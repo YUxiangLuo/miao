@@ -4,7 +4,7 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "dev": "bun run --watch miao.ts",
+    "dev": "bun run miao.ts",
     "rule": "bun run rule.ts"
   },
   "devDependencies": {
@@ -16,6 +16,7 @@
     "typescript": "^5"
   },
   "dependencies": {
+    "antd": "^5.27.5",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "yaml": "^2.8.1"

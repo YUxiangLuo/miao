@@ -1,65 +1,59 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback } from "react";
+import { Button } from "antd";
 import Config from "./Config";
+import Checks from "./Checks";
 
 export function App() {
-  const [genRes, setGenRes] = useState<string>("");
-  const [restartRes, setRestartRes] = useState<string>("");
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [configStatus, setConfigStatus] = useState<any>({});
+  const [configStatusLoading, setConfigStatusLoading] = useState<boolean>(false);
+
+  const [restartStatus, setRestartStatus] = useState<string>("");
+  const [restarting, setRestarting] = useState<boolean>(false);
 
   const restart = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await fetch("/api/sing/restart");
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const text = await res.text();
-      setRestartRes(text);
-    } catch (e: any) {
-      if (e?.name === "AbortError") return; // 被中断就忽略
-      setError(e?.message ?? "请求失败");
-    } finally {
-      setLoading(false);
-    }
+    setRestarting(true);
+    const res = await fetch("/api/sing/restart");
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const text = await res.text();
+    setRestartStatus(text);
+    setRestarting(false);
   }, []);
 
   const gen_config = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await fetch("/api/config/generate");
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const text = await res.text();
-      setGenRes(text);
-    } catch (e: any) {
-      if (e?.name === "AbortError") return; // 被中断就忽略
-      setError(e?.message ?? "请求失败");
-    } finally {
-      setLoading(false);
-    }
+    setConfigStatusLoading(true);
+    const res = await fetch("/api/config/generate");
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    setConfigStatus(await res.json());
+    setConfigStatusLoading(false);
   }, []);
 
   return (
     <>
-      <div>hello world from bun!</div>
+      <div style={{ height: "300px", display: "flex", justifyContent: "center", alignItems: "center", gap: "50px" }}>
+        <div>
+          <Button type="primary" size="large" onClick={gen_config} disabled={configStatusLoading}>
+            生成配置文件
+          </Button>
+        </div>
 
-      <div>
-        <button onClick={gen_config} disabled={loading}>
-          {loading ? "请求中..." : "生成配置文件"}
-        </button>
+        <div>
+          <Button type="dashed" size="large" onClick={restart} disabled={restarting}>
+            重启sing-box
+          </Button>
+        </div>
       </div>
 
-      <div>
-        <button onClick={restart} disabled={loading}>
-          {loading ? "请求中..." : "重启sing-box"}
-        </button>
+
+
+
+      <div style={{ display: "flex", justifyContent: "center" }}>
+        <div style={{ width: "800px" }}>
+          {configStatus.mtimeMs && <div>最新文件生成时间： {new Date(configStatus.mtimeMs).toLocaleString()}</div>}
+          {restartStatus && <div>sing-box进程ID: {restartStatus}</div>}
+          <Checks />
+          <Config />
+        </div>
       </div>
-
-      {error && <div style={{ color: "crimson" }}>错误：{error}</div>}
-      {!error && <div>{genRes}</div>}
-      {!error && <div>{restartRes}</div>}
-
-      <Config key={genRes} />
     </>
   );
 }

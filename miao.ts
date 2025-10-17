@@ -3,6 +3,8 @@ import type { Outbound, Anytls, Hysteria2, ClashProxy } from "./types";
 import get_config from "./config";
 import panel from "./panel/index.html";
 import fs from "fs/promises";
+import db from "./db";
+
 
 const config = yaml.parse(await Bun.file("./miao.yaml").text());
 const port = config.port as number;
@@ -28,6 +30,21 @@ if (!(Bun.env.IS_ARCH === "true")) {
   Bun.write("./pid.sing", pid);
 }
 
+setInterval(async () => {
+  const time = new Date().toISOString();
+  try {
+    const res = await Bun.$`curl -I https://gstatic.com/generate_204`;
+    const res_text = await res.text();
+    if (res_text.includes("HTTP/2 204")) {
+      db.prepare(`insert into checks (status, time) values (1, '${time}');`).run();
+    } else {
+      db.prepare(`insert into checks (status, time) values (0, '${time}');`).run();
+    }
+  } catch (error) {
+    db.prepare(`insert into checks (status, time) values (0, '${time}');`).run();
+  }
+}, 5 * 60 * 1000);
+
 
 Bun.serve({
   port,
@@ -48,9 +65,13 @@ Bun.serve({
       await Bun.$`killall sing-box && sleep 2`.nothrow();
       const pid = sing();
       return new Response(String(pid));
+    },
+    "/api/checks": async() => {
+      const res = db.prepare("select * from checks order by id DESC limit 10;").all();
+      return new Response(JSON.stringify(res));
     }
   },
-  development: false
+  development: true
 })
 
 async function gen_config(subs: string[], nodes: string[]) {
