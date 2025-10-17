@@ -1,26 +1,50 @@
 import yaml from "yaml";
 import type { Outbound, Anytls, Hysteria2, ClashProxy } from "./types";
 import sing_box_config from "./config";
+import panel from "./panel/index.html";
+import fs from "fs/promises";
 
-const links_and_nodes =  yaml.parse(await Bun.file("./miao.yaml").text());
-const links = links_and_nodes.subs;
+const config = yaml.parse(await Bun.file("./miao.yaml").text());
+console.log(config);
+const links = config.subs;
 
-const my_ountbounds = !links_and_nodes.nodes?[]:links_and_nodes.nodes.map((x: string) => JSON.parse(x)) as Outbound[];
+const my_ountbounds = !config.nodes ? [] : config.nodes.map((x: string) => JSON.parse(x)) as Outbound[];
 const my_names = my_ountbounds.map(x => x.tag);
 
 const final_node_names: string[] = [];
-const final_outbounds:  Outbound[] = [];
+const final_outbounds: Outbound[] = [];
 
 
-for(const link of links) {
-  const {node_names, outbounds} =  await fetch_sub(link);
-  final_node_names.push(...node_names);
-  final_outbounds.push(...outbounds);
-}
 
-sing_box_config.outbounds[0]!.outbounds!.push(...my_names, ...final_node_names);
-sing_box_config.outbounds.push(...my_ountbounds, ...final_outbounds);
-await Bun.write("./config.json", JSON.stringify(sing_box_config, null, 4));
+const port = config.port as number;
+const loc = config.loc[0] as string;
+Bun.serve({
+  port,
+  routes: {
+    "/": panel,
+    "/api/config": () => {
+      return new Response(Bun.file(loc));
+    },
+    "/api/config/status": async () => {
+      const config_status = await fs.stat(loc);
+      console.log(new Date(config_status.mtimeMs).toLocaleString());
+      return new Response(JSON.stringify(config_status, null, 2));
+    },
+    "/api/go": async () => {
+      for (const link of links) {
+        const { node_names, outbounds } = await fetch_sub(link);
+        final_node_names.push(...node_names);
+        final_outbounds.push(...outbounds);
+      }
+
+      sing_box_config.outbounds[0]!.outbounds!.push(...my_names, ...final_node_names);
+      sing_box_config.outbounds.push(...my_ountbounds, ...final_outbounds);
+      await Bun.write(loc, JSON.stringify(sing_box_config, null, 4));
+      return new Response(JSON.stringify(await fs.stat(loc)));
+    }
+  },
+  development: true
+})
 
 async function fetch_sub(link: string) {
   const res_body_text = await (await fetch(link, { headers: { "User-Agent": "clash-meta" } })).text();
