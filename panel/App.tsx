@@ -2,27 +2,35 @@ import { useState, useCallback, useRef } from "react";
 import Config from "./Config";
 
 export function App() {
-  const [goRes, setGoRes] = useState<string>("");
+  const [genRes, setGenRes] = useState<string>("");
+  const [restartRes, setRestartRes] = useState<string>("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // 保存当前请求的 AbortController，防止连点产生并发
-  const controllerRef = useRef<AbortController | null>(null);
-
-  const go = useCallback(async () => {
-    // 若已有请求在进行，先中断它（可选）
-    controllerRef.current?.abort();
-    const controller = new AbortController();
-    controllerRef.current = controller;
-
+  const restart = useCallback(async () => {
     setLoading(true);
     setError(null);
-
     try {
-      const res = await fetch("/api/go", { signal: controller.signal });
+      const res = await fetch("/api/sing/restart");
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const text = await res.text();
-      setGoRes(text);
+      setRestartRes(text);
+    } catch (e: any) {
+      if (e?.name === "AbortError") return; // 被中断就忽略
+      setError(e?.message ?? "请求失败");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const gen_config = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/config/generate");
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const text = await res.text();
+      setGenRes(text);
     } catch (e: any) {
       if (e?.name === "AbortError") return; // 被中断就忽略
       setError(e?.message ?? "请求失败");
@@ -35,14 +43,23 @@ export function App() {
     <>
       <div>hello world from bun!</div>
 
-      <button onClick={go} disabled={loading}>
-        {loading ? "请求中..." : "Let's go LGD"}
-      </button>
+      <div>
+        <button onClick={gen_config} disabled={loading}>
+          {loading ? "请求中..." : "生成配置文件"}
+        </button>
+      </div>
+
+      <div>
+        <button onClick={restart} disabled={loading}>
+          {loading ? "请求中..." : "重启sing-box"}
+        </button>
+      </div>
 
       {error && <div style={{ color: "crimson" }}>错误：{error}</div>}
-      {!error && <div>{goRes}</div>}
+      {!error && <div>{genRes}</div>}
+      {!error && <div>{restartRes}</div>}
 
-      <Config key={goRes} />
+      <Config key={genRes} />
     </>
   );
 }

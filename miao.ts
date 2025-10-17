@@ -1,23 +1,34 @@
 import yaml from "yaml";
 import type { Outbound, Anytls, Hysteria2, ClashProxy } from "./types";
-import sing_box_config from "./config";
+import get_config from "./config";
 import panel from "./panel/index.html";
 import fs from "fs/promises";
 
 const config = yaml.parse(await Bun.file("./miao.yaml").text());
-console.log(config);
-const links = config.subs;
-
-const my_ountbounds = !config.nodes ? [] : config.nodes.map((x: string) => JSON.parse(x)) as Outbound[];
-const my_names = my_ountbounds.map(x => x.tag);
-
-const final_node_names: string[] = [];
-const final_outbounds: Outbound[] = [];
-
-
-
 const port = config.port as number;
+const sing_box_home = config.sing_box_home as string;
 const loc = config.loc[0] as string;
+const subs = config.subs as string[]
+const nodes = (config.nodes || []) as string[];
+
+function sing() {
+  const p = Bun.spawn({
+    cwd: sing_box_home,
+    cmd: ["sing-box", "run", "-c", "config.json"],
+    env: { ...Bun.env, PATH: `${Bun.env.PATH}:${sing_box_home}` },
+    stdout: "inherit",
+    stderr: "inherit"
+  })
+  return String(p.pid);
+}
+
+if (!(Bun.env.IS_ARCH === "true")) {
+  await gen_config(subs, nodes);
+  const pid = sing();
+  Bun.write("./pid.sing", pid);
+}
+
+
 Bun.serve({
   port,
   routes: {
@@ -27,24 +38,37 @@ Bun.serve({
     },
     "/api/config/status": async () => {
       const config_status = await fs.stat(loc);
-      console.log(new Date(config_status.mtimeMs).toLocaleString());
       return new Response(JSON.stringify(config_status, null, 2));
     },
-    "/api/go": async () => {
-      for (const link of links) {
-        const { node_names, outbounds } = await fetch_sub(link);
-        final_node_names.push(...node_names);
-        final_outbounds.push(...outbounds);
-      }
-
-      sing_box_config.outbounds[0]!.outbounds!.push(...my_names, ...final_node_names);
-      sing_box_config.outbounds.push(...my_ountbounds, ...final_outbounds);
-      await Bun.write(loc, JSON.stringify(sing_box_config, null, 4));
+    "/api/config/generate": async () => {
+      await gen_config(subs, nodes);
       return new Response(JSON.stringify(await fs.stat(loc)));
+    },
+    "/api/sing/restart": async () => {
+      await Bun.$`killall sing-box && sleep 2`.nothrow();
+      const pid = sing();
+      return new Response(String(pid));
     }
   },
-  development: true
+  development: false
 })
+
+async function gen_config(subs: string[], nodes: string[]) {
+  const my_ountbounds = nodes.map((x: string) => JSON.parse(x)) as Outbound[];
+  const my_names = my_ountbounds.map(x => x.tag);
+
+  const final_outbounds: Outbound[] = [];
+  const final_node_names: string[] = [];
+  for (const sub of subs) {
+    const { node_names, outbounds } = await fetch_sub(sub);
+    final_node_names.push(...node_names);
+    final_outbounds.push(...outbounds);
+  }
+  const sing_box_config = get_config();
+  sing_box_config.outbounds[0]!.outbounds!.push(...my_names, ...final_node_names);
+  sing_box_config.outbounds.push(...my_ountbounds, ...final_outbounds);
+  await Bun.write(loc, JSON.stringify(sing_box_config, null, 4));
+}
 
 async function fetch_sub(link: string) {
   const res_body_text = await (await fetch(link, { headers: { "User-Agent": "clash-meta" } })).text();
