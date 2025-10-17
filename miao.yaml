@@ -1,0 +1,8 @@
+subs:
+  - https://nacho-dy1.moelink.top/Nachoneko?k=9f4e5905974018b3af2c800f0e612a42
+
+port:
+  6161
+
+nodes:
+  - '{"type":"anytls","tag":"nihong","server":"144.48.4.14","server_port":443,"password":"Dingzhenruike5.","tls":{"enabled":true,"insecure":true,"server_name":""}}'
