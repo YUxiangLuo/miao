@@ -3,7 +3,7 @@ import yaml from "yaml";
 import get_config from "./config";
 import fs from "fs/promises";
 import db from "./db";
-
+import panel from "./panel/index.html";
 
 // 从配置文件获取基础配置
 const config = yaml.parse(await Bun.file("./miao.yaml").text());
@@ -12,7 +12,6 @@ const sing_box_home = config.sing_box_home as string;
 const loc = sing_box_home + "/config.json";
 const subs = config.subs as string[];
 const nodes = (config.nodes || []) as string[];
-
 
 await gen_config(subs, nodes);
 // 全局共享sing-box进程
@@ -53,10 +52,10 @@ function stop_sing() {
   record_sing(0);
 }
 
-
 Bun.serve({
   port,
   routes: {
+    "/": panel,
     "/api/checks": async (req: Request) => {
       const checks = db
         .query("select * from checks order by id desc limit 10;")
@@ -158,7 +157,7 @@ Bun.serve({
       }
     },
   },
-  development: false,
+  development: true,
 });
 
 function record_sing(action: number) {
