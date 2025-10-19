@@ -67,6 +67,11 @@ function get_config() {
         { protocol: "dns", action: "hijack-dns" },
         { ip_is_private: true, action: "route", outbound: "direct" },
         {
+          process_path: ["/usr/bin/qbittorrent", "/usr/bin/NetworkManager"],
+          action: "route",
+          outbound: "direct",
+        },
+        {
           rule_set: ["chinasite"],
           action: "route",
           outbound: "direct",

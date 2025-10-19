@@ -14,6 +14,10 @@ const subs = config.subs as string[];
 const nodes = (config.nodes || []) as string[];
 
 let sing_process: Bun.Subprocess | null;
+await gen_config(subs, nodes);
+await start_sing();
+setInterval(check_connection, 1 * 60 * 1000);
+
 async function start_sing() {
   if (sing_process && !sing_process.killed) throw Error("already running!");
   sing_process = Bun.spawn({
@@ -46,8 +50,6 @@ function stop_sing() {
   sing_process = null;
   record_sing(0);
 }
-
-setInterval(check_connection, 1 * 60 * 1000);
 
 function checkMethod(req: Request, allowed: string[]) {
   if (!allowed.includes(req.method)) {
