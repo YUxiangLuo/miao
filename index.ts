@@ -1,11 +1,11 @@
-import yaml from "yaml";
 import type { Outbound, Anytls, Hysteria2, ClashProxy } from "./types";
+import yaml from "yaml";
 import get_config from "./config";
-import panel from "./panel/index.html";
 import fs from "fs/promises";
 import db from "./db";
-import { sleep } from "bun";
 
+
+// 从配置文件获取基础配置
 const config = yaml.parse(await Bun.file("./miao.yaml").text());
 const port = config.port as number;
 const sing_box_home = config.sing_box_home as string;
@@ -13,8 +13,10 @@ const loc = sing_box_home + "/config.json";
 const subs = config.subs as string[];
 const nodes = (config.nodes || []) as string[];
 
-let sing_process: Bun.Subprocess | null;
+
 await gen_config(subs, nodes);
+// 全局共享sing-box进程
+let sing_process: Bun.Subprocess | null;
 await start_sing();
 setInterval(check_connection, 1 * 60 * 1000);
 
@@ -27,7 +29,7 @@ async function start_sing() {
     stdout: "ignore",
     stderr: "ignore",
   });
-  await sleep(2000);
+  await Bun.sleep(3000);
   if (sing_process.exitCode !== null) {
     sing_process = null;
     throw Error("sing box failed to start");
@@ -51,23 +53,11 @@ function stop_sing() {
   record_sing(0);
 }
 
-function checkMethod(req: Request, allowed: string[]) {
-  if (!allowed.includes(req.method)) {
-    return new Response("Method Not Allowed", {
-      status: 405,
-      headers: { Allow: allowed.join(", ") },
-    });
-  }
-  return null;
-}
 
 Bun.serve({
   port,
   routes: {
-    "/": panel,
-    "/api/net-checks": async (req: Request) => {
-      const check = checkMethod(req, ["GET"]);
-      if (check) return check;
+    "/api/checks": async (req: Request) => {
       const checks = db
         .query("select * from checks order by id desc limit 10;")
         .all();
@@ -78,8 +68,6 @@ Bun.serve({
       });
     },
     "/api/config": async (req: Request) => {
-      const check = checkMethod(req, ["GET"]);
-      if (check) return check;
       try {
         const config_stat = await fs.stat(loc);
         const config_content = await Bun.file(loc).text();
@@ -94,8 +82,6 @@ Bun.serve({
       }
     },
     "/api/config/generate": async (req: Request) => {
-      const check = checkMethod(req, ["POST"]);
-      if (check) return check;
       try {
         await gen_config(subs, nodes);
         return new Response(Bun.file(loc));
@@ -105,8 +91,6 @@ Bun.serve({
       }
     },
     "/api/sing/log-live": async (req: Request) => {
-      const check = checkMethod(req, ["GET"]);
-      if (check) return check;
       if (!sing_process) return new Response("not running", { status: 404 });
       if (sing_process.killed)
         return new Response("not running", { status: 404 });
@@ -115,16 +99,12 @@ Bun.serve({
       );
     },
     "/api/sing/status": async (req: Request) => {
-      const check = checkMethod(req, ["GET"]);
-      if (check) return check;
       const running = !!(sing_process && !sing_process.killed);
       return new Response(JSON.stringify({ running }), {
         headers: { "Content-Type": "application/json" },
       });
     },
     "/api/sing/action-records": async (req: Request) => {
-      const check = checkMethod(req, ["GET"]);
-      if (check) return check;
       const action_records = db
         .query("select * from sing_record order by id desc limit 10;")
         .all();
@@ -135,8 +115,6 @@ Bun.serve({
       });
     },
     "/api/sing/restart": async (req: Request) => {
-      const check = checkMethod(req, ["POST"]);
-      if (check) return check;
       try {
         stop_sing();
         await start_sing();
@@ -147,8 +125,6 @@ Bun.serve({
       }
     },
     "/api/sing/start": async (req: Request) => {
-      const check = checkMethod(req, ["POST"]);
-      if (check) return check;
       if (!sing_process || (sing_process && sing_process.killed)) {
         try {
           await start_sing();
@@ -162,14 +138,10 @@ Bun.serve({
       }
     },
     "/api/sing/stop": async (req: Request) => {
-      const check = checkMethod(req, ["POST"]);
-      if (check) return check;
       stop_sing();
       return new Response("stopped");
     },
     "/api/net-checks/manual": async (req: Request) => {
-      const check = checkMethod(req, ["POST"]);
-      if (check) return check;
       try {
         await check_connection();
         const checks = db
@@ -186,7 +158,7 @@ Bun.serve({
       }
     },
   },
-  development: true,
+  development: false,
 });
 
 function record_sing(action: number) {
@@ -201,39 +173,31 @@ function record_sing(action: number) {
 }
 
 async function gen_config(subs: string[], nodes: string[]) {
-  try {
-    const my_ountbounds = nodes.map((x: string) => JSON.parse(x)) as Outbound[];
-    const my_names = my_ountbounds.map((x) => x.tag);
+  const my_ountbounds = nodes.map((x: string) => JSON.parse(x)) as Outbound[];
+  const my_names = my_ountbounds.map((x) => x.tag);
 
-    const final_outbounds: Outbound[] = [];
-    const final_node_names: string[] = [];
-    for (const sub of subs) {
-      const { node_names, outbounds } = await fetch_sub(sub);
-      final_node_names.push(...node_names);
-      final_outbounds.push(...outbounds);
-    }
-    const sing_box_config = get_config();
-    sing_box_config.outbounds[0]!.outbounds!.push(
-      ...my_names,
-      ...final_node_names,
-    );
-    sing_box_config.outbounds.push(...my_ountbounds, ...final_outbounds);
-    await Bun.write(loc, JSON.stringify(sing_box_config, null, 4));
-  } catch (error) {
-    throw error;
+  const final_outbounds: Outbound[] = [];
+  const final_node_names: string[] = [];
+  for (const sub of subs) {
+    const { node_names, outbounds } = await fetch_sub(sub);
+    final_node_names.push(...node_names);
+    final_outbounds.push(...outbounds);
   }
+  const sing_box_config = get_config();
+  sing_box_config.outbounds[0]!.outbounds!.push(
+    ...my_names,
+    ...final_node_names,
+  );
+  sing_box_config.outbounds.push(...my_ountbounds, ...final_outbounds);
+  await Bun.write(loc, JSON.stringify(sing_box_config, null, 4));
 }
 
 async function fetch_sub(link: string) {
   let clash_obj;
-  try {
-    const res_body_text = await (
-      await fetch(link, { headers: { "User-Agent": "clash-meta" } })
-    ).text();
-    clash_obj = yaml.parse(res_body_text);
-  } catch (error) {
-    throw error;
-  }
+  const res_body_text = await (
+    await fetch(link, { headers: { "User-Agent": "clash-meta" } })
+  ).text();
+  clash_obj = yaml.parse(res_body_text);
 
   const nodes = clash_obj.proxies.filter(
     (x: any) =>
