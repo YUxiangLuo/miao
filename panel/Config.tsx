@@ -1,0 +1,49 @@
+import type { Config } from "./types";
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
+import { useEffect, useState } from "react";
+
+export default function () {
+  const [config, set_config] = useState<Config>();
+  const [is_loading, set_is_loading] = useState(false);
+
+  const fetch_config_status = async () => {
+    set_is_loading(true);
+    const res = await fetch("/api/config");
+    const res_json = await res.json();
+    set_is_loading(false);
+    set_config(res_json);
+  };
+
+  const gen_config = async () => {
+    set_is_loading(true);
+    await fetch("/api/config/generate");
+    set_is_loading(false);
+  };
+
+  useEffect(() => {
+    fetch_config_status();
+  }, []);
+
+  return (
+    <div className="mt-8 m-h-48 flex justify-center items-center gap-4">
+      <div className="flex flex-col gap-4">
+        <Button size={"lg"} onClick={fetch_config_status} disabled={is_loading}>
+          Check
+        </Button>
+        <Button size={"lg"} onClick={gen_config} disabled={is_loading}>
+          Generate
+        </Button>
+      </div>
+      {config && config.config_stat && (
+        <span>
+          更新时间: {new Date(config.config_stat.mtimeMs!).toLocaleString()},
+          文件大小: {config.config_stat.size}字节
+        </span>
+      )}
+      {config && config.config_content && (
+        <Textarea readOnly value={config.config_content} rows={10} />
+      )}
+    </div>
+  );
+}

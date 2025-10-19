@@ -69,7 +69,11 @@ Bun.serve({
     "/api/config": async (req: Request) => {
       try {
         const config_stat = await fs.stat(loc);
-        const config_content = await Bun.file(loc).text();
+        const config_content = JSON.stringify(
+          JSON.parse(await Bun.file(loc).text()),
+          null,
+          2,
+        );
         return new Response(
           JSON.stringify({
             config_stat,
