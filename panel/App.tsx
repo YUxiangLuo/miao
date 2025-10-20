@@ -3,8 +3,7 @@ import Control from "./Control";
 
 export default function () {
   return (
-    <div className="p-32">
-      <h1 className="text-3xl text-center">Miao.</h1>
+    <div className="h-full w-full flex flex-col p-20">
       <Control />
       <Config />
     </div>

@@ -11,7 +11,7 @@ export default function () {
   };
 
   return (
-    <div className="mt-8 m-h-32 flex justify-center items-center">
+    <div className="flex justify-start items-center">
       <Button size={"lg"} disabled={is_restarting} onClick={restart}>
         重新启动
       </Button>

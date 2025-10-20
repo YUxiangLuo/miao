@@ -26,8 +26,8 @@ export default function () {
   }, []);
 
   return (
-    <div className="mt-8 m-h-48 flex justify-center items-center gap-4">
-      <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-4 mt-8">
+      <div className="flex gap-8">
         <Button size={"lg"} onClick={fetch_config_status} disabled={is_loading}>
           Check
         </Button>
@@ -35,15 +35,19 @@ export default function () {
           Generate
         </Button>
       </div>
-      {config && config.config_stat && (
-        <span>
-          更新时间: {new Date(config.config_stat.mtimeMs!).toLocaleString()},
-          文件大小: {config.config_stat.size}字节
-        </span>
-      )}
-      {config && config.config_content && (
-        <Textarea readOnly value={config.config_content} rows={10} />
-      )}
+      <div className="flex flex-col gap-4">
+        {config && (
+          <div className="flex flex-col gap-4">
+            <span>
+              更新时间: {new Date(config.config_stat.mtimeMs!).toLocaleString()}
+            </span>
+            <span>文件大小: {config.config_stat.size!}字节</span>
+          </div>
+        )}
+        {config && (
+          <Textarea readOnly value={JSON.stringify(config.config_content)} />
+        )}
+      </div>
     </div>
   );
 }
