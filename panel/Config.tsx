@@ -40,23 +40,18 @@ export default function () {
   }, []);
 
   return (
-    <div className="flex flex-col gap-4 mt-8">
+    <div className="flex flex-col gap-4 mt-8 border-1 rounded-2xl p-8">
       <div className="flex items-center gap-8">
         <Button size={"lg"} onClick={fetch_config_status}>
           Check
         </Button>
-        <Button
-          size={"lg"}
-          variant={"outline"}
-          onClick={gen_config}
-          disabled={is_generating}
-        >
+        <Button size={"lg"} onClick={gen_config} disabled={is_generating}>
           重新生成配置文件
         </Button>
         {success && <span className="text-green-500">成功</span>}
         {error && <span className="text-red-500">失败</span>}
       </div>
-      <div className="flex flex-col gap-4">
+      <div className="flex flex-col gap-4 bg-background text-foreground">
         {config && (
           <div className="flex flex-col gap-4">
             <span>

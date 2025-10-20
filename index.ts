@@ -1,6 +1,6 @@
 import type { Outbound, Anytls, Hysteria2, ClashProxy } from "./types";
 import yaml from "yaml";
-import get_config from "./config";
+import get_config from "./singboxconfig";
 import fs from "fs/promises";
 import db from "./db";
 import panel from "./panel/index.html";
