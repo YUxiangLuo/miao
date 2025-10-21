@@ -3,7 +3,6 @@ import yaml from "yaml";
 import get_config from "./template-config";
 import fs from "fs/promises";
 import { gen_direct } from "./rule";
-import panel from "./panel/index.html";
 
 // 从配置文件获取基础配置
 const config = yaml.parse(await Bun.file("./miao.yaml").text());
@@ -15,11 +14,10 @@ const nodes = (config.nodes || []) as string[];
 
 await gen_config();
 let sing_process: Bun.Subprocess | null;
-await start_sing();
+// await start_sing();
 Bun.serve({
   port,
   routes: {
-    "/": panel,
     "/api/rule/generate": async () => {
       try {
         await gen_direct();
