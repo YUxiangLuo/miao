@@ -2,23 +2,104 @@ import type { Outbound, Anytls, Hysteria2, ClashProxy } from "./types";
 import yaml from "yaml";
 import get_config from "./template-config";
 import fs from "fs/promises";
-import db from "./db";
-import panel from "./panel/index.html";
 import { gen_direct } from "./rule";
+import panel from "./panel/index.html";
 
 // 从配置文件获取基础配置
 const config = yaml.parse(await Bun.file("./miao.yaml").text());
 const port = config.port as number;
 const sing_box_home = config.sing_box_home as string;
-const loc = sing_box_home + "/config.json";
+const config_output_loc = sing_box_home + "/config.json";
 const subs = config.subs as string[];
 const nodes = (config.nodes || []) as string[];
 
-await gen_config(subs, nodes);
-// 全局共享sing-box进程
+await gen_config();
 let sing_process: Bun.Subprocess | null;
 await start_sing();
-setInterval(check_connection, 1 * 60 * 1000);
+Bun.serve({
+  port,
+  routes: {
+    "/": panel,
+    "/api/rule/generate": async () => {
+      try {
+        await gen_direct();
+        return new Response(
+          JSON.stringify(await fs.stat(sing_box_home + "/chinasite.srs")),
+        );
+      } catch (error) {
+        console.log(error);
+        return new Response("rule generation failed", { status: 500 });
+      }
+    },
+    "/api/config": async () => {
+      try {
+        const config_stat = await fs.stat(config_output_loc);
+        const config_content = JSON.stringify(
+          JSON.parse(await Bun.file(config_output_loc).text()),
+          null,
+          2,
+        );
+        return new Response(
+          JSON.stringify({
+            config_stat,
+            config_content,
+          }),
+        );
+      } catch (error) {
+        return new Response("config file not found", { status: 404 });
+      }
+    },
+    "/api/config/generate": async () => {
+      try {
+        await gen_config();
+        return new Response(Bun.file(config_output_loc));
+      } catch (error) {
+        console.log(error);
+        return new Response("500", { status: 500 });
+      }
+    },
+    "/api/sing/log-live": async () => {
+      if (!sing_process) return new Response("not running", { status: 404 });
+      if (sing_process.killed)
+        return new Response("not running", { status: 404 });
+      return new Response(
+        (await Bun.$`tail -n 50 ${sing_box_home}/box.log`).text(),
+      );
+    },
+    "/api/sing/restart": async (req: Request) => {
+      try {
+        stop_sing();
+        await start_sing();
+        return new Response("ok");
+      } catch (error) {
+        console.log(error);
+        return new Response(String(error), { status: 500 });
+      }
+    },
+    "/api/sing/start": async (req: Request) => {
+      if (!sing_process || (sing_process && sing_process.killed)) {
+        try {
+          await start_sing();
+          return new Response("ok");
+        } catch (error) {
+          console.log(error);
+          return new Response("error", { status: 500 });
+        }
+      } else {
+        return new Response("sing box is already running", { status: 500 });
+      }
+    },
+    "/api/sing/stop": async () => {
+      stop_sing();
+      return new Response("stopped");
+    },
+    "/api/net-checks/manual": async () => {
+      if (await check_connection()) return new Response("ok");
+      else return new Response("not ok", { status: 500 });
+    },
+  },
+  development: false,
+});
 
 async function start_sing() {
   if (sing_process && !sing_process.killed) throw Error("already running!");
@@ -36,7 +117,6 @@ async function start_sing() {
   }
   if (await check_connection()) {
     await Bun.write(sing_box_home + "/pid", String(sing_process.pid));
-    record_sing(1);
     return sing_process.pid;
   } else {
     sing_process.kill(9);
@@ -50,144 +130,9 @@ function stop_sing() {
   if (sing_process.killed) return;
   sing_process.kill(9);
   sing_process = null;
-  record_sing(0);
 }
 
-Bun.serve({
-  port,
-  routes: {
-    "/": panel,
-    "/api/checks": async (req: Request) => {
-      const checks = db
-        .query("select * from checks order by id desc limit 10;")
-        .all();
-      return new Response(JSON.stringify(checks, null, 2), {
-        headers: {
-          "Content-Type": "application/json",
-        },
-      });
-    },
-    "/api/rule/generate": async () => {
-      try {
-        await gen_direct();
-        return new Response(
-          JSON.stringify(await fs.stat(sing_box_home + "/chinasite.srs")),
-        );
-      } catch (error) {
-        console.log(error);
-        return new Response("rule generation failed", { status: 500 });
-      }
-    },
-    "/api/config": async (req: Request) => {
-      try {
-        const config_stat = await fs.stat(loc);
-        const config_content = JSON.stringify(
-          JSON.parse(await Bun.file(loc).text()),
-          null,
-          2,
-        );
-        return new Response(
-          JSON.stringify({
-            config_stat,
-            config_content,
-          }),
-        );
-      } catch (error) {
-        return new Response("config file not found", { status: 404 });
-      }
-    },
-    "/api/config/generate": async (req: Request) => {
-      try {
-        await gen_config(subs, nodes);
-        return new Response(Bun.file(loc));
-      } catch (error) {
-        console.log(error);
-        return new Response("500", { status: 500 });
-      }
-    },
-    "/api/sing/log-live": async (req: Request) => {
-      if (!sing_process) return new Response("not running", { status: 404 });
-      if (sing_process.killed)
-        return new Response("not running", { status: 404 });
-      return new Response(
-        (await Bun.$`tail -n 50 ${sing_box_home}/box.log`).text(),
-      );
-    },
-    "/api/sing/status": async (req: Request) => {
-      const running = !!(sing_process && !sing_process.killed);
-      return new Response(JSON.stringify({ running }), {
-        headers: { "Content-Type": "application/json" },
-      });
-    },
-    "/api/sing/action-records": async (req: Request) => {
-      const action_records = db
-        .query("select * from sing_record order by id desc limit 10;")
-        .all();
-      return new Response(JSON.stringify(action_records, null, 2), {
-        headers: {
-          "Content-Type": "application/json",
-        },
-      });
-    },
-    "/api/sing/restart": async (req: Request) => {
-      try {
-        stop_sing();
-        await start_sing();
-        return new Response("200");
-      } catch (error) {
-        console.log(error);
-        return new Response(String(error), { status: 500 });
-      }
-    },
-    "/api/sing/start": async (req: Request) => {
-      if (!sing_process || (sing_process && sing_process.killed)) {
-        try {
-          await start_sing();
-          return new Response("200");
-        } catch (error) {
-          console.log(error);
-          return new Response("500", { status: 500 });
-        }
-      } else {
-        return new Response("sing box is already running", { status: 500 });
-      }
-    },
-    "/api/sing/stop": async (req: Request) => {
-      stop_sing();
-      return new Response("stopped");
-    },
-    "/api/net-checks/manual": async (req: Request) => {
-      try {
-        await check_connection();
-        const checks = db
-          .query("select * from checks order by id desc limit 10;")
-          .all();
-        return new Response(JSON.stringify(checks, null, 2), {
-          headers: {
-            "Content-Type": "application/json",
-          },
-        });
-      } catch (error) {
-        console.log(error);
-        return new Response("500", { status: 500 });
-      }
-    },
-  },
-  development: false,
-});
-
-function record_sing(action: number) {
-  try {
-    const time = new Date().toISOString();
-    db.prepare(
-      `insert into sing_record (type, time) values (${action}, '${time}');`,
-    ).run();
-  } catch (error) {
-    throw error;
-  }
-}
-
-async function gen_config(subs: string[], nodes: string[]) {
+async function gen_config() {
   const my_ountbounds = nodes.map((x: string) => JSON.parse(x)) as Outbound[];
   const my_names = my_ountbounds.map((x) => x.tag);
 
@@ -204,7 +149,8 @@ async function gen_config(subs: string[], nodes: string[]) {
     ...final_node_names,
   );
   sing_box_config.outbounds.push(...my_ountbounds, ...final_outbounds);
-  await Bun.write(loc, JSON.stringify(sing_box_config, null, 4));
+  console.log(sing_box_config);
+  await Bun.write(config_output_loc, JSON.stringify(sing_box_config, null, 4));
 }
 
 async function fetch_sub(link: string) {
@@ -265,25 +211,15 @@ async function fetch_sub(link: string) {
 }
 
 async function check_connection(): Promise<boolean> {
-  const time = new Date().toISOString();
   try {
     const res = Bun.$`curl -I https://gstatic.com/generate_204`;
     const res_text = await res.text();
     if (res_text.includes("HTTP/2 204")) {
-      db.prepare(
-        `insert into checks (status, time) values (1, '${time}');`,
-      ).run();
       return true;
     } else {
-      db.prepare(
-        `insert into checks (status, time) values (0, '${time}');`,
-      ).run();
       return false;
     }
   } catch (error) {
-    db.prepare(
-      `insert into checks (status, time) values (0, '${time}');`,
-    ).run();
     return false;
   }
 }

@@ -1,1 +1,0 @@
-rsync --exclude=node_modules --exclude=sing-box --exclude=.env -r ./* root@192.168.64.1:/mnt/usb/miao

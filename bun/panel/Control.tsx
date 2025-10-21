@@ -21,6 +21,8 @@ export default function () {
     } else {
       set_restart_success(true);
     }
+    set_stop_error(null);
+    set_stop_success(null);
   };
 
   const stop = async () => {
@@ -34,6 +36,8 @@ export default function () {
     } else {
       set_stop_success(true);
     }
+    set_restart_error(null);
+    set_restart_success(null);
   };
 
   return (

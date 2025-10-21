@@ -1,7 +1,6 @@
 db.sqlite
 config.json
 sing-box
-files
 # dependencies (bun install)
 node_modules
 
