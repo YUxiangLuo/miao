@@ -90,6 +90,7 @@ async fn main() -> Result<()> {
     }
     println!("Sing-box started successfully.");
 
+    let state_arc = Arc::new(state);
     let app = Router::new()
         .route("/api/rule/generate", post(rule_generate))
         .route("/api/config", get(get_config))
@@ -99,7 +100,43 @@ async fn main() -> Result<()> {
         .route("/api/sing/start", post(sing_start))
         .route("/api/sing/stop", post(sing_stop))
         .route("/api/net-checks/manual", get(net_check_manual))
-        .with_state(Arc::new(state));
+        .with_state(state_arc.clone());
+
+    // Background task every 12 hours: regenerate config, regenerate rules, then restart sing-box
+    {
+        let state_clone = state_arc.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(12 * 3600));
+            interval.tick().await; // First tick is immediate, skip it
+            loop {
+                interval.tick().await;
+                let is_running = state_clone.sing_box_process.read().await.is_some();
+                if is_running {
+                    // Regenerate config
+                    if let Err(e) = gen_config(&state_clone.config).await {
+                        eprintln!("Failed to regenerate config: {}", e);
+                        continue;
+                    }
+                    println!("Config regenerated successfully");
+
+                    // Regenerate rules
+                    if let Err(e) = gen_rule(&state_clone.config).await {
+                        eprintln!("Failed to regenerate rules: {}", e);
+                        continue;
+                    }
+                    println!("Rules regenerated successfully");
+
+                    // Restart sing-box
+                    stop_sing_internal(&state_clone).await;
+                    if let Err(e) = start_sing_internal(&state_clone).await {
+                        eprintln!("Failed to restart sing-box: {}", e);
+                    } else {
+                        println!("Sing-box restarted successfully");
+                    }
+                }
+            }
+        });
+    }
 
     let addr = format!("0.0.0.0:{}", port);
     println!("Starting server on {}", addr);
@@ -244,10 +281,30 @@ async fn net_check_manual(State(_state): State<Arc<AppState>>) -> impl IntoRespo
 async fn stop_sing_internal(state: &AppState) {
     let mut proc = state.sing_box_process.write().await;
     if let Some(ref mut child) = *proc {
-        let _ = child.kill().await;
-        let _ = child.wait().await;
+        if let Some(pid) = child.id() {
+            // Send SIGTERM
+            let _ = tokio::process::Command::new("kill")
+                .args(&["-TERM", &pid.to_string()])
+                .status()
+                .await;
+            // Wait up to 10 seconds for graceful shutdown
+            let timeout_result =
+                tokio::time::timeout(tokio::time::Duration::from_secs(10), child.wait()).await;
+            match timeout_result {
+                Ok(Ok(_)) => {} // Process exited gracefully
+                _ => {
+                    // Force kill with SIGKILL
+                    let _ = child.kill().await;
+                    let _ = child.wait().await;
+                }
+            }
+        } else {
+            // Fallback if PID not available
+            let _ = child.kill().await;
+            let _ = child.wait().await;
+        }
+        *proc = None;
     }
-    *proc = None;
 }
 
 async fn start_sing_internal(state: &AppState) -> Result<()> {
