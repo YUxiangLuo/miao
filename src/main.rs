@@ -58,6 +58,25 @@ async fn main() -> Result<()> {
         sing_box_process: Arc::new(RwLock::new(None)),
     };
 
+    // Reload nftables rules from default paths
+    let nft_paths = ["/etc/nftables.d", "/etc/nftables.conf"];
+    let mut nft_loaded = false;
+    for &path in &nft_paths {
+        if tokio::fs::metadata(path).await.is_ok() {
+            println!("Flushing and reloading nftables rules from {}", path);
+            if let Err(e) = reload_nftables(path).await {
+                eprintln!("Failed to reload nftables: {}", e);
+                std::process::exit(1);
+            }
+            nft_loaded = true;
+            break;
+        }
+    }
+    if !nft_loaded {
+        eprintln!("No nftables config found at /etc/nftables.d or /etc/nftables.conf, exiting");
+        std::process::exit(1);
+    }
+
     // Generate config and start sing-box at startup
     println!("Generating config...");
     if let Err(e) = gen_config(&config).await {
@@ -268,6 +287,56 @@ async fn start_sing_internal(state: &AppState) -> Result<()> {
         }
         Err(e) => Err(e.into()),
     }
+}
+
+async fn reload_nftables(config_path: &str) -> Result<()> {
+    // Flush ruleset
+    let flush_status = tokio::process::Command::new("nft")
+        .args(&["flush", "ruleset"])
+        .status()
+        .await?;
+    if !flush_status.success() {
+        return Err("Failed to flush nftables ruleset".into());
+    }
+
+    // Check if config_path is a directory
+    let metadata = tokio::fs::metadata(config_path).await?;
+    if metadata.is_dir() {
+        // Load all .nft files in the directory, sorted by name
+        let mut dir_entries = tokio::fs::read_dir(config_path).await?;
+        let mut nft_files = Vec::new();
+        while let Some(entry) = dir_entries.next_entry().await? {
+            let path = entry.path();
+            if path.extension() == Some(std::ffi::OsStr::new("nft")) && path.file_name().is_some() {
+                nft_files.push(path);
+            }
+        }
+        // Sort by filename for consistent loading order
+        nft_files.sort_by(|a, b| a.file_name().cmp(&b.file_name()));
+
+        for file_path in nft_files {
+            let reload_status = tokio::process::Command::new("nft")
+                .args(&["-f", &file_path.to_string_lossy()])
+                .status()
+                .await?;
+            if !reload_status.success() {
+                return Err(
+                    format!("Failed to reload nftables from {}", file_path.display()).into(),
+                );
+            }
+        }
+    } else {
+        // Treat as single config file
+        let reload_status = tokio::process::Command::new("nft")
+            .args(&["-f", config_path])
+            .status()
+            .await?;
+        if !reload_status.success() {
+            return Err(format!("Failed to reload nftables from {}", config_path).into());
+        }
+    }
+
+    Ok(())
 }
 
 async fn check_connection() -> Result<()> {
