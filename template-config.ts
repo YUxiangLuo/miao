@@ -2,7 +2,7 @@ import type { SingBoxConfig } from "./types";
 function get_config() {
   const sing_box_config: SingBoxConfig = {
     log: {
-      disabled: false,
+      disabled: true,
       output: "./box.log",
       timestamp: true,
       level: "info",

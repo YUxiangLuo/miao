@@ -57,14 +57,14 @@ export async function gen_direct() {
       "compile",
       "--output",
       sing_box_home + "/chinasite.srs",
-      "/tmp/direct.json",
+      sing_box_home + "/direct.json",
     ],
     env: {
       ...Bun.env,
       PATH: `${Bun.env.PATH}:${sing_box_home}`,
     },
-    stdout: "ignore",
-    stderr: "ignore",
+    stdout: "inherit",
+    stderr: "inherit",
   });
   await Bun.sleep(1000);
   if (p.exitCode !== 0) {
