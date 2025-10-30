@@ -56,14 +56,6 @@ Bun.serve({
         return new Response("500", { status: 500 });
       }
     },
-    "/api/sing/log-live": async () => {
-      if (!sing_process) return new Response("not running", { status: 404 });
-      if (sing_process.killed)
-        return new Response("not running", { status: 404 });
-      return new Response(
-        (await Bun.$`tail -n 50 ${sing_box_home}/box.log`).text(),
-      );
-    },
     "/api/sing/restart": async (req: Request) => {
       try {
         stop_sing();

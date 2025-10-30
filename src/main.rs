@@ -92,7 +92,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         .route("/api/rule/generate", get(generate_rule))
         .route("/api/config", get(get_config_handler))
         .route("/api/config/generate", get(generate_config_handler))
-        .route("/api/sing/log-live", get(log_live))
         .route("/api/sing/restart", post(restart_sing))
         .route("/api/sing/start", post(start_sing_handler))
         .route("/api/sing/stop", post(stop_sing_handler))
@@ -162,6 +161,8 @@ async fn gen_direct(
                 sing_box_home
             ),
         )
+        .stdout(std::process::Stdio::inherit())
+        .stderr(std::process::Stdio::inherit())
         .spawn()?;
     let status = cmd.wait().await?;
     if !status.success() {
@@ -395,21 +396,6 @@ async fn fetch_sub(
         }
     }
     Ok((node_names, outbounds))
-}
-
-async fn log_live(State(config): State<Arc<Config>>) -> Result<String, (StatusCode, String)> {
-    let mut lock = SING_PROCESS.lock().await;
-    if lock.is_none() || lock.as_mut().unwrap().try_wait().unwrap().is_some() {
-        return Err((StatusCode::NOT_FOUND, "not running".to_string()));
-    }
-    let output = tokio::process::Command::new("tail")
-        .arg("-n")
-        .arg("50")
-        .arg(format!("{}/box.log", config.sing_box_home))
-        .output()
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-    Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
 
 async fn restart_sing(State(config): State<Arc<Config>>) -> Result<String, (StatusCode, String)> {
