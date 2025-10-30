@@ -227,7 +227,14 @@ async fn fetch_sub(
         .filter(|p| {
             p.get("name")
                 .and_then(|n| n.as_str())
-                .map(|n| n.contains("JP") || n.contains("日本"))
+                .map(|n| {
+                    n.contains("JP")
+                        || n.contains("日本")
+                        || n.contains("SG")
+                        || n.contains("新加坡")
+                        || n.contains("TW")
+                        || n.contains("台湾")
+                })
                 .unwrap_or(false)
         })
         .collect();
