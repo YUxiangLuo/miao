@@ -91,10 +91,6 @@ Bun.serve({
       stop_sing();
       return new Response("stopped");
     },
-    "/api/net-checks/manual": async () => {
-      if (await check_connection()) return new Response("ok");
-      else return new Response("not ok", { status: 500 });
-    },
   },
   development: false,
 });
@@ -105,22 +101,9 @@ async function start_sing() {
     cwd: sing_box_home,
     cmd: ["sing-box", "run", "-c", "config.json"],
     env: { ...Bun.env, PATH: `${Bun.env.PATH}:${sing_box_home}` },
-    stdout: "ignore",
-    stderr: "ignore",
+    stdout: "inherit",
+    stderr: "inherit",
   });
-  await Bun.sleep(3000);
-  if (sing_process.exitCode !== null) {
-    sing_process = null;
-    throw Error("sing box exited!");
-  }
-  if (await check_connection()) {
-    await Bun.write(sing_box_home + "/pid", String(sing_process.pid));
-    return sing_process.pid;
-  } else {
-    sing_process.kill(9);
-    sing_process = null;
-    throw Error("sing box started but failed to connect to internet");
-  }
 }
 
 function stop_sing() {
@@ -208,18 +191,4 @@ async function fetch_sub(link: string) {
     }
   }
   return { node_names, outbounds };
-}
-
-async function check_connection(): Promise<boolean> {
-  try {
-    const res = await fetch("https://gstatic.com/generate_204");
-    const res_text = await res.text();
-    if (res_text.includes("HTTP/2 204")) {
-      return true;
-    } else {
-      return false;
-    }
-  } catch (error) {
-    return false;
-  }
 }

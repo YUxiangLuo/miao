@@ -71,16 +71,13 @@ struct Tls {
     insecure: bool,
 }
 
-
-
 lazy_static! {
     static ref SING_PROCESS: Mutex<Option<tokio::process::Child>> = Mutex::new(None);
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let config: Config =
-        serde_yaml::from_str(&tokio::fs::read_to_string("miao.yaml").await?)?;
+    let config: Config = serde_yaml::from_str(&tokio::fs::read_to_string("miao.yaml").await?)?;
     let port = config.port;
     let sing_box_home = config.sing_box_home.clone();
 
@@ -88,9 +85,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     gen_config(&config).await?;
 
     // Start sing if possible
-    if let Err(e) = start_sing(&sing_box_home).await {
-        eprintln!("Failed to start sing-box: {}", e);
-    }
+    let _ = start_sing(&sing_box_home).await;
 
     let app_state = Arc::new(config);
     let app = Router::new()
@@ -101,7 +96,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         .route("/api/sing/restart", post(restart_sing))
         .route("/api/sing/start", post(start_sing_handler))
         .route("/api/sing/stop", post(stop_sing_handler))
-        .route("/api/net-checks/manual", get(net_check))
         .with_state(app_state);
 
     let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", port)).await?;
@@ -109,14 +103,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     Ok(())
 }
 
-async fn generate_rule(State(config): State<Arc<Config>>) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+async fn generate_rule(
+    State(config): State<Arc<Config>>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
     match gen_direct(&*config).await {
         Ok(stat) => Ok(Json(stat)),
-        Err(e) => Err((StatusCode::INTERNAL_SERVER_ERROR, format!("Rule generation failed: {}", e))),
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Rule generation failed: {}", e),
+        )),
     }
 }
 
-async fn gen_direct(config: &Config) -> Result<serde_json::Value, Box<dyn std::error::Error + Send + Sync>> {
+async fn gen_direct(
+    config: &Config,
+) -> Result<serde_json::Value, Box<dyn std::error::Error + Send + Sync>> {
     let sing_box_home = &config.sing_box_home;
     let direct_txt_url = &config.rules.direct_txt;
     let res = reqwest::get(direct_txt_url).await?;
@@ -153,7 +154,14 @@ async fn gen_direct(config: &Config) -> Result<serde_json::Value, Box<dyn std::e
         .arg("--output")
         .arg(&chinasite)
         .arg(format!("{}/direct.json", sing_box_home))
-        .env("PATH", format!("{}:{}", std::env::var("PATH").unwrap_or_default(), sing_box_home))
+        .env(
+            "PATH",
+            format!(
+                "{}:{}",
+                std::env::var("PATH").unwrap_or_default(),
+                sing_box_home
+            ),
+        )
         .spawn()?;
     let status = cmd.wait().await?;
     if !status.success() {
@@ -172,11 +180,18 @@ async fn gen_direct(config: &Config) -> Result<serde_json::Value, Box<dyn std::e
     }))
 }
 
-async fn get_config_handler(State(config): State<Arc<Config>>) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+async fn get_config_handler(
+    State(config): State<Arc<Config>>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
     let config_output_loc = format!("{}/config.json", config.sing_box_home);
-    let stat = tokio::fs::metadata(&config_output_loc).await.map_err(|_| (StatusCode::NOT_FOUND, "config file not found".to_string()))?;
-    let config_content = tokio::fs::read_to_string(&config_output_loc).await.map_err(|_| (StatusCode::NOT_FOUND, "config file not found".to_string()))?;
-    let config_json: serde_json::Value = serde_json::from_str(&config_content).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let stat = tokio::fs::metadata(&config_output_loc)
+        .await
+        .map_err(|_| (StatusCode::NOT_FOUND, "config file not found".to_string()))?;
+    let config_content = tokio::fs::read_to_string(&config_output_loc)
+        .await
+        .map_err(|_| (StatusCode::NOT_FOUND, "config file not found".to_string()))?;
+    let config_json: serde_json::Value = serde_json::from_str(&config_content)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     Ok(Json(serde_json::json!({
         "config_stat": serde_json::json!({
             "size": stat.len(),
@@ -187,11 +202,15 @@ async fn get_config_handler(State(config): State<Arc<Config>>) -> Result<Json<se
     })))
 }
 
-async fn generate_config_handler(State(config): State<Arc<Config>>) -> Result<axum::response::Response, (StatusCode, String)> {
+async fn generate_config_handler(
+    State(config): State<Arc<Config>>,
+) -> Result<axum::response::Response, (StatusCode, String)> {
     match gen_config(&*config).await {
         Ok(_) => {
             let config_output_loc = format!("{}/config.json", config.sing_box_home);
-            let file = tokio::fs::read(&config_output_loc).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+            let file = tokio::fs::read(&config_output_loc)
+                .await
+                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
             Ok(axum::response::Response::new(axum::body::Body::from(file)))
         }
         Err(e) => Err((StatusCode::INTERNAL_SERVER_ERROR, e.to_string())),
@@ -199,10 +218,13 @@ async fn generate_config_handler(State(config): State<Arc<Config>>) -> Result<ax
 }
 
 async fn gen_config(config: &Config) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let my_outbounds: Vec<serde_json::Value> = config.nodes.iter()
+    let my_outbounds: Vec<serde_json::Value> = config
+        .nodes
+        .iter()
         .filter_map(|s| serde_json::from_str(s).ok())
         .collect();
-    let my_names: Vec<String> = my_outbounds.iter()
+    let my_names: Vec<String> = my_outbounds
+        .iter()
         .filter_map(|o| o.get("tag").and_then(|v| v.as_str()).map(String::from))
         .collect();
     let mut final_outbounds: Vec<serde_json::Value> = vec![];
@@ -215,15 +237,27 @@ async fn gen_config(config: &Config) -> Result<(), Box<dyn std::error::Error + S
     let mut sing_box_config = get_config_template();
     if let Some(outbounds) = sing_box_config["outbounds"][0].get_mut("outbounds") {
         if let Some(arr) = outbounds.as_array_mut() {
-            arr.extend(my_names.into_iter().chain(final_node_names.into_iter()).map(|s| serde_json::Value::String(s)));
+            arr.extend(
+                my_names
+                    .into_iter()
+                    .chain(final_node_names.into_iter())
+                    .map(|s| serde_json::Value::String(s)),
+            );
         }
     }
     if let Some(arr) = sing_box_config["outbounds"].as_array_mut() {
         arr.extend(my_outbounds.into_iter().chain(final_outbounds.into_iter()));
     }
     let config_output_loc = format!("{}/config.json", config.sing_box_home);
-    tokio::fs::write(&config_output_loc, serde_json::to_string_pretty(&sing_box_config)?).await?;
-    println!("Generated config: {}", serde_json::to_string_pretty(&sing_box_config).unwrap());
+    tokio::fs::write(
+        &config_output_loc,
+        serde_json::to_string_pretty(&sing_box_config)?,
+    )
+    .await?;
+    println!(
+        "Generated config: {}",
+        serde_json::to_string_pretty(&sing_box_config).unwrap()
+    );
     Ok(())
 }
 
@@ -267,14 +301,30 @@ fn get_config_template() -> serde_json::Value {
     })
 }
 
-async fn fetch_sub(link: &str) -> Result<(Vec<String>, Vec<serde_json::Value>), Box<dyn std::error::Error + Send + Sync>> {
+async fn fetch_sub(
+    link: &str,
+) -> Result<(Vec<String>, Vec<serde_json::Value>), Box<dyn std::error::Error + Send + Sync>> {
     let client = reqwest::Client::new();
-    let res = client.get(link).header("User-Agent", "clash-meta").send().await?;
+    let res = client
+        .get(link)
+        .header("User-Agent", "clash-meta")
+        .send()
+        .await?;
     let text = res.text().await?;
     let clash_obj: serde_yaml::Value = serde_yaml::from_str(&text)?;
-    let proxies = clash_obj.get("proxies").and_then(|p| p.as_sequence()).unwrap_or(&vec![]).clone();
-    let nodes: Vec<serde_yaml::Value> = proxies.into_iter()
-        .filter(|p| p.get("name").and_then(|n| n.as_str()).map(|n| n.contains("JP") || n.contains("日本")).unwrap_or(false))
+    let proxies = clash_obj
+        .get("proxies")
+        .and_then(|p| p.as_sequence())
+        .unwrap_or(&vec![])
+        .clone();
+    let nodes: Vec<serde_yaml::Value> = proxies
+        .into_iter()
+        .filter(|p| {
+            p.get("name")
+                .and_then(|n| n.as_str())
+                .map(|n| n.contains("JP") || n.contains("日本"))
+                .unwrap_or(false)
+        })
         .collect();
     let mut node_names = vec![];
     let mut outbounds = vec![];
@@ -286,13 +336,27 @@ async fn fetch_sub(link: &str) -> Result<(Vec<String>, Vec<serde_json::Value>), 
                 let anytls = Anytls {
                     outbound_type: "anytls".to_string(),
                     tag: name.to_string(),
-                    server: node.get("server").and_then(|s| s.as_str()).unwrap_or("").to_string(),
+                    server: node
+                        .get("server")
+                        .and_then(|s| s.as_str())
+                        .unwrap_or("")
+                        .to_string(),
                     server_port: node.get("port").and_then(|p| p.as_u64()).unwrap_or(0) as u16,
-                    password: node.get("password").and_then(|p| p.as_str()).unwrap_or("").to_string(),
+                    password: node
+                        .get("password")
+                        .and_then(|p| p.as_str())
+                        .unwrap_or("")
+                        .to_string(),
                     tls: Tls {
                         enabled: true,
-                        server_name: node.get("sni").and_then(|s| s.as_str()).map(|s| s.to_string()),
-                        insecure: node.get("skip-cert-verify").and_then(|s| s.as_bool()).unwrap_or(false),
+                        server_name: node
+                            .get("sni")
+                            .and_then(|s| s.as_str())
+                            .map(|s| s.to_string()),
+                        insecure: node
+                            .get("skip-cert-verify")
+                            .and_then(|s| s.as_bool())
+                            .unwrap_or(false),
                     },
                 };
                 node_names.push(name.to_string());
@@ -302,14 +366,25 @@ async fn fetch_sub(link: &str) -> Result<(Vec<String>, Vec<serde_json::Value>), 
                 let hysteria2 = Hysteria2 {
                     outbound_type: "hysteria2".to_string(),
                     tag: name.to_string(),
-                    server: node.get("server").and_then(|s| s.as_str()).unwrap_or("").to_string(),
+                    server: node
+                        .get("server")
+                        .and_then(|s| s.as_str())
+                        .unwrap_or("")
+                        .to_string(),
                     server_port: node.get("port").and_then(|p| p.as_u64()).unwrap_or(0) as u16,
-                    password: node.get("password").and_then(|p| p.as_str()).unwrap_or("").to_string(),
+                    password: node
+                        .get("password")
+                        .and_then(|p| p.as_str())
+                        .unwrap_or("")
+                        .to_string(),
                     up_mbps: 40,
                     down_mbps: 350,
                     tls: Tls {
                         enabled: true,
-                        server_name: node.get("sni").and_then(|s| s.as_str()).map(|s| s.to_string()),
+                        server_name: node
+                            .get("sni")
+                            .and_then(|s| s.as_str())
+                            .map(|s| s.to_string()),
                         insecure: true,
                     },
                 };
@@ -331,7 +406,9 @@ async fn log_live(State(config): State<Arc<Config>>) -> Result<String, (StatusCo
         .arg("-n")
         .arg("50")
         .arg(format!("{}/box.log", config.sing_box_home))
-        .output().await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        .output()
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
 
@@ -343,10 +420,15 @@ async fn restart_sing(State(config): State<Arc<Config>>) -> Result<String, (Stat
     }
 }
 
-async fn start_sing_handler(State(config): State<Arc<Config>>) -> Result<String, (StatusCode, String)> {
+async fn start_sing_handler(
+    State(config): State<Arc<Config>>,
+) -> Result<String, (StatusCode, String)> {
     let mut lock = SING_PROCESS.lock().await;
     if lock.is_some() && lock.as_mut().unwrap().try_wait().unwrap().is_none() {
-        return Err((StatusCode::BAD_REQUEST, "sing box is already running".to_string()));
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "sing box is already running".to_string(),
+        ));
     }
     drop(lock);
     match start_sing(&config.sing_box_home).await {
@@ -355,41 +437,32 @@ async fn start_sing_handler(State(config): State<Arc<Config>>) -> Result<String,
     }
 }
 
-async fn stop_sing_handler(State(_config): State<Arc<Config>>) -> Result<String, (StatusCode, String)> {
+async fn stop_sing_handler(
+    State(_config): State<Arc<Config>>,
+) -> Result<String, (StatusCode, String)> {
     stop_sing_internal().await;
     Ok("stopped".to_string())
 }
 
-async fn start_sing(sing_box_home: &str) -> Result<u32, Box<dyn std::error::Error + Send + Sync>> {
+async fn start_sing(sing_box_home: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut lock = SING_PROCESS.lock().await;
     if lock.is_some() && lock.as_mut().unwrap().try_wait()?.is_none() {
         return Err("already running!".into());
     }
-    *lock = Some(tokio::process::Command::new("sing-box")
+    let child = tokio::process::Command::new("sing-box")
         .current_dir(sing_box_home)
         .arg("run")
         .arg("-c")
         .arg("config.json")
-        .env("PATH", format!("{}:{}", std::env::var("PATH")?, sing_box_home))
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn()?);
-    tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
-    if let Some(ref mut p) = *lock {
-        if p.try_wait()?.is_some() {
-            *lock = None;
-            return Err("sing box exited!".into());
-        }
-        if check_connection().await? {
-            tokio::fs::write(format!("{}/pid", sing_box_home), p.id().unwrap().to_string()).await?;
-            return Ok(p.id().unwrap());
-        } else {
-            p.kill().await?;
-            *lock = None;
-            return Err("sing box started but failed to connect to internet".into());
-        }
-    }
-    unreachable!()
+        .env(
+            "PATH",
+            format!("{}:{}", std::env::var("PATH")?, sing_box_home),
+        )
+        .stdout(std::process::Stdio::inherit())
+        .stderr(std::process::Stdio::inherit())
+        .spawn()?;
+    *lock = Some(child);
+    Ok(())
 }
 
 async fn stop_sing_internal() {
@@ -400,18 +473,4 @@ async fn stop_sing_internal() {
         }
     }
     *lock = None;
-}
-
-async fn net_check() -> Result<String, (StatusCode, String)> {
-    match check_connection().await {
-        Ok(true) => Ok("ok".to_string()),
-        Ok(false) => Err((StatusCode::BAD_REQUEST, "not ok".to_string())),
-        Err(e) => Err((StatusCode::INTERNAL_SERVER_ERROR, e.to_string())),
-    }
-}
-
-async fn check_connection() -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
-    let res = reqwest::get("https://gstatic.com/generate_204").await?;
-    let text = res.text().await?;
-    Ok(text.contains("HTTP/2 204"))
 }
