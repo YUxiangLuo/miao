@@ -184,6 +184,7 @@ fn get_config_template() -> serde_json::Value {
                 {"action": "sniff"},
                 {"protocol": "dns", "action": "hijack-dns"},
                 {"ip_is_private": true, "action": "route", "outbound": "direct"},
+                {"protocol": ["bittorrent"], "action": "route", "outbound": "direct"},
                 {"rule_set": ["chinasite"], "action": "route", "outbound": "direct"},
                 {"rule_set": ["chinaip"], "action": "route", "outbound": "direct"}
             ],
