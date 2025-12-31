@@ -19,7 +19,9 @@ async fn serve_index() -> Html<&'static str> {
 struct Config {
     port: u16,
     sing_box_home: String,
+    #[serde(default)]
     subs: Vec<String>,
+    #[serde(default)]
     nodes: Vec<String>,
 }
 
@@ -146,6 +148,13 @@ async fn gen_config(config: &Config) -> Result<(), Box<dyn std::error::Error + S
             }
         }
     }
+
+    // Check if we have at least one node (either from manual config or subscriptions)
+    let total_nodes = my_outbounds.len() + final_outbounds.len();
+    if total_nodes == 0 {
+        return Err("No nodes available: all subscriptions failed and no manual nodes configured".into());
+    }
+
     let mut sing_box_config = get_config_template();
     if let Some(outbounds) = sing_box_config["outbounds"][0].get_mut("outbounds") {
         if let Some(arr) = outbounds.as_array_mut() {
