@@ -1,6 +1,7 @@
 db.sqlite
-config.json
-sing-box
+/config.json
+/sing-box
+/dashboard
 # dependencies (bun install)
 node_modules
 

@@ -67,19 +67,13 @@ lazy_static! {
     static ref SING_PROCESS: Mutex<Option<tokio::process::Child>> = Mutex::new(None);
 }
 
-/// Extract embedded sing-box binary to a runtime directory
+/// Extract embedded sing-box binary to current working directory
 fn extract_sing_box() -> Result<PathBuf, Box<dyn std::error::Error + Send + Sync>> {
-    // Get the directory where the executable is located
-    let exe_path = std::env::current_exe()?;
-    let exe_dir = exe_path.parent().ok_or("Failed to get executable directory")?;
-    let runtime_dir = exe_dir.join("runtime");
+    // Use current working directory
+    let current_dir = std::env::current_dir()?;
+    let sing_box_path = current_dir.join("sing-box");
 
-    // Create runtime directory if it doesn't exist
-    fs::create_dir_all(&runtime_dir)?;
-
-    let sing_box_path = runtime_dir.join("sing-box");
-
-    // Extract sing-box binary if it doesn't exist or is outdated
+    // Extract sing-box binary if it doesn't exist
     if !sing_box_path.exists() {
         println!("Extracting embedded sing-box binary to {:?}", sing_box_path);
         fs::write(&sing_box_path, SING_BOX_BINARY)?;
@@ -87,11 +81,13 @@ fn extract_sing_box() -> Result<PathBuf, Box<dyn std::error::Error + Send + Sync
         println!("sing-box binary extracted successfully");
     }
 
-    // Also create dashboard directory placeholder
-    let dashboard_dir = runtime_dir.join("dashboard");
-    fs::create_dir_all(&dashboard_dir)?;
+    // Create dashboard directory if it doesn't exist
+    let dashboard_dir = current_dir.join("dashboard");
+    if !dashboard_dir.exists() {
+        fs::create_dir_all(&dashboard_dir)?;
+    }
 
-    Ok(runtime_dir)
+    Ok(current_dir)
 }
 
 #[tokio::main]
@@ -120,8 +116,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         }
     }
 
-    // Start sing if possible
-    let _ = start_sing(&sing_box_home).await;
+    // Start sing-box
+    match start_sing(&sing_box_home).await {
+        Ok(_) => println!("sing-box started successfully"),
+        Err(e) => eprintln!("Failed to start sing-box: {}", e),
+    }
 
     let app_state = Arc::new(AppState {
         config,
@@ -386,18 +385,25 @@ async fn start_sing(sing_box_home: &str) -> Result<(), Box<dyn std::error::Error
     if lock.is_some() && lock.as_mut().unwrap().try_wait()?.is_none() {
         return Err("already running!".into());
     }
-    let child = tokio::process::Command::new("sing-box")
+
+    // Use absolute path to sing-box binary
+    let sing_box_path = PathBuf::from(sing_box_home).join("sing-box");
+    let config_path = PathBuf::from(sing_box_home).join("config.json");
+
+    println!("Starting sing-box from: {:?}", sing_box_path);
+    println!("Using config: {:?}", config_path);
+
+    let child = tokio::process::Command::new(&sing_box_path)
         .current_dir(sing_box_home)
         .arg("run")
         .arg("-c")
-        .arg("config.json")
-        .env(
-            "PATH",
-            format!("{}:{}", std::env::var("PATH")?, sing_box_home),
-        )
+        .arg(&config_path)
         .stdout(std::process::Stdio::inherit())
         .stderr(std::process::Stdio::inherit())
         .spawn()?;
+
+    let pid = child.id();
+    println!("sing-box process spawned with PID: {:?}", pid);
     *lock = Some(child);
     Ok(())
 }
