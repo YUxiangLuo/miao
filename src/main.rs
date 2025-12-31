@@ -10,6 +10,16 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tokio::time::{sleep, Duration};
+use std::path::PathBuf;
+use std::fs;
+use std::os::unix::fs::PermissionsExt;
+
+// Embed sing-box binary based on target architecture
+#[cfg(target_arch = "x86_64")]
+const SING_BOX_BINARY: &[u8] = include_bytes!("../embedded/sing-box-amd64");
+
+#[cfg(target_arch = "aarch64")]
+const SING_BOX_BINARY: &[u8] = include_bytes!("../embedded/sing-box-arm64");
 
 async fn serve_index() -> Html<&'static str> {
     Html(include_str!("../public/index.html"))
@@ -18,11 +28,18 @@ async fn serve_index() -> Html<&'static str> {
 #[derive(Clone, Deserialize)]
 struct Config {
     port: u16,
-    sing_box_home: String,
+    #[serde(default)]
+    sing_box_home: Option<String>,
     #[serde(default)]
     subs: Vec<String>,
     #[serde(default)]
     nodes: Vec<String>,
+}
+
+#[derive(Clone)]
+struct AppState {
+    config: Config,
+    sing_box_home: String,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -50,15 +67,48 @@ lazy_static! {
     static ref SING_PROCESS: Mutex<Option<tokio::process::Child>> = Mutex::new(None);
 }
 
+/// Extract embedded sing-box binary to a runtime directory
+fn extract_sing_box() -> Result<PathBuf, Box<dyn std::error::Error + Send + Sync>> {
+    // Get the directory where the executable is located
+    let exe_path = std::env::current_exe()?;
+    let exe_dir = exe_path.parent().ok_or("Failed to get executable directory")?;
+    let runtime_dir = exe_dir.join("runtime");
+
+    // Create runtime directory if it doesn't exist
+    fs::create_dir_all(&runtime_dir)?;
+
+    let sing_box_path = runtime_dir.join("sing-box");
+
+    // Extract sing-box binary if it doesn't exist or is outdated
+    if !sing_box_path.exists() {
+        println!("Extracting embedded sing-box binary to {:?}", sing_box_path);
+        fs::write(&sing_box_path, SING_BOX_BINARY)?;
+        fs::set_permissions(&sing_box_path, fs::Permissions::from_mode(0o755))?;
+        println!("sing-box binary extracted successfully");
+    }
+
+    // Also create dashboard directory placeholder
+    let dashboard_dir = runtime_dir.join("dashboard");
+    fs::create_dir_all(&dashboard_dir)?;
+
+    Ok(runtime_dir)
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let config: Config = serde_yaml::from_str(&tokio::fs::read_to_string("miao.yaml").await?)?;
     let port = config.port;
-    let sing_box_home = config.sing_box_home.clone();
+
+    // Extract embedded sing-box binary and determine working directory
+    let sing_box_home = if let Some(custom_home) = &config.sing_box_home {
+        custom_home.clone()
+    } else {
+        extract_sing_box()?.to_string_lossy().to_string()
+    };
 
     // Generate initial config, retrying until success
     loop {
-        match gen_config(&config).await {
+        match gen_config(&config, &sing_box_home).await {
             Ok(_) => break,
             Err(e) => {
                 eprintln!(
@@ -73,7 +123,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // Start sing if possible
     let _ = start_sing(&sing_box_home).await;
 
-    let app_state = Arc::new(config);
+    let app_state = Arc::new(AppState {
+        config,
+        sing_box_home: sing_box_home.clone(),
+    });
     let app = Router::new()
         .route("/", get(serve_index))
         .route("/api/config", get(get_config_handler))
@@ -89,9 +142,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 }
 
 async fn get_config_handler(
-    State(config): State<Arc<Config>>,
+    State(state): State<Arc<AppState>>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
-    let config_output_loc = format!("{}/config.json", config.sing_box_home);
+    let config_output_loc = format!("{}/config.json", state.sing_box_home);
     let stat = tokio::fs::metadata(&config_output_loc)
         .await
         .map_err(|_| (StatusCode::NOT_FOUND, "config file not found".to_string()))?;
@@ -111,11 +164,11 @@ async fn get_config_handler(
 }
 
 async fn generate_config_handler(
-    State(config): State<Arc<Config>>,
+    State(state): State<Arc<AppState>>,
 ) -> Result<axum::response::Response, (StatusCode, String)> {
-    match gen_config(&*config).await {
+    match gen_config(&state.config, &state.sing_box_home).await {
         Ok(_) => {
-            let config_output_loc = format!("{}/config.json", config.sing_box_home);
+            let config_output_loc = format!("{}/config.json", state.sing_box_home);
             let file = tokio::fs::read(&config_output_loc)
                 .await
                 .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
@@ -125,7 +178,7 @@ async fn generate_config_handler(
     }
 }
 
-async fn gen_config(config: &Config) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+async fn gen_config(config: &Config, sing_box_home: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let my_outbounds: Vec<serde_json::Value> = config
         .nodes
         .iter()
@@ -169,7 +222,7 @@ async fn gen_config(config: &Config) -> Result<(), Box<dyn std::error::Error + S
     if let Some(arr) = sing_box_config["outbounds"].as_array_mut() {
         arr.extend(my_outbounds.into_iter().chain(final_outbounds.into_iter()));
     }
-    let config_output_loc = format!("{}/config.json", config.sing_box_home);
+    let config_output_loc = format!("{}/config.json", sing_box_home);
     tokio::fs::write(
         &config_output_loc,
         serde_json::to_string_pretty(&sing_box_config)?,
@@ -296,16 +349,16 @@ async fn fetch_sub(
     Ok((node_names, outbounds))
 }
 
-async fn restart_sing(State(config): State<Arc<Config>>) -> Result<String, (StatusCode, String)> {
+async fn restart_sing(State(state): State<Arc<AppState>>) -> Result<String, (StatusCode, String)> {
     stop_sing_internal().await;
-    match start_sing(&config.sing_box_home).await {
+    match start_sing(&state.sing_box_home).await {
         Ok(_) => Ok("ok".to_string()),
         Err(e) => Err((StatusCode::INTERNAL_SERVER_ERROR, e.to_string())),
     }
 }
 
 async fn start_sing_handler(
-    State(config): State<Arc<Config>>,
+    State(state): State<Arc<AppState>>,
 ) -> Result<String, (StatusCode, String)> {
     let mut lock = SING_PROCESS.lock().await;
     if lock.is_some() && lock.as_mut().unwrap().try_wait().unwrap().is_none() {
@@ -315,14 +368,14 @@ async fn start_sing_handler(
         ));
     }
     drop(lock);
-    match start_sing(&config.sing_box_home).await {
+    match start_sing(&state.sing_box_home).await {
         Ok(_) => Ok("ok".to_string()),
         Err(e) => Err((StatusCode::INTERNAL_SERVER_ERROR, e.to_string())),
     }
 }
 
 async fn stop_sing_handler(
-    State(_config): State<Arc<Config>>,
+    State(_state): State<Arc<AppState>>,
 ) -> Result<String, (StatusCode, String)> {
     stop_sing_internal().await;
     Ok("stopped".to_string())

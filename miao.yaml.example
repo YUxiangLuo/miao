@@ -1,0 +1,18 @@
+# Miao Configuration Example
+
+# HTTP API port
+port: 6161
+
+# sing-box home directory (optional)
+# If not specified, miao will use embedded sing-box binary
+# and extract it to ./runtime directory
+# sing_box_home: /home/alice/pros/miao/sing-box
+
+# Subscription URLs (optional)
+subs:
+  - https://example.com/subscription1
+  - https://example.com/subscription2
+
+# Manual nodes in JSON format (optional)
+nodes:
+  # - '{"type":"hysteria2","tag":"my-node","server":"example.com","server_port":443,"password":"xxx"}'
