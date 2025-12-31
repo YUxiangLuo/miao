@@ -291,22 +291,8 @@ async fn fetch_sub(
         .and_then(|p| p.as_sequence())
         .unwrap_or(&vec![])
         .clone();
-    let nodes: Vec<serde_yaml::Value> = proxies
-        .into_iter()
-        .filter(|p| {
-            p.get("name")
-                .and_then(|n| n.as_str())
-                .map(|n| {
-                    n.contains("JP")
-                        || n.contains("日本")
-                        || n.contains("SG")
-                        || n.contains("新加坡")
-                        || n.contains("TW")
-                        || n.contains("台湾")
-                })
-                .unwrap_or(false)
-        })
-        .collect();
+    // Accept all nodes from subscription (no geographic filtering)
+    let nodes: Vec<serde_yaml::Value> = proxies.into_iter().collect();
     let mut node_names = vec![];
     let mut outbounds = vec![];
     for node in nodes {
