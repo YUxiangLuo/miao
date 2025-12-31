@@ -20,7 +20,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.23'
+          go-version: '1.24'
 
       - name: Install Zig for cross-compilation
         run: |
@@ -48,12 +48,23 @@ jobs:
           # Set Go version
           go version
 
-          # Build for target architecture (following user's build script)
+          # Build for target architecture
+          # Use go build directly since sing-box requires Go 1.24.7+
           if [ "${{ matrix.target }}" = "arm64" ]; then
-            GOARCH=arm64 GOOS=linux TAGS="with_quic,with_clash_api" make
+            GOARCH=arm64 GOOS=linux CGO_ENABLED=0 go build \
+              -v \
+              -trimpath \
+              -ldflags "-s -w -buildid=" \
+              -tags "with_quic,with_clash_api" \
+              ./cmd/sing-box
             mv sing-box ../embedded/sing-box-arm64
           else
-            GOARCH=amd64 GOOS=linux TAGS="with_quic,with_clash_api" make
+            GOARCH=amd64 GOOS=linux CGO_ENABLED=0 go build \
+              -v \
+              -trimpath \
+              -ldflags "-s -w -buildid=" \
+              -tags "with_quic,with_clash_api" \
+              ./cmd/sing-box
             mv sing-box ../embedded/sing-box-amd64
           fi
 
