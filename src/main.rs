@@ -123,8 +123,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     }
 
     let app_state = Arc::new(AppState {
-        config,
+        config: config.clone(),
         sing_box_home: sing_box_home.clone(),
+    });
+
+    // Start background task to regenerate config backup every 6 hours
+    let config_regen = config.clone();
+    let sing_box_home_regen = sing_box_home.clone();
+    tokio::spawn(async move {
+        loop {
+            sleep(Duration::from_secs(6 * 60 * 60)).await; // 6 hours
+            println!("Regenerating config backup...");
+            match gen_config_backup(&config_regen, &sing_box_home_regen).await {
+                Ok(_) => println!("Config backup regenerated successfully"),
+                Err(e) => eprintln!("Failed to regenerate config backup: {}", e),
+            }
+        }
     });
     let app = Router::new()
         .route("/", get(serve_index))
@@ -231,6 +245,60 @@ async fn gen_config(config: &Config, sing_box_home: &str) -> Result<(), Box<dyn 
         "Generated config: {}",
         serde_json::to_string_pretty(&sing_box_config).unwrap()
     );
+    Ok(())
+}
+
+async fn gen_config_backup(config: &Config, sing_box_home: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let my_outbounds: Vec<serde_json::Value> = config
+        .nodes
+        .iter()
+        .filter_map(|s| serde_json::from_str(s).ok())
+        .collect();
+    let my_names: Vec<String> = my_outbounds
+        .iter()
+        .filter_map(|o| o.get("tag").and_then(|v| v.as_str()).map(String::from))
+        .collect();
+    let mut final_outbounds: Vec<serde_json::Value> = vec![];
+    let mut final_node_names: Vec<String> = vec![];
+    for sub in &config.subs {
+        match fetch_sub(sub).await {
+            Ok((node_names, outbounds)) => {
+                final_node_names.extend(node_names);
+                final_outbounds.extend(outbounds);
+            }
+            Err(e) => {
+                eprintln!("Failed to fetch subscription from {}: {}", sub, e);
+            }
+        }
+    }
+
+    // Check if we have at least one node (either from manual config or subscriptions)
+    let total_nodes = my_outbounds.len() + final_outbounds.len();
+    if total_nodes == 0 {
+        return Err("No nodes available: all subscriptions failed and no manual nodes configured".into());
+    }
+
+    let mut sing_box_config = get_config_template();
+    if let Some(outbounds) = sing_box_config["outbounds"][0].get_mut("outbounds") {
+        if let Some(arr) = outbounds.as_array_mut() {
+            arr.extend(
+                my_names
+                    .into_iter()
+                    .chain(final_node_names.into_iter())
+                    .map(|s| serde_json::Value::String(s)),
+            );
+        }
+    }
+    if let Some(arr) = sing_box_config["outbounds"].as_array_mut() {
+        arr.extend(my_outbounds.into_iter().chain(final_outbounds.into_iter()));
+    }
+    let config_backup_loc = format!("{}/config.bak.json", sing_box_home);
+    tokio::fs::write(
+        &config_backup_loc,
+        serde_json::to_string_pretty(&sing_box_config)?,
+    )
+    .await?;
+    println!("Generated config backup: {}", config_backup_loc);
     Ok(())
 }
 
