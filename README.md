@@ -27,22 +27,18 @@ chmod +x miao
 
 在**同一目录**下创建 `config.yaml`：
 
-```bash
-cat > config.yaml << 'EOF'
+```yaml
 port: 6161
 subs:
   - https://your-hysteria2-subscription-url
-EOF
 ```
 
 或者手动配置节点：
 
-```bash
-cat > config.yaml << 'EOF'
+```yaml
 port: 6161
 nodes:
   - '{"type":"hysteria2","tag":"我的节点","server":"example.com","server_port":443,"password":"your-password"}'
-EOF
 ```
 
 ### 3. 运行
