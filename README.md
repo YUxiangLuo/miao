@@ -6,47 +6,65 @@
 
 ## 🚀 30 秒快速开始
 
-**1. 下载**
+### 1. 创建目录并下载
 
 ```bash
-# Linux amd64
-wget https://github.com/YUxiangLuo/miao/releases/latest/download/miao-rust-linux-amd64
-chmod +x miao-rust-linux-amd64
+# 创建工作目录
+mkdir ~/miao && cd ~/miao
 
-# Linux arm64 (如树莓派、软路由)
-wget https://github.com/YUxiangLuo/miao/releases/latest/download/miao-rust-linux-arm64
-chmod +x miao-rust-linux-arm64
+# 下载 (根据你的架构选择一个)
+
+# Linux amd64
+wget https://github.com/YUxiangLuo/miao/releases/latest/download/miao-rust-linux-amd64 -O miao
+chmod +x miao
+
+# Linux arm64 (树莓派、软路由等)
+wget https://github.com/YUxiangLuo/miao/releases/latest/download/miao-rust-linux-arm64 -O miao
+chmod +x miao
 ```
 
-**2. 配置** - 创建 `miao.yaml`
+### 2. 创建配置文件
 
-```yaml
+在**同一目录**下创建 `miao.yaml`：
+
+```bash
+cat > miao.yaml << 'EOF'
 port: 6161
 subs:
   - https://your-hysteria2-subscription-url
+EOF
 ```
 
 或者手动配置节点：
 
-```yaml
+```bash
+cat > miao.yaml << 'EOF'
 port: 6161
 nodes:
   - '{"type":"hysteria2","tag":"我的节点","server":"example.com","server_port":443,"password":"your-password"}'
+EOF
 ```
 
-**3. 运行**
+### 3. 运行
 
 ```bash
-sudo ./miao-rust-linux-amd64
+sudo ./miao
 ```
 
 > 需要 root 权限创建 TUN 网卡
 
-**4. 完成！** 🎉
+### 4. 完成！🎉
 
 - 访问 `http://localhost:6161` 打开控制面板
 - 国内流量直连，国外流量自动走代理
 - 支持在网页上添加/删除订阅和节点
+
+**目录结构应该像这样：**
+```
+~/miao/
+├── miao          # 可执行文件
+└── miao.yaml     # 配置文件 (必须在同一目录)
+```
 
 ---
 
