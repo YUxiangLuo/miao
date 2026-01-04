@@ -90,6 +90,71 @@ fn extract_sing_box() -> Result<PathBuf, Box<dyn std::error::Error + Send + Sync
     Ok(current_dir)
 }
 
+async fn check_and_install_openwrt_dependencies() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    // Check if /etc/openwrt_release exists to identify OpenWrt
+    if !PathBuf::from("/etc/openwrt_release").exists() {
+        return Ok(());
+    }
+
+    println!("OpenWrt system detected. Checking dependencies...");
+
+    // Check installed packages
+    let output = tokio::process::Command::new("opkg")
+        .arg("list-installed")
+        .output()
+        .await?;
+
+    let installed_list = String::from_utf8_lossy(&output.stdout);
+    let installed_set: std::collections::HashSet<&str> = installed_list
+        .lines()
+        .map(|line| line.split_whitespace().next().unwrap_or(""))
+        .collect();
+
+    let mut packages_to_install = Vec::new();
+
+    if !installed_set.contains("kmod-tun") {
+        packages_to_install.push("kmod-tun");
+    }
+    if !installed_set.contains("kmod-nft-queue") {
+        packages_to_install.push("kmod-nft-queue");
+    }
+
+    if packages_to_install.is_empty() {
+        println!("Required dependencies (kmod-tun, kmod-nft-queue) are already installed.");
+        return Ok(());
+    }
+
+    println!("Missing dependencies: {:?}. Installing...", packages_to_install);
+
+    // Run opkg update
+    println!("Running 'opkg update'...");
+    let update_status = tokio::process::Command::new("opkg")
+        .arg("update")
+        .status()
+        .await?;
+
+    if !update_status.success() {
+        eprintln!("'opkg update' finished with error, but proceeding with installation attempt...");
+    }
+
+    // Install packages
+    for pkg in packages_to_install {
+        println!("Installing {}...", pkg);
+        let install_status = tokio::process::Command::new("opkg")
+            .arg("install")
+            .arg(pkg)
+            .status()
+            .await?;
+        
+        if !install_status.success() {
+            return Err(format!("Failed to install {}. Please install it manually.", pkg).into());
+        }
+    }
+
+    println!("Dependencies installed successfully.");
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let config: Config = serde_yaml::from_str(&tokio::fs::read_to_string("miao.yaml").await?)?;
@@ -114,6 +179,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 sleep(Duration::from_secs(300)).await;
             }
         }
+    }
+
+    // Check OpenWrt dependencies
+    if let Err(e) = check_and_install_openwrt_dependencies().await {
+        eprintln!("Failed to check or install OpenWrt dependencies: {}", e);
     }
 
     // Start sing-box
