@@ -443,6 +443,130 @@
             background: rgba(255, 255, 255, 0.1);
             margin: 1.5rem 0;
         }
+
+        .proxy-group {
+            margin-bottom: 1.5rem;
+        }
+
+        .proxy-group-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 0.75rem;
+        }
+
+        .proxy-group-name {
+            font-weight: 600;
+            color: #fff;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .proxy-group-now {
+            font-size: 0.8rem;
+            color: var(--accent-green);
+            background: rgba(0, 217, 165, 0.1);
+            padding: 0.25rem 0.75rem;
+            border-radius: 20px;
+        }
+
+        .proxy-nodes {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+            gap: 0.5rem;
+        }
+
+        .proxy-node {
+            background: rgba(0, 0, 0, 0.2);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
+            padding: 0.6rem 0.8rem;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: flex;
+            flex-direction: column;
+            gap: 0.25rem;
+        }
+
+        .proxy-node:hover {
+            background: rgba(255, 255, 255, 0.08);
+            border-color: rgba(255, 255, 255, 0.2);
+        }
+
+        .proxy-node.active {
+            background: rgba(0, 217, 165, 0.15);
+            border-color: var(--accent-green);
+        }
+
+        .proxy-node-name {
+            font-size: 0.85rem;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .proxy-node-delay {
+            font-size: 0.75rem;
+            color: rgba(255, 255, 255, 0.5);
+        }
+
+        .proxy-node-delay.fast {
+            color: var(--accent-green);
+        }
+
+        .proxy-node-delay.medium {
+            color: var(--accent-orange);
+        }
+
+        .proxy-node-delay.slow {
+            color: var(--accent-red);
+        }
+
+        .proxy-node-delay.timeout {
+            color: rgba(255, 255, 255, 0.3);
+        }
+
+        .btn-test-all {
+            background: rgba(255, 255, 255, 0.1);
+            color: #fff;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            padding: 0.4rem 0.8rem;
+            font-size: 0.8rem;
+        }
+
+        .btn-test-all:hover:not(:disabled) {
+            background: rgba(255, 255, 255, 0.15);
+        }
+
+        .traffic-stats {
+            display: flex;
+            gap: 2rem;
+            margin-top: 1rem;
+        }
+
+        .traffic-item {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .traffic-icon {
+            font-size: 1.2rem;
+        }
+
+        .traffic-icon.up {
+            color: var(--accent-green);
+        }
+
+        .traffic-icon.down {
+            color: var(--accent-blue);
+        }
+
+        .traffic-value {
+            font-size: 1.1rem;
+            font-weight: 600;
+        }
     </style>
 </head>
 
@@ -500,6 +624,58 @@
                             <i v-else class="bi bi-arrow-clockwise"></i>
                             重启
                         </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 代理选择 -->
+            <div class="glass-card" v-if="status.running">
+                <div class="card-header-custom">
+                    <i class="bi bi-shuffle"></i>
+                    <span>代理选择</span>
+                </div>
+
+                <div v-if="!proxies || Object.keys(proxies).length === 0" class="empty-state">
+                    <i class="bi bi-hourglass-split"
+                        style="font-size: 2rem; display: block; margin-bottom: 0.5rem;"></i>
+                    正在加载节点...
+                </div>
+
+                <div v-for="(group, groupName) in selectorGroups" :key="groupName" class="proxy-group">
+                    <div class="proxy-group-header">
+                        <div class="proxy-group-name">
+                            <i class="bi bi-collection"></i>
+                            {{ groupName }}
+                            <span class="proxy-group-now">{{ group.now }}</span>
+                        </div>
+                        <button class="btn-custom btn-test-all" @click="testAllDelays(groupName, group.all)"
+                            :disabled="testingGroup === groupName">
+                            <span v-if="testingGroup === groupName" class="spinner"
+                                style="width:12px;height:12px;"></span>
+                            <i v-else class="bi bi-speedometer"></i>
+                            测速
+                        </button>
+                    </div>
+                    <div class="proxy-nodes">
+                        <div v-for="nodeName in group.all" :key="nodeName"
+                            :class="['proxy-node', { active: nodeName === group.now }]"
+                            @click="switchProxy(groupName, nodeName)">
+                            <div class="proxy-node-name" :title="nodeName">{{ nodeName }}</div>
+                            <div :class="['proxy-node-delay', getDelayClass(delays[nodeName])]">
+                                {{ formatDelay(delays[nodeName]) }}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="traffic-stats" v-if="traffic.up !== undefined">
+                    <div class="traffic-item">
+                        <i class="bi bi-arrow-up-circle traffic-icon up"></i>
+                        <span class="traffic-value">{{ formatSpeed(traffic.up) }}</span>
+                    </div>
+                    <div class="traffic-item">
+                        <i class="bi bi-arrow-down-circle traffic-icon down"></i>
+                        <span class="traffic-value">{{ formatSpeed(traffic.down) }}</span>
                     </div>
                 </div>
             </div>
@@ -658,8 +834,21 @@
                 const newSubUrl = ref('');
                 const newNode = ref({ tag: '', server: '', server_port: 443, password: '', sni: '' });
 
+                // Clash API 状态
+                const proxies = ref({});
+                const delays = ref({});
+                const traffic = ref({});
+                const testingGroup = ref('');
+
                 let statusInterval = null;
                 let toastId = 0;
+                let trafficWs = null;
+
+                // Clash API 基础 URL
+                const clashApiBase = computed(() => {
+                    const host = window.location.hostname;
+                    return `http://${host}:6262`;
+                });
 
                 // 计算属性
                 const canAddNode = computed(() => {
@@ -669,6 +858,17 @@
                 const clashApiUrl = computed(() => {
                     const host = window.location.hostname;
                     return `http://${host}:6262/ui`;
+                });
+
+                // 过滤只显示 selector 类型的代理组
+                const selectorGroups = computed(() => {
+                    const groups = {};
+                    for (const [name, proxy] of Object.entries(proxies.value)) {
+                        if (proxy.type === 'Selector') {
+                            groups[name] = proxy;
+                        }
+                    }
+                    return groups;
                 });
 
                 // Toast 通知
@@ -683,6 +883,82 @@
                 const getToastIcon = (type) => {
                     const icons = { success: 'bi bi-check-circle-fill', error: 'bi bi-x-circle-fill', info: 'bi bi-info-circle-fill' };
                     return icons[type] || icons.info;
+                };
+
+                // Clash API 函数
+                const fetchProxies = async () => {
+                    try {
+                        const res = await fetch(`${clashApiBase.value}/proxies`);
+                        const data = await res.json();
+                        proxies.value = data.proxies || {};
+                    } catch (e) { console.error('获取代理失败:', e); }
+                };
+
+                const switchProxy = async (groupName, nodeName) => {
+                    try {
+                        await fetch(`${clashApiBase.value}/proxies/${encodeURIComponent(groupName)}`, {
+                            method: 'PUT',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ name: nodeName })
+                        });
+                        await fetchProxies();
+                        showToast(`已切换到 ${nodeName}`, 'success');
+                    } catch (e) {
+                        showToast('切换节点失败', 'error');
+                    }
+                };
+
+                const testDelay = async (nodeName) => {
+                    try {
+                        const res = await fetch(`${clashApiBase.value}/proxies/${encodeURIComponent(nodeName)}/delay?timeout=5000&url=http://www.gstatic.com/generate_204`);
+                        const data = await res.json();
+                        delays.value[nodeName] = data.delay || 0;
+                    } catch (e) {
+                        delays.value[nodeName] = -1;
+                    }
+                };
+
+                const testAllDelays = async (groupName, nodeNames) => {
+                    testingGroup.value = groupName;
+                    const promises = nodeNames.map(name => testDelay(name));
+                    await Promise.all(promises);
+                    testingGroup.value = '';
+                };
+
+                const getDelayClass = (delay) => {
+                    if (delay === undefined) return '';
+                    if (delay < 0) return 'timeout';
+                    if (delay < 200) return 'fast';
+                    if (delay < 500) return 'medium';
+                    return 'slow';
+                };
+
+                const formatDelay = (delay) => {
+                    if (delay === undefined) return '-';
+                    if (delay < 0) return '超时';
+                    return `${delay}ms`;
+                };
+
+                const formatSpeed = (bytes) => {
+                    if (!bytes) return '0 B/s';
+                    const k = 1024;
+                    const sizes = ['B/s', 'KB/s', 'MB/s', 'GB/s'];
+                    const i = Math.floor(Math.log(bytes) / Math.log(k));
+                    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+                };
+
+                const connectTrafficWs = () => {
+                    const host = window.location.hostname;
+                    trafficWs = new WebSocket(`ws://${host}:6262/traffic`);
+                    trafficWs.onmessage = (event) => {
+                        try {
+                            const data = JSON.parse(event.data);
+                            traffic.value = { up: data.up, down: data.down };
+                        } catch (e) { }
+                    };
+                    trafficWs.onclose = () => {
+                        setTimeout(connectTrafficWs, 3000);
+                    };
                 };
 
                 // API 调用
@@ -847,18 +1123,28 @@
                     fetchStatus();
                     fetchSubs();
                     fetchNodes();
-                    statusInterval = setInterval(fetchStatus, 3000);
+                    fetchProxies();
+                    connectTrafficWs();
+                    statusInterval = setInterval(() => {
+                        fetchStatus();
+                        if (status.value.running) fetchProxies();
+                    }, 3000);
                 });
 
-                onUnmounted(() => { if (statusInterval) clearInterval(statusInterval); });
+                onUnmounted(() => {
+                    if (statusInterval) clearInterval(statusInterval);
+                    if (trafficWs) trafficWs.close();
+                });
 
                 return {
                     status, config, subs, nodes, showConfig, loading, loadingAction, toasts,
                     newSubUrl, newNode, canAddNode, clashApiUrl,
+                    proxies, delays, traffic, testingGroup, selectorGroups,
                     showToast, getToastIcon,
                     startService, stopService, restartService,
                     addSub, deleteSub, addNode, deleteNode,
                     generateConfig, toggleConfig,
+                    switchProxy, testAllDelays, getDelayClass, formatDelay, formatSpeed,
                     formatUptime, formatBytes, formatTime
                 };
             }
