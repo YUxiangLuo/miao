@@ -492,10 +492,10 @@ async fn delete_node(
 // Internal Functions
 // ============================================================================
 
-/// Save config to miao.yaml
+/// Save config to config.yaml
 async fn save_config(config: &Config) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let yaml = serde_yaml::to_string(config)?;
-    tokio::fs::write("miao.yaml", yaml).await?;
+    tokio::fs::write("config.yaml", yaml).await?;
     Ok(())
 }
 
@@ -866,7 +866,7 @@ async fn fetch_sub(
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let config: Config = serde_yaml::from_str(&tokio::fs::read_to_string("miao.yaml").await?)?;
+    let config: Config = serde_yaml::from_str(&tokio::fs::read_to_string("config.yaml").await?)?;
     let port = config.port;
 
     // Extract embedded sing-box binary and determine working directory

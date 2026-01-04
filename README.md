@@ -25,10 +25,10 @@ chmod +x miao
 
 ### 2. 创建配置文件
 
-在**同一目录**下创建 `miao.yaml`：
+在**同一目录**下创建 `config.yaml`：
 
 ```bash
-cat > miao.yaml << 'EOF'
+cat > config.yaml << 'EOF'
 port: 6161
 subs:
   - https://your-hysteria2-subscription-url
@@ -38,7 +38,7 @@ EOF
 或者手动配置节点：
 
 ```bash
-cat > miao.yaml << 'EOF'
+cat > config.yaml << 'EOF'
 port: 6161
 nodes:
   - '{"type":"hysteria2","tag":"我的节点","server":"example.com","server_port":443,"password":"your-password"}'
@@ -63,7 +63,7 @@ sudo ./miao
 ```
 ~/miao/
 ├── miao          # 可执行文件
-└── miao.yaml     # 配置文件 (必须在同一目录)
+└── config.yaml   # 配置文件 (必须在同一目录)
 ```
 
 ---
