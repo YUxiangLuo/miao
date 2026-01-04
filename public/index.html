@@ -33,17 +33,158 @@
         }
 
         .container {
-            max-width: 900px;
-            padding: 2rem 1rem;
+            max-width: 1400px;
+            padding: 1.5rem 1rem;
+        }
+
+        /* 两列布局 */
+        .layout-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1.5rem;
+            align-items: start;
+        }
+
+        .layout-full {
+            grid-column: 1 / -1;
+        }
+
+        .layout-column {
+            display: flex;
+            flex-direction: column;
+            gap: 1.5rem;
+        }
+
+        /* 平板端 */
+        @media (max-width: 1200px) {
+            .container {
+                max-width: 100%;
+            }
+        }
+
+        /* 移动端单列 */
+        @media (max-width: 992px) {
+            .layout-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .layout-full {
+                grid-column: 1;
+            }
+
+            .card-scrollable {
+                max-height: none;
+                min-height: auto;
+            }
+
+            .header h1 {
+                font-size: 1.75rem;
+            }
+
+            .btn-group-custom {
+                width: 100%;
+                justify-content: center;
+            }
+
+            .proxy-controls {
+                width: 100%;
+                justify-content: flex-end;
+            }
+        }
+
+        /* 小屏幕优化 */
+        @media (max-width: 576px) {
+            .container {
+                padding: 1rem 0.75rem;
+            }
+
+            .glass-card {
+                padding: 1rem;
+                border-radius: 12px;
+            }
+
+            .header {
+                margin-bottom: 1rem;
+            }
+
+            .header h1 {
+                font-size: 1.5rem;
+            }
+
+            .header p {
+                font-size: 0.85rem;
+            }
+
+            .btn-custom {
+                padding: 0.6rem 1rem;
+                font-size: 0.85rem;
+                min-width: 80px;
+            }
+
+            .btn-group-custom {
+                gap: 0.5rem;
+            }
+
+            .status-details {
+                gap: 1rem;
+            }
+
+            .proxy-nodes {
+                grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+            }
+
+            .proxy-controls {
+                gap: 0.35rem;
+            }
+
+            .proxy-controls .btn-custom {
+                padding: 0.35rem 0.5rem;
+                font-size: 0.75rem;
+            }
+
+            .conn-table {
+                font-size: 0.7rem;
+                min-width: 500px;
+            }
+
+            .log-controls {
+                flex-wrap: wrap;
+                gap: 0.5rem;
+            }
+
+            .log-entry {
+                flex-wrap: wrap;
+                gap: 0.4rem;
+            }
+
+            .log-time {
+                width: 100%;
+            }
+
+            .form-row {
+                flex-direction: column;
+            }
+
+            .form-group {
+                min-width: 100%;
+            }
+
+            .traffic-stats {
+                gap: 1rem;
+            }
+
+            .conn-stats {
+                gap: 1rem;
+            }
         }
 
         .header {
             text-align: center;
-            margin-bottom: 2.5rem;
+            margin-bottom: 1.5rem;
         }
 
         .header h1 {
-            font-size: 2.5rem;
+            font-size: 2rem;
             font-weight: 700;
             background: linear-gradient(90deg, #fff, var(--accent-green));
             -webkit-background-clip: text;
@@ -63,14 +204,34 @@
             -webkit-backdrop-filter: blur(20px);
             border: 1px solid var(--card-border);
             border-radius: 16px;
-            padding: 1.5rem;
-            margin-bottom: 1.5rem;
+            padding: 1.25rem;
             transition: transform 0.2s ease, box-shadow 0.2s ease;
         }
 
         .glass-card:hover {
-            transform: translateY(-2px);
+            transform: translateY(-1px);
             box-shadow: 0 8px 32px rgba(0, 217, 165, 0.1);
+        }
+
+        /* 卡片高度控制 */
+        .card-scrollable {
+            max-height: calc(50vh - 100px);
+            min-height: 200px;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .card-scrollable .card-body-collapsible {
+            flex: 1;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .card-scrollable .log-container,
+        .card-scrollable .conn-table-container {
+            flex: 1;
+            max-height: none;
         }
 
         .card-header-custom {
@@ -1007,8 +1168,9 @@
                 <p>sing-box 控制面板</p>
             </div>
 
-            <!-- 状态卡片 -->
-            <div class="glass-card">
+            <div class="layout-grid">
+            <!-- 状态卡片 - 全宽 -->
+            <div class="glass-card layout-full">
                 <div class="card-header-custom">
                     <i class="bi bi-activity"></i>
                     <span>Sing-box 运行状态</span>
@@ -1050,6 +1212,9 @@
                     </div>
                 </div>
             </div>
+
+            <!-- 左列 -->
+            <div class="layout-column">
 
             <!-- 代理选择 -->
             <div class="glass-card" v-if="status.running">
@@ -1229,8 +1394,14 @@
                 </div>
             </div>
 
+            </div>
+            <!-- 左列结束 -->
+
+            <!-- 右列 -->
+            <div class="layout-column">
+
             <!-- 连接列表 -->
-            <div class="glass-card" v-if="status.running">
+            <div class="glass-card card-scrollable" v-if="status.running">
                 <div class="card-header-custom collapsible" @click="connCollapsed = !connCollapsed">
                     <i class="bi bi-diagram-2"></i>
                     <span>活跃连接</span>
@@ -1314,7 +1485,7 @@
             </div>
 
             <!-- 日志查看 -->
-            <div class="glass-card" v-if="status.running">
+            <div class="glass-card card-scrollable" v-if="status.running">
                 <div class="card-header-custom collapsible" @click="logCollapsed = !logCollapsed">
                     <i class="bi bi-journal-text"></i>
                     <span>运行日志</span>
@@ -1357,6 +1528,12 @@
                 </div>
                 </div>
             </div>
+
+            </div>
+            <!-- 右列结束 -->
+
+            </div>
+            <!-- layout-grid 结束 -->
 
         </div>
 
