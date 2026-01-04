@@ -657,7 +657,7 @@ async fn start_sing_internal(
     println!("Starting sing-box from: {:?}", sing_box_path);
     println!("Using config: {:?}", config_path);
 
-    let child = tokio::process::Command::new(&sing_box_path)
+    let mut child = tokio::process::Command::new(&sing_box_path)
         .current_dir(sing_box_home)
         .arg("run")
         .arg("-c")
@@ -669,10 +669,61 @@ async fn start_sing_internal(
     let pid = child.id();
     println!("sing-box process spawned with PID: {:?}", pid);
 
+    // Wait a short moment to check if process exits immediately
+    sleep(Duration::from_millis(500)).await;
+    if let Some(exit_status) = child.try_wait()? {
+        let code = exit_status.code().unwrap_or(-1);
+        return Err(format!("sing-box exited immediately with code {}", code).into());
+    }
+
+    // Store the process first
     *lock = Some(SingBoxProcess {
         child,
         started_at: Instant::now(),
     });
+    drop(lock); // Release lock before connectivity check
+
+    // Wait for sing-box to fully initialize
+    sleep(Duration::from_secs(5)).await;
+
+    // Connectivity check (3 attempts)
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()?;
+    
+    let mut connectivity_ok = false;
+    for attempt in 1..=3 {
+        println!("Connectivity check attempt {}/3...", attempt);
+        match client.get("http://connectivitycheck.gstatic.com/generate_204").send().await {
+            Ok(res) if res.status().as_u16() == 204 => {
+                println!("Connectivity check passed!");
+                connectivity_ok = true;
+                break;
+            }
+            Ok(res) => {
+                println!("Connectivity check failed: status {}", res.status());
+            }
+            Err(e) => {
+                println!("Connectivity check failed: {}", e);
+            }
+        }
+        if attempt < 3 {
+            sleep(Duration::from_secs(2)).await;
+        }
+    }
+
+    if !connectivity_ok {
+        // Stop sing-box and clean up
+        println!("Connectivity check failed, stopping sing-box...");
+        let mut lock = SING_PROCESS.lock().await;
+        if let Some(ref mut proc) = *lock {
+            proc.child.start_kill().ok();
+            // Wait for process to exit
+            let _ = proc.child.wait().await;
+        }
+        *lock = None;
+        return Err("sing-box started but connectivity check failed".into());
+    }
 
     Ok(())
 }
