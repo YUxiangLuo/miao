@@ -325,6 +325,22 @@ async fn delete_sub(
     Ok(Json(ApiResponse::success_no_data("Subscription deleted, restarting...")))
 }
 
+/// POST /api/subs/refresh - Refresh subscriptions and restart
+async fn refresh_subs(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<ApiResponse<()>>, (StatusCode, Json<ApiResponse<()>>)> {
+    let config = state.config.lock().await;
+    let config_clone = config.clone();
+    drop(config);
+
+    let sing_box_home = state.sing_box_home.clone();
+    tokio::spawn(async move {
+        regenerate_and_restart(&config_clone, &sing_box_home).await;
+    });
+
+    Ok(Json(ApiResponse::success_no_data("Subscriptions refreshed, restarting...")))
+}
+
 // ============================================================================
 // Node Management APIs
 // ============================================================================
@@ -904,6 +920,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         .route("/api/subs", get(get_subs))
         .route("/api/subs", post(add_sub))
         .route("/api/subs", delete(delete_sub))
+        .route("/api/subs/refresh", post(refresh_subs))
         // Node management
         .route("/api/nodes", get(get_nodes))
         .route("/api/nodes", post(add_node))

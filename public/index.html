@@ -680,6 +680,12 @@
                 <div class="card-header-custom">
                     <i class="bi bi-rss"></i>
                     <span>订阅管理</span>
+                    <button class="btn-custom btn-secondary-custom btn-sm-custom" @click="refreshSubs"
+                        :disabled="loading || subs.length === 0" style="margin-left: auto;">
+                        <span v-if="loading && loadingAction === 'refreshSubs'" class="spinner" style="width:12px;height:12px;"></span>
+                        <i v-else class="bi bi-arrow-clockwise"></i>
+                        更新订阅
+                    </button>
                 </div>
 
                 <div v-if="subs.length === 0" class="empty-state">
@@ -1020,6 +1026,14 @@
                     } catch (e) { }
                 };
 
+                const refreshSubs = async () => {
+                    try {
+                        await apiCall('subs/refresh', 'POST', null, 'refreshSubs');
+                        showToast('订阅已更新', 'success');
+                        await fetchSubs();
+                    } catch (e) { }
+                };
+
                 // 节点管理
                 const addNode = async () => {
                     if (!canAddNode.value) return;
@@ -1081,7 +1095,7 @@
                     proxies, delays, traffic, testingGroup, selectorGroups,
                     showToast, getToastIcon,
                     startService, stopService, restartService,
-                    addSub, deleteSub, addNode, deleteNode,
+                    addSub, deleteSub, refreshSubs, addNode, deleteNode,
                     switchProxy, testAllDelays, getDelayClass, formatDelay, formatSpeed,
                     formatUptime
                 };
