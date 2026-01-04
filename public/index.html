@@ -567,6 +567,429 @@
             font-size: 1.1rem;
             font-weight: 600;
         }
+
+        /* 日志查看样式 */
+        .log-container {
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 12px;
+            padding: 1rem;
+            max-height: 350px;
+            overflow-y: auto;
+            font-family: 'Fira Code', 'Monaco', monospace;
+            font-size: 0.8rem;
+            line-height: 1.5;
+        }
+
+        .log-container::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        .log-container::-webkit-scrollbar-track {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 4px;
+        }
+
+        .log-container::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 4px;
+        }
+
+        .log-entry {
+            padding: 0.3rem 0.5rem;
+            border-radius: 4px;
+            margin-bottom: 0.25rem;
+            display: flex;
+            gap: 0.75rem;
+            align-items: flex-start;
+        }
+
+        .log-entry:hover {
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        .log-time {
+            color: rgba(255, 255, 255, 0.4);
+            flex-shrink: 0;
+            font-size: 0.75rem;
+        }
+
+        .log-level {
+            flex-shrink: 0;
+            padding: 0.1rem 0.4rem;
+            border-radius: 4px;
+            font-size: 0.7rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            min-width: 45px;
+            text-align: center;
+        }
+
+        .log-level.debug { background: rgba(150, 150, 150, 0.3); color: #aaa; }
+        .log-level.info { background: rgba(0, 217, 165, 0.2); color: var(--accent-green); }
+        .log-level.warning { background: rgba(255, 165, 2, 0.2); color: var(--accent-orange); }
+        .log-level.error { background: rgba(255, 71, 87, 0.2); color: var(--accent-red); }
+
+        .log-message {
+            flex: 1;
+            word-break: break-all;
+            color: rgba(255, 255, 255, 0.85);
+        }
+
+        .log-controls {
+            display: flex;
+            gap: 0.75rem;
+            align-items: center;
+            margin-bottom: 1rem;
+            flex-wrap: wrap;
+        }
+
+        .log-level-select {
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            border-radius: 8px;
+            padding: 0.5rem 0.75rem;
+            color: #fff;
+            font-size: 0.85rem;
+            cursor: pointer;
+        }
+
+        .log-level-select:focus {
+            outline: none;
+            border-color: var(--accent-green);
+        }
+
+        /* 连接列表样式 */
+        .conn-stats {
+            display: flex;
+            gap: 1.5rem;
+            margin-bottom: 1rem;
+            flex-wrap: wrap;
+        }
+
+        .conn-stat-item {
+            display: flex;
+            flex-direction: column;
+            gap: 0.25rem;
+        }
+
+        .conn-stat-label {
+            font-size: 0.75rem;
+            color: rgba(255, 255, 255, 0.5);
+            text-transform: uppercase;
+        }
+
+        .conn-stat-value {
+            font-size: 1.25rem;
+            font-weight: 600;
+            color: #fff;
+        }
+
+        .conn-table-container {
+            overflow-x: auto;
+            max-height: 400px;
+            overflow-y: auto;
+            border-radius: 10px;
+            background: rgba(0, 0, 0, 0.2);
+        }
+
+        .conn-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.8rem;
+            min-width: 700px;
+        }
+
+        .conn-table th {
+            position: sticky;
+            top: 0;
+            background: rgba(30, 30, 40, 0.95);
+            padding: 0.75rem 0.5rem;
+            text-align: left;
+            font-weight: 600;
+            color: rgba(255, 255, 255, 0.7);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            white-space: nowrap;
+        }
+
+        .conn-table td {
+            padding: 0.6rem 0.5rem;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            color: rgba(255, 255, 255, 0.85);
+        }
+
+        .conn-table tr:hover td {
+            background: rgba(255, 255, 255, 0.03);
+        }
+
+        .conn-host {
+            max-width: 200px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .conn-chain {
+            font-size: 0.75rem;
+            color: rgba(255, 255, 255, 0.5);
+        }
+
+        .conn-type-badge {
+            padding: 0.15rem 0.4rem;
+            border-radius: 4px;
+            font-size: 0.7rem;
+            background: rgba(95, 158, 160, 0.2);
+            color: var(--accent-blue);
+        }
+
+        .btn-close-conn {
+            padding: 0.25rem 0.5rem;
+            font-size: 0.75rem;
+            background: rgba(255, 71, 87, 0.15);
+            color: var(--accent-red);
+            border: 1px solid rgba(255, 71, 87, 0.3);
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .btn-close-conn:hover {
+            background: rgba(255, 71, 87, 0.25);
+        }
+
+        .conn-speed {
+            display: flex;
+            flex-direction: column;
+            gap: 0.1rem;
+            font-size: 0.75rem;
+        }
+
+        .conn-speed-up { color: var(--accent-green); }
+        .conn-speed-down { color: var(--accent-blue); }
+
+        /* 确认对话框样式 */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.6);
+            backdrop-filter: blur(4px);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 2000;
+            animation: fadeIn 0.2s ease;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        .modal-content {
+            background: linear-gradient(135deg, rgba(30, 30, 45, 0.98), rgba(40, 40, 60, 0.98));
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 16px;
+            padding: 1.5rem;
+            max-width: 400px;
+            width: 90%;
+            animation: scaleIn 0.2s ease;
+        }
+
+        @keyframes scaleIn {
+            from { transform: scale(0.9); opacity: 0; }
+            to { transform: scale(1); opacity: 1; }
+        }
+
+        .modal-title {
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: #fff;
+            margin-bottom: 0.75rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .modal-title i {
+            color: var(--accent-orange);
+        }
+
+        .modal-body {
+            color: rgba(255, 255, 255, 0.7);
+            font-size: 0.9rem;
+            margin-bottom: 1.25rem;
+            word-break: break-all;
+        }
+
+        .modal-actions {
+            display: flex;
+            gap: 0.75rem;
+            justify-content: flex-end;
+        }
+
+        .btn-cancel {
+            background: rgba(255, 255, 255, 0.1);
+            color: #fff;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        .btn-cancel:hover {
+            background: rgba(255, 255, 255, 0.15);
+        }
+
+        .btn-confirm-delete {
+            background: linear-gradient(135deg, #ff4757, #ff6b7a);
+            color: #fff;
+        }
+
+        .btn-confirm-delete:hover {
+            box-shadow: 0 4px 15px rgba(255, 71, 87, 0.4);
+        }
+
+        /* 卡片折叠样式 */
+        .card-header-custom.collapsible {
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .card-header-custom.collapsible:hover {
+            opacity: 0.9;
+        }
+
+        .collapse-icon {
+            margin-left: auto;
+            transition: transform 0.3s ease;
+            font-size: 1rem;
+            color: rgba(255, 255, 255, 0.5);
+        }
+
+        .collapse-icon.collapsed {
+            transform: rotate(-90deg);
+        }
+
+        .card-body-collapsible {
+            overflow: hidden;
+            transition: max-height 0.3s ease, opacity 0.3s ease;
+        }
+
+        .card-body-collapsible.collapsed {
+            max-height: 0 !important;
+            opacity: 0;
+            padding: 0;
+        }
+
+        /* 搜索框样式 */
+        .search-box {
+            position: relative;
+            margin-bottom: 1rem;
+        }
+
+        .search-input {
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            border-radius: 10px;
+            padding: 0.6rem 1rem 0.6rem 2.5rem;
+            color: #fff;
+            font-size: 0.9rem;
+            width: 100%;
+            transition: border-color 0.2s ease;
+        }
+
+        .search-input:focus {
+            outline: none;
+            border-color: var(--accent-green);
+        }
+
+        .search-input::placeholder {
+            color: rgba(255, 255, 255, 0.4);
+        }
+
+        .search-icon {
+            position: absolute;
+            left: 0.85rem;
+            top: 50%;
+            transform: translateY(-50%);
+            color: rgba(255, 255, 255, 0.4);
+            font-size: 0.9rem;
+        }
+
+        .search-clear {
+            position: absolute;
+            right: 0.75rem;
+            top: 50%;
+            transform: translateY(-50%);
+            background: none;
+            border: none;
+            color: rgba(255, 255, 255, 0.4);
+            cursor: pointer;
+            padding: 0.25rem;
+            font-size: 0.85rem;
+        }
+
+        .search-clear:hover {
+            color: rgba(255, 255, 255, 0.7);
+        }
+
+        /* 日志控制增强 */
+        .log-auto-scroll {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.8rem;
+            color: rgba(255, 255, 255, 0.6);
+        }
+
+        .log-auto-scroll input[type="checkbox"] {
+            accent-color: var(--accent-green);
+        }
+
+        /* 排序按钮 */
+        .sort-btn {
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            color: rgba(255, 255, 255, 0.7);
+            padding: 0.35rem 0.65rem;
+            border-radius: 6px;
+            font-size: 0.75rem;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.3rem;
+        }
+
+        .sort-btn:hover {
+            background: rgba(255, 255, 255, 0.15);
+            color: #fff;
+        }
+
+        .sort-btn.active {
+            background: rgba(0, 217, 165, 0.2);
+            border-color: var(--accent-green);
+            color: var(--accent-green);
+        }
+
+        /* 快速选择最快节点 */
+        .btn-select-fastest {
+            background: rgba(0, 217, 165, 0.15);
+            color: var(--accent-green);
+            border: 1px solid rgba(0, 217, 165, 0.3);
+            padding: 0.4rem 0.8rem;
+            font-size: 0.8rem;
+        }
+
+        .btn-select-fastest:hover:not(:disabled) {
+            background: rgba(0, 217, 165, 0.25);
+        }
+
+        .proxy-controls {
+            display: flex;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+            align-items: center;
+        }
     </style>
 </head>
 
@@ -636,6 +1059,15 @@
                     正在加载节点...
                 </div>
 
+                <!-- 搜索框 -->
+                <div class="search-box" v-if="Object.keys(selectorGroups).length > 0">
+                    <i class="bi bi-search search-icon"></i>
+                    <input type="text" class="search-input" v-model="proxySearch" placeholder="搜索节点...">
+                    <button class="search-clear" v-if="proxySearch" @click="proxySearch = ''">
+                        <i class="bi bi-x"></i>
+                    </button>
+                </div>
+
                 <div v-for="(group, groupName) in selectorGroups" :key="groupName" class="proxy-group">
                     <div class="proxy-group-header">
                         <div class="proxy-group-name">
@@ -643,16 +1075,27 @@
                             {{ groupName }}
                             <span class="proxy-group-now">{{ group.now }}</span>
                         </div>
-                        <button class="btn-custom btn-test-all" @click="testAllDelays(groupName, group.all)"
-                            :disabled="testingGroup === groupName">
-                            <span v-if="testingGroup === groupName" class="spinner"
-                                style="width:12px;height:12px;"></span>
-                            <i v-else class="bi bi-speedometer"></i>
-                            测速
-                        </button>
+                        <div class="proxy-controls">
+                            <button class="sort-btn" :class="{ active: sortByDelay }" @click="sortByDelay = !sortByDelay" title="按延迟排序">
+                                <i class="bi bi-sort-numeric-down"></i>
+                                排序
+                            </button>
+                            <button class="btn-custom btn-select-fastest" @click="selectFastest(groupName, group.all)"
+                                :disabled="!hasFastestNode(group.all)" title="选择最快节点">
+                                <i class="bi bi-lightning"></i>
+                                最快
+                            </button>
+                            <button class="btn-custom btn-test-all" @click="testAllDelays(groupName, group.all)"
+                                :disabled="testingGroup === groupName">
+                                <span v-if="testingGroup === groupName" class="spinner"
+                                    style="width:12px;height:12px;"></span>
+                                <i v-else class="bi bi-speedometer"></i>
+                                测速
+                            </button>
+                        </div>
                     </div>
                     <div class="proxy-nodes">
-                        <div v-for="nodeName in group.all" :key="nodeName"
+                        <div v-for="nodeName in getFilteredNodes(group.all)" :key="nodeName"
                             :class="['proxy-node', { active: nodeName === group.now }]"
                             @click="switchProxy(groupName, nodeName)">
                             <div class="proxy-node-name" :title="nodeName">{{ nodeName }}</div>
@@ -660,6 +1103,9 @@
                                 {{ formatDelay(delays[nodeName]) }}
                             </div>
                         </div>
+                    </div>
+                    <div v-if="proxySearch && getFilteredNodes(group.all).length === 0" class="empty-state" style="padding: 1rem;">
+                        没有匹配的节点
                     </div>
                 </div>
 
@@ -695,7 +1141,7 @@
 
                 <div v-for="sub in subs" :key="sub" class="list-item">
                     <span class="list-item-text">{{ sub }}</span>
-                    <button class="btn-custom btn-delete btn-sm-custom" @click="deleteSub(sub)" :disabled="loading">
+                    <button class="btn-custom btn-delete btn-sm-custom" @click="confirmDeleteSub(sub)" :disabled="loading">
                         <i class="bi bi-trash"></i>
                     </button>
                 </div>
@@ -738,7 +1184,7 @@
                             <span v-if="node.sni"> (SNI: {{ node.sni }})</span>
                         </div>
                     </div>
-                    <button class="btn-custom btn-delete btn-sm-custom" @click="deleteNode(node.tag)"
+                    <button class="btn-custom btn-delete btn-sm-custom" @click="confirmDeleteNode(node.tag)"
                         :disabled="loading">
                         <i class="bi bi-trash"></i>
                     </button>
@@ -778,6 +1224,134 @@
                 </div>
             </div>
 
+            <!-- 连接列表 -->
+            <div class="glass-card" v-if="status.running">
+                <div class="card-header-custom collapsible" @click="connCollapsed = !connCollapsed">
+                    <i class="bi bi-diagram-2"></i>
+                    <span>活跃连接</span>
+                    <span style="font-size: 0.8rem; color: rgba(255,255,255,0.5); margin-left: 0.5rem;">
+                        ({{ connections.length }})
+                    </span>
+                    <button class="btn-custom btn-secondary-custom btn-sm-custom" @click.stop="confirmCloseAllConnections"
+                        :disabled="connections.length === 0" style="margin-left: auto; margin-right: 0.5rem;">
+                        <i class="bi bi-x-circle"></i>
+                        全部关闭
+                    </button>
+                    <i :class="['bi bi-chevron-down collapse-icon', { collapsed: connCollapsed }]"></i>
+                </div>
+
+                <div :class="['card-body-collapsible', { collapsed: connCollapsed }]" :style="{ maxHeight: connCollapsed ? '0' : '600px' }">
+                <div class="conn-stats">
+                    <div class="conn-stat-item">
+                        <span class="conn-stat-label">连接数</span>
+                        <span class="conn-stat-value">{{ connections.length }}</span>
+                    </div>
+                    <div class="conn-stat-item">
+                        <span class="conn-stat-label">总上传</span>
+                        <span class="conn-stat-value">{{ formatBytes(connUploadTotal) }}</span>
+                    </div>
+                    <div class="conn-stat-item">
+                        <span class="conn-stat-label">总下载</span>
+                        <span class="conn-stat-value">{{ formatBytes(connDownloadTotal) }}</span>
+                    </div>
+                </div>
+
+                <div v-if="connections.length === 0" class="empty-state">
+                    <i class="bi bi-plug" style="font-size: 2rem; display: block; margin-bottom: 0.5rem;"></i>
+                    暂无活跃连接
+                </div>
+
+                <div v-else class="conn-table-container">
+                    <table class="conn-table">
+                        <thead>
+                            <tr>
+                                <th>主机</th>
+                                <th>网络</th>
+                                <th>类型</th>
+                                <th>代理链</th>
+                                <th>速率</th>
+                                <th>流量</th>
+                                <th>时长</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr v-for="conn in connections" :key="conn.id">
+                                <td class="conn-host" :title="conn.metadata.host || conn.metadata.destinationIP">
+                                    {{ conn.metadata.host || conn.metadata.destinationIP }}:{{ conn.metadata.destinationPort }}
+                                </td>
+                                <td><span class="conn-type-badge">{{ conn.metadata.network }}</span></td>
+                                <td>{{ conn.metadata.type }}</td>
+                                <td class="conn-chain">{{ conn.chains?.join(' → ') || '-' }}</td>
+                                <td>
+                                    <div class="conn-speed">
+                                        <span class="conn-speed-up">↑ {{ formatSpeed(conn.uploadSpeed || 0) }}</span>
+                                        <span class="conn-speed-down">↓ {{ formatSpeed(conn.downloadSpeed || 0) }}</span>
+                                    </div>
+                                </td>
+                                <td>
+                                    <div class="conn-speed">
+                                        <span>↑ {{ formatBytes(conn.upload) }}</span>
+                                        <span>↓ {{ formatBytes(conn.download) }}</span>
+                                    </div>
+                                </td>
+                                <td>{{ formatConnDuration(conn.start) }}</td>
+                                <td>
+                                    <button class="btn-close-conn" @click="closeConnection(conn.id)" title="关闭连接">
+                                        <i class="bi bi-x"></i>
+                                    </button>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                </div>
+            </div>
+
+            <!-- 日志查看 -->
+            <div class="glass-card" v-if="status.running">
+                <div class="card-header-custom collapsible" @click="logCollapsed = !logCollapsed">
+                    <i class="bi bi-journal-text"></i>
+                    <span>运行日志</span>
+                    <span style="font-size: 0.8rem; color: rgba(255,255,255,0.5); margin-left: 0.5rem;">
+                        ({{ logs.length }})
+                    </span>
+                    <i :class="['bi bi-chevron-down collapse-icon', { collapsed: logCollapsed }]" style="margin-left: auto;"></i>
+                </div>
+
+                <div :class="['card-body-collapsible', { collapsed: logCollapsed }]" :style="{ maxHeight: logCollapsed ? '0' : '500px' }">
+                <div class="log-controls">
+                    <select class="log-level-select" v-model="logLevel" @change="reconnectLogs">
+                        <option value="debug">Debug</option>
+                        <option value="info">Info</option>
+                        <option value="warning">Warning</option>
+                        <option value="error">Error</option>
+                    </select>
+                    <button class="btn-custom btn-secondary-custom btn-sm-custom" @click="clearLogs">
+                        <i class="bi bi-trash"></i>
+                        清空
+                    </button>
+                    <label class="log-auto-scroll">
+                        <input type="checkbox" v-model="logAutoScroll">
+                        自动滚动
+                    </label>
+                    <span style="font-size: 0.8rem; color: rgba(255,255,255,0.5); margin-left: auto;">
+                        {{ logs.length }} 条日志
+                    </span>
+                </div>
+
+                <div class="log-container" ref="logContainer">
+                    <div v-if="logs.length === 0" class="empty-state" style="padding: 1rem;">
+                        等待日志...
+                    </div>
+                    <div v-for="log in logs" :key="log.id" class="log-entry">
+                        <span class="log-time">{{ log.time }}</span>
+                        <span :class="['log-level', log.level]">{{ log.level }}</span>
+                        <span class="log-message">{{ log.payload }}</span>
+                    </div>
+                </div>
+                </div>
+            </div>
 
         </div>
 
@@ -789,6 +1363,21 @@
                     <span>{{ toast.message }}</span>
                 </div>
             </transition-group>
+        </div>
+
+        <!-- 确认对话框 -->
+        <div class="modal-overlay" v-if="confirmModal.show" @click.self="cancelConfirm">
+            <div class="modal-content">
+                <div class="modal-title">
+                    <i class="bi bi-exclamation-triangle"></i>
+                    {{ confirmModal.title }}
+                </div>
+                <div class="modal-body">{{ confirmModal.message }}</div>
+                <div class="modal-actions">
+                    <button class="btn-custom btn-cancel btn-sm-custom" @click="cancelConfirm">取消</button>
+                    <button class="btn-custom btn-confirm-delete btn-sm-custom" @click="executeConfirm">确认</button>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -814,9 +1403,36 @@
                 const traffic = ref({});
                 const testingGroup = ref('');
 
+                // 日志状态
+                const logs = ref([]);
+                const logLevel = ref('info');
+                const logContainer = ref(null);
+                const logAutoScroll = ref(true);
+                const logCollapsed = ref(false);
+
+                // 连接列表状态
+                const connections = ref([]);
+                const connUploadTotal = ref(0);
+                const connDownloadTotal = ref(0);
+                const prevConnections = ref({});
+                const connCollapsed = ref(false);
+
+                // UI 状态
+                const proxySearch = ref('');
+                const sortByDelay = ref(false);
+                const confirmModal = ref({
+                    show: false,
+                    title: '',
+                    message: '',
+                    onConfirm: null
+                });
+
                 let statusInterval = null;
                 let toastId = 0;
                 let trafficWs = null;
+                let logsWs = null;
+                let connectionsWs = null;
+                let logId = 0;
 
                 // Clash API 基础 URL
                 const clashApiBase = computed(() => {
@@ -857,6 +1473,84 @@
                 const getToastIcon = (type) => {
                     const icons = { success: 'bi bi-check-circle-fill', error: 'bi bi-x-circle-fill', info: 'bi bi-info-circle-fill' };
                     return icons[type] || icons.info;
+                };
+
+                // 确认对话框
+                const showConfirm = (title, message, onConfirm) => {
+                    confirmModal.value = { show: true, title, message, onConfirm };
+                };
+
+                const cancelConfirm = () => {
+                    confirmModal.value = { show: false, title: '', message: '', onConfirm: null };
+                };
+
+                const executeConfirm = () => {
+                    if (confirmModal.value.onConfirm) {
+                        confirmModal.value.onConfirm();
+                    }
+                    cancelConfirm();
+                };
+
+                // 页面标题更新
+                const updatePageTitle = (running) => {
+                    document.title = running ? '✓ Miao 控制面板' : '✗ Miao 控制面板';
+                };
+
+                // 节点搜索和排序
+                const getFilteredNodes = (nodes) => {
+                    let result = [...nodes];
+
+                    // 搜索过滤
+                    if (proxySearch.value) {
+                        const search = proxySearch.value.toLowerCase();
+                        result = result.filter(name => name.toLowerCase().includes(search));
+                    }
+
+                    // 按延迟排序
+                    if (sortByDelay.value) {
+                        result.sort((a, b) => {
+                            const delayA = delays.value[a];
+                            const delayB = delays.value[b];
+                            // 未测速的放最后
+                            if (delayA === undefined && delayB === undefined) return 0;
+                            if (delayA === undefined) return 1;
+                            if (delayB === undefined) return -1;
+                            // 超时的放最后
+                            if (delayA < 0 && delayB < 0) return 0;
+                            if (delayA < 0) return 1;
+                            if (delayB < 0) return -1;
+                            return delayA - delayB;
+                        });
+                    }
+
+                    return result;
+                };
+
+                // 检查是否有可用最快节点
+                const hasFastestNode = (nodes) => {
+                    return nodes.some(name => {
+                        const delay = delays.value[name];
+                        return delay !== undefined && delay > 0;
+                    });
+                };
+
+                // 选择最快节点
+                const selectFastest = async (groupName, nodes) => {
+                    let fastest = null;
+                    let minDelay = Infinity;
+
+                    for (const name of nodes) {
+                        const delay = delays.value[name];
+                        if (delay !== undefined && delay > 0 && delay < minDelay) {
+                            minDelay = delay;
+                            fastest = name;
+                        }
+                    }
+
+                    if (fastest) {
+                        await switchProxy(groupName, fastest);
+                        showToast(`已切换到最快节点: ${fastest} (${minDelay}ms)`, 'success');
+                    }
                 };
 
                 // Clash API 函数
@@ -935,6 +1629,141 @@
                     };
                 };
 
+                // 日志 WebSocket
+                const connectLogsWs = () => {
+                    if (logsWs) {
+                        logsWs.close();
+                    }
+                    const host = window.location.hostname;
+                    logsWs = new WebSocket(`ws://${host}:6262/logs?level=${logLevel.value}`);
+                    logsWs.onmessage = (event) => {
+                        try {
+                            const data = JSON.parse(event.data);
+                            const now = new Date();
+                            const time = now.toLocaleTimeString('zh-CN', { hour12: false });
+                            logs.value.push({
+                                id: ++logId,
+                                time,
+                                level: data.type || 'info',
+                                payload: data.payload
+                            });
+                            // 限制日志数量
+                            if (logs.value.length > 500) {
+                                logs.value = logs.value.slice(-400);
+                            }
+                            // 自动滚动到底部（如果启用）
+                            if (logAutoScroll.value && logContainer.value) {
+                                setTimeout(() => {
+                                    logContainer.value.scrollTop = logContainer.value.scrollHeight;
+                                }, 10);
+                            }
+                        } catch (e) { }
+                    };
+                    logsWs.onclose = () => {
+                        setTimeout(() => {
+                            if (status.value.running) connectLogsWs();
+                        }, 3000);
+                    };
+                };
+
+                const reconnectLogs = () => {
+                    logs.value = [];
+                    connectLogsWs();
+                };
+
+                const clearLogs = () => {
+                    logs.value = [];
+                };
+
+                // 连接列表 WebSocket
+                const connectConnectionsWs = () => {
+                    if (connectionsWs) {
+                        connectionsWs.close();
+                    }
+                    const host = window.location.hostname;
+                    connectionsWs = new WebSocket(`ws://${host}:6262/connections`);
+                    connectionsWs.onmessage = (event) => {
+                        try {
+                            const data = JSON.parse(event.data);
+                            connUploadTotal.value = data.uploadTotal || 0;
+                            connDownloadTotal.value = data.downloadTotal || 0;
+
+                            // 计算每个连接的速率
+                            const newConns = (data.connections || []).map(conn => {
+                                const prev = prevConnections.value[conn.id];
+                                let uploadSpeed = 0;
+                                let downloadSpeed = 0;
+                                if (prev) {
+                                    uploadSpeed = conn.upload - prev.upload;
+                                    downloadSpeed = conn.download - prev.download;
+                                }
+                                return { ...conn, uploadSpeed, downloadSpeed };
+                            });
+
+                            // 保存当前连接数据用于下次计算速率
+                            const connMap = {};
+                            (data.connections || []).forEach(conn => {
+                                connMap[conn.id] = { upload: conn.upload, download: conn.download };
+                            });
+                            prevConnections.value = connMap;
+
+                            connections.value = newConns;
+                        } catch (e) { }
+                    };
+                    connectionsWs.onclose = () => {
+                        setTimeout(() => {
+                            if (status.value.running) connectConnectionsWs();
+                        }, 3000);
+                    };
+                };
+
+                // 关闭连接
+                const closeConnection = async (id) => {
+                    try {
+                        await fetch(`${clashApiBase.value}/connections/${id}`, { method: 'DELETE' });
+                    } catch (e) {
+                        showToast('关闭连接失败', 'error');
+                    }
+                };
+
+                const closeAllConnections = async () => {
+                    try {
+                        await fetch(`${clashApiBase.value}/connections`, { method: 'DELETE' });
+                        showToast('已关闭所有连接', 'success');
+                    } catch (e) {
+                        showToast('关闭连接失败', 'error');
+                    }
+                };
+
+                // 带确认的关闭所有连接
+                const confirmCloseAllConnections = () => {
+                    showConfirm(
+                        '关闭所有连接',
+                        `确定要关闭全部 ${connections.value.length} 个连接吗？`,
+                        closeAllConnections
+                    );
+                };
+
+                // 格式化字节数
+                const formatBytes = (bytes) => {
+                    if (!bytes || bytes === 0) return '0 B';
+                    const k = 1024;
+                    const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+                    const i = Math.floor(Math.log(bytes) / Math.log(k));
+                    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+                };
+
+                // 格式化连接时长
+                const formatConnDuration = (startTime) => {
+                    if (!startTime) return '-';
+                    const start = new Date(startTime);
+                    const now = new Date();
+                    const diff = Math.floor((now - start) / 1000);
+                    if (diff < 60) return `${diff}s`;
+                    if (diff < 3600) return `${Math.floor(diff / 60)}m ${diff % 60}s`;
+                    return `${Math.floor(diff / 3600)}h ${Math.floor((diff % 3600) / 60)}m`;
+                };
+
                 // API 调用
                 const apiCall = async (endpoint, method = 'GET', body = null, action = '') => {
                     loading.value = true;
@@ -960,7 +1789,10 @@
                     try {
                         const response = await fetch('/api/status');
                         const data = await response.json();
-                        if (data.success && data.data) status.value = data.data;
+                        if (data.success && data.data) {
+                            status.value = data.data;
+                            updatePageTitle(data.data.running);
+                        }
                     } catch (e) { console.error('获取状态失败:', e); }
                 };
 
@@ -1026,6 +1858,10 @@
                     } catch (e) { }
                 };
 
+                const confirmDeleteSub = (url) => {
+                    showConfirm('删除订阅', `确定要删除此订阅吗？\n${url}`, () => deleteSub(url));
+                };
+
                 const refreshSubs = async () => {
                     try {
                         await apiCall('subs/refresh', 'POST', null, 'refreshSubs');
@@ -1055,6 +1891,10 @@
                     } catch (e) { }
                 };
 
+                const confirmDeleteNode = (tag) => {
+                    showConfirm('删除节点', `确定要删除节点 "${tag}" 吗？`, () => deleteNode(tag));
+                };
+
 
 
 
@@ -1078,6 +1918,8 @@
                     fetchNodes();
                     fetchProxies();
                     connectTrafficWs();
+                    connectLogsWs();
+                    connectConnectionsWs();
                     statusInterval = setInterval(() => {
                         fetchStatus();
                         if (status.value.running) fetchProxies();
@@ -1087,15 +1929,30 @@
                 onUnmounted(() => {
                     if (statusInterval) clearInterval(statusInterval);
                     if (trafficWs) trafficWs.close();
+                    if (logsWs) logsWs.close();
+                    if (connectionsWs) connectionsWs.close();
                 });
 
                 return {
                     status, subs, nodes, loading, loadingAction, toasts,
                     newSubUrl, newNode, canAddNode, clashApiUrl,
                     proxies, delays, traffic, testingGroup, selectorGroups,
+                    // 日志相关
+                    logs, logLevel, logContainer, logAutoScroll, logCollapsed,
+                    reconnectLogs, clearLogs,
+                    // 连接相关
+                    connections, connUploadTotal, connDownloadTotal, connCollapsed,
+                    closeConnection, closeAllConnections, confirmCloseAllConnections,
+                    formatBytes, formatConnDuration,
+                    // UI 相关
+                    proxySearch, sortByDelay,
+                    confirmModal, showConfirm, cancelConfirm, executeConfirm,
+                    getFilteredNodes, hasFastestNode, selectFastest,
+                    // 其他
                     showToast, getToastIcon,
                     startService, stopService, restartService,
-                    addSub, deleteSub, refreshSubs, addNode, deleteNode,
+                    addSub, deleteSub, confirmDeleteSub, refreshSubs,
+                    addNode, deleteNode, confirmDeleteNode,
                     switchProxy, testAllDelays, getDelayClass, formatDelay, formatSpeed,
                     formatUptime
                 };
