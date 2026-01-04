@@ -54,52 +54,5 @@ sudo ./miao
 > 需要 root 权限创建 TUN 网卡
 
 ### 4. 完成！🎉
-<img width="1823" height="1420" alt="image" src="https://github.com/user-attachments/assets/7cec4dd0-9a9c-4fe1-882b-6ec4344411bb" />
 
-
-- 访问 `http://localhost:6161` 打开控制面板
-- 国内流量直连，国外流量自动走代理
-- 支持在网页上添加/删除订阅和节点
-
-**目录结构应该像这样：**
-```
-~/miao/
-├── miao          # 可执行文件
-└── config.yaml   # 配置文件 (必须在同一目录)
-```
-
----
-
-## 📱 控制面板功能
-
-- 启动/停止/重启服务
-- 添加/删除订阅链接
-- 表单添加 Hysteria2 节点
-- 查看 sing-box 配置
-
-## 🖥️ OpenWrt 支持
-
-在 OpenWrt 上运行时会自动安装依赖 `kmod-tun` 和 `kmod-nft-queue`。
-
-## 📄 配置文件说明
-
-| 字段 | 说明 |
-|------|------|
-| `port` | 控制面板端口 |
-| `subs` | Hysteria2 订阅链接列表 |
-| `nodes` | 手动节点 (JSON 格式) |
-
-## 🔗 API
-
-| 接口 | 说明 |
-|------|------|
-| `GET /api/status` | 服务状态 |
-| `POST /api/service/restart` | 重启服务 |
-| `GET/POST/DELETE /api/subs` | 订阅管理 |
-| `GET/POST/DELETE /api/nodes` | 节点管理 |
-
----
-
-## 致谢
-
-- [sing-box](https://github.com/SagerNet/sing-box)
+<img width="2404" height="1435" alt="image" src="https://github.com/user-attachments/assets/d71c581d-e74e-477c-b97b-d3f992c77bb9" />
