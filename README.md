@@ -30,7 +30,7 @@ chmod +x miao
 ```yaml
 port: 6161
 subs:
-  - https://your-hysteria2-subscription-url
+  - "https://your-hysteria2-subscription-url"
 ```
 
 或者手动配置节点：
