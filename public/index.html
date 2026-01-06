@@ -653,6 +653,16 @@
             border-color: var(--accent-green);
         }
 
+        .proxy-node.disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+
+        .proxy-node.disabled:hover {
+            background: rgba(0, 0, 0, 0.2);
+            border-color: rgba(255, 255, 255, 0.1);
+        }
+
         .proxy-node-name {
             font-size: 0.85rem;
             white-space: nowrap;
@@ -1128,7 +1138,6 @@
             <!-- 头部 -->
             <div class="header">
                 <h1><i class="bi bi-box-seam"></i> Miao</h1>
-                <p>sing-box 控制面板</p>
             </div>
 
             <div class="layout-grid">
@@ -1220,8 +1229,8 @@
                             </div>
                             <div class="proxy-nodes">
                                 <div v-for="nodeName in getFilteredNodes(group.all)" :key="nodeName"
-                                    :class="['proxy-node', { active: nodeName === group.now }]"
-                                    @click="switchProxy(groupName, nodeName)">
+                                    :class="['proxy-node', { active: nodeName === group.now, disabled: delays[nodeName] < 0 }]"
+                                    @click="delays[nodeName] < 0 ? null : switchProxy(groupName, nodeName)">
                                     <div class="proxy-node-name" :title="nodeName">{{ nodeName }}</div>
                                     <div :class="['proxy-node-delay', getDelayClass(delays[nodeName])]">
                                         {{ formatDelay(delays[nodeName]) }}
