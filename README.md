@@ -13,6 +13,8 @@
 - **自动更新** - 支持从 GitHub 一键更新到最新版本
 - **OpenWrt 支持** - 自动安装所需内核模块
 
+<img width="2560" height="1440" alt="image" src="https://github.com/user-attachments/assets/e5e101c1-6002-423b-956a-e4730c67bc12" />
+
 ## 快速开始
 
 ### 1. 下载
@@ -55,8 +57,6 @@ sudo ./miao
 
 访问 `http://localhost:6161` 打开管理面板。
 
-> 需要 root 权限创建 TUN 网卡
-
 ## 配置说明
 
 | 字段 | 说明 | 默认值 |
@@ -64,14 +64,3 @@ sudo ./miao
 | `port` | Web 面板端口 | `6161` |
 | `subs` | 订阅 URL 列表 | - |
 | `nodes` | 手动配置的节点 (JSON 格式) | - |
-
-## 端口
-
-| 端口 | 用途 |
-|------|------|
-| 6161 | Web 管理面板 |
-| 6262 | sing-box Clash API (内部使用) |
-
-## 截图
-
-<img width="2404" height="1435" alt="image" src="https://github.com/user-attachments/assets/d71c581d-e74e-477c-b97b-d3f992c77bb9" />
