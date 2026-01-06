@@ -15,6 +15,9 @@ use std::time::Instant;
 use tokio::sync::Mutex;
 use tokio::time::{sleep, Duration};
 
+// Version embedded at compile time
+const VERSION: &str = env!("CARGO_PKG_VERSION");
+
 // Embed sing-box binary based on target architecture
 #[cfg(target_arch = "x86_64")]
 const SING_BOX_BINARY: &[u8] = include_bytes!("../embedded/sing-box-amd64");
@@ -225,7 +228,215 @@ async fn stop_service() -> Json<ApiResponse<()>> {
     Json(ApiResponse::success_no_data("sing-box stopped"))
 }
 
+// ============================================================================
+// Version and Upgrade APIs
+// ============================================================================
 
+#[derive(Serialize)]
+struct VersionInfo {
+    current: String,
+    latest: Option<String>,
+    has_update: bool,
+    download_url: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct GitHubRelease {
+    tag_name: String,
+    assets: Vec<GitHubAsset>,
+}
+
+#[derive(Deserialize)]
+struct GitHubAsset {
+    name: String,
+    browser_download_url: String,
+}
+
+/// GET /api/version - Get current version and check for updates
+async fn get_version() -> Json<ApiResponse<VersionInfo>> {
+    let current = format!("v{}", VERSION);
+
+    // Try to fetch latest version from GitHub
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build();
+
+    let client = match client {
+        Ok(c) => c,
+        Err(_) => {
+            return Json(ApiResponse::success("Version info", VersionInfo {
+                current,
+                latest: None,
+                has_update: false,
+                download_url: None,
+            }));
+        }
+    };
+
+    let resp = client
+        .get("https://api.github.com/repos/YUxiangLuo/miao/releases/latest")
+        .header("User-Agent", "miao")
+        .send()
+        .await;
+
+    match resp {
+        Ok(r) => {
+            if let Ok(release) = r.json::<GitHubRelease>().await {
+                let latest = release.tag_name.clone();
+                let has_update = latest != current;
+
+                // Find download URL for current architecture
+                let asset_name = if cfg!(target_arch = "x86_64") {
+                    "miao-rust-linux-amd64"
+                } else if cfg!(target_arch = "aarch64") {
+                    "miao-rust-linux-arm64"
+                } else {
+                    ""
+                };
+
+                let download_url = release.assets.iter()
+                    .find(|a| a.name == asset_name)
+                    .map(|a| a.browser_download_url.clone());
+
+                Json(ApiResponse::success("Version info", VersionInfo {
+                    current,
+                    latest: Some(latest),
+                    has_update,
+                    download_url,
+                }))
+            } else {
+                Json(ApiResponse::success("Version info", VersionInfo {
+                    current,
+                    latest: None,
+                    has_update: false,
+                    download_url: None,
+                }))
+            }
+        }
+        Err(_) => {
+            Json(ApiResponse::success("Version info", VersionInfo {
+                current,
+                latest: None,
+                has_update: false,
+                download_url: None,
+            }))
+        }
+    }
+}
+
+/// POST /api/upgrade - Download and apply upgrade
+async fn upgrade() -> Json<ApiResponse<String>> {
+    // 1. Fetch latest release info
+    let client = match reqwest::Client::builder()
+        .timeout(Duration::from_secs(60))
+        .build() {
+        Ok(c) => c,
+        Err(e) => return Json(ApiResponse::error(format!("Failed to create HTTP client: {}", e))),
+    };
+
+    let release: GitHubRelease = match client
+        .get("https://api.github.com/repos/YUxiangLuo/miao/releases/latest")
+        .header("User-Agent", "miao")
+        .send()
+        .await {
+        Ok(r) => match r.json().await {
+            Ok(rel) => rel,
+            Err(e) => return Json(ApiResponse::error(format!("Failed to parse release info: {}", e))),
+        },
+        Err(e) => return Json(ApiResponse::error(format!("Failed to fetch release info: {}", e))),
+    };
+
+    let current = format!("v{}", VERSION);
+    if release.tag_name == current {
+        return Json(ApiResponse::success_no_data("Already up to date"));
+    }
+
+    // 2. Find download URL for current architecture
+    let asset_name = if cfg!(target_arch = "x86_64") {
+        "miao-rust-linux-amd64"
+    } else if cfg!(target_arch = "aarch64") {
+        "miao-rust-linux-arm64"
+    } else {
+        return Json(ApiResponse::error("Unsupported architecture"));
+    };
+
+    let download_url = match release.assets.iter().find(|a| a.name == asset_name) {
+        Some(a) => a.browser_download_url.clone(),
+        None => return Json(ApiResponse::error("No binary found for current architecture")),
+    };
+
+    // 3. Download new binary to temp location
+    println!("Downloading update from: {}", download_url);
+    let binary_data = match client.get(&download_url).send().await {
+        Ok(r) => match r.bytes().await {
+            Ok(b) => b,
+            Err(e) => return Json(ApiResponse::error(format!("Failed to download binary: {}", e))),
+        },
+        Err(e) => return Json(ApiResponse::error(format!("Failed to download: {}", e))),
+    };
+
+    let temp_path = "/tmp/miao-new";
+    if let Err(e) = fs::write(temp_path, &binary_data) {
+        return Json(ApiResponse::error(format!("Failed to write temp file: {}", e)));
+    }
+
+    // 4. Make it executable
+    if let Err(e) = fs::set_permissions(temp_path, fs::Permissions::from_mode(0o755)) {
+        return Json(ApiResponse::error(format!("Failed to set permissions: {}", e)));
+    }
+
+    // 5. Verify the new binary can run
+    let verify = tokio::process::Command::new(temp_path)
+        .arg("--help")
+        .output()
+        .await;
+
+    if verify.is_err() {
+        let _ = fs::remove_file(temp_path);
+        return Json(ApiResponse::error("New binary verification failed"));
+    }
+
+    // 6. Get current executable path
+    let current_exe = match std::env::current_exe() {
+        Ok(p) => p,
+        Err(e) => return Json(ApiResponse::error(format!("Failed to get current exe path: {}", e))),
+    };
+
+    // 7. Stop sing-box before replacing
+    println!("Stopping sing-box before upgrade...");
+    stop_sing_internal().await;
+    sleep(Duration::from_secs(1)).await;
+
+    // 8. Backup current binary
+    let backup_path = format!("{}.bak", current_exe.display());
+    let _ = fs::copy(&current_exe, &backup_path);
+
+    // 9. Replace binary
+    if let Err(e) = fs::rename(temp_path, &current_exe) {
+        // Try to restore from backup
+        let _ = fs::copy(&backup_path, &current_exe);
+        return Json(ApiResponse::error(format!("Failed to replace binary: {}", e)));
+    }
+
+    println!("Upgrade successful! Restarting...");
+
+    // 10. Exec to restart with new binary
+    // Spawn a background task to exec after response is sent
+    tokio::spawn(async move {
+        sleep(Duration::from_millis(500)).await;
+
+        use std::os::unix::process::CommandExt;
+        let args: Vec<String> = std::env::args().collect();
+        let err = std::process::Command::new(&current_exe)
+            .args(&args[1..])
+            .exec();
+
+        // exec() only returns if there's an error
+        eprintln!("Failed to exec: {}", err);
+    });
+
+    Json(ApiResponse::success("Upgrade complete, restarting...", release.tag_name))
+}
 
 // ============================================================================
 // Subscription Management APIs
@@ -898,7 +1109,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         .route("/api/status", get(get_status))
         .route("/api/service/start", post(start_service))
         .route("/api/service/stop", post(stop_service))
-
+        // Version and upgrade
+        .route("/api/version", get(get_version))
+        .route("/api/upgrade", post(upgrade))
         // Subscription management
         .route("/api/subs", get(get_subs))
         .route("/api/subs", post(add_sub))

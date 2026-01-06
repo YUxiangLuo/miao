@@ -1053,6 +1053,72 @@
         [v-cloak] {
             display: none !important;
         }
+
+        /* 更新按钮 - 左下角固定 */
+        .update-widget {
+            position: fixed;
+            bottom: 1.5rem;
+            left: 1.5rem;
+            z-index: 1000;
+        }
+
+        .update-btn {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.6rem 1rem;
+            border-radius: 50px;
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            background: rgba(30, 30, 45, 0.9);
+            backdrop-filter: blur(10px);
+            color: rgba(255, 255, 255, 0.7);
+            font-size: 0.8rem;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .update-btn:hover {
+            background: rgba(40, 40, 60, 0.95);
+            border-color: rgba(255, 255, 255, 0.25);
+            color: #fff;
+        }
+
+        .update-btn.has-update {
+            background: linear-gradient(135deg, rgba(0, 217, 165, 0.2), rgba(0, 184, 148, 0.2));
+            border-color: var(--accent-green);
+            color: var(--accent-green);
+            animation: pulse-update 2s infinite;
+        }
+
+        .update-btn.has-update:hover {
+            background: linear-gradient(135deg, rgba(0, 217, 165, 0.3), rgba(0, 184, 148, 0.3));
+        }
+
+        @keyframes pulse-update {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(0, 217, 165, 0.4); }
+            50% { box-shadow: 0 0 0 8px rgba(0, 217, 165, 0); }
+        }
+
+        .update-btn.upgrading {
+            pointer-events: none;
+            opacity: 0.7;
+        }
+
+        .update-btn .version {
+            font-family: 'Fira Code', monospace;
+        }
+
+        @media (max-width: 576px) {
+            .update-widget {
+                bottom: 1rem;
+                left: 1rem;
+            }
+
+            .update-btn {
+                padding: 0.5rem 0.8rem;
+                font-size: 0.75rem;
+            }
+        }
     </style>
 </head>
 
@@ -1367,6 +1433,18 @@
                 </div>
             </div>
         </div>
+
+        <!-- 更新按钮 -->
+        <div class="update-widget">
+            <button :class="['update-btn', { 'has-update': versionInfo.has_update, 'upgrading': upgrading }]"
+                @click="handleUpdateClick" :disabled="upgrading">
+                <span v-if="upgrading" class="spinner" style="width:14px;height:14px;"></span>
+                <i v-else-if="versionInfo.has_update" class="bi bi-cloud-download"></i>
+                <i v-else class="bi bi-info-circle"></i>
+                <span class="version">{{ versionInfo.current || '...' }}</span>
+                <span v-if="versionInfo.has_update">→ {{ versionInfo.latest }}</span>
+            </button>
+        </div>
     </div>
 
     <script src="https://registry.npmmirror.com/vue/3/files/dist/vue.global.prod.js"></script>
@@ -1407,6 +1485,10 @@
                     message: '',
                     onConfirm: null
                 });
+
+                // 版本更新状态
+                const versionInfo = ref({ current: '', latest: null, has_update: false });
+                const upgrading = ref(false);
 
                 let statusInterval = null;
                 let toastId = 0;
@@ -1781,8 +1863,71 @@
                     showConfirm('删除节点', `确定要删除节点 "${tag}" 吗？`, () => deleteNode(tag));
                 };
 
+                // 版本检查
+                const checkVersion = async () => {
+                    try {
+                        const res = await fetch('/api/version');
+                        const data = await res.json();
+                        if (data.success && data.data) {
+                            versionInfo.value = data.data;
+                        }
+                    } catch (e) {
+                        console.error('获取版本失败:', e);
+                    }
+                };
 
+                // 处理更新按钮点击
+                const handleUpdateClick = () => {
+                    if (versionInfo.value.has_update) {
+                        showConfirm(
+                            '更新确认',
+                            `确定要从 ${versionInfo.value.current} 更新到 ${versionInfo.value.latest} 吗？\n\n更新过程中服务将短暂中断。`,
+                            doUpgrade
+                        );
+                    } else {
+                        checkVersion();
+                        showToast('已是最新版本', 'info');
+                    }
+                };
 
+                // 执行更新
+                const doUpgrade = async () => {
+                    upgrading.value = true;
+                    showToast('正在下载更新...', 'info');
+
+                    try {
+                        const res = await fetch('/api/upgrade', { method: 'POST' });
+                        const data = await res.json();
+
+                        if (data.success) {
+                            showToast(`更新成功，等待服务重启...`, 'success');
+                            // 轮询等待服务恢复
+                            waitForRestart();
+                        } else {
+                            showToast(data.message || '更新失败', 'error');
+                            upgrading.value = false;
+                        }
+                    } catch (e) {
+                        showToast('更新请求失败', 'error');
+                        upgrading.value = false;
+                    }
+                };
+
+                // 轮询等待服务重启完成
+                const waitForRestart = async () => {
+                    for (let i = 0; i < 30; i++) {  // 最多等 15 秒
+                        await new Promise(r => setTimeout(r, 500));
+                        try {
+                            const res = await fetch('/api/version');
+                            if (res.ok) {
+                                location.reload();
+                                return;
+                            }
+                        } catch (e) { }
+                    }
+                    showToast('服务重启超时，请手动刷新页面', 'error');
+                    upgrading.value = false;
+                };
 
                 // 格式化函数
                 const formatUptime = (seconds) => {
@@ -1805,6 +1950,7 @@
                     fetchProxies();
                     connectTrafficWs();
                     connectLogsWs();
+                    checkVersion();
                     statusInterval = setInterval(() => {
                         fetchStatus();
                         if (status.value.running) fetchProxies();
@@ -1827,6 +1973,8 @@
                     proxySearch, sortByDelay,
                     confirmModal, showConfirm, cancelConfirm, executeConfirm,
                     getFilteredNodes, hasFastestNode, selectFastest,
+                    // 版本更新
+                    versionInfo, upgrading, handleUpdateClick,
                     // 其他
                     showToast, getToastIcon,
                     startService, stopService, toggleService,
