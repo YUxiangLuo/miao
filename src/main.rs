@@ -255,6 +255,28 @@ struct GitHubAsset {
     browser_download_url: String,
 }
 
+/// Parse version string like "v0.6.10" into comparable tuple
+fn parse_version(v: &str) -> Option<(u32, u32, u32)> {
+    let v = v.strip_prefix('v').unwrap_or(v);
+    let parts: Vec<&str> = v.split('.').collect();
+    if parts.len() != 3 {
+        return None;
+    }
+    Some((
+        parts[0].parse().ok()?,
+        parts[1].parse().ok()?,
+        parts[2].parse().ok()?,
+    ))
+}
+
+/// Compare two version strings, returns true if `latest` is newer than `current`
+fn is_newer_version(current: &str, latest: &str) -> bool {
+    match (parse_version(current), parse_version(latest)) {
+        (Some(c), Some(l)) => l > c,
+        _ => false,
+    }
+}
+
 /// GET /api/version - Get current version and check for updates
 async fn get_version() -> Json<ApiResponse<VersionInfo>> {
     let current = format!("v{}", VERSION);
@@ -286,7 +308,7 @@ async fn get_version() -> Json<ApiResponse<VersionInfo>> {
         Ok(r) => {
             if let Ok(release) = r.json::<GitHubRelease>().await {
                 let latest = release.tag_name.clone();
-                let has_update = latest != current;
+                let has_update = is_newer_version(&current, &latest);
 
                 // Find download URL for current architecture
                 let asset_name = if cfg!(target_arch = "x86_64") {
@@ -350,7 +372,7 @@ async fn upgrade() -> Json<ApiResponse<String>> {
     };
 
     let current = format!("v{}", VERSION);
-    if release.tag_name == current {
+    if !is_newer_version(&current, &release.tag_name) {
         return Json(ApiResponse::success_no_data("Already up to date"));
     }
 
@@ -405,14 +427,15 @@ async fn upgrade() -> Json<ApiResponse<String>> {
         Err(e) => return Json(ApiResponse::error(format!("Failed to get current exe path: {}", e))),
     };
 
-    // 7. Stop sing-box before replacing
+    // 7. Stop sing-box before replacing and wait for it to exit
     println!("Stopping sing-box before upgrade...");
-    stop_sing_internal().await;
-    sleep(Duration::from_secs(1)).await;
+    stop_sing_internal_and_wait().await;
 
-    // 8. Backup current binary
+    // 8. Backup current binary (must succeed)
     let backup_path = format!("{}.bak", current_exe.display());
-    let _ = fs::copy(&current_exe, &backup_path);
+    if let Err(e) = fs::copy(&current_exe, &backup_path) {
+        return Json(ApiResponse::error(format!("Failed to backup current binary: {}", e)));
+    }
 
     // 9. Replace binary: delete first then copy (Linux allows deleting running executables)
     if let Err(e) = fs::remove_file(&current_exe) {
@@ -424,13 +447,18 @@ async fn upgrade() -> Json<ApiResponse<String>> {
         return Json(ApiResponse::error(format!("Failed to copy new binary: {}", e)));
     }
     // Set executable permission
-    let _ = fs::set_permissions(&current_exe, fs::Permissions::from_mode(0o755));
+    if let Err(e) = fs::set_permissions(&current_exe, fs::Permissions::from_mode(0o755)) {
+        // Try to restore from backup
+        let _ = fs::remove_file(&current_exe);
+        let _ = fs::copy(&backup_path, &current_exe);
+        return Json(ApiResponse::error(format!("Failed to set permissions: {}", e)));
+    }
     let _ = fs::remove_file(temp_path);
 
     println!("Upgrade successful! Restarting...");
 
     // 10. Exec to restart with new binary
-    // Spawn a background task to exec after response is sent
+    let new_version = release.tag_name.clone();
     tokio::spawn(async move {
         sleep(Duration::from_millis(500)).await;
 
@@ -440,11 +468,24 @@ async fn upgrade() -> Json<ApiResponse<String>> {
             .args(&args[1..])
             .exec();
 
-        // exec() only returns if there's an error
-        eprintln!("Failed to exec: {}", err);
+        // exec() only returns if there's an error, try to restore from backup
+        eprintln!("Failed to exec new binary: {}", err);
+        eprintln!("Attempting to restore from backup...");
+
+        if fs::remove_file(&current_exe).is_ok() {
+            if fs::copy(&backup_path, &current_exe).is_ok() {
+                let _ = fs::set_permissions(&current_exe, fs::Permissions::from_mode(0o755));
+                eprintln!("Restored from backup, restarting with old version...");
+                let _ = std::process::Command::new(&current_exe)
+                    .args(&args[1..])
+                    .exec();
+            }
+        }
+        eprintln!("Failed to restore from backup, manual intervention required");
+        std::process::exit(1);
     });
 
-    Json(ApiResponse::success("Upgrade complete, restarting...", release.tag_name))
+    Json(ApiResponse::success("Upgrade complete, restarting...", new_version))
 }
 
 // ============================================================================
@@ -888,6 +929,19 @@ async fn stop_sing_internal() {
     if let Some(ref mut proc) = *lock {
         if proc.child.try_wait().ok().flatten().is_none() {
             proc.child.start_kill().ok();
+        }
+    }
+    *lock = None;
+}
+
+/// Stop sing-box and wait for it to fully exit
+async fn stop_sing_internal_and_wait() {
+    let mut lock = SING_PROCESS.lock().await;
+    if let Some(ref mut proc) = *lock {
+        if proc.child.try_wait().ok().flatten().is_none() {
+            proc.child.start_kill().ok();
+            // Wait for process to exit
+            let _ = proc.child.wait().await;
         }
     }
     *lock = None;
