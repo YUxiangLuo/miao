@@ -411,12 +411,13 @@ async fn upgrade() -> Json<ApiResponse<String>> {
     let backup_path = format!("{}.bak", current_exe.display());
     let _ = fs::copy(&current_exe, &backup_path);
 
-    // 9. Replace binary
-    if let Err(e) = fs::rename(temp_path, &current_exe) {
+    // 9. Replace binary (use copy+remove instead of rename for cross-device support)
+    if let Err(e) = fs::copy(temp_path, &current_exe) {
         // Try to restore from backup
         let _ = fs::copy(&backup_path, &current_exe);
         return Json(ApiResponse::error(format!("Failed to replace binary: {}", e)));
     }
+    let _ = fs::remove_file(temp_path);
 
     println!("Upgrade successful! Restarting...");
 
