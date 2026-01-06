@@ -528,7 +528,9 @@ async fn add_sub(
     // Regenerate and restart in background
     let sing_box_home = state.sing_box_home.clone();
     tokio::spawn(async move {
-        regenerate_and_restart(&config_clone, &sing_box_home).await;
+        if let Err(e) = regenerate_and_restart(&config_clone, &sing_box_home).await {
+            eprintln!("Background regenerate failed: {}", e);
+        }
     });
 
     Ok(Json(ApiResponse::success_no_data("Subscription added, restarting...")))
@@ -564,7 +566,9 @@ async fn delete_sub(
 
     let sing_box_home = state.sing_box_home.clone();
     tokio::spawn(async move {
-        regenerate_and_restart(&config_clone, &sing_box_home).await;
+        if let Err(e) = regenerate_and_restart(&config_clone, &sing_box_home).await {
+            eprintln!("Background regenerate failed: {}", e);
+        }
     });
 
     Ok(Json(ApiResponse::success_no_data("Subscription deleted, restarting...")))
@@ -578,12 +582,13 @@ async fn refresh_subs(
     let config_clone = config.clone();
     drop(config);
 
-    let sing_box_home = state.sing_box_home.clone();
-    tokio::spawn(async move {
-        regenerate_and_restart(&config_clone, &sing_box_home).await;
-    });
-
-    Ok(Json(ApiResponse::success_no_data("Subscriptions refreshed, restarting...")))
+    match regenerate_and_restart(&config_clone, &state.sing_box_home).await {
+        Ok(_) => Ok(Json(ApiResponse::success_no_data("Subscriptions refreshed and sing-box restarted"))),
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiResponse::error(e)),
+        )),
+    }
 }
 
 // ============================================================================
@@ -671,7 +676,9 @@ async fn add_node(
 
     let sing_box_home = state.sing_box_home.clone();
     tokio::spawn(async move {
-        regenerate_and_restart(&config_clone, &sing_box_home).await;
+        if let Err(e) = regenerate_and_restart(&config_clone, &sing_box_home).await {
+            eprintln!("Background regenerate failed: {}", e);
+        }
     });
 
     Ok(Json(ApiResponse::success_no_data("Node added, restarting...")))
@@ -713,7 +720,9 @@ async fn delete_node(
 
     let sing_box_home = state.sing_box_home.clone();
     tokio::spawn(async move {
-        regenerate_and_restart(&config_clone, &sing_box_home).await;
+        if let Err(e) = regenerate_and_restart(&config_clone, &sing_box_home).await {
+            eprintln!("Background regenerate failed: {}", e);
+        }
     });
 
     Ok(Json(ApiResponse::success_no_data("Node deleted, restarting...")))
@@ -731,23 +740,18 @@ async fn save_config(config: &Config) -> Result<(), Box<dyn std::error::Error + 
 }
 
 /// Regenerate sing-box config and restart the service
-async fn regenerate_and_restart(config: &Config, sing_box_home: &str) {
+async fn regenerate_and_restart(config: &Config, sing_box_home: &str) -> Result<(), String> {
     // Regenerate config
-    if let Err(e) = gen_config(config, sing_box_home).await {
-        eprintln!("Failed to regenerate config: {}", e);
-        return;
-    }
+    gen_config(config, sing_box_home).await.map_err(|e| format!("Failed to regenerate config: {}", e))?;
     println!("Config regenerated successfully");
 
     // Stop and restart sing-box
     stop_sing_internal().await;
     sleep(Duration::from_millis(500)).await;
 
-    if let Err(e) = start_sing_internal(sing_box_home).await {
-        eprintln!("Failed to restart sing-box: {}", e);
-    } else {
-        println!("sing-box restarted successfully");
-    }
+    start_sing_internal(sing_box_home).await.map_err(|e| format!("Failed to restart sing-box: {}", e))?;
+    println!("sing-box restarted successfully");
+    Ok(())
 }
 
 /// Extract embedded sing-box binary to current working directory
