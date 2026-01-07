@@ -6,14 +6,13 @@
 
 ## 特性
 
-- **零配置 sing-box** - 内嵌 sing-box 二进制，无需单独安装
-- **TUN 透明代理** - 系统级代理，所有流量自动走代理
+- **预配置 sing-box** - 内嵌 sing-box 二进制
 - **国内外自动分流** - 基于 geosite/geoip 规则，国内直连、国外代理
-- **Web 管理面板** - 节点管理、订阅管理、实时流量监控、测速
-- **自动更新** - 支持从 GitHub 一键更新到最新版本
+- **Web 管理面板** - 节点管理、订阅管理、实时流量、延迟测试
+- **自动更新** - 支持一键更新到最新release
 - **OpenWrt 支持** - 自动安装所需内核模块
 
-<img width="2560" height="1440" alt="image" src="https://github.com/user-attachments/assets/e5e101c1-6002-423b-956a-e4730c67bc12" />
+<img width="1543" height="1735" alt="localhost_6161_ (1)" src="https://github.com/user-attachments/assets/bb06a924-14d0-4225-81f7-150aa0273967" />
 
 ## 快速开始
 
