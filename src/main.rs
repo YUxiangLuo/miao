@@ -1015,13 +1015,15 @@ async fn gen_config(
     let mut final_node_names: Vec<String> = vec![];
 
     for sub in &config.subs {
+        println!("Fetching subscription: {}", sub);
         match fetch_sub(sub).await {
             Ok((node_names, outbounds)) => {
+                println!("  -> Success: fetched {} nodes", node_names.len());
                 final_node_names.extend(node_names);
                 final_outbounds.extend(outbounds);
             }
             Err(e) => {
-                eprintln!("Failed to fetch subscription from {}: {}", sub, e);
+                eprintln!("  -> Failed to fetch subscription: {}", e);
             }
         }
     }
@@ -1052,7 +1054,7 @@ async fn gen_config(
     let config_output_loc = sing_box_home.join("config.json");
     tokio::fs::write(
         &config_output_loc,
-        serde_json::to_string_pretty(&sing_box_config)?,
+        serde_json::to_string(&sing_box_config)?,
     )
     .await?;
 
@@ -1236,6 +1238,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         }
     }
 
+    println!("Reading configuration...");
     let config: Config = serde_yaml::from_str(&tokio::fs::read_to_string("config.yaml").await?)?;
     let port = config.port.unwrap_or(DEFAULT_PORT);
 
@@ -1244,6 +1247,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // sing_box_home is hardcoded to /tmp/miao-sing-box inside functions
 
     // Generate initial config, retrying until success
+    println!("Generating initial config...");
     loop {
         match gen_config(&config).await {
             Ok(_) => break,
@@ -1258,6 +1262,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     }
 
     // Check OpenWrt dependencies
+    println!("Checking dependencies...");
     if let Err(e) = check_and_install_openwrt_dependencies().await {
         eprintln!("Failed to check or install OpenWrt dependencies: {}", e);
     }
