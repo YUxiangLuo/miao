@@ -35,8 +35,6 @@ const SING_BOX_BINARY: &[u8] = include_bytes!("../embedded/sing-box-arm64");
 struct Config {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     port: Option<u16>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    sing_box_home: Option<String>,
     #[serde(default)]
     subs: Vec<String>,
     #[serde(default)]
@@ -47,7 +45,6 @@ const DEFAULT_PORT: u16 = 6161;
 
 struct AppState {
     config: Mutex<Config>,
-    sing_box_home: String,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -232,7 +229,7 @@ async fn get_status() -> Json<ApiResponse<StatusData>> {
 
 /// POST /api/service/start - Start sing-box
 async fn start_service(
-    State(state): State<Arc<AppState>>,
+    State(_): State<Arc<AppState>>,
 ) -> Result<Json<ApiResponse<()>>, (StatusCode, Json<ApiResponse<()>>)> {
     let mut lock = SING_PROCESS.lock().await;
 
@@ -247,7 +244,7 @@ async fn start_service(
 
     drop(lock);
 
-    match start_sing_internal(&state.sing_box_home).await {
+    match start_sing_internal().await {
         Ok(_) => Ok(Json(ApiResponse::success_no_data("sing-box started successfully"))),
         Err(e) => Err((
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -556,7 +553,7 @@ async fn add_sub(
         config_clone = config.clone();
     }
 
-    match regenerate_and_restart(&config_clone, &state.sing_box_home).await {
+    match regenerate_and_restart(&config_clone).await {
         Ok(_) => Ok(Json(ApiResponse::success_no_data("Subscription added and sing-box restarted"))),
         Err(e) => Err((StatusCode::INTERNAL_SERVER_ERROR, Json(ApiResponse::error(e)))),
     }
@@ -590,7 +587,7 @@ async fn delete_sub(
         config_clone = config.clone();
     }
 
-    match regenerate_and_restart(&config_clone, &state.sing_box_home).await {
+    match regenerate_and_restart(&config_clone).await {
         Ok(_) => Ok(Json(ApiResponse::success_no_data("Subscription deleted and sing-box restarted"))),
         Err(e) => Err((StatusCode::INTERNAL_SERVER_ERROR, Json(ApiResponse::error(e)))),
     }
@@ -604,7 +601,7 @@ async fn refresh_subs(
     let config_clone = config.clone();
     drop(config);
 
-    match regenerate_and_restart(&config_clone, &state.sing_box_home).await {
+    match regenerate_and_restart(&config_clone).await {
         Ok(_) => Ok(Json(ApiResponse::success_no_data("Subscriptions refreshed and sing-box restarted"))),
         Err(e) => Err((
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -727,7 +724,7 @@ async fn add_node(
         config_clone = config.clone();
     }
 
-    match regenerate_and_restart(&config_clone, &state.sing_box_home).await {
+    match regenerate_and_restart(&config_clone).await {
         Ok(_) => Ok(Json(ApiResponse::success_no_data("Node added and sing-box restarted"))),
         Err(e) => Err((StatusCode::INTERNAL_SERVER_ERROR, Json(ApiResponse::error(e)))),
     }
@@ -767,7 +764,7 @@ async fn delete_node(
         config_clone = config.clone();
     }
 
-    match regenerate_and_restart(&config_clone, &state.sing_box_home).await {
+    match regenerate_and_restart(&config_clone).await {
         Ok(_) => Ok(Json(ApiResponse::success_no_data("Node deleted and sing-box restarted"))),
         Err(e) => Err((StatusCode::INTERNAL_SERVER_ERROR, Json(ApiResponse::error(e)))),
     }
@@ -785,21 +782,22 @@ async fn save_config(config: &Config) -> Result<(), Box<dyn std::error::Error + 
 }
 
 /// Regenerate sing-box config and restart the service
-async fn regenerate_and_restart(config: &Config, sing_box_home: &str) -> Result<(), String> {
+async fn regenerate_and_restart(config: &Config) -> Result<(), String> {
     // Regenerate config
-    gen_config(config, sing_box_home).await.map_err(|e| format!("Failed to regenerate config: {}", e))?;
+    gen_config(config).await.map_err(|e| format!("Failed to regenerate config: {}", e))?;
     println!("Config regenerated successfully");
 
     // Stop and restart sing-box
     stop_sing_internal().await;
     sleep(Duration::from_millis(500)).await;
 
-    start_sing_internal(sing_box_home).await.map_err(|e| format!("Failed to restart sing-box: {}", e))?;
+    start_sing_internal().await.map_err(|e| format!("Failed to restart sing-box: {}", e))?;
     println!("sing-box restarted successfully");
     Ok(())
 }
 
 /// Extract embedded sing-box binary to /tmp (saves flash storage on OpenWrt)
+/// Returns the path to sing-box home directory
 fn extract_sing_box() -> Result<PathBuf, Box<dyn std::error::Error + Send + Sync>> {
     let sing_box_home = PathBuf::from("/tmp/miao-sing-box");
     if !sing_box_home.exists() {
@@ -821,6 +819,10 @@ fn extract_sing_box() -> Result<PathBuf, Box<dyn std::error::Error + Send + Sync
     }
 
     Ok(sing_box_home)
+}
+
+fn get_sing_box_home() -> PathBuf {
+    PathBuf::from("/tmp/miao-sing-box")
 }
 
 async fn check_and_install_openwrt_dependencies(
@@ -891,7 +893,6 @@ async fn check_and_install_openwrt_dependencies(
 }
 
 async fn start_sing_internal(
-    sing_box_home: &str,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut lock = SING_PROCESS.lock().await;
     if let Some(ref mut proc) = *lock {
@@ -900,14 +901,15 @@ async fn start_sing_internal(
         }
     }
 
-    let sing_box_path = PathBuf::from(sing_box_home).join("sing-box");
-    let config_path = PathBuf::from(sing_box_home).join("config.json");
+    let sing_box_home = get_sing_box_home();
+    let sing_box_path = sing_box_home.join("sing-box");
+    let config_path = sing_box_home.join("config.json");
 
     println!("Starting sing-box from: {:?}", sing_box_path);
     println!("Using config: {:?}", config_path);
 
     let mut child = tokio::process::Command::new(&sing_box_path)
-        .current_dir(sing_box_home)
+        .current_dir(&sing_box_home)
         .arg("run")
         .arg("-c")
         .arg(&config_path)
@@ -998,7 +1000,6 @@ async fn stop_sing_internal() {
 
 async fn gen_config(
     config: &Config,
-    sing_box_home: &str,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let my_outbounds: Vec<serde_json::Value> = config
         .nodes
@@ -1047,7 +1048,8 @@ async fn gen_config(
         arr.extend(my_outbounds.into_iter().chain(final_outbounds.into_iter()));
     }
 
-    let config_output_loc = format!("{}/config.json", sing_box_home);
+    let sing_box_home = get_sing_box_home();
+    let config_output_loc = sing_box_home.join("config.json");
     tokio::fs::write(
         &config_output_loc,
         serde_json::to_string_pretty(&sing_box_config)?,
@@ -1238,15 +1240,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let port = config.port.unwrap_or(DEFAULT_PORT);
 
     // Extract embedded sing-box binary and determine working directory
-    let sing_box_home = if let Some(custom_home) = &config.sing_box_home {
-        custom_home.clone()
-    } else {
-        extract_sing_box()?.to_string_lossy().to_string()
-    };
+    let _ = extract_sing_box()?;
+    // sing_box_home is hardcoded to /tmp/miao-sing-box inside functions
 
     // Generate initial config, retrying until success
     loop {
-        match gen_config(&config, &sing_box_home).await {
+        match gen_config(&config).await {
             Ok(_) => break,
             Err(e) => {
                 eprintln!(
@@ -1264,14 +1263,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     }
 
     // Start sing-box
-    match start_sing_internal(&sing_box_home).await {
+    match start_sing_internal().await {
         Ok(_) => println!("sing-box started successfully"),
         Err(e) => eprintln!("Failed to start sing-box: {}", e),
     }
 
     let app_state = Arc::new(AppState {
         config: Mutex::new(config.clone()),
-        sing_box_home: sing_box_home.clone(),
     });
 
 

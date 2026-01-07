@@ -3,10 +3,7 @@
 # HTTP API port (optional, default: 6161)
 # port: 6161
 
-# sing-box home directory (optional)
-# If not specified, miao will use embedded sing-box binary
-# and extract it to ./runtime directory
-# sing_box_home: /home/alice/pros/miao/sing-box
+
 
 # Subscription URLs (optional)
 subs:
