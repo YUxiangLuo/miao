@@ -799,10 +799,14 @@ async fn regenerate_and_restart(config: &Config, sing_box_home: &str) -> Result<
     Ok(())
 }
 
-/// Extract embedded sing-box binary to current working directory
+/// Extract embedded sing-box binary to /tmp (saves flash storage on OpenWrt)
 fn extract_sing_box() -> Result<PathBuf, Box<dyn std::error::Error + Send + Sync>> {
-    let current_dir = std::env::current_dir()?;
-    let sing_box_path = current_dir.join("sing-box");
+    let sing_box_home = PathBuf::from("/tmp/miao-sing-box");
+    if !sing_box_home.exists() {
+        fs::create_dir_all(&sing_box_home)?;
+    }
+
+    let sing_box_path = sing_box_home.join("sing-box");
 
     if !sing_box_path.exists() {
         println!("Extracting embedded sing-box binary to {:?}", sing_box_path);
@@ -811,12 +815,12 @@ fn extract_sing_box() -> Result<PathBuf, Box<dyn std::error::Error + Send + Sync
         println!("sing-box binary extracted successfully");
     }
 
-    let dashboard_dir = current_dir.join("dashboard");
+    let dashboard_dir = sing_box_home.join("dashboard");
     if !dashboard_dir.exists() {
         fs::create_dir_all(&dashboard_dir)?;
     }
 
-    Ok(current_dir)
+    Ok(sing_box_home)
 }
 
 async fn check_and_install_openwrt_dependencies(
