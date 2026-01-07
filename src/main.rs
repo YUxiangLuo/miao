@@ -71,6 +71,17 @@ struct Tls {
     insecure: bool,
 }
 
+#[derive(Serialize, Deserialize)]
+struct AnyTls {
+    #[serde(rename = "type")]
+    outbound_type: String,
+    tag: String,
+    server: String,
+    server_port: u16,
+    password: String,
+    tls: Tls,
+}
+
 // ============================================================================
 // API Response Types
 // ============================================================================
@@ -1099,6 +1110,36 @@ async fn fetch_sub(
                 };
                 node_names.push(name.to_string());
                 outbounds.push(serde_json::to_value(hysteria2)?);
+            }
+            "anytls" => {
+                let anytls = AnyTls {
+                    outbound_type: "anytls".to_string(),
+                    tag: name.to_string(),
+                    server: node
+                        .get("server")
+                        .and_then(|s| s.as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                    server_port: node.get("port").and_then(|p| p.as_u64()).unwrap_or(0) as u16,
+                    password: node
+                        .get("password")
+                        .and_then(|p| p.as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                    tls: Tls {
+                        enabled: true,
+                        server_name: node
+                            .get("sni")
+                            .and_then(|s| s.as_str())
+                            .map(|s| s.to_string()),
+                        insecure: node
+                            .get("skip-cert-verify")
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(false),
+                    },
+                };
+                node_names.push(name.to_string());
+                outbounds.push(serde_json::to_value(anytls)?);
             }
             _ => {}
         }
