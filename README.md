@@ -1,6 +1,6 @@
 # Miao
 
-一个开箱即用的 [sing-box](https://github.com/SagerNet/sing-box) 管理器。下载、配置订阅、运行，即可实现 **TUN 模式透明代理 + 国内外自动分流**。
+一个开箱即用的 [sing-box](https://github.com/SagerNet/sing-box) 启动器。下载、配置订阅、运行，即可实现 **TUN 模式透明代理 + 国内外自动分流**。
 
 > **当前仅支持 Hysteria2 协议节点**
 
