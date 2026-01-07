@@ -82,6 +82,30 @@ struct AnyTls {
     tls: Tls,
 }
 
+#[derive(Serialize, Deserialize)]
+struct TuicTls {
+    enabled: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    server_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    alpn: Option<Vec<String>>,
+    insecure: bool,
+}
+
+#[derive(Serialize, Deserialize)]
+struct Tuic {
+    #[serde(rename = "type")]
+    outbound_type: String,
+    tag: String,
+    server: String,
+    server_port: u16,
+    uuid: String,
+    password: String,
+    congestion_control: String,
+    udp_relay_mode: String,
+    tls: TuicTls,
+}
+
 // ============================================================================
 // API Response Types
 // ============================================================================
@@ -1140,6 +1164,61 @@ async fn fetch_sub(
                 };
                 node_names.push(name.to_string());
                 outbounds.push(serde_json::to_value(anytls)?);
+            }
+            "tuic" => {
+                let alpn: Option<Vec<String>> = node
+                    .get("alpn")
+                    .and_then(|a| a.as_sequence())
+                    .map(|seq| {
+                        seq.iter()
+                            .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                            .collect()
+                    });
+
+                let tuic = Tuic {
+                    outbound_type: "tuic".to_string(),
+                    tag: name.to_string(),
+                    server: node
+                        .get("server")
+                        .and_then(|s| s.as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                    server_port: node.get("port").and_then(|p| p.as_u64()).unwrap_or(0) as u16,
+                    uuid: node
+                        .get("uuid")
+                        .and_then(|u| u.as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                    password: node
+                        .get("password")
+                        .and_then(|p| p.as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                    congestion_control: node
+                        .get("congestion-controller")
+                        .and_then(|c| c.as_str())
+                        .unwrap_or("cubic")
+                        .to_string(),
+                    udp_relay_mode: node
+                        .get("udp-relay-mode")
+                        .and_then(|u| u.as_str())
+                        .unwrap_or("native")
+                        .to_string(),
+                    tls: TuicTls {
+                        enabled: true,
+                        server_name: node
+                            .get("sni")
+                            .and_then(|s| s.as_str())
+                            .map(|s| s.to_string()),
+                        alpn,
+                        insecure: node
+                            .get("skip-cert-verify")
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(false),
+                    },
+                };
+                node_names.push(name.to_string());
+                outbounds.push(serde_json::to_value(tuic)?);
             }
             _ => {}
         }
