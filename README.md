@@ -41,6 +41,8 @@ subs:
   - "https://your-hysteria2-subscription-url3"
 ```
 
+> **提示**: 订阅链接请尽量选择 **Clash.Meta** 客户端格式
+
 或手动配置节点：
 
 ```yaml
