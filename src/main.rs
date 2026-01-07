@@ -7,7 +7,7 @@ use axum::{
 };
 use lazy_static::lazy_static;
 use nix::sys::signal::{kill, Signal};
-use nix::unistd::Pid;
+use nix::unistd::{Pid, Uid};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
@@ -1230,6 +1230,12 @@ async fn fetch_sub(
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    // Check for root privileges
+    if !Uid::effective().is_root() {
+        eprintln!("Error: This application must be run as root.");
+        std::process::exit(1);
+    }
+
     // Clean up backup file from previous upgrade
     if let Ok(current_exe) = std::env::current_exe() {
         let backup_path = format!("{}.bak", current_exe.display());
