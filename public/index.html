@@ -2042,6 +2042,7 @@
                     try {
                         await apiCall('subs', 'POST', { url: newSubUrl.value }, 'addSub');
                         showToast('订阅已添加', 'success');
+                        delays.value = {};
                         newSubUrl.value = '';
                         await fetchSubs();
                     } catch (e) { }
@@ -2051,6 +2052,7 @@
                     try {
                         await apiCall('subs', 'DELETE', { url }, 'deleteSub');
                         showToast('订阅已删除', 'success');
+                        delays.value = {};
                         await fetchSubs();
                     } catch (e) { }
                 };
@@ -2063,6 +2065,7 @@
                     try {
                         await apiCall('subs/refresh', 'POST', null, 'refreshSubs');
                         showToast('订阅已更新', 'success');
+                        delays.value = {};
                         await fetchSubs();
                     } catch (e) { }
                 };
@@ -2087,6 +2090,7 @@
                         }
                         await apiCall('nodes', 'POST', nodeData, 'addNode');
                         showToast('节点已添加', 'success');
+                        delays.value = {};
                         newNode.value = { tag: '', server: '', server_port: 443, password: '', sni: '', cipher: '2022-blake3-aes-128-gcm' };
                         showNodeModal.value = false;
                         await fetchNodes();
@@ -2097,6 +2101,7 @@
                     try {
                         await apiCall('nodes', 'DELETE', { tag }, 'deleteNode');
                         showToast('节点已删除', 'success');
+                        delays.value = {};
                         await fetchNodes();
                     } catch (e) { }
                 };
