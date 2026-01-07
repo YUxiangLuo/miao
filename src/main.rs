@@ -150,12 +150,15 @@ struct SubRequest {
 
 #[derive(Deserialize)]
 struct NodeRequest {
+    node_type: Option<String>,
     tag: String,
     server: String,
     server_port: u16,
     password: String,
     #[serde(default)]
     sni: Option<String>,
+    #[serde(default)]
+    cipher: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -659,23 +662,54 @@ async fn add_node(
             }
         }
 
-        // Build Hysteria2 node
-        let node = Hysteria2 {
-            outbound_type: "hysteria2".to_string(),
-            tag: req.tag,
-            server: req.server,
-            server_port: req.server_port,
-            password: req.password,
-            up_mbps: 40,
-            down_mbps: 350,
-            tls: Tls {
-                enabled: true,
-                server_name: req.sni,
-                insecure: true,
-            },
-        };
-
-        let node_json = serde_json::to_string(&node).map_err(|e| {
+        // Build node based on type
+        let node_type = req.node_type.as_deref().unwrap_or("hysteria2");
+        let node_json = match node_type {
+            "anytls" => {
+                let node = AnyTls {
+                    outbound_type: "anytls".to_string(),
+                    tag: req.tag,
+                    server: req.server,
+                    server_port: req.server_port,
+                    password: req.password,
+                    tls: Tls {
+                        enabled: true,
+                        server_name: req.sni,
+                        insecure: true,
+                    },
+                };
+                serde_json::to_string(&node)
+            }
+            "ss" => {
+                let node = Shadowsocks {
+                    outbound_type: "shadowsocks".to_string(),
+                    tag: req.tag,
+                    server: req.server,
+                    server_port: req.server_port,
+                    method: req.cipher.unwrap_or_else(|| "2022-blake3-aes-128-gcm".to_string()),
+                    password: req.password,
+                };
+                serde_json::to_string(&node)
+            }
+            _ => {
+                // Default to Hysteria2
+                let node = Hysteria2 {
+                    outbound_type: "hysteria2".to_string(),
+                    tag: req.tag,
+                    server: req.server,
+                    server_port: req.server_port,
+                    password: req.password,
+                    up_mbps: 40,
+                    down_mbps: 350,
+                    tls: Tls {
+                        enabled: true,
+                        server_name: req.sni,
+                        insecure: true,
+                    },
+                };
+                serde_json::to_string(&node)
+            }
+        }.map_err(|e| {
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(ApiResponse::error(format!("Failed to serialize node: {}", e))),

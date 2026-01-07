@@ -8,11 +8,27 @@
     <link rel="icon" href="/favicon.svg" type="image/svg+xml">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
     <style>
-        .container { max-width: 1400px; margin: 0 auto; padding: 0 1rem; }
-        .d-flex { display: flex; }
-        .align-items-center { align-items: center; }
-        .flex-wrap { flex-wrap: wrap; }
-        .gap-3 { gap: 1rem; }
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 0 1rem;
+        }
+
+        .d-flex {
+            display: flex;
+        }
+
+        .align-items-center {
+            align-items: center;
+        }
+
+        .flex-wrap {
+            flex-wrap: wrap;
+        }
+
+        .gap-3 {
+            gap: 1rem;
+        }
 
         :root {
             --bg-gradient-start: #0f0c29;
@@ -536,6 +552,120 @@
             margin-top: 0.25rem;
         }
 
+        /* Modal styles */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.7);
+            backdrop-filter: blur(5px);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+            animation: fadeIn 0.2s ease;
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+            }
+
+            to {
+                opacity: 1;
+            }
+        }
+
+        .modal-content {
+            background: linear-gradient(135deg, rgba(30, 30, 50, 0.95), rgba(20, 20, 35, 0.98));
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            border-radius: 20px;
+            padding: 1.5rem;
+            width: 90%;
+            max-width: 500px;
+            max-height: 90vh;
+            overflow-y: auto;
+            animation: slideUp 0.3s ease;
+        }
+
+        @keyframes slideUp {
+            from {
+                transform: translateY(20px);
+                opacity: 0;
+            }
+
+            to {
+                transform: translateY(0);
+                opacity: 1;
+            }
+        }
+
+        .modal-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 1.25rem;
+        }
+
+        .modal-title {
+            font-size: 1.2rem;
+            font-weight: 600;
+            color: #fff;
+        }
+
+        .modal-close {
+            background: rgba(255, 255, 255, 0.1);
+            border: none;
+            color: #fff;
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: background 0.2s;
+        }
+
+        .modal-close:hover {
+            background: rgba(255, 71, 87, 0.3);
+        }
+
+        /* Tab styles */
+        .tab-container {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 1.25rem;
+            background: rgba(0, 0, 0, 0.2);
+            padding: 0.35rem;
+            border-radius: 12px;
+        }
+
+        .tab-btn {
+            flex: 1;
+            padding: 0.6rem 0.75rem;
+            border: none;
+            background: transparent;
+            color: rgba(255, 255, 255, 0.6);
+            font-size: 0.85rem;
+            font-weight: 500;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .tab-btn:hover {
+            color: #fff;
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        .tab-btn.active {
+            background: var(--accent-green);
+            color: #000;
+        }
+
         .toast-container {
             position: fixed;
             top: 1.5rem;
@@ -678,8 +808,15 @@
         }
 
         @keyframes pulse {
-            0%, 100% { opacity: 0.6; }
-            50% { opacity: 0.3; }
+
+            0%,
+            100% {
+                opacity: 0.6;
+            }
+
+            50% {
+                opacity: 0.3;
+            }
         }
 
         .proxy-node-name {
@@ -1124,8 +1261,15 @@
         }
 
         @keyframes pulse-update {
-            0%, 100% { box-shadow: 0 0 0 0 rgba(0, 217, 165, 0.4); }
-            50% { box-shadow: 0 0 0 8px rgba(0, 217, 165, 0); }
+
+            0%,
+            100% {
+                box-shadow: 0 0 0 0 rgba(0, 217, 165, 0.4);
+            }
+
+            50% {
+                box-shadow: 0 0 0 8px rgba(0, 217, 165, 0);
+            }
         }
 
         .update-btn.upgrading {
@@ -1350,42 +1494,95 @@
                         </div>
 
                         <div class="add-form">
-                            <div class="form-row">
-                                <div class="form-group">
-                                    <label class="form-label">节点名称</label>
-                                    <input type="text" class="form-input" v-model="newNode.tag" placeholder="例如: 我的节点">
-                                </div>
-                                <div class="form-group">
-                                    <label class="form-label">服务器地址</label>
-                                    <input type="text" class="form-input" v-model="newNode.server"
-                                        placeholder="例如: example.com">
-                                </div>
-                            </div>
-                            <div class="form-row">
-                                <div class="form-group">
-                                    <label class="form-label">端口</label>
-                                    <input type="number" class="form-input" v-model.number="newNode.server_port"
-                                        placeholder="443">
-                                </div>
-                                <div class="form-group">
-                                    <label class="form-label">密码</label>
-                                    <input type="text" class="form-input" v-model="newNode.password"
-                                        placeholder="密码">
-                                </div>
-                                <div class="form-group">
-                                    <label class="form-label">SNI (可选)</label>
-                                    <input type="text" class="form-input" v-model="newNode.sni" placeholder="留空使用服务器地址">
-                                </div>
-                            </div>
-                            <button class="btn-custom btn-add" @click="addNode" :disabled="loading || !canAddNode">
+                            <button class="btn-custom btn-add" @click="showNodeModal = true" :disabled="loading"
+                                style="width: 100%;">
                                 <i class="bi bi-plus-lg"></i>
-                                添加 Hysteria2 节点
+                                添加节点
                             </button>
                         </div>
                     </div>
 
                 </div>
                 <!-- 右列结束 -->
+
+                <!-- 添加节点模态框 -->
+                <div class="modal-overlay" v-if="showNodeModal" @click.self="showNodeModal = false">
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <span class="modal-title">添加节点</span>
+                            <button class="modal-close" @click="showNodeModal = false">
+                                <i class="bi bi-x-lg"></i>
+                            </button>
+                        </div>
+
+                        <!-- Tab 切换 -->
+                        <div class="tab-container">
+                            <button class="tab-btn" :class="{ active: nodeType === 'hysteria2' }"
+                                @click="nodeType = 'hysteria2'">Hysteria2</button>
+                            <button class="tab-btn" :class="{ active: nodeType === 'anytls' }"
+                                @click="nodeType = 'anytls'">AnyTLS</button>
+                            <button class="tab-btn" :class="{ active: nodeType === 'ss' }"
+                                @click="nodeType = 'ss'">Shadowsocks</button>
+                        </div>
+
+                        <!-- 通用字段 -->
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label class="form-label">节点名称</label>
+                                <input type="text" class="form-input" v-model="newNode.tag" placeholder="例如: 我的节点">
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label class="form-label">服务器地址</label>
+                                <input type="text" class="form-input" v-model="newNode.server"
+                                    placeholder="例如: example.com">
+                            </div>
+                            <div class="form-group" style="max-width: 120px;">
+                                <label class="form-label">端口</label>
+                                <input type="number" class="form-input" v-model.number="newNode.server_port"
+                                    placeholder="443">
+                            </div>
+                        </div>
+
+                        <!-- Shadowsocks 特有字段 -->
+                        <div class="form-row" v-if="nodeType === 'ss'">
+                            <div class="form-group">
+                                <label class="form-label">加密方式</label>
+                                <select class="form-input" v-model="newNode.cipher">
+                                    <option value="2022-blake3-aes-128-gcm">2022-blake3-aes-128-gcm</option>
+                                    <option value="2022-blake3-aes-256-gcm">2022-blake3-aes-256-gcm</option>
+                                    <option value="2022-blake3-chacha20-poly1305">2022-blake3-chacha20-poly1305</option>
+                                    <option value="aes-128-gcm">aes-128-gcm</option>
+                                    <option value="aes-256-gcm">aes-256-gcm</option>
+                                    <option value="chacha20-ietf-poly1305">chacha20-ietf-poly1305</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label class="form-label">密码</label>
+                                <input type="text" class="form-input" v-model="newNode.password" placeholder="密码">
+                            </div>
+                        </div>
+
+                        <!-- Hysteria2/AnyTLS 的 SNI 字段 -->
+                        <div class="form-row" v-if="nodeType !== 'ss'">
+                            <div class="form-group">
+                                <label class="form-label">SNI (可选)</label>
+                                <input type="text" class="form-input" v-model="newNode.sni" placeholder="留空使用服务器地址">
+                            </div>
+                        </div>
+
+                        <button class="btn-custom btn-add" @click="addNode" :disabled="loading || !canAddNode"
+                            style="width: 100%; margin-top: 0.5rem;">
+                            <i class="bi bi-plus-lg"></i>
+                            添加 {{ nodeType === 'hysteria2' ? 'Hysteria2' : nodeType === 'anytls' ? 'AnyTLS' :
+                            'Shadowsocks' }} 节点
+                        </button>
+                    </div>
+                </div>
 
                 <!-- 日志查看 - 全宽底部 -->
                 <div class="layout-full" v-if="status.running">
@@ -1485,7 +1682,9 @@
                 const loadingAction = ref('');
                 const toasts = ref([]);
                 const newSubUrl = ref('');
-                const newNode = ref({ tag: '', server: '', server_port: 443, password: '', sni: '' });
+                const newNode = ref({ tag: '', server: '', server_port: 443, password: '', sni: '', cipher: '2022-blake3-aes-128-gcm' });
+                const showNodeModal = ref(false);
+                const nodeType = ref('hysteria2');
 
                 // Clash API 状态
                 const proxies = ref({});
@@ -1873,16 +2072,23 @@
                     if (!canAddNode.value) return;
                     try {
                         const nodeData = {
+                            node_type: nodeType.value,
                             tag: newNode.value.tag.trim(),
                             server: newNode.value.server.trim(),
                             server_port: newNode.value.server_port,
                             password: newNode.value.password.trim(),
                         };
-                        const sni = newNode.value.sni?.trim();
-                        if (sni) nodeData.sni = sni;
+                        // Add type-specific fields
+                        if (nodeType.value === 'ss') {
+                            nodeData.cipher = newNode.value.cipher;
+                        } else {
+                            const sni = newNode.value.sni?.trim();
+                            if (sni) nodeData.sni = sni;
+                        }
                         await apiCall('nodes', 'POST', nodeData, 'addNode');
                         showToast('节点已添加', 'success');
-                        newNode.value = { tag: '', server: '', server_port: 443, password: '', sni: '' };
+                        newNode.value = { tag: '', server: '', server_port: 443, password: '', sni: '', cipher: '2022-blake3-aes-128-gcm' };
+                        showNodeModal.value = false;
                         await fetchNodes();
                     } catch (e) { }
                 };
@@ -2001,7 +2207,7 @@
 
                 return {
                     status, subs, nodes, loading, loadingAction, toasts,
-                    newSubUrl, newNode, canAddNode,
+                    newSubUrl, newNode, canAddNode, showNodeModal, nodeType,
                     proxies, delays, testingNodes, traffic, testingGroup, selectorGroups,
                     // 日志相关
                     logs, logContainer, logAutoScroll, showLogs, clearLogs,
