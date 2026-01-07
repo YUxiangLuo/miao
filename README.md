@@ -46,11 +46,16 @@ subs:
 或手动配置节点：
 
 ```yaml
-# 手动配置节点
+# 手动配置节点 (支持 Hysteria2、AnyTLS、Shadowsocks)
 nodes:
-  - '{"type":"hysteria2","tag":"节点名","server":"example.com","server_port":443,"password":"xxx"}'
-  # server 是 IP 时需指定 sni
-  - '{"type":"hysteria2","tag":"节点2","server":"1.2.3.4","server_port":443,"password":"xxx","sni":"example.com"}'
+  # Hysteria2
+  - '{"type":"hysteria2","tag":"Hy2节点","server":"example.com","server_port":443,"password":"xxx","tls":{"enabled":true}}'
+  
+  # AnyTLS  
+  - '{"type":"anytls","tag":"AnyTLS节点","server":"example.com","server_port":443,"password":"xxx","tls":{"enabled":true}}'
+  
+  # Shadowsocks
+  - '{"type":"shadowsocks","tag":"SS节点","server":"example.com","server_port":443,"method":"2022-blake3-aes-128-gcm","password":"xxx"}'
 ```
 
 ### 3. 运行
