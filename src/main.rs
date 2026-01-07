@@ -82,6 +82,17 @@ struct AnyTls {
     tls: Tls,
 }
 
+#[derive(Serialize, Deserialize)]
+struct Shadowsocks {
+    #[serde(rename = "type")]
+    outbound_type: String,
+    tag: String,
+    server: String,
+    server_port: u16,
+    method: String,
+    password: String,
+}
+
 // ============================================================================
 // API Response Types
 // ============================================================================
@@ -1140,6 +1151,30 @@ async fn fetch_sub(
                 };
                 node_names.push(name.to_string());
                 outbounds.push(serde_json::to_value(anytls)?);
+            }
+            "ss" => {
+                let ss = Shadowsocks {
+                    outbound_type: "shadowsocks".to_string(),
+                    tag: name.to_string(),
+                    server: node
+                        .get("server")
+                        .and_then(|s| s.as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                    server_port: node.get("port").and_then(|p| p.as_u64()).unwrap_or(0) as u16,
+                    method: node
+                        .get("cipher")
+                        .and_then(|c| c.as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                    password: node
+                        .get("password")
+                        .and_then(|p| p.as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                };
+                node_names.push(name.to_string());
+                outbounds.push(serde_json::to_value(ss)?);
             }
             _ => {}
         }

@@ -2,7 +2,7 @@
 
 一个开箱即用的 [sing-box](https://github.com/SagerNet/sing-box) 启动器。下载、配置订阅、运行，即可实现 **TUN 模式透明代理 + 国内外自动分流**。
 
-> **当前支持 Hysteria2 和 AnyTLS 协议节点**
+> **当前支持 Hysteria2、AnyTLS 和 Shadowsocks (SS) 协议节点**
 
 ## 特性
 
