@@ -5,9 +5,15 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Miao 控制面板</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
     <style>
+        .container { max-width: 1400px; margin: 0 auto; padding: 0 1rem; }
+        .d-flex { display: flex; }
+        .align-items-center { align-items: center; }
+        .flex-wrap { flex-wrap: wrap; }
+        .gap-3 { gap: 1rem; }
+
         :root {
             --bg-gradient-start: #0f0c29;
             --bg-gradient-mid: #302b63;
@@ -663,6 +669,17 @@
             border-color: rgba(255, 255, 255, 0.1);
         }
 
+        .proxy-node.testing {
+            opacity: 0.6;
+            cursor: wait;
+            animation: pulse 1s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 0.6; }
+            50% { opacity: 0.3; }
+        }
+
         .proxy-node-name {
             font-size: 0.85rem;
             white-space: nowrap;
@@ -1225,8 +1242,8 @@
                             </div>
                             <div class="proxy-nodes">
                                 <div v-for="nodeName in getFilteredNodes(group.all)" :key="nodeName"
-                                    :class="['proxy-node', { active: nodeName === group.now, disabled: delays[nodeName] < 0 }]"
-                                    @click="delays[nodeName] < 0 ? null : switchProxy(groupName, nodeName)">
+                                    :class="['proxy-node', { active: nodeName === group.now, disabled: delays[nodeName] < 0, testing: testingNodes[nodeName] }]"
+                                    @click="delays[nodeName] < 0 || testingNodes[nodeName] ? null : switchProxy(groupName, nodeName)">
                                     <div class="proxy-node-name" :title="nodeName">{{ nodeName }}</div>
                                     <div :class="['proxy-node-delay', getDelayClass(delays[nodeName])]">
                                         {{ formatDelay(delays[nodeName]) }}
@@ -1471,6 +1488,7 @@
                 // Clash API 状态
                 const proxies = ref({});
                 const delays = ref({});
+                const testingNodes = ref({});
                 const traffic = ref({});
                 const testingGroup = ref('');
 
@@ -1509,7 +1527,7 @@
 
                 // 计算属性
                 const canAddNode = computed(() => {
-                    return newNode.value.tag && newNode.value.server && newNode.value.server_port && newNode.value.password;
+                    return newNode.value.tag?.trim() && newNode.value.server?.trim() && newNode.value.server_port && newNode.value.password?.trim();
                 });
 
                 // 过滤只显示 selector 类型的代理组
@@ -1551,11 +1569,6 @@
                         confirmModal.value.onConfirm();
                     }
                     cancelConfirm();
-                };
-
-                // 页面标题更新
-                const updatePageTitle = (running) => {
-                    document.title = running ? '✓ Miao 控制面板' : '✗ Miao 控制面板';
                 };
 
                 // 节点搜索和排序
@@ -1639,8 +1652,9 @@
                 };
 
                 const testDelay = async (nodeName) => {
+                    testingNodes.value[nodeName] = true;
                     try {
-                        const res = await fetch(`${clashApiBase.value}/proxies/${encodeURIComponent(nodeName)}/delay?timeout=5000&url=http://www.gstatic.com/generate_204`);
+                        const res = await fetch(`${clashApiBase.value}/proxies/${encodeURIComponent(nodeName)}/delay?timeout=3000&url=http://www.gstatic.com/generate_204`);
                         if (!res.ok) {
                             delays.value[nodeName] = -1;
                             return;
@@ -1649,6 +1663,8 @@
                         delays.value[nodeName] = data.delay > 0 ? data.delay : -1;
                     } catch (e) {
                         delays.value[nodeName] = -1;
+                    } finally {
+                        delete testingNodes.value[nodeName];
                     }
                 };
 
@@ -1767,7 +1783,6 @@
                         const data = await response.json();
                         if (data.success && data.data) {
                             status.value = data.data;
-                            updatePageTitle(data.data.running);
                         }
                     } catch (e) { console.error('获取状态失败:', e); }
                 };
@@ -1855,8 +1870,14 @@
                 const addNode = async () => {
                     if (!canAddNode.value) return;
                     try {
-                        const nodeData = { ...newNode.value };
-                        if (!nodeData.sni) delete nodeData.sni;
+                        const nodeData = {
+                            tag: newNode.value.tag.trim(),
+                            server: newNode.value.server.trim(),
+                            server_port: newNode.value.server_port,
+                            password: newNode.value.password.trim(),
+                        };
+                        const sni = newNode.value.sni?.trim();
+                        if (sni) nodeData.sni = sni;
                         await apiCall('nodes', 'POST', nodeData, 'addNode');
                         showToast('节点已添加', 'success');
                         newNode.value = { tag: '', server: '', server_port: 443, password: '', sni: '' };
@@ -1979,7 +2000,7 @@
                 return {
                     status, subs, nodes, loading, loadingAction, toasts,
                     newSubUrl, newNode, canAddNode,
-                    proxies, delays, traffic, testingGroup, selectorGroups,
+                    proxies, delays, testingNodes, traffic, testingGroup, selectorGroups,
                     // 日志相关
                     logs, logContainer, logAutoScroll, showLogs, clearLogs,
                     // UI 相关

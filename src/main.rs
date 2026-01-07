@@ -171,6 +171,10 @@ async fn serve_index() -> Html<&'static str> {
     Html(include_str!("../public/index.html"))
 }
 
+async fn serve_favicon() -> ([(axum::http::header::HeaderName, &'static str); 1], &'static str) {
+    ([(axum::http::header::CONTENT_TYPE, "image/svg+xml")], include_str!("../public/icon.svg"))
+}
+
 /// GET /api/status - Get sing-box running status
 async fn get_status() -> Json<ApiResponse<StatusData>> {
     let mut lock = SING_PROCESS.lock().await;
@@ -431,7 +435,7 @@ async fn upgrade() -> Json<ApiResponse<String>> {
 
     // 7. Stop sing-box before replacing and wait for it to exit
     println!("Stopping sing-box before upgrade...");
-    stop_sing_internal_and_wait().await;
+    stop_sing_internal().await;
 
     // 8. Backup current binary (must succeed)
     let backup_path = format!("{}.bak", current_exe.display());
@@ -527,15 +531,10 @@ async fn add_sub(
         config_clone = config.clone();
     }
 
-    // Regenerate and restart in background
-    let sing_box_home = state.sing_box_home.clone();
-    tokio::spawn(async move {
-        if let Err(e) = regenerate_and_restart(&config_clone, &sing_box_home).await {
-            eprintln!("Background regenerate failed: {}", e);
-        }
-    });
-
-    Ok(Json(ApiResponse::success_no_data("Subscription added, restarting...")))
+    match regenerate_and_restart(&config_clone, &state.sing_box_home).await {
+        Ok(_) => Ok(Json(ApiResponse::success_no_data("Subscription added and sing-box restarted"))),
+        Err(e) => Err((StatusCode::INTERNAL_SERVER_ERROR, Json(ApiResponse::error(e)))),
+    }
 }
 
 /// DELETE /api/subs - Delete a subscription URL
@@ -566,14 +565,10 @@ async fn delete_sub(
         config_clone = config.clone();
     }
 
-    let sing_box_home = state.sing_box_home.clone();
-    tokio::spawn(async move {
-        if let Err(e) = regenerate_and_restart(&config_clone, &sing_box_home).await {
-            eprintln!("Background regenerate failed: {}", e);
-        }
-    });
-
-    Ok(Json(ApiResponse::success_no_data("Subscription deleted, restarting...")))
+    match regenerate_and_restart(&config_clone, &state.sing_box_home).await {
+        Ok(_) => Ok(Json(ApiResponse::success_no_data("Subscription deleted and sing-box restarted"))),
+        Err(e) => Err((StatusCode::INTERNAL_SERVER_ERROR, Json(ApiResponse::error(e)))),
+    }
 }
 
 /// POST /api/subs/refresh - Refresh subscriptions and restart
@@ -676,14 +671,10 @@ async fn add_node(
         config_clone = config.clone();
     }
 
-    let sing_box_home = state.sing_box_home.clone();
-    tokio::spawn(async move {
-        if let Err(e) = regenerate_and_restart(&config_clone, &sing_box_home).await {
-            eprintln!("Background regenerate failed: {}", e);
-        }
-    });
-
-    Ok(Json(ApiResponse::success_no_data("Node added, restarting...")))
+    match regenerate_and_restart(&config_clone, &state.sing_box_home).await {
+        Ok(_) => Ok(Json(ApiResponse::success_no_data("Node added and sing-box restarted"))),
+        Err(e) => Err((StatusCode::INTERNAL_SERVER_ERROR, Json(ApiResponse::error(e)))),
+    }
 }
 
 /// DELETE /api/nodes - Delete a node by tag
@@ -720,14 +711,10 @@ async fn delete_node(
         config_clone = config.clone();
     }
 
-    let sing_box_home = state.sing_box_home.clone();
-    tokio::spawn(async move {
-        if let Err(e) = regenerate_and_restart(&config_clone, &sing_box_home).await {
-            eprintln!("Background regenerate failed: {}", e);
-        }
-    });
-
-    Ok(Json(ApiResponse::success_no_data("Node deleted, restarting...")))
+    match regenerate_and_restart(&config_clone, &state.sing_box_home).await {
+        Ok(_) => Ok(Json(ApiResponse::success_no_data("Node deleted and sing-box restarted"))),
+        Err(e) => Err((StatusCode::INTERNAL_SERVER_ERROR, Json(ApiResponse::error(e)))),
+    }
 }
 
 // ============================================================================
@@ -915,15 +902,9 @@ async fn start_sing_internal(
     }
 
     if !connectivity_ok {
-        // Stop sing-box and clean up
+        // Stop sing-box gracefully and clean up
         println!("Connectivity check failed, stopping sing-box...");
-        let mut lock = SING_PROCESS.lock().await;
-        if let Some(ref mut proc) = *lock {
-            proc.child.start_kill().ok();
-            // Wait for process to exit
-            let _ = proc.child.wait().await;
-        }
-        *lock = None;
+        stop_sing_internal().await;
         return Err("sing-box started but connectivity check failed".into());
     }
 
@@ -931,31 +912,6 @@ async fn start_sing_internal(
 }
 
 async fn stop_sing_internal() {
-    let mut lock = SING_PROCESS.lock().await;
-    if let Some(ref mut proc) = *lock {
-        if proc.child.try_wait().ok().flatten().is_none() {
-            // Use SIGTERM to allow sing-box to gracefully shutdown and cleanup nftables rules
-            if let Some(pid) = proc.child.id() {
-                let _ = kill(Pid::from_raw(pid as i32), Signal::SIGTERM);
-                // Wait up to 3 seconds for graceful shutdown
-                for _ in 0..30 {
-                    sleep(Duration::from_millis(100)).await;
-                    if proc.child.try_wait().ok().flatten().is_some() {
-                        break;
-                    }
-                }
-                // Force kill if still running
-                if proc.child.try_wait().ok().flatten().is_none() {
-                    proc.child.start_kill().ok();
-                }
-            }
-        }
-    }
-    *lock = None;
-}
-
-/// Stop sing-box and wait for it to fully exit
-async fn stop_sing_internal_and_wait() {
     let mut lock = SING_PROCESS.lock().await;
     if let Some(ref mut proc) = *lock {
         if proc.child.try_wait().ok().flatten().is_none() {
@@ -1156,6 +1112,14 @@ async fn fetch_sub(
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    // Clean up backup file from previous upgrade
+    if let Ok(current_exe) = std::env::current_exe() {
+        let backup_path = format!("{}.bak", current_exe.display());
+        if std::path::Path::new(&backup_path).exists() {
+            let _ = fs::remove_file(&backup_path);
+        }
+    }
+
     let config: Config = serde_yaml::from_str(&tokio::fs::read_to_string("config.yaml").await?)?;
     let port = config.port.unwrap_or(DEFAULT_PORT);
 
@@ -1201,6 +1165,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // Build router with API endpoints
     let app = Router::new()
         .route("/", get(serve_index))
+        .route("/favicon.svg", get(serve_favicon))
         // Status and service control
         .route("/api/status", get(get_status))
         .route("/api/service/start", post(start_service))
