@@ -137,7 +137,13 @@ struct StatusData {
     uptime_secs: Option<u64>,
 }
 
-
+#[derive(Serialize, Clone)]
+struct ConnectivityResult {
+    name: String,
+    url: String,
+    latency_ms: Option<u64>,
+    success: bool,
+}
 
 // Request types for subscription and node management
 #[derive(Deserialize)]
@@ -257,6 +263,44 @@ async fn start_service(
 async fn stop_service() -> Json<ApiResponse<()>> {
     stop_sing_internal().await;
     Json(ApiResponse::success_no_data("sing-box stopped"))
+}
+
+/// POST /api/connectivity - Test connectivity to a single site
+#[derive(Deserialize)]
+struct ConnectivityRequest {
+    url: String,
+}
+
+async fn test_connectivity(
+    Json(req): Json<ConnectivityRequest>,
+) -> Json<ApiResponse<ConnectivityResult>> {
+    let client = match reqwest::Client::builder()
+        .timeout(Duration::from_secs(5))
+        .build()
+    {
+        Ok(c) => c,
+        Err(e) => {
+            return Json(ApiResponse::error(format!("Failed to create client: {}", e)));
+        }
+    };
+
+    let start = Instant::now();
+    let result = match client.head(&req.url).send().await {
+        Ok(_) => ConnectivityResult {
+            name: String::new(),
+            url: req.url,
+            latency_ms: Some(start.elapsed().as_millis() as u64),
+            success: true,
+        },
+        Err(_) => ConnectivityResult {
+            name: String::new(),
+            url: req.url,
+            latency_ms: None,
+            success: false,
+        },
+    };
+
+    Json(ApiResponse::success("Test completed", result))
 }
 
 // ============================================================================
@@ -1074,7 +1118,7 @@ fn get_config_template() -> serde_json::Value {
         "dns": {
             "final": "googledns",
             "strategy": "prefer_ipv4",
-            "independent_cache": true,
+            "disable_cache": true,
             "servers": [
                 {"type": "udp", "tag": "googledns", "server": "8.8.8.8", "detour": "proxy"},
                 {"tag": "local", "type": "udp", "server": "223.5.5.5"}
@@ -1293,6 +1337,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         .route("/api/status", get(get_status))
         .route("/api/service/start", post(start_service))
         .route("/api/service/stop", post(stop_service))
+        // Connectivity test
+        .route("/api/connectivity", post(test_connectivity))
         // Version and upgrade
         .route("/api/version", get(get_version))
         .route("/api/upgrade", post(upgrade))

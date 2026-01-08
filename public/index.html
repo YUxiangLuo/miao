@@ -1224,6 +1224,62 @@
             align-items: center;
         }
 
+        /* 连通性测试 */
+        .connectivity-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+            gap: 0.75rem;
+        }
+
+        .connectivity-item {
+            background: rgba(0, 0, 0, 0.2);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
+            padding: 0.75rem;
+            text-align: center;
+            transition: all 0.2s ease;
+        }
+
+        .connectivity-item:hover {
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        .connectivity-item.testing {
+            animation: pulse 1s infinite;
+        }
+
+        .connectivity-item.pending {
+            opacity: 0.4;
+        }
+
+        .connectivity-name {
+            font-size: 0.85rem;
+            color: rgba(255, 255, 255, 0.7);
+            margin-bottom: 0.35rem;
+        }
+
+        .connectivity-delay {
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: rgba(255, 255, 255, 0.4);
+        }
+
+        .connectivity-delay.fast {
+            color: var(--accent-green);
+        }
+
+        .connectivity-delay.medium {
+            color: var(--accent-orange);
+        }
+
+        .connectivity-delay.slow {
+            color: var(--accent-red);
+        }
+
+        .connectivity-delay.timeout {
+            color: var(--accent-red);
+        }
+
         /* 防止 Vue 加载前闪烁 */
         [v-cloak] {
             display: none !important;
@@ -1338,6 +1394,35 @@
                         <div class="status-item" v-if="status.running">
                             <span class="status-label">运行时间</span>
                             <span class="status-value">{{ formatUptime(status.uptime_secs) }}</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 连通性测试 - 全宽 -->
+                <div class="glass-card layout-full" v-if="status.running">
+                    <div class="card-header-custom">
+                        <i class="bi bi-globe"></i>
+                        <span>HTTPS 连通性测试</span>
+                        <button class="btn-custom btn-secondary-custom btn-sm-custom"
+                            @click="testConnectivity" :disabled="testingConnectivity"
+                            style="margin-left: auto;">
+                            <span v-if="testingConnectivity" class="spinner" style="width:12px;height:12px;"></span>
+                            <i v-else class="bi bi-wifi"></i>
+                            测试连接
+                        </button>
+                    </div>
+                    <div class="connectivity-grid">
+                        <div v-for="site in connectivitySites" :key="site.name"
+                            :class="['connectivity-item', {
+                                testing: currentTestingSite === site.name,
+                                pending: testingConnectivity && currentTestingSite !== site.name && !connectivityResults[site.name]
+                            }]"
+                            @click="testSingleSite(site)"
+                            :style="{ cursor: currentTestingSite ? 'wait' : 'pointer' }">
+                            <div class="connectivity-name">{{ site.name }}</div>
+                            <div :class="['connectivity-delay', getConnectivityClass(site.name)]">
+                                {{ formatConnectivityDelay(site.name) }}
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -1515,7 +1600,7 @@
                 <!-- 右列结束 -->
 
                 <!-- 添加节点模态框 -->
-                <div class="modal-overlay" v-if="showNodeModal" @click.self="showNodeModal = false">
+                <div class="modal-overlay" v-if="showNodeModal" v-cloak @click.self="showNodeModal = false">
                     <div class="modal-content">
                         <div class="modal-header">
                             <span class="modal-title">添加节点</span>
@@ -1722,6 +1807,19 @@
                 // 版本更新状态
                 const versionInfo = ref({ current: '', latest: null, has_update: false });
                 const upgrading = ref(false);
+
+                // 连通性测试状态
+                const connectivitySites = [
+                    { name: 'Google', url: 'https://www.google.com' },
+                    { name: 'GitHub', url: 'https://github.com' },
+                    { name: 'YouTube', url: 'https://www.youtube.com' },
+                    { name: 'Twitter', url: 'https://x.com' },
+                    { name: 'Telegram', url: 'https://telegram.org' },
+                    { name: 'OpenAI', url: 'https://openai.com' },
+                ];
+                const connectivityResults = ref({});  // { 'Google': { latency_ms: 123, success: true }, ... }
+                const testingConnectivity = ref(false);
+                const currentTestingSite = ref(null);  // 当前正在测试的站点名
 
                 let statusInterval = null;
                 let toastId = 0;
@@ -2132,6 +2230,73 @@
                     }
                 };
 
+                // 连通性测试 - 测试单个站点
+                const testSingleSite = async (site) => {
+                    if (currentTestingSite.value) return;  // 正在测试中
+                    currentTestingSite.value = site.name;
+                    try {
+                        const res = await fetch('/api/connectivity', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ url: site.url })
+                        });
+                        const data = await res.json();
+                        if (data.success && data.data) {
+                            connectivityResults.value[site.name] = data.data;
+                        } else {
+                            connectivityResults.value[site.name] = { success: false };
+                        }
+                    } catch (e) {
+                        connectivityResults.value[site.name] = { success: false };
+                    }
+                    currentTestingSite.value = null;
+                };
+
+                // 连通性测试 - 测试所有站点
+                const testConnectivity = async () => {
+                    testingConnectivity.value = true;
+                    connectivityResults.value = {};  // 清除之前的结果
+
+                    for (const site of connectivitySites) {
+                        currentTestingSite.value = site.name;
+                        try {
+                            const res = await fetch('/api/connectivity', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ url: site.url })
+                            });
+                            const data = await res.json();
+                            if (data.success && data.data) {
+                                connectivityResults.value[site.name] = data.data;
+                            } else {
+                                connectivityResults.value[site.name] = { success: false };
+                            }
+                        } catch (e) {
+                            connectivityResults.value[site.name] = { success: false };
+                        }
+                    }
+
+                    currentTestingSite.value = null;
+                    testingConnectivity.value = false;
+                };
+
+                const getConnectivityClass = (siteName) => {
+                    const result = connectivityResults.value[siteName];
+                    if (!result) return '';
+                    if (!result.success) return 'timeout';
+                    const ms = result.latency_ms;
+                    if (ms < 300) return 'fast';
+                    if (ms < 800) return 'medium';
+                    return 'slow';
+                };
+
+                const formatConnectivityDelay = (siteName) => {
+                    const result = connectivityResults.value[siteName];
+                    if (!result) return '-';
+                    if (!result.success) return '超时';
+                    return `${result.latency_ms}ms`;
+                };
+
                 // 处理更新按钮点击
                 const handleUpdateClick = () => {
                     if (versionInfo.value.has_update) {
@@ -2231,6 +2396,10 @@
                     getFilteredNodes, hasFastestNode, selectFastest,
                     // 版本更新
                     versionInfo, upgrading, handleUpdateClick,
+                    // 连通性测试
+                    connectivitySites, connectivityResults, testingConnectivity,
+                    currentTestingSite, testConnectivity, testSingleSite,
+                    getConnectivityClass, formatConnectivityDelay,
                     // 其他
                     showToast, getToastIcon,
                     startService, stopService, toggleService,
