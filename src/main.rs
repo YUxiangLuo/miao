@@ -203,6 +203,22 @@ async fn serve_favicon() -> ([(axum::http::header::HeaderName, &'static str); 1]
     ([(axum::http::header::CONTENT_TYPE, "image/svg+xml")], include_str!("../public/icon.svg"))
 }
 
+async fn serve_vue() -> ([(axum::http::header::HeaderName, &'static str); 1], &'static str) {
+    ([(axum::http::header::CONTENT_TYPE, "application/javascript")], include_str!("../embedded/assets/vue.js"))
+}
+
+async fn serve_bootstrap_css() -> ([(axum::http::header::HeaderName, &'static str); 1], &'static str) {
+    ([(axum::http::header::CONTENT_TYPE, "text/css")], include_str!("../embedded/assets/bootstrap-icons.css"))
+}
+
+async fn serve_font_woff2() -> ([(axum::http::header::HeaderName, &'static str); 1], &'static [u8]) {
+    ([(axum::http::header::CONTENT_TYPE, "font/woff2")], include_bytes!("../embedded/assets/fonts/bootstrap-icons.woff2"))
+}
+
+async fn serve_font_woff() -> ([(axum::http::header::HeaderName, &'static str); 1], &'static [u8]) {
+    ([(axum::http::header::CONTENT_TYPE, "font/woff")], include_bytes!("../embedded/assets/fonts/bootstrap-icons.woff"))
+}
+
 /// GET /api/status - Get sing-box running status
 async fn get_status() -> Json<ApiResponse<StatusData>> {
     let mut lock = SING_PROCESS.lock().await;
@@ -1333,6 +1349,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let app = Router::new()
         .route("/", get(serve_index))
         .route("/favicon.svg", get(serve_favicon))
+        // Static assets
+        .route("/assets/vue.js", get(serve_vue))
+        .route("/assets/bootstrap-icons.css", get(serve_bootstrap_css))
+        .route("/assets/fonts/bootstrap-icons.woff2", get(serve_font_woff2))
+        .route("/assets/fonts/bootstrap-icons.woff", get(serve_font_woff))
         // Status and service control
         .route("/api/status", get(get_status))
         .route("/api/service/start", post(start_service))
