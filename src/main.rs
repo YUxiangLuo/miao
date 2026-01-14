@@ -1133,8 +1133,9 @@ fn get_config_template() -> serde_json::Value {
         "experimental": {"clash_api": {"external_controller": "0.0.0.0:6262", "access_control_allow_origin": ["*"]}},
         "dns": {
             "final": "googledns",
-            "strategy": "prefer_ipv4",
+            "strategy": "ipv4_only",
             "disable_cache": false,
+            "independent_cache": true,
             "servers": [
                 {"type": "udp", "tag": "googledns", "server": "8.8.8.8", "detour": "proxy"},
                 {"tag": "local", "type": "udp", "server": "223.5.5.5"}
@@ -1156,7 +1157,6 @@ fn get_config_template() -> serde_json::Value {
                 {"action": "sniff"},
                 {"protocol": "dns", "action": "hijack-dns"},
                 {"ip_is_private": true, "action": "route", "outbound": "direct"},
-                {"protocol": ["bittorrent"], "action": "route", "outbound": "direct"},
                 {"rule_set": ["chinasite"], "action": "route", "outbound": "direct"},
                 {"rule_set": ["chinaip"], "action": "route", "outbound": "direct"}
             ],
