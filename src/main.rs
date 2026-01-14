@@ -1156,9 +1156,7 @@ fn get_config_template() -> serde_json::Value {
             "rules": [
                 {"action": "sniff"},
                 {"protocol": "dns", "action": "hijack-dns"},
-                {"ip_is_private": true, "action": "route", "outbound": "direct"},
-                {"rule_set": ["chinasite"], "action": "route", "outbound": "direct"},
-                {"rule_set": ["chinaip"], "action": "route", "outbound": "direct"}
+                {"ip_is_private": true, "rule_set": ["chinasite", "chinaip"], "action": "route", "outbound": "direct"}
             ],
             "rule_set": [
                 {"type": "remote", "tag": "chinasite", "format": "binary", "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-geolocation-cn.srs"},
