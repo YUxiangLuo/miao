@@ -14,3 +14,4 @@ tower = "0.5"
 tower-http = "0.5"
 lazy_static = "1.4"
 nix = { version = "0.29", features = ["signal", "user"] }
+urlencoding = "2.1.3"

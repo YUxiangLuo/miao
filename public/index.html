@@ -1963,6 +1963,12 @@
                         });
                         await fetchProxies();
                         showToast(`已切换到 ${nodeName}`, 'success');
+                        // Save last selected proxy for auto-restore
+                        fetch('/api/last-proxy', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ group: groupName, name: nodeName })
+                        }).catch(() => {});
                     } catch (e) {
                         showToast('切换节点失败', 'error');
                     }

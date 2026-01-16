@@ -857,6 +857,107 @@ async fn delete_node(
 }
 
 // ============================================================================
+// Last Proxy Management (for auto-restore after restart)
+// ============================================================================
+
+#[derive(Serialize, Deserialize, Clone)]
+struct LastProxy {
+    group: String,
+    name: String,
+}
+
+fn get_last_proxy_path() -> PathBuf {
+    get_sing_box_home().join(".last_proxy")
+}
+
+async fn save_last_proxy(proxy: &LastProxy) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let json = serde_json::to_string(proxy)?;
+    tokio::fs::write(get_last_proxy_path(), json).await?;
+    Ok(())
+}
+
+async fn load_last_proxy() -> Option<LastProxy> {
+    let path = get_last_proxy_path();
+    if let Ok(content) = tokio::fs::read_to_string(&path).await {
+        serde_json::from_str(&content).ok()
+    } else {
+        None
+    }
+}
+
+/// POST /api/last-proxy - Save last selected proxy
+async fn set_last_proxy(
+    Json(req): Json<LastProxy>,
+) -> Json<ApiResponse<()>> {
+    match save_last_proxy(&req).await {
+        Ok(_) => Json(ApiResponse::success_no_data("Last proxy saved")),
+        Err(e) => Json(ApiResponse::error(format!("Failed to save: {}", e))),
+    }
+}
+
+/// Try to restore last selected proxy via Clash API
+async fn restore_last_proxy() {
+    let proxy = match load_last_proxy().await {
+        Some(p) => p,
+        None => return,
+    };
+
+    println!("Attempting to restore last proxy: {} -> {}", proxy.group, proxy.name);
+
+    // Wait a bit for Clash API to be ready
+    sleep(Duration::from_secs(1)).await;
+
+    let client = match reqwest::Client::builder()
+        .timeout(Duration::from_secs(5))
+        .build()
+    {
+        Ok(c) => c,
+        Err(_) => return,
+    };
+
+    // First check if the node exists in the group
+    let check_url = format!("http://127.0.0.1:6262/proxies/{}", urlencoding::encode(&proxy.group));
+    let group_info = match client.get(&check_url).send().await {
+        Ok(res) => match res.json::<serde_json::Value>().await {
+            Ok(v) => v,
+            Err(_) => return,
+        },
+        Err(_) => return,
+    };
+
+    // Check if the node name exists in the group's "all" array
+    let all_nodes = group_info.get("all").and_then(|v| v.as_array());
+    if let Some(nodes) = all_nodes {
+        let node_exists = nodes.iter().any(|n| n.as_str() == Some(&proxy.name));
+        if !node_exists {
+            println!("Last proxy '{}' not found in current node list, skipping restore", proxy.name);
+            return;
+        }
+    } else {
+        return;
+    }
+
+    // Restore the proxy selection
+    let url = format!("http://127.0.0.1:6262/proxies/{}", urlencoding::encode(&proxy.group));
+    match client
+        .put(&url)
+        .json(&serde_json::json!({ "name": proxy.name }))
+        .send()
+        .await
+    {
+        Ok(res) if res.status().is_success() => {
+            println!("Successfully restored last proxy: {}", proxy.name);
+        }
+        Ok(res) => {
+            println!("Failed to restore last proxy: status {}", res.status());
+        }
+        Err(e) => {
+            println!("Failed to restore last proxy: {}", e);
+        }
+    }
+}
+
+// ============================================================================
 // Internal Functions
 // ============================================================================
 
@@ -879,6 +980,12 @@ async fn regenerate_and_restart(config: &Config) -> Result<(), String> {
 
     start_sing_internal().await.map_err(|e| format!("Failed to restart sing-box: {}", e))?;
     println!("sing-box restarted successfully");
+
+    // Try to restore last selected proxy (non-blocking)
+    tokio::spawn(async {
+        restore_last_proxy().await;
+    });
+
     Ok(())
 }
 
@@ -1416,6 +1523,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         .route("/api/nodes", get(get_nodes))
         .route("/api/nodes", post(add_node))
         .route("/api/nodes", delete(delete_node))
+        // Last proxy (for auto-restore)
+        .route("/api/last-proxy", post(set_last_proxy))
         .with_state(app_state);
 
     let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", port)).await?;
