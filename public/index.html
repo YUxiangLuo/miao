@@ -1403,12 +1403,17 @@
                     <div class="card-header-custom">
                         <i class="bi bi-globe"></i>
                         <span>HTTPS 连通性测试</span>
-                        <button class="btn-custom btn-secondary-custom btn-sm-custom"
-                            @click="testConnectivity" :disabled="testingConnectivity"
+                        <button v-if="!testingConnectivity" class="btn-custom btn-secondary-custom btn-sm-custom"
+                            @click="testConnectivity"
                             style="margin-left: auto;">
-                            <span v-if="testingConnectivity" class="spinner" style="width:12px;height:12px;"></span>
-                            <i v-else class="bi bi-wifi"></i>
+                            <i class="bi bi-wifi"></i>
                             测试连接
+                        </button>
+                        <button v-else class="btn-custom btn-sm-custom"
+                            @click="stopConnectivity"
+                            style="margin-left: auto; background: var(--accent-red);">
+                            <i class="bi bi-stop-fill"></i>
+                            停止测试
                         </button>
                     </div>
                     <div class="connectivity-grid">
@@ -1830,6 +1835,7 @@
                 const connectivityResults = ref({});  // { 'Google': { latency_ms: 123, success: true }, ... }
                 const testingConnectivity = ref(false);
                 const currentTestingSite = ref(null);  // 当前正在测试的站点名
+                const stopConnectivityTest = ref(false);  // 停止测试标志
 
                 let statusInterval = null;
                 let toastId = 0;
@@ -2265,9 +2271,11 @@
                 // 连通性测试 - 测试所有站点
                 const testConnectivity = async () => {
                     testingConnectivity.value = true;
+                    stopConnectivityTest.value = false;
                     connectivityResults.value = {};  // 清除之前的结果
 
                     for (const site of connectivitySites) {
+                        if (stopConnectivityTest.value) break;  // 检查是否需要停止
                         currentTestingSite.value = site.name;
                         try {
                             const res = await fetch('/api/connectivity', {
@@ -2288,6 +2296,12 @@
 
                     currentTestingSite.value = null;
                     testingConnectivity.value = false;
+                    stopConnectivityTest.value = false;
+                };
+
+                // 停止连通性测试
+                const stopConnectivity = () => {
+                    stopConnectivityTest.value = true;
                 };
 
                 const getConnectivityClass = (siteName) => {
@@ -2408,7 +2422,7 @@
                     versionInfo, upgrading, handleUpdateClick,
                     // 连通性测试
                     connectivitySites, connectivityResults, testingConnectivity,
-                    currentTestingSite, testConnectivity, testSingleSite,
+                    currentTestingSite, testConnectivity, testSingleSite, stopConnectivity,
                     getConnectivityClass, formatConnectivityDelay,
                     // 其他
                     showToast, getToastIcon,
