@@ -1486,7 +1486,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     // Start sing-box
     match start_sing_internal().await {
-        Ok(_) => println!("sing-box started successfully"),
+        Ok(_) => {
+            println!("sing-box started successfully");
+            // Try to restore last selected proxy (non-blocking)
+            tokio::spawn(async {
+                restore_last_proxy().await;
+            });
+        }
         Err(e) => eprintln!("Failed to start sing-box: {}", e),
     }
 
