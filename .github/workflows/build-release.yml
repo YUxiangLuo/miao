@@ -91,6 +91,14 @@ jobs:
           echo "Built sing-box ${SING_BOX_VERSION}"
           ls -lh embedded/
 
+      - name: Download geo rule files
+        run: |
+          # Download geoip and geosite rule files from sing-box releases
+          curl -L -o embedded/geoip-cn.srs https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/geoip-cn.srs
+          curl -L -o embedded/geosite-geolocation-cn.srs https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-geolocation-cn.srs
+          echo "Downloaded geo rule files:"
+          ls -lh embedded/*.srs
+
       - name: Build release for ${{ matrix.target }}
         run: |
           if [ "${{ matrix.target }}" = "arm64" ]; then
