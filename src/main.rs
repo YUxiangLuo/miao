@@ -1007,10 +1007,18 @@ fn extract_sing_box() -> Result<PathBuf, Box<dyn std::error::Error + Send + Sync
     if !sing_box_path.exists() {
         println!("Extracting embedded sing-box binary to {:?}", sing_box_path);
         fs::write(&sing_box_path, SING_BOX_BINARY)?;
-        fs::write(&ip_rule_path, IP_RULE_BINARY)?;
-        fs::write(&site_rule_path, SITE_RULE_BINARY)?;
         fs::set_permissions(&sing_box_path, fs::Permissions::from_mode(0o755))?;
         println!("sing-box binary extracted successfully");
+    }
+
+    // Always check and extract rule files separately
+    if !ip_rule_path.exists() {
+        println!("Extracting geoip rule file to {:?}", ip_rule_path);
+        fs::write(&ip_rule_path, IP_RULE_BINARY)?;
+    }
+    if !site_rule_path.exists() {
+        println!("Extracting geosite rule file to {:?}", site_rule_path);
+        fs::write(&site_rule_path, SITE_RULE_BINARY)?;
     }
 
     let dashboard_dir = sing_box_home.join("dashboard");
