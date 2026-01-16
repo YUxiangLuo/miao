@@ -9,6 +9,7 @@ use lazy_static::lazy_static;
 use nix::sys::signal::{kill, Signal};
 use nix::unistd::{Pid, Uid};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
@@ -187,8 +188,18 @@ struct SingBoxProcess {
     started_at: Instant,
 }
 
+#[derive(Clone, Serialize)]
+struct SubStatus {
+    url: String,
+    success: bool,
+    node_count: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
+}
+
 lazy_static! {
     static ref SING_PROCESS: Mutex<Option<SingBoxProcess>> = Mutex::new(None);
+    static ref SUB_STATUS: Mutex<HashMap<String, SubStatus>> = Mutex::new(HashMap::new());
 }
 
 // ============================================================================
@@ -580,10 +591,25 @@ async fn upgrade() -> Json<ApiResponse<String>> {
 // Subscription Management APIs
 // ============================================================================
 
-/// GET /api/subs - Get all subscription URLs
-async fn get_subs(State(state): State<Arc<AppState>>) -> Json<ApiResponse<Vec<String>>> {
+/// GET /api/subs - Get all subscription URLs with status
+async fn get_subs(State(state): State<Arc<AppState>>) -> Json<ApiResponse<Vec<SubStatus>>> {
     let config = state.config.lock().await;
-    Json(ApiResponse::success("Subscriptions loaded", config.subs.clone()))
+    let status_map = SUB_STATUS.lock().await;
+
+    let subs_with_status: Vec<SubStatus> = config
+        .subs
+        .iter()
+        .map(|url| {
+            status_map.get(url).cloned().unwrap_or(SubStatus {
+                url: url.clone(),
+                success: true, // Not yet fetched, assume pending
+                node_count: 0,
+                error: None,
+            })
+        })
+        .collect();
+
+    Json(ApiResponse::success("Subscriptions loaded", subs_with_status))
 }
 
 /// POST /api/subs - Add a subscription URL
@@ -1074,18 +1100,38 @@ async fn gen_config(
     let mut final_outbounds: Vec<serde_json::Value> = vec![];
     let mut final_node_names: Vec<String> = vec![];
 
+    // Clear old status for subs that no longer exist
+    {
+        let mut status_map = SUB_STATUS.lock().await;
+        status_map.retain(|url, _| config.subs.contains(url));
+    }
+
     for sub in &config.subs {
         println!("Fetching subscription: {}", sub);
-        match fetch_sub(sub).await {
+        let status = match fetch_sub(sub).await {
             Ok((node_names, outbounds)) => {
-                println!("  -> Success: fetched {} nodes", node_names.len());
+                let count = node_names.len();
+                println!("  -> Success: fetched {} nodes", count);
                 final_node_names.extend(node_names);
                 final_outbounds.extend(outbounds);
+                SubStatus {
+                    url: sub.clone(),
+                    success: count > 0,
+                    node_count: count,
+                    error: if count == 0 { Some("No nodes found".into()) } else { None },
+                }
             }
             Err(e) => {
                 eprintln!("  -> Failed to fetch subscription: {}", e);
+                SubStatus {
+                    url: sub.clone(),
+                    success: false,
+                    node_count: 0,
+                    error: Some(e.to_string()),
+                }
             }
-        }
+        };
+        SUB_STATUS.lock().await.insert(sub.clone(), status);
     }
 
     let total_nodes = my_outbounds.len() + final_outbounds.len();

@@ -1533,9 +1533,19 @@
                             暂无订阅
                         </div>
 
-                        <div v-for="sub in subs" :key="sub" class="list-item">
-                            <span class="list-item-text">{{ sub }}</span>
-                            <button class="btn-custom btn-delete btn-sm-custom" @click="confirmDeleteSub(sub)"
+                        <div v-for="sub in subs" :key="sub.url" class="list-item">
+                            <div style="flex: 1; min-width: 0;">
+                                <div class="list-item-text" style="display: flex; align-items: center; gap: 0.5rem;">
+                                    <i v-if="sub.success" class="bi bi-check-circle-fill" style="color: var(--accent-green); flex-shrink: 0;"></i>
+                                    <i v-else class="bi bi-exclamation-circle-fill" style="color: var(--accent-red); flex-shrink: 0;"></i>
+                                    <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{ sub.url }}</span>
+                                </div>
+                                <div class="node-info" style="margin-top: 0.25rem;">
+                                    <span v-if="sub.success">{{ sub.node_count }} 个节点</span>
+                                    <span v-else style="color: var(--accent-red);">{{ sub.error || '获取失败' }}</span>
+                                </div>
+                            </div>
+                            <button class="btn-custom btn-delete btn-sm-custom" @click="confirmDeleteSub(sub.url)"
                                 :disabled="loading">
                                 <i class="bi bi-trash"></i>
                             </button>
