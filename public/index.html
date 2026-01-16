@@ -1822,7 +1822,6 @@
                     { name: 'GitHub', url: 'https://github.com' },
                     { name: 'YouTube', url: 'https://www.youtube.com' },
                     { name: 'Twitter', url: 'https://x.com' },
-                    { name: 'Telegram', url: 'https://telegram.org' },
                     { name: 'OpenAI', url: 'https://openai.com' },
                 ];
                 const connectivityResults = ref({});  // { 'Google': { latency_ms: 123, success: true }, ... }
@@ -2188,6 +2187,7 @@
                         await apiCall('subs/refresh', 'POST', null, 'refreshSubs');
                         showToast('订阅已更新', 'success');
                         delays.value = {};
+                        connectivityResults.value = {};
                         await fetchSubs();
                     } catch (e) { }
                 };
