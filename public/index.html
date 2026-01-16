@@ -1403,17 +1403,12 @@
                     <div class="card-header-custom">
                         <i class="bi bi-globe"></i>
                         <span>HTTPS 连通性测试</span>
-                        <button v-if="!testingConnectivity" class="btn-custom btn-secondary-custom btn-sm-custom"
-                            @click="testConnectivity"
+                        <button class="btn-custom btn-secondary-custom btn-sm-custom"
+                            @click="testingConnectivity ? stopConnectivity() : testConnectivity()"
                             style="margin-left: auto;">
-                            <i class="bi bi-wifi"></i>
-                            测试连接
-                        </button>
-                        <button v-else class="btn-custom btn-sm-custom"
-                            @click="stopConnectivity"
-                            style="margin-left: auto; background: var(--accent-red);">
-                            <i class="bi bi-stop-fill"></i>
-                            停止测试
+                            <span v-if="testingConnectivity" class="spinner" style="width:12px;height:12px;"></span>
+                            <i v-else class="bi bi-wifi"></i>
+                            {{ testingConnectivity ? '停止' : '测试连接' }}
                         </button>
                     </div>
                     <div class="connectivity-grid">
@@ -2302,6 +2297,7 @@
                 // 停止连通性测试
                 const stopConnectivity = () => {
                     stopConnectivityTest.value = true;
+                    showToast('测试已停止', 'info');
                 };
 
                 const getConnectivityClass = (siteName) => {
