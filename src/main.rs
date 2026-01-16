@@ -281,7 +281,13 @@ async fn start_service(
     drop(lock);
 
     match start_sing_internal().await {
-        Ok(_) => Ok(Json(ApiResponse::success_no_data("sing-box started successfully"))),
+        Ok(_) => {
+            // Try to restore last selected proxy (non-blocking)
+            tokio::spawn(async {
+                restore_last_proxy().await;
+            });
+            Ok(Json(ApiResponse::success_no_data("sing-box started successfully")))
+        }
         Err(e) => Err((
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(ApiResponse::error(format!("Failed to start: {}", e))),
