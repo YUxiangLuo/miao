@@ -565,10 +565,15 @@ async fn upgrade() -> Json<ApiResponse<String>> {
     tokio::spawn(async move {
         sleep(Duration::from_millis(500)).await;
 
-        // Clean up old sing-box directory so new version will re-extract all embedded files
-        if sing_box_home.exists() {
-            println!("Cleaning up old sing-box directory: {:?}", sing_box_home);
-            let _ = fs::remove_dir_all(&sing_box_home);
+        // Clean up embedded files so new version will re-extract them
+        // Keep .last_proxy to preserve user's last selected node
+        let files_to_remove = ["sing-box", "chinaip.srs", "chinasite.srs"];
+        for file in &files_to_remove {
+            let path = sing_box_home.join(file);
+            if path.exists() {
+                println!("Removing old file: {:?}", path);
+                let _ = fs::remove_file(&path);
+            }
         }
 
         use std::os::unix::process::CommandExt;
