@@ -28,6 +28,9 @@ const SING_BOX_BINARY: &[u8] = include_bytes!("../embedded/sing-box-amd64");
 #[cfg(target_arch = "aarch64")]
 const SING_BOX_BINARY: &[u8] = include_bytes!("../embedded/sing-box-arm64");
 
+const IP_RULE_BINARY: &[u8] = include_bytes!("../embedded/geoip-cn.srs");
+const SITE_RULE_BINARY: &[u8] = include_bytes!("../embedded/geosite-geolocation-cn.srs");
+
 // ============================================================================
 // Data Structures
 // ============================================================================
@@ -998,10 +1001,14 @@ fn extract_sing_box() -> Result<PathBuf, Box<dyn std::error::Error + Send + Sync
     }
 
     let sing_box_path = sing_box_home.join("sing-box");
+    let ip_rule_path = sing_box_home.join("chinaip.srs");
+    let site_rule_path = sing_box_home.join("chinasite.srs");
 
     if !sing_box_path.exists() {
         println!("Extracting embedded sing-box binary to {:?}", sing_box_path);
         fs::write(&sing_box_path, SING_BOX_BINARY)?;
+        fs::write(&ip_rule_path, IP_RULE_BINARY)?;
+        fs::write(&site_rule_path, SITE_RULE_BINARY)?;
         fs::set_permissions(&sing_box_path, fs::Permissions::from_mode(0o755))?;
         println!("sing-box binary extracted successfully");
     }
@@ -1312,8 +1319,8 @@ fn get_config_template() -> serde_json::Value {
                 {"ip_is_private": true, "rule_set": ["chinaip", "chinasite"], "action": "route", "outbound": "direct"}
             ],
             "rule_set": [
-                {"type": "remote", "tag": "chinasite", "format": "binary", "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-geolocation-cn.srs"},
-                {"type": "remote", "tag": "chinaip", "format": "binary", "url": "https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/geoip-cn.srs"}
+                {"type": "local", "tag": "chinasite", "format": "binary", "path": "./chinasite.srs"},
+                {"type": "local", "tag": "chinaip", "format": "binary", "path": "./chinaip.srs"}
             ]
         }
     })
