@@ -561,8 +561,15 @@ async fn upgrade() -> Json<ApiResponse<String>> {
 
     // 10. Exec to restart with new binary
     let new_version = release.tag_name.clone();
+    let sing_box_home = get_sing_box_home();
     tokio::spawn(async move {
         sleep(Duration::from_millis(500)).await;
+
+        // Clean up old sing-box directory so new version will re-extract all embedded files
+        if sing_box_home.exists() {
+            println!("Cleaning up old sing-box directory: {:?}", sing_box_home);
+            let _ = fs::remove_dir_all(&sing_box_home);
+        }
 
         use std::os::unix::process::CommandExt;
         let args: Vec<String> = std::env::args().collect();
