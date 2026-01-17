@@ -163,7 +163,7 @@
             }
 
             .proxy-nodes {
-                grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+                grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
             }
 
             .proxy-controls {
@@ -784,7 +784,7 @@
 
         .proxy-nodes {
             display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
             gap: 0.5rem;
         }
 
@@ -792,12 +792,13 @@
             background: rgba(0, 0, 0, 0.2);
             border: 1px solid rgba(255, 255, 255, 0.1);
             border-radius: 10px;
-            padding: 0.6rem 0.8rem;
-            cursor: pointer;
+            padding: 0.75rem 1rem;
             transition: all 0.2s ease;
             display: flex;
-            flex-direction: column;
-            gap: 0.25rem;
+            flex-direction: row;
+            align-items: center;
+            justify-content: space-between;
+            gap: 0.5rem;
         }
 
         .proxy-node:hover {
@@ -843,11 +844,24 @@
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
+            cursor: pointer;
+            flex: 1;
         }
 
         .proxy-node-delay {
-            font-size: 0.75rem;
+            font-size: 0.8rem;
             color: rgba(255, 255, 255, 0.5);
+            cursor: pointer;
+            padding: 0.35rem 0.6rem;
+            border-radius: 6px;
+            transition: background 0.2s;
+            min-width: 50px;
+            text-align: center;
+            flex-shrink: 0;
+        }
+
+        .proxy-node-delay:hover {
+            background: rgba(255, 255, 255, 0.15);
         }
 
         .proxy-node-delay.fast {
@@ -1507,10 +1521,14 @@
                             </div>
                             <div class="proxy-nodes">
                                 <div v-for="nodeName in getFilteredNodes(group.all)" :key="nodeName"
-                                    :class="['proxy-node', { active: nodeName === group.now, disabled: delays[nodeName] < 0, testing: testingNodes[nodeName] }]"
-                                    @click="delays[nodeName] < 0 || testingNodes[nodeName] ? null : switchProxy(groupName, nodeName)">
-                                    <div class="proxy-node-name" :title="nodeName">{{ nodeName }}</div>
-                                    <div :class="['proxy-node-delay', getDelayClass(delays[nodeName])]">
+                                    :class="['proxy-node', { active: nodeName === group.now, disabled: delays[nodeName] < 0, testing: testingNodes[nodeName] }]">
+                                    <div class="proxy-node-name" :title="nodeName"
+                                        @click="delays[nodeName] < 0 || testingNodes[nodeName] ? null : switchProxy(groupName, nodeName)">
+                                        {{ nodeName }}
+                                    </div>
+                                    <div :class="['proxy-node-delay', getDelayClass(delays[nodeName])]"
+                                        @click="testingNodes[nodeName] ? null : testDelay(nodeName)"
+                                        :title="testingNodes[nodeName] ? '测速中...' : '点击测速'">
                                         {{ formatDelay(delays[nodeName]) }}
                                     </div>
                                 </div>
@@ -2444,7 +2462,7 @@
                     startService, stopService, toggleService,
                     addSub, deleteSub, confirmDeleteSub, refreshSubs,
                     addNode, deleteNode, confirmDeleteNode,
-                    switchProxy, testAllDelays, getDelayClass, formatDelay, formatSpeed,
+                    switchProxy, testDelay, testAllDelays, getDelayClass, formatDelay, formatSpeed,
                     formatUptime
                 };
             }
