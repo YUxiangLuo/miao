@@ -799,6 +799,7 @@
             align-items: center;
             justify-content: space-between;
             gap: 0.5rem;
+            cursor: pointer;
         }
 
         .proxy-node:hover {
@@ -1451,12 +1452,10 @@
                         </button>
                     </div>
                     <div class="connectivity-grid">
-                        <div v-for="site in connectivitySites" :key="site.name"
-                            :class="['connectivity-item', {
+                        <div v-for="site in connectivitySites" :key="site.name" :class="['connectivity-item', {
                                 testing: currentTestingSite === site.name,
                                 pending: testingConnectivity && currentTestingSite !== site.name && !connectivityResults[site.name]
-                            }]"
-                            @click="testSingleSite(site)"
+                            }]" @click="testSingleSite(site)"
                             :style="{ cursor: currentTestingSite ? 'wait' : 'pointer' }">
                             <div class="connectivity-name">{{ site.name }}</div>
                             <div :class="['connectivity-delay', getConnectivityClass(site.name)]">
@@ -1521,13 +1520,13 @@
                             </div>
                             <div class="proxy-nodes">
                                 <div v-for="nodeName in getFilteredNodes(group.all)" :key="nodeName"
-                                    :class="['proxy-node', { active: nodeName === group.now, disabled: delays[nodeName] < 0, testing: testingNodes[nodeName] }]">
-                                    <div class="proxy-node-name" :title="nodeName"
-                                        @click="delays[nodeName] < 0 || testingNodes[nodeName] ? null : switchProxy(groupName, nodeName)">
+                                    :class="['proxy-node', { active: nodeName === group.now, disabled: delays[nodeName] < 0, testing: testingNodes[nodeName] }]"
+                                    @click="delays[nodeName] < 0 || testingNodes[nodeName] ? null : switchProxy(groupName, nodeName)">
+                                    <div class="proxy-node-name" :title="nodeName">
                                         {{ nodeName }}
                                     </div>
                                     <div :class="['proxy-node-delay', getDelayClass(delays[nodeName])]"
-                                        @click="testingNodes[nodeName] ? null : testDelay(nodeName)"
+                                        @click.stop="testingNodes[nodeName] ? null : testDelay(nodeName)"
                                         :title="testingNodes[nodeName] ? '测速中...' : '点击测速'">
                                         {{ formatDelay(delays[nodeName]) }}
                                     </div>
@@ -1567,13 +1566,21 @@
                         </div>
 
                         <div v-for="sub in subs" :key="sub.url" class="list-item">
-                            <div style="display: flex; flex-direction: column; align-items: center; min-width: 50px; margin-right: 0.75rem;">
-                                <i v-if="sub.success" class="bi bi-check-circle-fill" style="color: var(--accent-green); font-size: 1.25rem;"></i>
-                                <i v-else class="bi bi-exclamation-circle-fill" style="color: var(--accent-red); font-size: 1.25rem;"></i>
-                                <span v-if="sub.success" style="font-size: 0.7rem; color: rgba(255,255,255,0.6); margin-top: 0.2rem;">{{ sub.node_count }} 节点</span>
-                                <span v-else style="font-size: 0.7rem; color: var(--accent-red); margin-top: 0.2rem;">失败</span>
+                            <div
+                                style="display: flex; flex-direction: column; align-items: center; min-width: 50px; margin-right: 0.75rem;">
+                                <i v-if="sub.success" class="bi bi-check-circle-fill"
+                                    style="color: var(--accent-green); font-size: 1.25rem;"></i>
+                                <i v-else class="bi bi-exclamation-circle-fill"
+                                    style="color: var(--accent-red); font-size: 1.25rem;"></i>
+                                <span v-if="sub.success"
+                                    style="font-size: 0.7rem; color: rgba(255,255,255,0.6); margin-top: 0.2rem;">{{
+                                    sub.node_count }} 节点</span>
+                                <span v-else
+                                    style="font-size: 0.7rem; color: var(--accent-red); margin-top: 0.2rem;">失败</span>
                             </div>
-                            <div class="list-item-text" style="flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" :title="sub.error || ''">
+                            <div class="list-item-text"
+                                style="flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"
+                                :title="sub.error || ''">
                                 {{ sub.url }}
                             </div>
                             <button class="btn-custom btn-delete btn-sm-custom" @click="confirmDeleteSub(sub.url)"
@@ -2000,7 +2007,7 @@
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ group: groupName, name: nodeName })
-                        }).catch(() => {});
+                        }).catch(() => { });
                     } catch (e) {
                         showToast('切换节点失败', 'error');
                     }
