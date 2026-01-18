@@ -12,7 +12,8 @@
 - **自动更新** - 支持一键更新到最新release
 - **OpenWrt 支持** - 自动安装所需内核模块
 
-<img width="1685" height="1404" alt="image" src="https://github.com/user-attachments/assets/27e4234a-44fe-420d-943f-71a92a91e29c" />
+<img width="1515" height="1364" alt="image" src="https://github.com/user-attachments/assets/cbd75cee-3439-4448-af5d-4778905f9d43" />
+
 
 
 ## 快速开始
