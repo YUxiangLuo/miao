@@ -43,6 +43,8 @@ struct Config {
     subs: Vec<String>,
     #[serde(default)]
     nodes: Vec<String>,
+    #[serde(default)]
+    custom_rules: Vec<String>,
 }
 
 const DEFAULT_PORT: u16 = 6161;
@@ -1294,6 +1296,17 @@ async fn gen_config(
     }
     if let Some(arr) = sing_box_config["outbounds"].as_array_mut() {
         arr.extend(my_outbounds.into_iter().chain(final_outbounds.into_iter()));
+    }
+
+    // Append custom rules
+    if let Some(rules) = sing_box_config["route"]["rules"].as_array_mut() {
+        for rule_str in &config.custom_rules {
+            if let Ok(rule_json) = serde_json::from_str::<serde_json::Value>(rule_str) {
+                 rules.push(rule_json);
+            } else {
+                 eprintln!("Failed to parse custom rule: {}", rule_str);
+            }
+        }
     }
 
     let sing_box_home = get_sing_box_home();
