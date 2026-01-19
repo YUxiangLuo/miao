@@ -1736,7 +1736,7 @@
                 <!-- 右列结束 -->
 
                 <!-- 添加节点模态框 -->
-                <div class="modal-overlay" v-if="showNodeModal" v-cloak @click.self="showNodeModal = false">
+                <div class="modal-overlay" v-if="showNodeModal" v-cloak>
                     <div class="modal-content">
                         <div class="modal-header">
                             <span class="modal-title">添加节点</span>
@@ -2330,26 +2330,28 @@
                 // 节点管理
                 const addNode = async () => {
                     if (!canAddNode.value) return;
+                    const nodeData = {
+                        node_type: nodeType.value,
+                        tag: newNode.value.tag.trim(),
+                        server: newNode.value.server.trim(),
+                        server_port: newNode.value.server_port,
+                        password: newNode.value.password.trim(),
+                    };
+                    // Add type-specific fields
+                    if (nodeType.value === 'ss') {
+                        nodeData.cipher = newNode.value.cipher;
+                    } else {
+                        const sni = newNode.value.sni?.trim();
+                        if (sni) nodeData.sni = sni;
+                    }
+                    // 先关闭模态框和清空表单，提升用户体验
+                    showNodeModal.value = false;
+                    newNode.value = { tag: '', server: '', server_port: 443, password: '', sni: '', cipher: '2022-blake3-aes-128-gcm' };
+                    // 后台异步处理请求
                     try {
-                        const nodeData = {
-                            node_type: nodeType.value,
-                            tag: newNode.value.tag.trim(),
-                            server: newNode.value.server.trim(),
-                            server_port: newNode.value.server_port,
-                            password: newNode.value.password.trim(),
-                        };
-                        // Add type-specific fields
-                        if (nodeType.value === 'ss') {
-                            nodeData.cipher = newNode.value.cipher;
-                        } else {
-                            const sni = newNode.value.sni?.trim();
-                            if (sni) nodeData.sni = sni;
-                        }
                         await apiCall('nodes', 'POST', nodeData, 'addNode');
                         showToast('节点已添加', 'success');
                         delays.value = {};
-                        newNode.value = { tag: '', server: '', server_port: 443, password: '', sni: '', cipher: '2022-blake3-aes-128-gcm' };
-                        showNodeModal.value = false;
                         await fetchNodes();
                     } catch (e) { }
                 };
