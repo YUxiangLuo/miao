@@ -630,6 +630,15 @@ async fn add_sub(
     State(state): State<Arc<AppState>>,
     Json(req): Json<SubRequest>,
 ) -> Result<Json<ApiResponse<()>>, (StatusCode, Json<ApiResponse<()>>)> {
+    // 1. Validate subscription first (don't lock config yet)
+    println!("Validating new subscription: {}", req.url);
+    if let Err(e) = fetch_sub(&req.url).await {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(ApiResponse::error(format!("Failed to validate subscription: {}", e))),
+        ));
+    }
+
     let config_clone;
     {
         let mut config = state.config.lock().await;

@@ -13,6 +13,7 @@ export const SubManager: React.FC<SubManagerProps> = ({ subs, onUpdate }) => {
   const [newUrl, setNewUrl] = useState('');
   const [adding, setAdding] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [deletingUrl, setDeletingUrl] = useState<string | null>(null);
 
   const handleAdd = async () => {
     if (!newUrl) return;
@@ -34,6 +35,7 @@ export const SubManager: React.FC<SubManagerProps> = ({ subs, onUpdate }) => {
 
   const handleDelete = async (url: string) => {
     if (!confirm('Remove this subscription?')) return;
+    setDeletingUrl(url);
     try {
       const res = await api.deleteSub(url);
       if (res.success) {
@@ -43,6 +45,8 @@ export const SubManager: React.FC<SubManagerProps> = ({ subs, onUpdate }) => {
       }
     } catch (e) {
       alert('Failed to delete subscription. Check logs.');
+    } finally {
+      setDeletingUrl(null);
     }
   };
 
@@ -102,9 +106,15 @@ export const SubManager: React.FC<SubManagerProps> = ({ subs, onUpdate }) => {
             </div>
             <button 
               onClick={() => handleDelete(sub.url)}
-              className="p-2 text-miao-muted hover:text-red-400 hover:bg-miao-red/10 rounded-lg opacity-0 group-hover:opacity-100 transition-all"
+              disabled={deletingUrl === sub.url}
+              className={clsx(
+                "p-2 rounded-lg transition-all",
+                deletingUrl === sub.url 
+                  ? "text-miao-green bg-miao-green/10 opacity-100" 
+                  : "text-miao-muted hover:text-red-400 hover:bg-miao-red/10 opacity-0 group-hover:opacity-100"
+              )}
             >
-              <Trash2 size={16} />
+              {deletingUrl === sub.url ? <RefreshCw size={16} className="animate-spin" /> : <Trash2 size={16} />}
             </button>
           </div>
         ))}
@@ -131,7 +141,7 @@ export const SubManager: React.FC<SubManagerProps> = ({ subs, onUpdate }) => {
               className="bg-miao-green hover:bg-miao-green-hover disabled:opacity-50 disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg font-medium text-sm transition-colors flex items-center gap-2"
             >
               {adding ? <RefreshCw size={16} className="animate-spin" /> : <Plus size={16} />}
-              Add
+              {adding ? "Adding..." : "Add"}
             </button>
           </div>
         </div>

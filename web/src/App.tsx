@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from 'react';
-import { Activity, LayoutGrid, Settings, Download, Globe, StopCircle } from 'lucide-react';
+import { Activity, LayoutGrid, Settings, Download, Globe, StopCircle, Youtube, Github, Twitter, Bot } from 'lucide-react';
 import { StatusCard } from './components/StatusCard';
 import { TrafficChart } from './components/TrafficChart';
 import { NodeList } from './components/NodeList';
@@ -8,6 +8,27 @@ import { NodeManager } from './components/NodeManager';
 import { api } from './lib/api';
 import type { StatusData, SubStatus, NodeInfo, VersionInfo } from './types';
 import { clsx } from 'clsx';
+
+const GoogleIcon = ({ size, className }: { size?: number, className?: string }) => (
+  <svg 
+    width={size || 24} 
+    height={size || 24} 
+    viewBox="0 0 24 24" 
+    xmlns="http://www.w3.org/2000/svg"
+    className={className}
+    fill="currentColor"
+  >
+    <path d="M21.35 11.1h-9.17v2.73h6.51c-.33 3.81-3.5 5.44-6.5 5.44C8.36 19.27 5 16.25 5 12c0-4.1 3.2-7.27 7.2-7.27 3.09 0 4.9 1.97 4.9 1.97L19 4.72S16.56 2 12.1 2C6.42 2 2.03 6.8 2.03 12c0 5.05 4.13 10 10.22 10 5.35 0 9.25-3.67 9.25-9.09 0-1.15-.15-1.81-.15-1.81Z" />
+  </svg>
+);
+
+const SITES = [
+  { id: 'google', name: 'Google', url: 'https://www.google.com', icon: GoogleIcon },
+  { id: 'youtube', name: 'YouTube', url: 'https://www.youtube.com', icon: Youtube },
+  { id: 'github', name: 'GitHub', url: 'https://github.com', icon: Github },
+  { id: 'openai', name: 'OpenAI', url: 'https://api.openai.com', icon: Bot },
+  { id: 'twitter', name: 'Twitter', url: 'https://twitter.com', icon: Twitter },
+];
 
 function App() {
   const [activeTab, setActiveTab] = useState<'dashboard' | 'proxies' | 'config'>('dashboard');
@@ -20,8 +41,11 @@ function App() {
   
   const [selectedNode, setSelectedNode] = useState<string>('');
   const [latencies, setLatencies] = useState<Record<string, number>>({});
-  const [connectivityResult, setConnectivityResult] = useState<number | null>(null);
-  const [testingConnectivity, setTestingConnectivity] = useState(false);
+  
+  // New Site Connectivity State
+  const [siteLatencies, setSiteLatencies] = useState<Record<string, number | null>>({});
+  const [testingSites, setTestingSites] = useState<Record<string, boolean>>({});
+
   const [testingSpeed, setTestingSpeed] = useState(false);
   const [testingNodes, setTestingNodes] = useState<string[]>([]);
   const [upgrading, setUpgrading] = useState(false);
@@ -141,17 +165,24 @@ function App() {
     }
   };
 
-  const testLatency = async () => {
-    setTestingConnectivity(true);
-    setConnectivityResult(null);
-    const res = await api.testConnectivity('https://www.google.com/generate_204');
-    setTestingConnectivity(false);
-
-    if (res.success && res.data?.latency_ms != null) {
-      setConnectivityResult(res.data.latency_ms);
+  const testSiteLatency = async (id: string, url: string) => {
+    setTestingSites(prev => ({ ...prev, [id]: true }));
+    setSiteLatencies(prev => ({ ...prev, [id]: null }));
+    
+    const res = await api.testConnectivity(url);
+    
+    setTestingSites(prev => ({ ...prev, [id]: false }));
+    
+    if (res.success && res.data && res.data.latency_ms !== undefined) {
+      const latency = res.data.latency_ms;
+      setSiteLatencies(prev => ({ ...prev, [id]: latency }));
     } else {
-      setConnectivityResult(-1);
+      setSiteLatencies(prev => ({ ...prev, [id]: -1 }));
     }
+  };
+
+  const testAllSites = () => {
+    SITES.forEach(site => testSiteLatency(site.id, site.url));
   };
 
   const testNodeLatency = async (tag: string) => {
@@ -327,29 +358,54 @@ function App() {
                 <TrafficChart />
               </div>
               
-              {/* Quick Connectivity Check */}
-              <div className="lg:col-span-3 bg-miao-panel border border-miao-border rounded-xl p-6 flex items-center justify-between">
-                <div>
-                  <h3 className="font-medium text-lg">Connectivity Check</h3>
-                  <p className="text-miao-muted text-sm">Ping Google to verify your connection status.</p>
-                </div>
-                <div className="flex items-center gap-4">
-                  {connectivityResult !== null && (
-                    <span className={clsx("font-mono font-bold", 
-                      connectivityResult === -1 ? "text-miao-red" : 
-                      connectivityResult < 200 ? "text-miao-green" : "text-yellow-500"
-                    )}>
-                      {connectivityResult === -1 ? "Timeout" : `${connectivityResult} ms`}
-                    </span>
-                  )}
+              {/* Site Connectivity Check */}
+              <div className="lg:col-span-3 bg-miao-panel border border-miao-border rounded-xl p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <div>
+                    <h3 className="font-medium text-lg">Connectivity Check</h3>
+                    <p className="text-miao-muted text-sm">Test connection latency to popular sites.</p>
+                  </div>
                   <button 
-                    onClick={testLatency}
-                    disabled={testingConnectivity}
-                    className="px-6 py-2.5 bg-miao-bg border border-miao-border hover:border-miao-green text-miao-text rounded-lg transition-all flex items-center gap-2 disabled:opacity-50"
+                    onClick={testAllSites}
+                    className="px-4 py-2 bg-miao-bg border border-miao-border hover:border-miao-green text-miao-text rounded-lg transition-all text-sm font-medium"
                   >
-                    <Globe size={18} className={clsx("text-miao-green", testingConnectivity && "animate-spin")} />
-                    {testingConnectivity ? "Testing..." : "Test Latency"}
+                    Test All
                   </button>
+                </div>
+                
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+                  {SITES.map((site) => {
+                    const latency = siteLatencies[site.id];
+                    const loading = testingSites[site.id];
+                    
+                    return (
+                      <button 
+                        key={site.id}
+                        onClick={() => testSiteLatency(site.id, site.url)}
+                        disabled={loading}
+                        className="flex items-center gap-3 px-3 py-2.5 bg-miao-bg/50 border border-miao-border hover:border-miao-green/50 hover:bg-miao-bg rounded-xl transition-all group text-left"
+                      >
+                        <site.icon size={20} className="text-miao-muted group-hover:text-miao-text shrink-0 transition-colors" />
+                        
+                        <div className="flex flex-col min-w-0">
+                          <span className="font-medium text-sm text-miao-text leading-tight">{site.name}</span>
+                          
+                          {loading ? (
+                            <span className="text-[10px] text-miao-muted animate-pulse">Testing...</span>
+                          ) : latency !== undefined && latency !== null ? (
+                            <span className={clsx("text-xs font-mono font-bold", 
+                              latency === -1 ? "text-miao-red" : 
+                              latency < 200 ? "text-miao-green" : "text-yellow-500"
+                            )}>
+                              {latency === -1 ? "Timeout" : `${latency}ms`}
+                            </span>
+                          ) : (
+                            <span className="text-[10px] text-miao-muted group-hover:text-miao-green transition-colors">Click to test</span>
+                          )}
+                        </div>
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
             </div>
