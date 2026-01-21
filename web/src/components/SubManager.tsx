@@ -17,23 +17,49 @@ export const SubManager: React.FC<SubManagerProps> = ({ subs, onUpdate }) => {
   const handleAdd = async () => {
     if (!newUrl) return;
     setAdding(true);
-    await api.addSub(newUrl);
-    setNewUrl('');
-    setAdding(false);
-    onUpdate();
+    try {
+      const res = await api.addSub(newUrl);
+      if (res.success) {
+        setNewUrl('');
+        onUpdate();
+      } else {
+        alert(`Failed to add subscription: ${res.message}`);
+      }
+    } catch (e) {
+      alert('Failed to add subscription. Check logs.');
+    } finally {
+      setAdding(false);
+    }
   };
 
   const handleDelete = async (url: string) => {
     if (!confirm('Remove this subscription?')) return;
-    await api.deleteSub(url);
-    onUpdate();
+    try {
+      const res = await api.deleteSub(url);
+      if (res.success) {
+        onUpdate();
+      } else {
+        alert(`Failed to delete subscription: ${res.message}`);
+      }
+    } catch (e) {
+      alert('Failed to delete subscription. Check logs.');
+    }
   };
 
   const handleRefresh = async () => {
     setRefreshing(true);
-    await api.refreshSubs();
-    setRefreshing(false);
-    onUpdate();
+    try {
+      const res = await api.refreshSubs();
+      if (res.success) {
+        onUpdate();
+      } else {
+        alert(`Failed to refresh subscriptions: ${res.message}`);
+      }
+    } catch (e) {
+      alert('Failed to refresh subscriptions. Check logs.');
+    } finally {
+      setRefreshing(false);
+    }
   };
 
   return (

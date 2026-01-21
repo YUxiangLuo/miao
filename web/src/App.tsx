@@ -12,7 +12,7 @@ import { clsx } from 'clsx';
 function App() {
   const [activeTab, setActiveTab] = useState<'dashboard' | 'proxies' | 'config'>('dashboard');
   const [status, setStatus] = useState<StatusData | null>(null);
-  const [loadingStatus] = useState(false);
+  const [loadingStatus, setLoadingStatus] = useState(false);
   const [toggling, setToggling] = useState(false);
   
   const [subs, setSubs] = useState<SubStatus[]>([]);
@@ -26,8 +26,14 @@ function App() {
   const [testingNodes, setTestingNodes] = useState<string[]>([]);
   const [upgrading, setUpgrading] = useState(false);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const statusRunningRef = useRef(false);
   
   const [version, setVersion] = useState<VersionInfo | null>(null);
+
+  // Sync ref with state
+  useEffect(() => {
+    statusRunningRef.current = Boolean(status?.running);
+  }, [status?.running]);
 
   // Initial Data Load
   useEffect(() => {
@@ -35,15 +41,18 @@ function App() {
     fetchSubs();
     fetchNodes();
     fetchVersion();
+  }, []);
 
+  // Interval updates
+  useEffect(() => {
     const interval = setInterval(() => {
       fetchStatus();
-      if (status?.running) {
+      if (statusRunningRef.current) {
         fetchClashData(); 
       }
     }, 3000);
     return () => clearInterval(interval);
-  }, [status?.running]);
+  }, []);
 
   const handleUpgrade = async () => {
     if (!confirm(`Upgrade to version ${version?.latest}? The service will restart.`)) return;
@@ -65,7 +74,10 @@ function App() {
   };
 
   const fetchStatus = async () => {
+    // Only set loading if status is null (first load) to avoid flickering
+    if (!status) setLoadingStatus(true);
     const res = await api.getStatus();
+    setLoadingStatus(false);
     if (res.success && res.data) {
       setStatus(res.data);
     }
@@ -233,7 +245,7 @@ function App() {
               <p className="text-miao-muted text-sm flex items-center gap-2">
                 {version?.current || "..."} 
                 {version?.has_update && (
-                  <span className="text-miao-green cursor-pointer hover:underline flex items-center gap-1" onClick={() => api.upgrade()}>
+                  <span className="text-miao-green cursor-pointer hover:underline flex items-center gap-1" onClick={handleUpgrade}>
                     <Download size={12} /> Update Available ({version.latest})
                   </span>
                 )}

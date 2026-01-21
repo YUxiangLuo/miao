@@ -9,7 +9,7 @@ interface TrafficData {
 }
 
 export const TrafficChart: React.FC = () => {
-  const [data, setData] = useState<TrafficData[]>(Array(20).fill({ time: '', up: 0, down: 0 }));
+  const [data, setData] = useState<TrafficData[]>(Array.from({ length: 20 }, () => ({ time: '', up: 0, down: 0 })));
   const [currentSpeed, setCurrentSpeed] = useState({ up: 0, down: 0 });
 
   useEffect(() => {

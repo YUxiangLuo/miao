@@ -60,8 +60,16 @@ export const NodeManager: React.FC<NodeManagerProps> = ({ nodes, onUpdate }) => 
 
   const handleDelete = async (tag: string) => {
     if (!confirm(`Delete manual node "${tag}"?`)) return;
-    await api.deleteNode(tag);
-    onUpdate();
+    try {
+      const res = await api.deleteNode(tag);
+      if (res.success) {
+        onUpdate();
+      } else {
+        alert(`Failed to delete node: ${res.message}`);
+      }
+    } catch (e) {
+      alert('Failed to delete node. Check logs.');
+    }
   };
 
   return (
@@ -139,7 +147,7 @@ export const NodeManager: React.FC<NodeManagerProps> = ({ nodes, onUpdate }) => 
               <div className="md:col-span-2">
                 <label className="block text-xs text-miao-muted uppercase font-bold mb-1">Password</label>
                 <input 
-                  type="text" 
+                  type="password" 
                   name="password"
                   value={formData.password}
                   onChange={handleInputChange}

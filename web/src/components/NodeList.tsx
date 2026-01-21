@@ -47,7 +47,7 @@ export const NodeList: React.FC<NodeListProps> = ({ nodes, selectedTag, onSelect
                     onTest?.(node.tag);
                   }}
                   disabled={isTesting}
-                  className="p-1.5 rounded hover:bg-miao-border text-miao-muted hover:text-miao-green transition-colors"
+                  className="relative p-1.5 rounded hover:bg-miao-border text-miao-muted hover:text-miao-green transition-colors"
                   title="Test Latency"
                 >
                   <Zap size={14} className={clsx(isTesting && "opacity-0")} />
