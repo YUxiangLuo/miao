@@ -175,13 +175,16 @@ struct DeleteNodeRequest {
     tag: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 struct NodeInfo {
     tag: String,
     server: String,
     server_port: u16,
     #[serde(skip_serializing_if = "Option::is_none")]
     sni: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    protocol: Option<String>,
+    source: String, // "manual" or "subscription"
 }
 
 // ============================================================================
@@ -200,6 +203,8 @@ struct SubStatus {
     node_count: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
     error: Option<String>,
+    #[serde(skip)]
+    nodes: Vec<NodeInfo>,
 }
 
 lazy_static! {
@@ -217,22 +222,6 @@ async fn serve_index() -> Html<&'static str> {
 
 async fn serve_favicon() -> ([(axum::http::header::HeaderName, &'static str); 1], &'static str) {
     ([(axum::http::header::CONTENT_TYPE, "image/svg+xml")], include_str!("../public/icon.svg"))
-}
-
-async fn serve_vue() -> ([(axum::http::header::HeaderName, &'static str); 1], &'static str) {
-    ([(axum::http::header::CONTENT_TYPE, "application/javascript")], include_str!("../embedded/assets/vue.js"))
-}
-
-async fn serve_bootstrap_css() -> ([(axum::http::header::HeaderName, &'static str); 1], &'static str) {
-    ([(axum::http::header::CONTENT_TYPE, "text/css")], include_str!("../embedded/assets/bootstrap-icons.css"))
-}
-
-async fn serve_font_woff2() -> ([(axum::http::header::HeaderName, &'static str); 1], &'static [u8]) {
-    ([(axum::http::header::CONTENT_TYPE, "font/woff2")], include_bytes!("../embedded/assets/fonts/bootstrap-icons.woff2"))
-}
-
-async fn serve_font_woff() -> ([(axum::http::header::HeaderName, &'static str); 1], &'static [u8]) {
-    ([(axum::http::header::CONTENT_TYPE, "font/woff")], include_bytes!("../embedded/assets/fonts/bootstrap-icons.woff"))
 }
 
 /// GET /api/status - Get sing-box running status
@@ -628,6 +617,7 @@ async fn get_subs(State(state): State<Arc<AppState>>) -> Json<ApiResponse<Vec<Su
                 success: true, // Not yet fetched, assume pending
                 node_count: 0,
                 error: None,
+                nodes: vec![],
             })
         })
         .collect();
@@ -726,8 +716,9 @@ async fn refresh_subs(
 /// GET /api/nodes - Get all manual nodes
 async fn get_nodes(State(state): State<Arc<AppState>>) -> Json<ApiResponse<Vec<NodeInfo>>> {
     let config = state.config.lock().await;
+    let sub_status = SUB_STATUS.lock().await;
 
-    let nodes: Vec<NodeInfo> = config
+    let mut nodes: Vec<NodeInfo> = config
         .nodes
         .iter()
         .filter_map(|s| {
@@ -740,9 +731,16 @@ async fn get_nodes(State(state): State<Arc<AppState>>) -> Json<ApiResponse<Vec<N
                     .and_then(|t| t.get("server_name"))
                     .and_then(|s| s.as_str())
                     .map(|s| s.to_string()),
+                protocol: v.get("type").and_then(|t| t.as_str()).map(|s| s.to_string()),
+                source: "manual".to_string(),
             })
         })
         .collect();
+
+    // Append subscription nodes
+    for status in sub_status.values() {
+        nodes.extend(status.nodes.clone());
+    }
 
     Json(ApiResponse::success("Nodes loaded", nodes))
 }
@@ -1251,7 +1249,7 @@ async fn gen_config(
     for sub in &config.subs {
         println!("Fetching subscription: {}", sub);
         let status = match fetch_sub(sub).await {
-            Ok((node_names, outbounds)) => {
+            Ok((node_names, outbounds, nodes)) => {
                 let count = node_names.len();
                 println!("  -> Success: fetched {} nodes", count);
                 final_node_names.extend(node_names);
@@ -1261,6 +1259,7 @@ async fn gen_config(
                     success: count > 0,
                     node_count: count,
                     error: if count == 0 { Some("No nodes found".into()) } else { None },
+                    nodes,
                 }
             }
             Err(e) => {
@@ -1270,6 +1269,7 @@ async fn gen_config(
                     success: false,
                     node_count: 0,
                     error: Some(e.to_string()),
+                    nodes: vec![],
                 }
             }
         };
@@ -1367,7 +1367,7 @@ fn get_config_template() -> serde_json::Value {
 
 async fn fetch_sub(
     link: &str,
-) -> Result<(Vec<String>, Vec<serde_json::Value>), Box<dyn std::error::Error + Send + Sync>> {
+) -> Result<(Vec<String>, Vec<serde_json::Value>, Vec<NodeInfo>), Box<dyn std::error::Error + Send + Sync>> {
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(30))
         .build()?;
@@ -1387,21 +1387,33 @@ async fn fetch_sub(
     let nodes: Vec<serde_yaml::Value> = proxies.into_iter().collect();
     let mut node_names = vec![];
     let mut outbounds = vec![];
+    let mut node_infos = vec![];
 
     for node in nodes {
         let typ = node.get("type").and_then(|t| t.as_str()).unwrap_or("");
         let name = node.get("name").and_then(|n| n.as_str()).unwrap_or("");
+        
+        // Common info for NodeInfo
+        let server = node.get("server").and_then(|s| s.as_str()).unwrap_or("").to_string();
+        let port = node.get("port").and_then(|p| p.as_u64()).unwrap_or(0) as u16;
+        let sni = node.get("sni").and_then(|s| s.as_str()).map(|s| s.to_string());
+        
+        let info = NodeInfo {
+            tag: name.to_string(),
+            server: server.clone(),
+            server_port: port,
+            sni: sni.clone(),
+            protocol: Some(typ.to_string()),
+            source: "subscription".to_string(),
+        };
+
         match typ {
             "hysteria2" => {
                 let hysteria2 = Hysteria2 {
                     outbound_type: "hysteria2".to_string(),
                     tag: name.to_string(),
-                    server: node
-                        .get("server")
-                        .and_then(|s| s.as_str())
-                        .unwrap_or("")
-                        .to_string(),
-                    server_port: node.get("port").and_then(|p| p.as_u64()).unwrap_or(0) as u16,
+                    server,
+                    server_port: port,
                     password: node
                         .get("password")
                         .and_then(|p| p.as_str())
@@ -1411,26 +1423,20 @@ async fn fetch_sub(
                     down_mbps: 350,
                     tls: Tls {
                         enabled: true,
-                        server_name: node
-                            .get("sni")
-                            .and_then(|s| s.as_str())
-                            .map(|s| s.to_string()),
+                        server_name: sni,
                         insecure: true,
                     },
                 };
                 node_names.push(name.to_string());
                 outbounds.push(serde_json::to_value(hysteria2)?);
+                node_infos.push(info);
             }
             "anytls" => {
                 let anytls = AnyTls {
                     outbound_type: "anytls".to_string(),
                     tag: name.to_string(),
-                    server: node
-                        .get("server")
-                        .and_then(|s| s.as_str())
-                        .unwrap_or("")
-                        .to_string(),
-                    server_port: node.get("port").and_then(|p| p.as_u64()).unwrap_or(0) as u16,
+                    server,
+                    server_port: port,
                     password: node
                         .get("password")
                         .and_then(|p| p.as_str())
@@ -1438,10 +1444,7 @@ async fn fetch_sub(
                         .to_string(),
                     tls: Tls {
                         enabled: true,
-                        server_name: node
-                            .get("sni")
-                            .and_then(|s| s.as_str())
-                            .map(|s| s.to_string()),
+                        server_name: sni,
                         insecure: node
                             .get("skip-cert-verify")
                             .and_then(|v| v.as_bool())
@@ -1450,17 +1453,14 @@ async fn fetch_sub(
                 };
                 node_names.push(name.to_string());
                 outbounds.push(serde_json::to_value(anytls)?);
+                node_infos.push(info);
             }
             "ss" => {
                 let ss = Shadowsocks {
                     outbound_type: "shadowsocks".to_string(),
                     tag: name.to_string(),
-                    server: node
-                        .get("server")
-                        .and_then(|s| s.as_str())
-                        .unwrap_or("")
-                        .to_string(),
-                    server_port: node.get("port").and_then(|p| p.as_u64()).unwrap_or(0) as u16,
+                    server,
+                    server_port: port,
                     method: node
                         .get("cipher")
                         .and_then(|c| c.as_str())
@@ -1474,11 +1474,12 @@ async fn fetch_sub(
                 };
                 node_names.push(name.to_string());
                 outbounds.push(serde_json::to_value(ss)?);
+                node_infos.push(info);
             }
             _ => {}
         }
     }
-    Ok((node_names, outbounds))
+    Ok((node_names, outbounds, node_infos))
 }
 
 // ============================================================================
@@ -1552,11 +1553,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let app = Router::new()
         .route("/", get(serve_index))
         .route("/favicon.svg", get(serve_favicon))
-        // Static assets
-        .route("/assets/vue.js", get(serve_vue))
-        .route("/assets/bootstrap-icons.css", get(serve_bootstrap_css))
-        .route("/assets/fonts/bootstrap-icons.woff2", get(serve_font_woff2))
-        .route("/assets/fonts/bootstrap-icons.woff", get(serve_font_woff))
         // Status and service control
         .route("/api/status", get(get_status))
         .route("/api/service/start", post(start_service))

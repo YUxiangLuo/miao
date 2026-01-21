@@ -51,6 +51,20 @@ jobs:
           rustup target add x86_64-unknown-linux-musl
           rustup target add aarch64-unknown-linux-musl
 
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v1
+        with:
+          bun-version: latest
+
+      - name: Build Frontend
+        run: |
+          cd web
+          bun install
+          bun run build
+          cd ..
+          cp web/dist/index.html public/index.html
+          echo "Frontend build complete and copied to public/index.html"
+
       - name: Build sing-box binary
         run: |
           mkdir -p embedded
