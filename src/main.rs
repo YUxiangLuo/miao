@@ -1248,32 +1248,58 @@ async fn gen_config(
         status_map.retain(|url, _| config.subs.contains(url));
     }
 
-    for sub in &config.subs {
-        println!("Fetching subscription: {}", sub);
-        let status = match fetch_sub(sub).await {
+    // Fetch all subscriptions concurrently with timeout
+    let sub_futures: Vec<_> = config.subs.iter().map(|sub| {
+        let sub = sub.clone();
+        async move {
+            println!("Fetching subscription: {}", sub);
+            let result = tokio::time::timeout(
+                Duration::from_secs(30),
+                fetch_sub(&sub)
+            ).await;
+            
+            let status = match result {
+                Ok(Ok((node_names, outbounds))) => {
+                    let count = node_names.len();
+                    println!("  -> Success: fetched {} nodes from {}", count, sub);
+                    (sub.clone(), Ok((node_names, outbounds)))
+                }
+                Ok(Err(e)) => {
+                    eprintln!("  -> Failed to fetch subscription {}: {}", sub, e);
+                    (sub.clone(), Err(e.to_string()))
+                }
+                Err(_) => {
+                    eprintln!("  -> Subscription {} timed out after 30s", sub);
+                    (sub.clone(), Err("Request timeout".to_string()))
+                }
+            };
+            status
+        }
+    }).collect();
+
+    let results = futures::future::join_all(sub_futures).await;
+
+    for (url, result) in results {
+        let status = match result {
             Ok((node_names, outbounds)) => {
                 let count = node_names.len();
-                println!("  -> Success: fetched {} nodes", count);
                 final_node_names.extend(node_names);
                 final_outbounds.extend(outbounds);
                 SubStatus {
-                    url: sub.clone(),
+                    url: url.clone(),
                     success: count > 0,
                     node_count: count,
                     error: if count == 0 { Some("No nodes found".into()) } else { None },
                 }
             }
-            Err(e) => {
-                eprintln!("  -> Failed to fetch subscription: {}", e);
-                SubStatus {
-                    url: sub.clone(),
-                    success: false,
-                    node_count: 0,
-                    error: Some(e.to_string()),
-                }
-            }
+            Err(e) => SubStatus {
+                url: url.clone(),
+                success: false,
+                node_count: 0,
+                error: Some(e),
+            },
         };
-        SUB_STATUS.lock().await.insert(sub.clone(), status);
+        SUB_STATUS.lock().await.insert(url, status);
     }
 
     let total_nodes = my_outbounds.len() + final_outbounds.len();
