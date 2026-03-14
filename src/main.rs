@@ -26,6 +26,11 @@ pub(crate) const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[tokio::main]
 async fn main() -> AppResult<()> {
+    if std::env::args().any(|a| a == "--version" || a == "-V") {
+        println!("miao v{}", VERSION);
+        return Ok(());
+    }
+
     if !Uid::effective().is_root() {
         eprintln!("Error: This application must be run as root.");
         std::process::exit(1);

@@ -1,11 +1,30 @@
-use std::{fs, os::unix::{fs::PermissionsExt, process::CommandExt}};
+use std::{
+    fs,
+    os::unix::{fs::PermissionsExt, process::CommandExt},
+    sync::LazyLock,
+};
 
-use tokio::time::{sleep, Duration};
+use tokio::sync::RwLock;
+use tokio::time::{sleep, Duration, Instant};
 
 use crate::error::{AppError, AppResult};
 use crate::models::{GitHubRelease, VersionInfo};
 use crate::services::singbox::{get_sing_box_home, stop_sing_internal};
 use crate::VERSION;
+
+const CACHE_TTL: Duration = Duration::from_secs(300);
+
+struct ReleaseCache {
+    release: Option<GitHubRelease>,
+    fetched_at: Option<Instant>,
+}
+
+static RELEASE_CACHE: LazyLock<RwLock<ReleaseCache>> = LazyLock::new(|| {
+    RwLock::new(ReleaseCache {
+        release: None,
+        fetched_at: None,
+    })
+});
 
 fn parse_version(v: &str) -> Option<(u32, u32, u32)> {
     let v = v.strip_prefix('v').unwrap_or(v);
@@ -41,7 +60,7 @@ fn current_arch_asset_name() -> Option<&'static str> {
     }
 }
 
-async fn fetch_latest_release() -> AppResult<GitHubRelease> {
+async fn fetch_latest_release_uncached() -> AppResult<GitHubRelease> {
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(60))
         .build()?;
@@ -55,6 +74,31 @@ async fn fetch_latest_release() -> AppResult<GitHubRelease> {
         .await?;
 
     Ok(release)
+}
+
+async fn fetch_latest_release() -> AppResult<GitHubRelease> {
+    {
+        let cache = RELEASE_CACHE.read().await;
+        if let (Some(release), Some(fetched_at)) = (&cache.release, cache.fetched_at) {
+            if fetched_at.elapsed() < CACHE_TTL {
+                return Ok(release.clone());
+            }
+        }
+    }
+
+    let release = fetch_latest_release_uncached().await?;
+    {
+        let mut cache = RELEASE_CACHE.write().await;
+        cache.release = Some(release.clone());
+        cache.fetched_at = Some(Instant::now());
+    }
+    Ok(release)
+}
+
+async fn invalidate_release_cache() {
+    let mut cache = RELEASE_CACHE.write().await;
+    cache.release = None;
+    cache.fetched_at = None;
 }
 
 pub async fn get_version_info() -> VersionInfo {
@@ -88,6 +132,8 @@ pub async fn get_version_info() -> VersionInfo {
 }
 
 pub async fn upgrade_binary() -> AppResult<String> {
+    // Force fresh fetch for upgrade to ensure we have the latest info
+    invalidate_release_cache().await;
     let release = fetch_latest_release().await?;
     let current = current_version();
 
@@ -95,7 +141,8 @@ pub async fn upgrade_binary() -> AppResult<String> {
         return Ok("Already up to date".to_string());
     }
 
-    let asset_name = current_arch_asset_name().ok_or_else(|| AppError::message("Unsupported architecture"))?;
+    let asset_name =
+        current_arch_asset_name().ok_or_else(|| AppError::message("Unsupported architecture"))?;
     let download_url = release
         .assets
         .iter()
@@ -116,13 +163,23 @@ pub async fn upgrade_binary() -> AppResult<String> {
     fs::set_permissions(temp_path, fs::Permissions::from_mode(0o755))
         .map_err(|e| AppError::context("Failed to set permissions on temp file", e))?;
 
+    // Verify the new binary is a valid miao binary by checking --version output
     let verify = tokio::process::Command::new(temp_path)
-        .arg("--help")
+        .arg("--version")
         .output()
         .await;
-    if verify.is_err() {
-        let _ = fs::remove_file(temp_path);
-        return Err(AppError::message("New binary verification failed"));
+    match verify {
+        Ok(output) => {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            if !stdout.contains("miao") && !stdout.contains(&release.tag_name) {
+                let _ = fs::remove_file(temp_path);
+                return Err(AppError::message("New binary verification failed: unexpected --version output"));
+            }
+        }
+        Err(_) => {
+            let _ = fs::remove_file(temp_path);
+            return Err(AppError::message("New binary verification failed"));
+        }
     }
 
     let current_exe = std::env::current_exe()?;
@@ -130,20 +187,19 @@ pub async fn upgrade_binary() -> AppResult<String> {
     println!("Stopping sing-box before upgrade...");
     stop_sing_internal().await;
 
+    // Use rename for atomic replacement instead of remove + copy
     let backup_path = format!("{}.bak", current_exe.display());
-    fs::copy(&current_exe, &backup_path)
+    fs::rename(&current_exe, &backup_path)
         .map_err(|e| AppError::context("Failed to backup current binary", e))?;
 
-    if let Err(e) = fs::remove_file(&current_exe) {
-        return Err(AppError::context("Failed to remove old binary", e));
-    }
     if let Err(e) = fs::copy(temp_path, &current_exe) {
-        let _ = fs::copy(&backup_path, &current_exe);
-        return Err(AppError::context("Failed to copy new binary", e));
+        // Restore from backup on failure
+        let _ = fs::rename(&backup_path, &current_exe);
+        return Err(AppError::context("Failed to install new binary", e));
     }
     if let Err(e) = fs::set_permissions(&current_exe, fs::Permissions::from_mode(0o755)) {
         let _ = fs::remove_file(&current_exe);
-        let _ = fs::copy(&backup_path, &current_exe);
+        let _ = fs::rename(&backup_path, &current_exe);
         return Err(AppError::context("Failed to set permissions on new binary", e));
     }
     let _ = fs::remove_file(temp_path);
@@ -172,14 +228,12 @@ pub async fn upgrade_binary() -> AppResult<String> {
         eprintln!("Failed to exec new binary: {}", err);
         eprintln!("Attempting to restore from backup...");
 
-        if fs::remove_file(&current_exe).is_ok() {
-            if fs::copy(&backup_path, &current_exe).is_ok() {
-                let _ = fs::set_permissions(&current_exe, fs::Permissions::from_mode(0o755));
-                eprintln!("Restored from backup, restarting with old version...");
-                let _ = std::process::Command::new(&current_exe)
-                    .args(&args[1..])
-                    .exec();
-            }
+        if fs::rename(&backup_path, &current_exe).is_ok() {
+            let _ = fs::set_permissions(&current_exe, fs::Permissions::from_mode(0o755));
+            eprintln!("Restored from backup, restarting with old version...");
+            let _ = std::process::Command::new(&current_exe)
+                .args(&args[1..])
+                .exec();
         }
         eprintln!("Failed to restore from backup, manual intervention required");
         std::process::exit(1);

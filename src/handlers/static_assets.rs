@@ -32,7 +32,7 @@ mod tests {
     async fn serve_index_returns_html_document() {
         let axum::response::Html(html) = serve_index().await;
 
-        assert!(html.contains("<!DOCTYPE html>"));
+        assert!(html.to_lowercase().contains("<!doctype html>"));
         assert!(html.contains("Miao 控制面板"));
     }
 

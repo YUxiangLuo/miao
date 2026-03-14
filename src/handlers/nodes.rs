@@ -17,6 +17,7 @@ pub async fn get_nodes(State(state): State<Arc<AppState>>) -> Json<ApiResponse<V
                 tag: v.get("tag").and_then(|t| t.as_str()).unwrap_or("").to_string(),
                 server: v.get("server").and_then(|s| s.as_str()).unwrap_or("").to_string(),
                 server_port: v.get("server_port").and_then(|p| p.as_u64()).unwrap_or(0) as u16,
+                node_type: v.get("type").and_then(|t| t.as_str()).unwrap_or("unknown").to_string(),
                 sni: v
                     .get("tls")
                     .and_then(|t| t.get("server_name"))
@@ -170,6 +171,7 @@ mod tests {
         assert_eq!(nodes[0].tag, "node-a");
         assert_eq!(nodes[0].server, "a.example.com");
         assert_eq!(nodes[0].server_port, 443);
+        assert_eq!(nodes[0].node_type, "hysteria2");
         assert_eq!(nodes[0].sni.as_deref(), Some("sni.example.com"));
     }
 }

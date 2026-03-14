@@ -8,82 +8,94 @@ permissions:
   contents: write
 
 jobs:
-  build:
+  frontend:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        target: [amd64, arm64]
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build frontend
+        run: |
+          npm --prefix frontend ci
+          npm --prefix frontend run build
+
+      - name: Upload frontend artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: public/
+
+  build:
+    runs-on: ubuntu-latest
+    needs: frontend
+    strategy:
+      matrix:
+        include:
+          - target: amd64
+            rust_target: x86_64-unknown-linux-musl
+            goarch: amd64
+          - target: arm64
+            rust_target: aarch64-unknown-linux-musl
+            goarch: arm64
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download frontend artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-dist
+          path: public/
+
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_target }}
+
+      - name: Clone sing-box source
+        run: git clone --depth=1 https://github.com/SagerNet/sing-box.git sing-box-src
 
       - name: Determine required Go version
         id: go-version
         run: |
-          # Clone sing-box to read go.mod
-          git clone --depth=1 https://github.com/SagerNet/sing-box.git sing-box-temp
-          cd sing-box-temp
-          # Extract Go version from go.mod
-          GO_VERSION=$(grep '^go ' go.mod | awk '{print $2}')
+          GO_VERSION=$(grep '^go ' sing-box-src/go.mod | awk '{print $2}')
           echo "Required Go version: ${GO_VERSION}"
           echo "version=${GO_VERSION}" >> $GITHUB_OUTPUT
-          cd ..
-          rm -rf sing-box-temp
 
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
           go-version: ${{ steps.go-version.outputs.version }}
-          cache: false
+          cache-dependency-path: sing-box-src/go.sum
 
       - name: Install Zig for cross-compilation
-        run: |
-          sudo snap install zig --classic --edge
+        uses: mlugg/setup-zig@v2
 
       - name: Install cargo-zigbuild
-        run: cargo install cargo-zigbuild
-
-      - name: Add musl targets
-        run: |
-          rustup target add x86_64-unknown-linux-musl
-          rustup target add aarch64-unknown-linux-musl
+        uses: taiki-e/install-action@cargo-zigbuild
 
       - name: Build sing-box binary
         run: |
           mkdir -p embedded
-
-          # Clone sing-box repository
-          git clone --depth=1 https://github.com/SagerNet/sing-box.git sing-box-src
           cd sing-box-src
 
           SING_BOX_VERSION=$(git describe --tags --always)
           echo "Building sing-box version: ${SING_BOX_VERSION}"
 
-          # Set Go version
-          go version
-
-          # Build for target architecture
-          # Use go build directly since sing-box requires Go 1.24.7+
-          if [ "${{ matrix.target }}" = "arm64" ]; then
-            GOARCH=arm64 GOOS=linux CGO_ENABLED=0 go build \
-              -v \
-              -trimpath \
-              -ldflags "-s -w -buildid=" \
-              -tags "with_quic,with_clash_api" \
-              ./cmd/sing-box
-            mv sing-box ../embedded/sing-box-arm64
-          else
-            GOARCH=amd64 GOOS=linux CGO_ENABLED=0 go build \
-              -v \
-              -trimpath \
-              -ldflags "-s -w -buildid=" \
-              -tags "with_quic,with_clash_api" \
-              ./cmd/sing-box
-            mv sing-box ../embedded/sing-box-amd64
-          fi
+          GOARCH=${{ matrix.goarch }} GOOS=linux CGO_ENABLED=0 go build \
+            -v \
+            -trimpath \
+            -ldflags "-s -w -buildid=" \
+            -tags "with_quic,with_clash_api" \
+            ./cmd/sing-box
+          mv sing-box ../embedded/sing-box-${{ matrix.target }}
 
           cd ..
           rm -rf sing-box-src
@@ -93,29 +105,18 @@ jobs:
 
       - name: Download geo rule files
         run: |
-          # Download geoip and geosite rule files from sing-box releases
           curl -L -o embedded/geoip-cn.srs https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/geoip-cn.srs
           curl -L -o embedded/geosite-geolocation-cn.srs https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-geolocation-cn.srs
           echo "Downloaded geo rule files:"
           ls -lh embedded/*.srs
 
       - name: Build release for ${{ matrix.target }}
-        run: |
-          if [ "${{ matrix.target }}" = "arm64" ]; then
-            cargo zigbuild --release --target aarch64-unknown-linux-musl
-          else
-            cargo zigbuild --release --target x86_64-unknown-linux-musl
-          fi
+        run: cargo zigbuild --release --target ${{ matrix.rust_target }}
 
       - name: Prepare release asset
         run: |
-          if [ "${{ matrix.target }}" = "arm64" ]; then
-            mv target/aarch64-unknown-linux-musl/release/miao-rust miao-rust-linux-arm64
-            echo "RELEASE_ASSET=miao-rust-linux-arm64" >> $GITHUB_ENV
-          else
-            mv target/x86_64-unknown-linux-musl/release/miao-rust miao-rust-linux-amd64
-            echo "RELEASE_ASSET=miao-rust-linux-amd64" >> $GITHUB_ENV
-          fi
+          mv target/${{ matrix.rust_target }}/release/miao-rust miao-rust-linux-${{ matrix.target }}
+          echo "RELEASE_ASSET=miao-rust-linux-${{ matrix.target }}" >> $GITHUB_ENV
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

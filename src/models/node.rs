@@ -66,6 +66,7 @@ pub struct NodeInfo {
     pub tag: String,
     pub server: String,
     pub server_port: u16,
+    pub node_type: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sni: Option<String>,
 }

@@ -8,13 +8,13 @@ pub struct VersionInfo {
     pub download_url: Option<String>,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 pub struct GitHubRelease {
     pub tag_name: String,
     pub assets: Vec<GitHubAsset>,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 pub struct GitHubAsset {
     pub name: String,
     pub browser_download_url: String,

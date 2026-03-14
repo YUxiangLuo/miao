@@ -25,7 +25,10 @@ else
     echo "==> sing-box 已存在，跳过"
 fi
 
-# 编译 miao-rust
+echo "==> 构建 Vite + React 前端..."
+npm --prefix frontend install
+npm --prefix frontend run build
+
 echo "==> 编译 miao-rust (debug)..."
 cargo build
 
