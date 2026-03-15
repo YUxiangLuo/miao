@@ -9,7 +9,7 @@ use crate::services::{
     proxy::restore_last_proxy,
     singbox::{start_sing_internal, stop_sing_internal},
 };
-use crate::state::{AppState, CONFIG_WARNING, SING_PROCESS};
+use crate::state::{AppState, CONFIG_WARNING, INITIALIZING, SING_PROCESS};
 
 pub async fn get_status() -> Json<ApiResponse<StatusData>> {
     let mut lock = SING_PROCESS.lock().await;
@@ -30,12 +30,14 @@ pub async fn get_status() -> Json<ApiResponse<StatusData>> {
         (false, None, None)
     };
 
+    let initializing = INITIALIZING.load(std::sync::atomic::Ordering::Relaxed);
     let warning = CONFIG_WARNING.lock().await.clone();
 
     success(
         if running { "running" } else { "stopped" },
         StatusData {
             running,
+            initializing,
             pid,
             uptime_secs,
             warning,

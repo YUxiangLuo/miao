@@ -1,5 +1,7 @@
 use lazy_static::lazy_static;
-use std::{collections::HashMap, time::Instant};
+use std::collections::HashMap;
+use std::sync::atomic::AtomicBool;
+use std::time::Instant;
 use tokio::sync::Mutex;
 
 use crate::models::{Config, SubStatus};
@@ -12,6 +14,8 @@ pub struct SingBoxProcess {
     pub child: tokio::process::Child,
     pub started_at: Instant,
 }
+
+pub static INITIALIZING: AtomicBool = AtomicBool::new(true);
 
 lazy_static! {
     pub static ref SING_PROCESS: Mutex<Option<SingBoxProcess>> = Mutex::new(None);

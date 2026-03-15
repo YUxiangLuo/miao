@@ -650,7 +650,7 @@ export default function App() {
           <span className="run-dot" />
           {status.running ? '运行中' : '已停止'}
         </div>
-        <button className={classNames('version-chip', versionInfo.has_update && 'has-update')} onClick={handleUpgradeClick} disabled={upgrading}>
+        <button className={classNames('version-chip', versionInfo.has_update && 'has-update')} onClick={handleUpgradeClick} disabled={upgrading || status.initializing}>
           {upgrading && <LoaderCircle size={12} className="spin" />}
           {!upgrading && versionInfo.has_update && <span className="version-dot" />}
           <span>{versionInfo.has_update ? versionInfo.latest : versionInfo.current || 'v--'}</span>
@@ -662,8 +662,8 @@ export default function App() {
           <div className="status-left-wrap">
             <div className="status-pill-icon"><span className="status-pill-dot" /></div>
             <div className="status-copy">
-              <div className="status-title">Sing-box {status.running ? '运行中' : '已停止'}</div>
-              <div className="status-subtitle">{status.running ? `PID: ${status.pid ?? '--'} · 运行时长: ${formatUptime(status.uptime_secs)}` : '等待启动服务'}</div>
+              <div className="status-title">Sing-box {status.initializing ? '初始化中' : status.running ? '运行中' : '已停止'}</div>
+              <div className="status-subtitle">{status.running ? `PID: ${status.pid ?? '--'} · 运行时长: ${formatUptime(status.uptime_secs)}` : status.initializing ? '正在获取订阅并启动服务…' : '等待启动服务'}</div>
             </div>
           </div>
 
@@ -673,7 +673,7 @@ export default function App() {
           </div>
 
           <div className="status-card-spacer" />
-          <Button tone={status.running ? 'danger' : 'success'} icon={<Power size={14} />} loading={loadingAction === 'start' || loadingAction === 'stop'} disabled={loadingAction === 'start' || loadingAction === 'stop'} onClick={handleToggleService}>
+          <Button tone={status.running ? 'danger' : 'success'} icon={<Power size={14} />} loading={loadingAction === 'start' || loadingAction === 'stop' || status.initializing} disabled={loadingAction === 'start' || loadingAction === 'stop' || status.initializing} onClick={handleToggleService}>
             {status.running ? '停止服务' : '启动服务'}
           </Button>
         </SectionCard>
@@ -762,7 +762,7 @@ export default function App() {
 
             <SectionCard
               bodyClassName="panel-body-tight"
-              header={<div className="section-header"><div className="section-title-wrap"><Rss size={14} className="section-icon" /><span>订阅管理</span></div><Button tone="secondary" size="sm" icon={<RefreshCw size={12} />} loading={loadingAction === 'refreshSubs'} disabled={subs.length === 0 || loadingAction === 'refreshSubs'} onClick={handleRefreshSubscriptions}>刷新</Button></div>}
+              header={<div className="section-header"><div className="section-title-wrap"><Rss size={14} className="section-icon" /><span>订阅管理</span></div><Button tone="secondary" size="sm" icon={<RefreshCw size={12} />} loading={loadingAction === 'refreshSubs'} disabled={subs.length === 0 || loadingAction === 'refreshSubs' || status.initializing} onClick={handleRefreshSubscriptions}>刷新</Button></div>}
             >
               <div className="list-stack">
                 {subs.length === 0 ? <div className="empty-block">暂无订阅</div> : subs.map((sub) => (
@@ -784,7 +784,7 @@ export default function App() {
 
             <SectionCard
               bodyClassName="panel-body-tight"
-              header={<div className="section-header"><div className="section-title-wrap"><Globe size={14} className="section-icon" /><span>连通性测试</span></div><Button tone="secondary" size="sm" icon={<Play size={11} />} loading={testingConnectivity} onClick={testingConnectivity ? stopConnectivity : testAllConnectivity}>{testingConnectivity ? '停止测试' : '开始测试'}</Button></div>}
+              header={<div className="section-header"><div className="section-title-wrap"><Globe size={14} className="section-icon" /><span>连通性测试</span></div><Button tone="secondary" size="sm" icon={<Play size={11} />} loading={testingConnectivity} disabled={status.initializing} onClick={testingConnectivity ? stopConnectivity : testAllConnectivity}>{testingConnectivity ? '停止测试' : '开始测试'}</Button></div>}
             >
               <div className="connectivity-grid">
                 {CONNECTIVITY_SITES.map((site) => {

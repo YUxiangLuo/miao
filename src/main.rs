@@ -80,6 +80,7 @@ async fn main() -> AppResult<()> {
                         *state::CONFIG_WARNING.lock().await = Some(
                             "所有订阅获取失败且无可用缓存，请添加订阅或手动节点".to_string()
                         );
+                        state::INITIALIZING.store(false, std::sync::atomic::Ordering::Relaxed);
                         return;
                     }
                 }
@@ -105,6 +106,7 @@ async fn main() -> AppResult<()> {
             }
             Err(e) => eprintln!("Failed to start sing-box: {}", e),
         }
+        state::INITIALIZING.store(false, std::sync::atomic::Ordering::Relaxed);
     });
 
     axum::serve(listener, app).await?;
