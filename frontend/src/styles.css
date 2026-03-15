@@ -784,8 +784,28 @@ button {
     }
 }
 @media (max-width: 840px) {
+    /* Switch from viewport-locked to natural page scroll */
+    html, body, #root {
+        height: auto;
+        overflow: auto;
+    }
+    .shell {
+        height: auto;
+        min-height: 100svh;
+        overflow: visible;
+    }
     .workspace {
+        flex: none;
+        overflow: visible;
         padding: 16px;
+    }
+    .content-grid {
+        flex: none;
+        overflow: visible;
+    }
+    .left-column,
+    .right-column {
+        overflow: visible;
     }
     .status-card-body {
         flex-wrap: wrap;
@@ -800,7 +820,6 @@ button {
     }
     .proxy-grid {
         grid-template-columns: repeat(2, minmax(0, 1fr));
-        max-height: none;
     }
 }
 @media (max-width: 560px) {
