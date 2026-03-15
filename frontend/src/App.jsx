@@ -399,11 +399,11 @@ export default function App() {
     fetchSubs()
     fetchNodes()
     fetchVersion()
-    fetchProxies()
 
     const timer = window.setInterval(() => {
       fetchStatus()
-      fetchProxies()
+      fetchSubs()
+      fetchNodes()
     }, POLL_INTERVAL)
 
     return () => {
@@ -416,6 +416,8 @@ export default function App() {
     if (status.running) {
       fetchProxies()
       connectTrafficWs()
+      const proxyTimer = window.setInterval(fetchProxies, POLL_INTERVAL)
+      return () => window.clearInterval(proxyTimer)
     } else {
       setTraffic({})
       setProxies({})
