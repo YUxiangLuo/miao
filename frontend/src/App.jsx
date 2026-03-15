@@ -258,6 +258,7 @@ export default function App() {
   const toastIdRef = useRef(0)
   const stopConnectivityRef = useRef(false)
   const trafficWsRef = useRef(null)
+  const shownWarningRef = useRef(null)
 
   const clashApiBase = useMemo(() => `http://${window.location.hostname}:6262`, [])
 
@@ -312,7 +313,13 @@ export default function App() {
     try {
       const response = await fetch('/api/status')
       const payload = await response.json()
-      if (payload.success && payload.data) setStatus(payload.data)
+      if (payload.success && payload.data) {
+        setStatus(payload.data)
+        if (payload.data.warning && shownWarningRef.current !== payload.data.warning) {
+          shownWarningRef.current = payload.data.warning
+          showToast(payload.data.warning, 'error')
+        }
+      }
     } catch {
       // ignore
     }

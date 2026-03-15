@@ -9,6 +9,8 @@ use crate::services::{
 };
 use crate::state::SUB_STATUS;
 
+const CONFIG_CACHE_PATH: &str = "/tmp/miao-sing-box/config.json.cache";
+
 pub async fn save_config(
     config: &Config,
 ) -> AppResult<()> {
@@ -17,8 +19,30 @@ pub async fn save_config(
     Ok(())
 }
 
+pub async fn save_config_cache() {
+    let config_path = get_sing_box_home().join("config.json");
+    if let Err(e) = tokio::fs::copy(&config_path, CONFIG_CACHE_PATH).await {
+        eprintln!("Failed to save config cache: {}", e);
+    } else {
+        println!("Config cache saved to {}", CONFIG_CACHE_PATH);
+    }
+}
+
+pub async fn restore_config_from_cache() -> AppResult<()> {
+    let cache = std::path::Path::new(CONFIG_CACHE_PATH);
+    if !cache.exists() {
+        return Err(AppError::message("No cached config available"));
+    }
+    let config_path = get_sing_box_home().join("config.json");
+    tokio::fs::copy(CONFIG_CACHE_PATH, &config_path)
+        .await
+        .map_err(|e| AppError::context("Failed to restore config from cache", e))?;
+    println!("Restored config from cache");
+    Ok(())
+}
+
 pub async fn regenerate_and_restart(config: &Config) -> AppResult<()> {
-    gen_config(config)
+    let has_sub_nodes = gen_config(config)
         .await
         .map_err(|e| AppError::context("Failed to regenerate config", e))?;
     println!("Config regenerated successfully");
@@ -31,6 +55,17 @@ pub async fn regenerate_and_restart(config: &Config) -> AppResult<()> {
         .map_err(|e| AppError::context("Failed to restart sing-box", e))?;
     println!("sing-box restarted successfully");
 
+    if has_sub_nodes {
+        save_config_cache().await;
+        *crate::state::CONFIG_WARNING.lock().await = None;
+    } else if !config.subs.is_empty() {
+        *crate::state::CONFIG_WARNING.lock().await = Some(
+            "所有订阅获取失败，请检查当前订阅".to_string()
+        );
+    } else {
+        *crate::state::CONFIG_WARNING.lock().await = None;
+    }
+
     tokio::spawn(async {
         restore_last_proxy().await;
     });
@@ -38,9 +73,10 @@ pub async fn regenerate_and_restart(config: &Config) -> AppResult<()> {
     Ok(())
 }
 
+/// Returns `true` if at least one subscription node was fetched successfully.
 pub async fn gen_config(
     config: &Config,
-) -> AppResult<()> {
+) -> AppResult<bool> {
     let (my_outbounds, my_names) = collect_manual_outbounds(config);
     let mut final_outbounds: Vec<serde_json::Value> = vec![];
     let mut final_node_names: Vec<String> = vec![];
@@ -107,6 +143,8 @@ pub async fn gen_config(
         SUB_STATUS.lock().await.insert(url, status);
     }
 
+    let has_sub_nodes = !final_node_names.is_empty();
+
     let sing_box_config = build_sing_box_config(
         config,
         my_names,
@@ -127,7 +165,7 @@ pub async fn gen_config(
         "Generated config: {}",
         serde_json::to_string(&sing_box_config).unwrap()
     );
-    Ok(())
+    Ok(has_sub_nodes)
 }
 
 fn collect_manual_outbounds(config: &Config) -> (Vec<serde_json::Value>, Vec<String>) {

@@ -11,11 +11,10 @@ mod test_support;
 use crate::error::AppResult;
 use nix::unistd::Uid;
 use std::{fs, sync::Arc};
-use tokio::time::{sleep, Duration};
 
 use models::{Config, DEFAULT_PORT};
 use services::{
-    config::gen_config,
+    config::{gen_config, restore_config_from_cache, save_config_cache},
     openwrt::check_and_install_openwrt_dependencies,
     proxy::restore_last_proxy,
     singbox::{extract_sing_box, start_sing_internal},
@@ -50,15 +49,27 @@ async fn main() -> AppResult<()> {
     let _ = extract_sing_box()?;
 
     println!("Generating initial config...");
-    loop {
-        match gen_config(&config).await {
-            Ok(_) => break,
-            Err(e) => {
-                eprintln!(
-                    "Failed to generate config: {}. Retrying in 300 seconds...",
-                    e
-                );
-                sleep(Duration::from_secs(300)).await;
+    let mut all_subs_failed = false;
+    match gen_config(&config).await {
+        Ok(has_sub_nodes) => {
+            if has_sub_nodes {
+                save_config_cache().await;
+            } else if !config.subs.is_empty() {
+                all_subs_failed = true;
+            }
+        }
+        Err(e) => {
+            eprintln!("Failed to generate config: {}", e);
+            match restore_config_from_cache().await {
+                Ok(_) => {
+                    println!("Using cached config as fallback");
+                    all_subs_failed = true;
+                }
+                Err(cache_err) => {
+                    eprintln!("No cached config available: {}", cache_err);
+                    eprintln!("Cannot start without a valid config. Exiting.");
+                    std::process::exit(1);
+                }
             }
         }
     }
@@ -71,6 +82,11 @@ async fn main() -> AppResult<()> {
     match start_sing_internal().await {
         Ok(_) => {
             println!("sing-box started successfully");
+            if all_subs_failed {
+                *state::CONFIG_WARNING.lock().await = Some(
+                    "所有订阅获取失败，请检查当前订阅".to_string()
+                );
+            }
             tokio::spawn(async {
                 restore_last_proxy().await;
             });

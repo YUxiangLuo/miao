@@ -16,4 +16,5 @@ pub struct SingBoxProcess {
 lazy_static! {
     pub static ref SING_PROCESS: Mutex<Option<SingBoxProcess>> = Mutex::new(None);
     pub static ref SUB_STATUS: Mutex<HashMap<String, SubStatus>> = Mutex::new(HashMap::new());
+    pub static ref CONFIG_WARNING: Mutex<Option<String>> = Mutex::new(None);
 }

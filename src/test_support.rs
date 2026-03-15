@@ -11,7 +11,7 @@ use tokio::sync::Mutex;
 use crate::{
     models::Config,
     router::build_router,
-    state::{AppState, SING_PROCESS, SUB_STATUS},
+    state::{AppState, CONFIG_WARNING, SING_PROCESS, SUB_STATUS},
 };
 
 pub fn app_state(config: Config) -> Arc<AppState> {
@@ -23,6 +23,7 @@ pub fn app_state(config: Config) -> Arc<AppState> {
 pub async fn reset_test_globals() {
     *SING_PROCESS.lock().await = None;
     SUB_STATUS.lock().await.clear();
+    *CONFIG_WARNING.lock().await = None;
 }
 
 pub async fn test_app(config: Config) -> Router {
