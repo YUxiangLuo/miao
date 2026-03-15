@@ -753,7 +753,7 @@ export default function App() {
 
             <SectionCard
               bodyClassName="panel-body-tight"
-              header={<div className="section-header"><div className="section-title-wrap"><Rss size={14} className="section-icon" /><span>订阅管理</span></div><Button tone="secondary" size="sm" icon={<RefreshCw size={12} />} loading={loadingAction === 'refreshSubs'} disabled={subs.length === 0} onClick={handleRefreshSubscriptions}>刷新</Button></div>}
+              header={<div className="section-header"><div className="section-title-wrap"><Rss size={14} className="section-icon" /><span>订阅管理</span></div><Button tone="secondary" size="sm" icon={<RefreshCw size={12} />} loading={loadingAction === 'refreshSubs'} disabled={subs.length === 0 || loadingAction === 'refreshSubs'} onClick={handleRefreshSubscriptions}>刷新</Button></div>}
             >
               <div className="list-stack">
                 {subs.length === 0 ? <div className="empty-block">暂无订阅</div> : subs.map((sub) => (
