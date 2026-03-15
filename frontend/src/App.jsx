@@ -664,7 +664,7 @@ export default function App() {
           </div>
 
           <div className="status-card-spacer" />
-          <Button tone={status.running ? 'danger' : 'success'} icon={<Power size={14} />} loading={loadingAction === 'start' || loadingAction === 'stop'} onClick={handleToggleService}>
+          <Button tone={status.running ? 'danger' : 'success'} icon={<Power size={14} />} loading={loadingAction === 'start' || loadingAction === 'stop'} disabled={loadingAction === 'start' || loadingAction === 'stop'} onClick={handleToggleService}>
             {status.running ? '停止服务' : '启动服务'}
           </Button>
         </SectionCard>
