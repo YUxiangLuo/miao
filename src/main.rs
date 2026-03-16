@@ -17,7 +17,7 @@ use services::{
     config::{gen_config, restore_config_from_cache, save_config_cache},
     openwrt::check_and_install_openwrt_dependencies,
     proxy::restore_last_proxy,
-    singbox::{extract_sing_box, start_sing_internal},
+    singbox::{extract_sing_box, start_sing_internal, stop_sing_internal},
 };
 use state::AppState;
 
@@ -109,6 +109,24 @@ async fn main() -> AppResult<()> {
         state::INITIALIZING.store(false, std::sync::atomic::Ordering::Relaxed);
     });
 
-    axum::serve(listener, app).await?;
+    axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_signal())
+        .await?;
     Ok(())
+}
+
+async fn shutdown_signal() {
+    let mut sigterm =
+        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+            .expect("failed to install SIGTERM handler");
+
+    tokio::select! {
+        result = tokio::signal::ctrl_c() => {
+            result.expect("failed to install Ctrl+C handler");
+        }
+        _ = sigterm.recv() => {}
+    }
+
+    println!("Shutting down, stopping sing-box...");
+    stop_sing_internal().await;
 }

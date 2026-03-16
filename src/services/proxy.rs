@@ -40,19 +40,16 @@ pub async fn restore_last_proxy() {
 
     sleep(Duration::from_secs(1)).await;
 
-    let client = match reqwest::Client::builder()
-        .timeout(Duration::from_secs(5))
-        .build()
-    {
-        Ok(c) => c,
-        Err(_) => return,
-    };
-
-    let check_url = format!(
+    let url = format!(
         "http://127.0.0.1:6262/proxies/{}",
         urlencoding::encode(&proxy.group)
     );
-    let group_info = match client.get(&check_url).send().await {
+    let group_info = match crate::state::CLIENT
+        .get(&url)
+        .timeout(Duration::from_secs(5))
+        .send()
+        .await
+    {
         Ok(res) => match res.json::<serde_json::Value>().await {
             Ok(v) => v,
             Err(_) => return,
@@ -74,12 +71,9 @@ pub async fn restore_last_proxy() {
         return;
     }
 
-    let url = format!(
-        "http://127.0.0.1:6262/proxies/{}",
-        urlencoding::encode(&proxy.group)
-    );
-    match client
+    match crate::state::CLIENT
         .put(&url)
+        .timeout(Duration::from_secs(5))
         .json(&serde_json::json!({ "name": proxy.name }))
         .send()
         .await

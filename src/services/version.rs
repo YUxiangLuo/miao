@@ -61,12 +61,9 @@ fn current_arch_asset_name() -> Option<&'static str> {
 }
 
 async fn fetch_latest_release_uncached() -> AppResult<GitHubRelease> {
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(60))
-        .build()?;
-
-    let release = client
+    let release = crate::state::CLIENT
         .get("https://api.github.com/repos/YUxiangLuo/miao/releases/latest")
+        .timeout(Duration::from_secs(60))
         .header("User-Agent", "miao")
         .send()
         .await?
@@ -150,12 +147,14 @@ pub async fn upgrade_binary() -> AppResult<String> {
         .map(|a| a.browser_download_url.clone())
         .ok_or_else(|| AppError::message("No binary found for current architecture"))?;
 
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(60))
-        .build()?;
-
     println!("Downloading update from: {}", download_url);
-    let binary_data = client.get(&download_url).send().await?.bytes().await?;
+    let binary_data = crate::state::CLIENT
+        .get(&download_url)
+        .timeout(Duration::from_secs(60))
+        .send()
+        .await?
+        .bytes()
+        .await?;
 
     let temp_path = "/tmp/miao-new";
     fs::write(temp_path, &binary_data)

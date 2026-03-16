@@ -3,13 +3,14 @@ use serde::Deserialize;
 use std::{sync::Arc, time::Instant};
 use tokio::time::Duration;
 
+use crate::error::AppError;
 use crate::models::{ApiResponse, ConnectivityResult, StatusData};
-use crate::responses::{error, status_error, success, success_no_data, HandlerResult};
+use crate::responses::{status_error, success, success_no_data, HandlerResult};
 use crate::services::{
     proxy::restore_last_proxy,
     singbox::{start_sing_internal, stop_sing_internal},
 };
-use crate::state::{AppState, CONFIG_WARNING, INITIALIZING, SING_PROCESS};
+use crate::state::{AppState, CLIENT, CONFIG_WARNING, INITIALIZING, SING_PROCESS};
 
 pub async fn get_status() -> Json<ApiResponse<StatusData>> {
     let mut lock = SING_PROCESS.lock().await;
@@ -48,16 +49,6 @@ pub async fn get_status() -> Json<ApiResponse<StatusData>> {
 pub async fn start_service(
     State(_): State<Arc<AppState>>,
 ) -> HandlerResult {
-    let mut lock = SING_PROCESS.lock().await;
-
-    if let Some(ref mut proc) = *lock {
-        if proc.child.try_wait().ok().flatten().is_none() {
-            return Err(status_error(StatusCode::BAD_REQUEST, "sing-box is already running"));
-        }
-    }
-
-    drop(lock);
-
     match start_sing_internal().await {
         Ok(_) => {
             tokio::spawn(async {
@@ -65,7 +56,12 @@ pub async fn start_service(
             });
             Ok(success_no_data("sing-box started successfully"))
         }
-        Err(e) => Err(status_error(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to start: {}", e))),
+        Err(AppError::AlreadyRunning) => {
+            Err(status_error(StatusCode::BAD_REQUEST, "sing-box is already running"))
+        }
+        Err(e) => {
+            Err(status_error(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to start: {}", e)))
+        }
     }
 }
 
@@ -82,18 +78,13 @@ pub(crate) struct ConnectivityRequest {
 pub async fn test_connectivity(
     Json(req): Json<ConnectivityRequest>,
 ) -> Json<ApiResponse<ConnectivityResult>> {
-    let client = match reqwest::Client::builder()
-        .timeout(Duration::from_secs(5))
-        .build()
-    {
-        Ok(c) => c,
-        Err(e) => {
-            return error(format!("Failed to create client: {}", e));
-        }
-    };
-
     let start = Instant::now();
-    let result = match client.head(&req.url).send().await {
+    let result = match CLIENT
+        .head(&req.url)
+        .timeout(Duration::from_secs(5))
+        .send()
+        .await
+    {
         Ok(_) => ConnectivityResult {
             name: String::new(),
             url: req.url,

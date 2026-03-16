@@ -71,7 +71,7 @@ pub async fn start_sing_internal() -> AppResult<()> {
             .map_err(|e| AppError::context("Failed to check whether sing-box is already running", e))?
             .is_none()
         {
-            return Err(AppError::message("sing-box is already running"));
+            return Err(AppError::AlreadyRunning);
         }
     }
 
@@ -115,16 +115,12 @@ pub async fn start_sing_internal() -> AppResult<()> {
 
     sleep(Duration::from_secs(5)).await;
 
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(10))
-        .build()
-        .map_err(|e| AppError::context("Failed to create connectivity check HTTP client", e))?;
-
     let mut connectivity_ok = false;
     for attempt in 1..=3 {
         println!("Connectivity check attempt {}/3...", attempt);
-        match client
+        match crate::state::CLIENT
             .get("http://connectivitycheck.gstatic.com/generate_204")
+            .timeout(Duration::from_secs(10))
             .send()
             .await
         {

@@ -4,13 +4,9 @@ use crate::models::{AnyTls, Hysteria2, Shadowsocks, Tls};
 pub async fn fetch_sub(
     link: &str,
 ) -> AppResult<(Vec<String>, Vec<serde_json::Value>)> {
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(30))
-        .build()
-        .map_err(|e| AppError::context("Failed to create subscription HTTP client", e))?;
-
-    let res = client
+    let res = crate::state::CLIENT
         .get(link)
+        .timeout(std::time::Duration::from_secs(30))
         .header("User-Agent", "clash-meta")
         .send()
         .await

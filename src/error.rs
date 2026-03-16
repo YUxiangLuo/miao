@@ -3,6 +3,7 @@ use std::{error::Error, fmt::{self, Display, Formatter}};
 #[derive(Debug)]
 pub enum AppError {
     Message(String),
+    AlreadyRunning,
     Io(std::io::Error),
     Json(serde_json::Error),
     Yaml(serde_yaml::Error),
@@ -30,6 +31,7 @@ impl Display for AppError {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             Self::Message(message) => write!(f, "{message}"),
+            Self::AlreadyRunning => write!(f, "sing-box is already running"),
             Self::Io(err) => write!(f, "{err}"),
             Self::Json(err) => write!(f, "{err}"),
             Self::Yaml(err) => write!(f, "{err}"),
@@ -43,6 +45,7 @@ impl Error for AppError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
             Self::Message(_) => None,
+            Self::AlreadyRunning => None,
             Self::Io(err) => Some(err),
             Self::Json(err) => Some(err),
             Self::Yaml(err) => Some(err),
