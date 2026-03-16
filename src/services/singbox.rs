@@ -113,42 +113,6 @@ pub async fn start_sing_internal() -> AppResult<()> {
     });
     drop(lock);
 
-    sleep(Duration::from_secs(5)).await;
-
-    let mut connectivity_ok = false;
-    for attempt in 1..=3 {
-        println!("Connectivity check attempt {}/3...", attempt);
-        match crate::state::CLIENT
-            .get("http://connectivitycheck.gstatic.com/generate_204")
-            .timeout(Duration::from_secs(10))
-            .send()
-            .await
-        {
-            Ok(res) if res.status().as_u16() == 204 => {
-                println!("Connectivity check passed!");
-                connectivity_ok = true;
-                break;
-            }
-            Ok(res) => {
-                println!("Connectivity check failed: status {}", res.status());
-            }
-            Err(e) => {
-                println!("Connectivity check failed: {}", e);
-            }
-        }
-        if attempt < 3 {
-            sleep(Duration::from_secs(2)).await;
-        }
-    }
-
-    if !connectivity_ok {
-        println!("Connectivity check failed, stopping sing-box...");
-        stop_sing_internal().await;
-        return Err(AppError::message(
-            "sing-box started but connectivity check failed",
-        ));
-    }
-
     Ok(())
 }
 
