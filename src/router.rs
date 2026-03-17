@@ -9,10 +9,7 @@ use crate::handlers::{
     nodes::{add_node, delete_node, get_nodes},
     proxy::set_last_proxy,
     service::{get_status, start_service, stop_service, test_connectivity},
-    static_assets::{
-        serve_bootstrap_css, serve_favicon, serve_font_woff, serve_font_woff2,
-        serve_index, serve_vue,
-    },
+    static_assets::{serve_favicon, serve_index},
     subs::{add_sub, delete_sub, get_subs, refresh_subs},
     version::{get_version, upgrade},
 };
@@ -22,10 +19,6 @@ pub fn build_router(app_state: Arc<AppState>) -> Router {
     Router::new()
         .route("/", get(serve_index))
         .route("/favicon.svg", get(serve_favicon))
-        .route("/assets/vue.js", get(serve_vue))
-        .route("/assets/bootstrap-icons.css", get(serve_bootstrap_css))
-        .route("/assets/fonts/bootstrap-icons.woff2", get(serve_font_woff2))
-        .route("/assets/fonts/bootstrap-icons.woff", get(serve_font_woff))
         .route("/api/status", get(get_status))
         .route("/api/service/start", post(start_service))
         .route("/api/service/stop", post(stop_service))
@@ -64,10 +57,7 @@ mod tests {
         })
         .await;
 
-        let response = app
-            .oneshot(empty_request("GET", "/"))
-            .await
-            .unwrap();
+        let response = app.oneshot(empty_request("GET", "/")).await.unwrap();
 
         assert_eq!(response.status(), StatusCode::OK);
         let body = response_text(response).await;
@@ -90,7 +80,10 @@ mod tests {
             .unwrap();
 
         assert_eq!(response.status(), StatusCode::OK);
-        assert_eq!(response.headers().get(CONTENT_TYPE).unwrap(), "image/svg+xml");
+        assert_eq!(
+            response.headers().get(CONTENT_TYPE).unwrap(),
+            "image/svg+xml"
+        );
         let body = response_text(response).await;
         assert!(body.contains("<svg"));
     }
