@@ -9,7 +9,7 @@ use crate::state::AppState;
 pub async fn get_version(
     State(state): State<Arc<AppState>>,
 ) -> Json<ApiResponse<VersionInfo>> {
-    success("Version info", get_version_info(&state.http_client).await)
+    success("Version info", get_version_info(&state).await)
 }
 
 pub async fn upgrade(

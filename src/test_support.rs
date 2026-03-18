@@ -14,18 +14,19 @@ use crate::{
 };
 
 pub fn app_state(config: Config) -> Arc<AppState> {
-    Arc::new(AppState::new(config))
+    Arc::new(AppState::new(config).expect("Failed to create AppState in test"))
 }
 
-pub async fn reset_version_cache() {
-    let mut cache = crate::state::VERSION_CACHE.write().await;
+pub async fn reset_version_cache(state: &Arc<AppState>) {
+    let mut cache = state.version_cache.lock().await;
     cache.release = None;
     cache.fetched_at = None;
 }
 
 pub async fn test_app(config: Config) -> Router {
-    reset_version_cache().await;
-    build_router(app_state(config))
+    let state = app_state(config);
+    reset_version_cache(&state).await;
+    build_router(state)
 }
 
 pub fn empty_request(method: &str, uri: &str) -> Request<Body> {

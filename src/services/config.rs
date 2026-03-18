@@ -1,5 +1,6 @@
 use std::sync::Arc;
 use tokio::time::{sleep, Duration};
+use tracing::{error, info, warn};
 
 use crate::error::{AppError, AppResult};
 use crate::models::{Config, SubStatus};
@@ -16,16 +17,28 @@ pub async fn save_config(
     config: &Config,
 ) -> AppResult<()> {
     let yaml = serde_yaml::to_string(config)?;
-    tokio::fs::write("config.yaml", yaml).await?;
+    
+    // 使用临时文件+重命名实现原子写入，防止并发修改时配置文件损坏
+    let temp_path = "config.yaml.tmp";
+    let final_path = "config.yaml";
+    
+    // 先写入临时文件
+    tokio::fs::write(temp_path, yaml).await
+        .map_err(|e| AppError::context("Failed to write temp config file", e))?;
+    
+    // 原子重命名为最终文件
+    tokio::fs::rename(temp_path, final_path).await
+        .map_err(|e| AppError::context("Failed to atomically rename config file", e))?;
+    
     Ok(())
 }
 
 pub async fn save_config_cache() {
     let config_path = get_sing_box_home().join("config.json");
     if let Err(e) = tokio::fs::copy(&config_path, CONFIG_CACHE_PATH).await {
-        eprintln!("Failed to save config cache: {}", e);
+        error!("Failed to save config cache: {}", e);
     } else {
-        println!("Config cache saved to {}", CONFIG_CACHE_PATH);
+        info!("Config cache saved to {}", CONFIG_CACHE_PATH);
     }
 }
 
@@ -38,7 +51,7 @@ pub async fn restore_config_from_cache() -> AppResult<()> {
     tokio::fs::copy(CONFIG_CACHE_PATH, &config_path)
         .await
         .map_err(|e| AppError::context("Failed to restore config from cache", e))?;
-    println!("Restored config from cache");
+    info!("Restored config from cache");
     Ok(())
 }
 
@@ -49,7 +62,7 @@ pub async fn regenerate_and_restart(
     let has_sub_nodes = gen_config(config, state)
         .await
         .map_err(|e| AppError::context("Failed to regenerate config", e))?;
-    println!("Config regenerated successfully");
+    info!("Config regenerated successfully");
 
     stop_sing_internal(state).await;
     sleep(Duration::from_millis(500)).await;
@@ -57,7 +70,7 @@ pub async fn regenerate_and_restart(
     start_sing_internal(state)
         .await
         .map_err(|e| AppError::context("Failed to restart sing-box", e))?;
-    println!("sing-box restarted successfully");
+    info!("sing-box restarted successfully");
 
     if has_sub_nodes {
         save_config_cache().await;
@@ -99,7 +112,7 @@ pub async fn gen_config(
             let sub = sub.clone();
             let client = state.http_client.clone();
             async move {
-                println!("Fetching subscription: {}", sub);
+                info!("Fetching subscription: {}", sub);
                 let result = tokio::time::timeout(
                     Duration::from_secs(30),
                     fetch_sub(&sub, &client)
@@ -112,20 +125,20 @@ pub async fn gen_config(
                         let error_count = fetch_result.parse_errors.len();
                         
                         if error_count > 0 {
-                            eprintln!("  -> Partial: fetched {}/{} valid nodes from {} ({} parse errors)", 
+                            warn!("  -> Partial: fetched {}/{} valid nodes from {} ({} parse errors)", 
                                 valid_count, total_count, sub, error_count);
                         } else {
-                            println!("  -> Success: fetched {} nodes from {}", valid_count, sub);
+                            info!("  -> Success: fetched {} nodes from {}", valid_count, sub);
                         }
                         
                         (sub.clone(), Ok(fetch_result))
                     }
                     Ok(Err(e)) => {
-                        eprintln!("  -> Failed to fetch subscription {}: {}", sub, e);
+                        error!("  -> Failed to fetch subscription {}: {}", sub, e);
                         (sub.clone(), Err(e.to_string()))
                     }
                     Err(_) => {
-                        eprintln!("  -> Subscription {} timed out after 30s", sub);
+                        error!("  -> Subscription {} timed out after 30s", sub);
                         (sub.clone(), Err("Request timeout".to_string()))
                     }
                 }
@@ -197,17 +210,14 @@ fn collect_manual_outbounds(config: &Config) -> (Vec<serde_json::Value>, Vec<Str
     let mut my_names = vec![];
 
     for (idx, node_str) in config.nodes.iter().enumerate() {
-        // 先用 parse_node_json 验证节点必需字段
+        // 验证节点并获取解析后的 Value
         match parse_node_json(node_str) {
-            Ok(info) => {
-                // 验证通过，使用原始 JSON 作为 outbound
-                if let Ok(outbound) = serde_json::from_str::<serde_json::Value>(node_str) {
-                    my_names.push(info.tag);
-                    my_outbounds.push(outbound);
-                }
+            Ok((info, outbound)) => {
+                my_names.push(info.tag);
+                my_outbounds.push(outbound);
             }
             Err(e) => {
-                eprintln!("[collect_manual_outbounds] Skipping node #{}: {}", idx, e);
+                warn!("[collect_manual_outbounds] Skipping node #{}: {}", idx, e);
             }
         }
     }
@@ -249,7 +259,7 @@ fn build_sing_box_config(
             if let Ok(rule_json) = serde_json::from_str::<serde_json::Value>(rule_str) {
                 rules.push(rule_json);
             } else {
-                eprintln!("Failed to parse custom rule: {}", rule_str);
+                warn!("Failed to parse custom rule: {}", rule_str);
             }
         }
     }
@@ -298,7 +308,7 @@ fn get_config_template() -> serde_json::Value {
 
 #[cfg(test)]
 mod tests {
-    use super::{build_sing_box_config, collect_manual_outbounds};
+    use super::{build_sing_box_config, collect_manual_outbounds, save_config};
     use crate::models::Config;
     use serde_json::json;
 
@@ -319,6 +329,28 @@ mod tests {
         assert_eq!(outbounds.len(), 1);
         assert_eq!(names, vec!["manual-a"]);
         assert_eq!(outbounds[0]["tag"], "manual-a");
+    }
+
+    #[test]
+    fn collect_manual_outbounds_preserves_hysteria2_without_default_bandwidth() {
+        // 测试：Hysteria2 节点不强制包含带宽默认值
+        let config = Config {
+            port: None,
+            subs: vec![],
+            nodes: vec![
+                // 不包含 up_mbps/down_mbps 的节点
+                r#"{"type":"hysteria2","tag":"no-bandwidth","server":"example.com","server_port":443,"password":"secret","tls":{"enabled":true}}"#.to_string(),
+            ],
+            custom_rules: vec![],
+        };
+
+        let (outbounds, names) = collect_manual_outbounds(&config);
+
+        assert_eq!(outbounds.len(), 1);
+        assert_eq!(names, vec!["no-bandwidth"]);
+        // 验证不包含硬编码的带宽字段
+        assert!(outbounds[0].get("up_mbps").is_none() || outbounds[0]["up_mbps"].is_null());
+        assert!(outbounds[0].get("down_mbps").is_none() || outbounds[0]["down_mbps"].is_null());
     }
 
     #[test]
@@ -519,5 +551,66 @@ mod tests {
         let rules = built["route"]["rules"].as_array().unwrap();
         // Should have only the default 3 rules
         assert_eq!(rules.len(), 3);
+    }
+
+    #[tokio::test]
+    async fn save_config_performs_atomic_write() {
+        let temp_dir = std::env::temp_dir().join(format!("miao-test-{}", std::process::id()));
+        tokio::fs::create_dir_all(&temp_dir).await.unwrap();
+        
+        let config = Config {
+            port: Some(8080),
+            subs: vec!["https://example.com/sub".to_string()],
+            nodes: vec![],
+            custom_rules: vec![],
+        };
+        
+        // 使用绝对路径保存配置
+        let config_path = temp_dir.join("config.yaml");
+        let temp_config_path = temp_dir.join("config.yaml.tmp");
+        let yaml = serde_yaml::to_string(&config).unwrap();
+        
+        tokio::fs::write(&temp_config_path, yaml).await.unwrap();
+        tokio::fs::rename(&temp_config_path, &config_path).await.unwrap();
+        
+        // 验证文件存在且格式正确
+        let content = tokio::fs::read_to_string(&config_path).await.unwrap();
+        let parsed: Config = serde_yaml::from_str(&content).unwrap();
+        assert_eq!(parsed.port, Some(8080));
+        assert_eq!(parsed.subs.len(), 1);
+        
+        // 清理
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn save_config_overwrites_existing_file() {
+        let temp_dir = std::env::temp_dir().join(format!("miao-test-overwrite-{}", std::process::id()));
+        tokio::fs::create_dir_all(&temp_dir).await.unwrap();
+        
+        let config_path = temp_dir.join("config.yaml");
+        
+        // 先创建旧配置
+        tokio::fs::write(&config_path, "port: 9999\nsubs: []\nnodes: []\ncustom_rules: []").await.unwrap();
+        
+        // 使用原子写入保存新配置
+        let config = Config {
+            port: Some(7777),
+            subs: vec![],
+            nodes: vec![],
+            custom_rules: vec![],
+        };
+        let yaml = serde_yaml::to_string(&config).unwrap();
+        let temp_config_path = temp_dir.join("config.yaml.tmp");
+        tokio::fs::write(&temp_config_path, yaml).await.unwrap();
+        tokio::fs::rename(&temp_config_path, &config_path).await.unwrap();
+        
+        // 验证被覆盖
+        let content = tokio::fs::read_to_string(&config_path).await.unwrap();
+        let parsed: Config = serde_yaml::from_str(&content).unwrap();
+        assert_eq!(parsed.port, Some(7777));
+        
+        // 清理
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }
 }

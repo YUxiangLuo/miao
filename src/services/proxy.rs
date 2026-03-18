@@ -2,6 +2,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use tokio::time::{sleep, Duration};
+use tracing::{error, info, warn};
 
 use crate::error::AppResult;
 use crate::models::LastProxy;
@@ -35,7 +36,7 @@ pub async fn restore_last_proxy(state: &Arc<AppState>) {
         None => return,
     };
 
-    println!(
+    info!(
         "Attempting to restore last proxy: {} -> {}",
         proxy.group, proxy.name
     );
@@ -63,7 +64,7 @@ pub async fn restore_last_proxy(state: &Arc<AppState>) {
     if let Some(nodes) = all_nodes {
         let node_exists = nodes.iter().any(|n| n.as_str() == Some(&proxy.name));
         if !node_exists {
-            println!(
+            warn!(
                 "Last proxy '{}' not found in current node list, skipping restore",
                 proxy.name
             );
@@ -81,13 +82,13 @@ pub async fn restore_last_proxy(state: &Arc<AppState>) {
         .await
     {
         Ok(res) if res.status().is_success() => {
-            println!("Successfully restored last proxy: {}", proxy.name);
+            info!("Successfully restored last proxy: {}", proxy.name);
         }
         Ok(res) => {
-            println!("Failed to restore last proxy: status {}", res.status());
+            warn!("Failed to restore last proxy: status {}", res.status());
         }
         Err(e) => {
-            println!("Failed to restore last proxy: {}", e);
+            error!("Failed to restore last proxy: {}", e);
         }
     }
 }

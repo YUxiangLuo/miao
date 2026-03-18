@@ -7,11 +7,12 @@ use std::{
 
 use sha2::{Sha256, Digest};
 use tokio::time::{sleep, Duration};
+use tracing::{error, info};
 
 use crate::error::{AppError, AppResult};
 use crate::models::{GitHubRelease, GitHubAsset, VersionInfo};
 use crate::services::singbox::{get_sing_box_home, stop_sing_internal};
-use crate::state::{AppState, VERSION_CACHE};
+use crate::state::AppState;
 use crate::VERSION;
 
 fn compute_sha256(data: &[u8]) -> String {
@@ -35,9 +36,12 @@ async fn fetch_latest_release_uncached(client: &reqwest::Client) -> AppResult<Gi
     Ok(release)
 }
 
-async fn fetch_latest_release(client: &reqwest::Client) -> AppResult<GitHubRelease> {
+async fn fetch_latest_release(
+    client: &reqwest::Client,
+    state: &Arc<AppState>,
+) -> AppResult<GitHubRelease> {
     {
-        let cache = VERSION_CACHE.read().await;
+        let cache = state.version_cache.lock().await;
         if let (Some(release), Some(fetched_at)) = (&cache.release, cache.fetched_at) {
             if fetched_at.elapsed() < CACHE_TTL {
                 return Ok(release.clone());
@@ -47,24 +51,24 @@ async fn fetch_latest_release(client: &reqwest::Client) -> AppResult<GitHubRelea
 
     let release = fetch_latest_release_uncached(client).await?;
     {
-        let mut cache = VERSION_CACHE.write().await;
+        let mut cache = state.version_cache.lock().await;
         cache.release = Some(release.clone());
         cache.fetched_at = Some(Instant::now());
     }
     Ok(release)
 }
 
-async fn invalidate_release_cache() {
-    let mut cache = VERSION_CACHE.write().await;
+async fn invalidate_release_cache(state: &Arc<AppState>) {
+    let mut cache = state.version_cache.lock().await;
     cache.release = None;
     cache.fetched_at = None;
 }
 
-pub async fn get_version_info(client: &reqwest::Client) -> VersionInfo {
+pub async fn get_version_info(state: &Arc<AppState>) -> VersionInfo {
     let current = current_version();
     let asset_name = current_arch_asset_name().unwrap_or("");
 
-    match fetch_latest_release(client).await {
+    match fetch_latest_release(&state.http_client, state).await {
         Ok(release) => {
             let latest = release.tag_name.clone();
             let has_update = is_newer_version(&current, &latest);
@@ -92,8 +96,8 @@ pub async fn get_version_info(client: &reqwest::Client) -> VersionInfo {
 
 pub async fn upgrade_binary(state: &Arc<AppState>) -> AppResult<String> {
     // Force fresh fetch for upgrade to ensure we have the latest info
-    invalidate_release_cache().await;
-    let release = fetch_latest_release(&state.http_client).await?;
+    invalidate_release_cache(state).await;
+    let release = fetch_latest_release(&state.http_client, state).await?;
     let current = current_version();
 
     if !is_newer_version(&current, &release.tag_name) {
@@ -111,7 +115,7 @@ pub async fn upgrade_binary(state: &Arc<AppState>) -> AppResult<String> {
     let download_url = &asset.browser_download_url;
     let expected_size = asset.size;
 
-    println!("Downloading update from: {}", download_url);
+    info!("Downloading update from: {}", download_url);
     let binary_data = state.http_client
         .get(download_url)
         .timeout(Duration::from_secs(60))
@@ -131,7 +135,7 @@ pub async fn upgrade_binary(state: &Arc<AppState>) -> AppResult<String> {
 
     // Compute and log SHA256 for verification
     let sha256_hash = compute_sha256(&binary_data);
-    println!("Downloaded binary SHA256: {}", sha256_hash);
+    info!("Downloaded binary SHA256: {}", sha256_hash);
 
     let temp_path = "/tmp/miao-new";
     fs::write(temp_path, &binary_data)
@@ -160,7 +164,7 @@ pub async fn upgrade_binary(state: &Arc<AppState>) -> AppResult<String> {
 
     let current_exe = std::env::current_exe()?;
 
-    println!("Stopping sing-box before upgrade...");
+    info!("Stopping sing-box before upgrade...");
     stop_sing_internal(state).await;
 
     // Use rename for atomic replacement instead of remove + copy
@@ -180,7 +184,7 @@ pub async fn upgrade_binary(state: &Arc<AppState>) -> AppResult<String> {
     }
     let _ = fs::remove_file(temp_path);
 
-    println!("Upgrade successful! Restarting...");
+    info!("Upgrade successful! Restarting...");
 
     let new_version = release.tag_name.clone();
     let sing_box_home = get_sing_box_home();
@@ -191,7 +195,7 @@ pub async fn upgrade_binary(state: &Arc<AppState>) -> AppResult<String> {
         for file in &files_to_remove {
             let path = sing_box_home.join(file);
             if path.exists() {
-                println!("Removing old file: {:?}", path);
+                info!("Removing old file: {:?}", path);
                 let _ = fs::remove_file(&path);
             }
         }
@@ -201,38 +205,30 @@ pub async fn upgrade_binary(state: &Arc<AppState>) -> AppResult<String> {
             .args(&args[1..])
             .exec();
 
-        eprintln!("Failed to exec new binary: {}", err);
-        eprintln!("Attempting to restore from backup...");
+        error!("Failed to exec new binary: {}", err);
+        error!("Attempting to restore from backup...");
 
         if fs::rename(&backup_path, &current_exe).is_ok() {
             let _ = fs::set_permissions(&current_exe, fs::Permissions::from_mode(0o755));
-            eprintln!("Restored from backup, restarting with old version...");
+            error!("Restored from backup, restarting with old version...");
             let _ = std::process::Command::new(&current_exe)
                 .args(&args[1..])
                 .exec();
         }
-        eprintln!("Failed to restore from backup, manual intervention required");
+        error!("Failed to restore from backup, manual intervention required");
         std::process::exit(1);
     });
 
     Ok(new_version)
 }
 
-fn parse_version(v: &str) -> Option<(u32, u32, u32)> {
+fn parse_semver(v: &str) -> Option<semver::Version> {
     let v = v.strip_prefix('v').unwrap_or(v);
-    let parts: Vec<&str> = v.split('.').collect();
-    if parts.len() != 3 {
-        return None;
-    }
-    Some((
-        parts[0].parse().ok()?,
-        parts[1].parse().ok()?,
-        parts[2].parse().ok()?,
-    ))
+    semver::Version::parse(v).ok()
 }
 
 fn is_newer_version(current: &str, latest: &str) -> bool {
-    match (parse_version(current), parse_version(latest)) {
+    match (parse_semver(current), parse_semver(latest)) {
         (Some(c), Some(l)) => l > c,
         _ => false,
     }
@@ -254,19 +250,27 @@ fn current_arch_asset_name() -> Option<&'static str> {
 
 #[cfg(test)]
 mod tests {
-    use super::{current_arch_asset_name, is_newer_version, parse_version};
+    use super::{current_arch_asset_name, is_newer_version, parse_semver};
 
     #[test]
-    fn parse_version_accepts_prefixed_and_unprefixed_versions() {
-        assert_eq!(parse_version("v1.2.3"), Some((1, 2, 3)));
-        assert_eq!(parse_version("1.2.3"), Some((1, 2, 3)));
+    fn parse_semver_accepts_prefixed_and_unprefixed_versions() {
+        assert!(parse_semver("v1.2.3").is_some());
+        assert!(parse_semver("1.2.3").is_some());
     }
 
     #[test]
-    fn parse_version_rejects_invalid_shapes() {
-        assert_eq!(parse_version("v1.2"), None);
-        assert_eq!(parse_version("v1.2.3.4"), None);
-        assert_eq!(parse_version("vx.y.z"), None);
+    fn parse_semver_handles_pre_release_versions() {
+        // semver crate supports pre-release versions like 1.0.0-beta, 1.0.0-alpha.1
+        assert!(parse_semver("v1.0.0-beta").is_some());
+        assert!(parse_semver("v1.0.0-alpha.1").is_some());
+        assert!(parse_semver("v1.0.0+build.123").is_some());
+    }
+
+    #[test]
+    fn parse_semver_rejects_invalid_shapes() {
+        assert!(parse_semver("v1.2").is_none());
+        assert!(parse_semver("v1.2.3.4").is_none());
+        assert!(parse_semver("vx.y.z").is_none());
     }
 
     #[test]
@@ -275,6 +279,13 @@ mod tests {
         assert!(is_newer_version("v1.2.9", "v1.3.0"));
         assert!(!is_newer_version("v1.0.0", "v1.0.0"));
         assert!(!is_newer_version("v2.0.0", "v1.9.9"));
+    }
+
+    #[test]
+    fn is_newer_version_handles_pre_release() {
+        // Pre-release versions are considered older than release versions
+        assert!(is_newer_version("v1.0.0-beta", "v1.0.0"));
+        assert!(!is_newer_version("v1.0.0", "v1.0.0-beta"));
     }
 
     #[test]

@@ -8,8 +8,10 @@ pub struct Hysteria2 {
     pub server: String,
     pub server_port: u16,
     pub password: String,
-    pub up_mbps: u32,
-    pub down_mbps: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub up_mbps: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub down_mbps: Option<u32>,
     pub tls: Tls,
 }
 

@@ -1,5 +1,6 @@
 use axum::{extract::State, http::StatusCode, response::Json};
 use std::sync::Arc;
+use tracing::warn;
 
 use crate::models::{AnyTls, ApiResponse, DeleteNodeRequest, Hysteria2, NodeInfo, NodeRequest, Shadowsocks, Tls};
 use crate::responses::{status_error, success, success_no_data, HandlerResult};
@@ -16,7 +17,7 @@ pub async fn get_nodes(State(state): State<Arc<AppState>>) -> Json<ApiResponse<V
 
     for (idx, node_str) in config.nodes.iter().enumerate() {
         match parse_node_json(node_str) {
-            Ok(display_info) => {
+            Ok((display_info, _)) => {
                 nodes.push(NodeInfo {
                     tag: display_info.tag,
                     server: display_info.server,
@@ -27,7 +28,7 @@ pub async fn get_nodes(State(state): State<Arc<AppState>>) -> Json<ApiResponse<V
             }
             Err(e) => {
                 let error_msg = format!("Node #{}: {}", idx, e);
-                eprintln!("[get_nodes] {}", error_msg);
+                warn!("[get_nodes] {}", error_msg);
                 parse_errors.push(error_msg);
             }
         }
@@ -35,7 +36,7 @@ pub async fn get_nodes(State(state): State<Arc<AppState>>) -> Json<ApiResponse<V
 
     // 如果有解析错误，记录到日志但不影响返回有效节点
     if !parse_errors.is_empty() {
-        eprintln!("[get_nodes] Skipped {} invalid node(s)", parse_errors.len());
+        warn!("[get_nodes] Skipped {} invalid node(s)", parse_errors.len());
     }
 
     success("Nodes loaded", nodes)
@@ -95,8 +96,8 @@ pub async fn add_node(
                     server: req.server,
                     server_port: req.server_port,
                     password: req.password,
-                    up_mbps: 40,
-                    down_mbps: 350,
+                    up_mbps: None,
+                    down_mbps: None,
                     tls: Tls {
                         enabled: true,
                         server_name: req.sni,
@@ -187,6 +188,29 @@ mod tests {
         assert_eq!(nodes[0].server_port, 443);
         assert_eq!(nodes[0].node_type, "hysteria2");
         assert_eq!(nodes[0].sni.as_deref(), Some("sni.example.com"));
+    }
+
+    #[tokio::test]
+    async fn get_nodes_handles_hysteria2_without_bandwidth() {
+        // 测试：Hysteria2 节点不包含带宽默认值也能被正确解析
+        let state = app_state(Config {
+            port: None,
+            subs: vec![],
+            nodes: vec![
+                // 不包含 up_mbps/down_mbps 的 Hysteria2 节点
+                r#"{"type":"hysteria2","tag":"no-bw-node","server":"example.com","server_port":443,"password":"secret","tls":{"enabled":true}}"#.to_string(),
+            ],
+            custom_rules: vec![],
+        });
+
+        let Json(response) = get_nodes(State(state)).await;
+
+        assert!(response.success);
+        assert_eq!(response.message, "Nodes loaded");
+        let nodes = response.data.unwrap();
+        assert_eq!(nodes.len(), 1);
+        assert_eq!(nodes[0].tag, "no-bw-node");
+        assert_eq!(nodes[0].node_type, "hysteria2");
     }
 
     #[tokio::test]

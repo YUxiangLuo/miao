@@ -29,13 +29,16 @@ pub fn parse_clash_proxies(clash_yaml: &str) -> AppResult<ParseResult> {
     };
 
     for (idx, node) in proxies.iter().enumerate() {
-        let node_type = node.get("type").and_then(|t| t.as_str()).unwrap_or("unknown");
-        
+        let node_type = node
+            .get("type")
+            .and_then(|t| t.as_str())
+            .unwrap_or("unknown");
+
         // Skip unsupported node types silently
         if !is_supported_node_type(node_type) {
             continue;
         }
-        
+
         match parse_single_node(node) {
             Some((name, outbound)) => result.nodes.push((name, outbound)),
             None => {
@@ -78,8 +81,8 @@ fn parse_single_node(node: &Value) -> Option<(String, serde_json::Value)> {
             server: server.to_string(),
             server_port: port as u16,
             password: password.to_string(),
-            up_mbps: 40,
-            down_mbps: 350,
+            up_mbps: None,
+            down_mbps: None,
             tls: Tls {
                 enabled: true,
                 server_name: node
@@ -130,8 +133,8 @@ fn parse_single_node(node: &Value) -> Option<(String, serde_json::Value)> {
     Some((name, outbound))
 }
 
-/// 解析单个节点 JSON 字符串为 NodeInfo 显示结构
-pub fn parse_node_json(node_str: &str) -> Result<NodeDisplayInfo, String> {
+/// 解析单个节点 JSON 字符串，返回验证后的 Value 和显示信息
+pub fn parse_node_json(node_str: &str) -> Result<(NodeDisplayInfo, serde_json::Value), String> {
     let v: serde_json::Value =
         serde_json::from_str(node_str).map_err(|e| format!("Invalid JSON: {}", e))?;
 
@@ -152,7 +155,13 @@ pub fn parse_node_json(node_str: &str) -> Result<NodeDisplayInfo, String> {
     let server_port = v
         .get("server_port")
         .and_then(|p| p.as_u64())
-        .and_then(|p| if p > 0 && p <= 65535 { Some(p as u16) } else { None })
+        .and_then(|p| {
+            if p > 0 && p <= 65535 {
+                Some(p as u16)
+            } else {
+                None
+            }
+        })
         .ok_or("Invalid or missing port")?;
 
     let node_type = v
@@ -168,13 +177,15 @@ pub fn parse_node_json(node_str: &str) -> Result<NodeDisplayInfo, String> {
         .filter(|s| !s.is_empty())
         .map(|s| s.to_string());
 
-    Ok(NodeDisplayInfo {
+    let info = NodeDisplayInfo {
         tag,
         server,
         server_port,
         node_type,
         sni,
-    })
+    };
+
+    Ok((info, v))
 }
 
 /// 节点显示信息结构
@@ -189,7 +200,11 @@ pub struct NodeDisplayInfo {
 
 impl std::fmt::Display for NodeDisplayInfo {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{} ({}:{}) [{}]", self.tag, self.server, self.server_port, self.node_type)
+        write!(
+            f,
+            "{} ({}:{}) [{}]",
+            self.tag, self.server, self.server_port, self.node_type
+        )
     }
 }
 
@@ -273,11 +288,20 @@ proxies:
         // 3 errors: missing-server, zero-port, missing-password
         // unsupported-type (vmess) is silently skipped, not reported as error
         assert_eq!(result.errors.len(), 3);
-        
+
         // Verify error messages contain node names
-        assert!(result.errors.iter().any(|e| e.contains("invalid-missing-server")));
-        assert!(result.errors.iter().any(|e| e.contains("invalid-zero-port")));
-        assert!(result.errors.iter().any(|e| e.contains("invalid-missing-password")));
+        assert!(result
+            .errors
+            .iter()
+            .any(|e| e.contains("invalid-missing-server")));
+        assert!(result
+            .errors
+            .iter()
+            .any(|e| e.contains("invalid-zero-port")));
+        assert!(result
+            .errors
+            .iter()
+            .any(|e| e.contains("invalid-missing-password")));
     }
 
     #[test]
@@ -294,20 +318,25 @@ proxies:
     fn parse_clash_proxies_reports_invalid_yaml() {
         let err = parse_clash_proxies("proxies: [").unwrap_err();
 
-        assert!(err.to_string().contains("Failed to parse subscription YAML"));
+        assert!(err
+            .to_string()
+            .contains("Failed to parse subscription YAML"));
     }
 
     #[test]
     fn parse_node_json_extracts_valid_node() {
         let json = r#"{"type":"hysteria2","tag":"test-node","server":"example.com","server_port":443,"password":"secret","tls":{"enabled":true,"server_name":"sni.example.com"}}"#;
 
-        let info = parse_node_json(json).unwrap();
+        let (info, value) = parse_node_json(json).unwrap();
 
         assert_eq!(info.tag, "test-node");
         assert_eq!(info.server, "example.com");
         assert_eq!(info.server_port, 443);
         assert_eq!(info.node_type, "hysteria2");
         assert_eq!(info.sni, Some("sni.example.com".to_string()));
+        // 验证返回的 Value 是正确的
+        assert_eq!(value["tag"], "test-node");
+        assert_eq!(value["server"], "example.com");
     }
 
     #[test]
@@ -338,7 +367,7 @@ proxies:
     fn parse_node_json_handles_optional_sni() {
         let json = r#"{"type":"hysteria2","tag":"test","server":"example.com","server_port":443,"password":"secret","tls":{"enabled":true}}"#;
 
-        let info = parse_node_json(json).unwrap();
+        let (info, _) = parse_node_json(json).unwrap();
         assert_eq!(info.sni, None);
     }
 
@@ -346,7 +375,7 @@ proxies:
     fn parse_node_json_handles_missing_tls() {
         let json = r#"{"type":"shadowsocks","tag":"test","server":"example.com","server_port":8388,"password":"secret","method":"aes-128-gcm"}"#;
 
-        let info = parse_node_json(json).unwrap();
+        let (info, _) = parse_node_json(json).unwrap();
         assert_eq!(info.sni, None);
     }
 
@@ -363,7 +392,7 @@ proxies:
         // 65535 should be accepted
         let json = r#"{"type":"hysteria2","tag":"test","server":"example.com","server_port":65535,"password":"secret"}"#;
 
-        let info = parse_node_json(json).unwrap();
+        let (info, _) = parse_node_json(json).unwrap();
         assert_eq!(info.server_port, 65535);
     }
 
@@ -371,7 +400,7 @@ proxies:
     fn parse_node_json_accepts_ipv4_server() {
         let json = r#"{"type":"hysteria2","tag":"test","server":"192.168.1.1","server_port":443,"password":"secret"}"#;
 
-        let info = parse_node_json(json).unwrap();
+        let (info, _) = parse_node_json(json).unwrap();
         assert_eq!(info.server, "192.168.1.1");
     }
 
@@ -379,7 +408,7 @@ proxies:
     fn parse_node_json_accepts_ipv6_server() {
         let json = r#"{"type":"hysteria2","tag":"test","server":"::1","server_port":443,"password":"secret"}"#;
 
-        let info = parse_node_json(json).unwrap();
+        let (info, _) = parse_node_json(json).unwrap();
         assert_eq!(info.server, "::1");
     }
 
@@ -415,11 +444,16 @@ proxies:
 
         assert_eq!(result.nodes.len(), 4);
         assert!(result.errors.is_empty());
-        
-        let types: Vec<String> = result.nodes.iter()
+
+        let types: Vec<String> = result
+            .nodes
+            .iter()
             .map(|(_, o)| o.get("type").unwrap().as_str().unwrap().to_string())
             .collect();
-        assert_eq!(types, vec!["hysteria2", "hysteria2", "anytls", "shadowsocks"]);
+        assert_eq!(
+            types,
+            vec!["hysteria2", "hysteria2", "anytls", "shadowsocks"]
+        );
     }
 
     #[test]
@@ -503,9 +537,33 @@ proxies:
         // Only 2 valid nodes (hysteria2 and ss), vmess and trojan silently skipped
         assert_eq!(result.nodes.len(), 2);
         assert!(result.errors.is_empty());
-        
+
         let names: Vec<String> = result.nodes.iter().map(|(n, _)| n.clone()).collect();
         assert_eq!(names, vec!["valid-hy2", "valid-ss"]);
+    }
+
+    #[test]
+    fn parse_clash_proxies_hysteria2_without_bandwidth_defaults() {
+        // 测试：从 Clash 配置解析 Hysteria2 时不添加硬编码带宽
+        let yaml = r#"
+proxies:
+  - name: hy2-without-bandwidth
+    type: hysteria2
+    server: hy.example.com
+    port: 443
+    password: pass
+    sni: hy.example.com
+"#;
+
+        let result = parse_clash_proxies(yaml).unwrap();
+
+        assert_eq!(result.nodes.len(), 1);
+        let outbound = &result.nodes[0].1;
+        assert_eq!(outbound["type"], "hysteria2");
+        assert_eq!(outbound["tag"], "hy2-without-bandwidth");
+        // 关键测试：不应包含硬编码的 up_mbps/down_mbps
+        assert!(outbound.get("up_mbps").is_none() || outbound["up_mbps"].is_null());
+        assert!(outbound.get("down_mbps").is_none() || outbound["down_mbps"].is_null());
     }
 
     #[test]
@@ -528,7 +586,7 @@ proxies:
     fn parse_node_json_accepts_whitespace_in_tag() {
         let json = r#"{"type":"hysteria2","tag":"My Node 1","server":"example.com","server_port":443,"password":"secret"}"#;
 
-        let info = parse_node_json(json).unwrap();
+        let (info, _) = parse_node_json(json).unwrap();
         assert_eq!(info.tag, "My Node 1");
     }
 

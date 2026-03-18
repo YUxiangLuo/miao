@@ -19,3 +19,6 @@ regex = "1"
 url = "2.5"
 sha2 = "0.10"
 hex = "0.4"
+semver = "1.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

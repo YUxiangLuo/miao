@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use tracing::{info, warn};
 
 use crate::error::{AppError, AppResult};
 
@@ -7,7 +8,7 @@ pub async fn check_and_install_openwrt_dependencies() -> AppResult<()> {
         return Ok(());
     }
 
-    println!("OpenWrt system detected. Checking dependencies...");
+    info!("OpenWrt system detected. Checking dependencies...");
 
     let output = tokio::process::Command::new("opkg")
         .arg("list-installed")
@@ -31,18 +32,18 @@ pub async fn check_and_install_openwrt_dependencies() -> AppResult<()> {
     }
 
     if packages_to_install.is_empty() {
-        println!(
+        info!(
             "Required dependencies (kmod-tun, kmod-nft-queue) are already installed."
         );
         return Ok(());
     }
 
-    println!(
+    info!(
         "Missing dependencies: {:?}. Installing...",
         packages_to_install
     );
 
-    println!("Running 'opkg update'...");
+    info!("Running 'opkg update'...");
     let update_status = tokio::process::Command::new("opkg")
         .arg("update")
         .status()
@@ -50,13 +51,13 @@ pub async fn check_and_install_openwrt_dependencies() -> AppResult<()> {
         .map_err(|e| AppError::context("Failed to run 'opkg update'", e))?;
 
     if !update_status.success() {
-        eprintln!(
+        warn!(
             "'opkg update' finished with error, but proceeding with installation attempt..."
         );
     }
 
     for pkg in packages_to_install {
-        println!("Installing {}...", pkg);
+        info!("Installing {}...", pkg);
         let install_status = tokio::process::Command::new("opkg")
             .arg("install")
             .arg(pkg)
@@ -72,6 +73,6 @@ pub async fn check_and_install_openwrt_dependencies() -> AppResult<()> {
         }
     }
 
-    println!("Dependencies installed successfully.");
+    info!("Dependencies installed successfully.");
     Ok(())
 }

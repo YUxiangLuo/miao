@@ -30,10 +30,7 @@ pub async fn fetch_sub(link: &str, client: &reqwest::Client) -> AppResult<FetchR
     let node_names: Vec<String> = parse_result.nodes.iter().map(|(n, _)| n.clone()).collect();
     let outbounds: Vec<serde_json::Value> = parse_result.nodes.into_iter().map(|(_, o)| o).collect();
 
-    // 记录解析警告
-    for error in &parse_result.errors {
-        eprintln!("  [Parse Warning] {}", error);
-    }
+    // 解析错误将由调用方统一处理，此处不再打印
 
     Ok(FetchResult {
         node_names,
