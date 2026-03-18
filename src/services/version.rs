@@ -1,10 +1,11 @@
 use std::{
     fs,
     os::unix::{fs::PermissionsExt, process::CommandExt},
-    sync::Arc,
+    sync::{Arc, atomic::Ordering},
     time::Instant,
 };
 
+use futures::StreamExt;
 use sha2::{Sha256, Digest};
 use tokio::time::{sleep, Duration};
 use tracing::{error, info};
@@ -12,7 +13,7 @@ use tracing::{error, info};
 use crate::error::{AppError, AppResult};
 use crate::models::{GitHubRelease, GitHubAsset, VersionInfo};
 use crate::services::singbox::{get_sing_box_home, stop_sing_internal};
-use crate::state::AppState;
+use crate::state::{AppState, VersionCache};
 use crate::VERSION;
 
 fn compute_sha256(data: &[u8]) -> String {
@@ -40,28 +41,30 @@ async fn fetch_latest_release(
     client: &reqwest::Client,
     state: &Arc<AppState>,
 ) -> AppResult<GitHubRelease> {
-    {
-        let cache = state.version_cache.lock().await;
-        if let (Some(release), Some(fetched_at)) = (&cache.release, cache.fetched_at) {
-            if fetched_at.elapsed() < CACHE_TTL {
-                return Ok(release.clone());
-            }
+    // 无锁读取缓存
+    let cache = state.version_cache.load();
+    if let (Some(release), Some(fetched_at)) = (&cache.release, cache.fetched_at) {
+        if fetched_at.elapsed() < CACHE_TTL {
+            return Ok(release.clone());
         }
     }
+    // 释放读取 guard，避免持有期间进行网络请求
+    drop(cache);
 
     let release = fetch_latest_release_uncached(client).await?;
-    {
-        let mut cache = state.version_cache.lock().await;
-        cache.release = Some(release.clone());
-        cache.fetched_at = Some(Instant::now());
-    }
+    // 原子更新缓存
+    state.version_cache.store(Arc::new(VersionCache {
+        release: Some(release.clone()),
+        fetched_at: Some(Instant::now()),
+    }));
     Ok(release)
 }
 
 async fn invalidate_release_cache(state: &Arc<AppState>) {
-    let mut cache = state.version_cache.lock().await;
-    cache.release = None;
-    cache.fetched_at = None;
+    state.version_cache.store(Arc::new(VersionCache {
+        release: None,
+        fetched_at: None,
+    }));
 }
 
 pub async fn get_version_info(state: &Arc<AppState>) -> VersionInfo {
@@ -94,7 +97,33 @@ pub async fn get_version_info(state: &Arc<AppState>) -> VersionInfo {
     }
 }
 
+fn get_temp_binary_path() -> String {
+    let pid = std::process::id();
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    format!("/tmp/miao-new-{}-{}", pid, timestamp)
+}
+
 pub async fn upgrade_binary(state: &Arc<AppState>) -> AppResult<String> {
+    // 检查是否正在升级中，防止并发升级请求
+    if state.upgrading.load(Ordering::SeqCst) {
+        return Err(AppError::message("Upgrade already in progress"));
+    }
+    
+    // 标记升级开始
+    state.upgrading.store(true, Ordering::SeqCst);
+    
+    // 确保无论结果如何都会重置升级状态
+    struct UpgradeGuard(Arc<AppState>);
+    impl Drop for UpgradeGuard {
+        fn drop(&mut self) {
+            self.0.upgrading.store(false, Ordering::SeqCst);
+        }
+    }
+    let _guard = UpgradeGuard(state.clone());
+    
     // Force fresh fetch for upgrade to ensure we have the latest info
     invalidate_release_cache(state).await;
     let release = fetch_latest_release(&state.http_client, state).await?;
@@ -115,14 +144,36 @@ pub async fn upgrade_binary(state: &Arc<AppState>) -> AppResult<String> {
     let download_url = &asset.browser_download_url;
     let expected_size = asset.size;
 
-    info!("Downloading update from: {}", download_url);
-    let binary_data = state.http_client
+    info!("Downloading update from: {} ({} bytes)", download_url, expected_size);
+    
+    // 使用流式下载并记录进度
+    let response = state.http_client
         .get(download_url)
-        .timeout(Duration::from_secs(60))
+        .timeout(Duration::from_secs(120))  // 增加超时到 120s，适应大文件慢网络
         .send()
-        .await?
-        .bytes()
         .await?;
+    
+    let mut downloaded: u64 = 0;
+    let mut last_logged_percent = 0u8;
+    let mut binary_data = Vec::with_capacity(expected_size as usize);
+    
+    let mut stream = response.bytes_stream();
+    while let Some(chunk_result) = stream.next().await {
+        let chunk: bytes::Bytes = chunk_result.map_err(|e| AppError::context("Download stream error", e))?;
+        downloaded += chunk.len() as u64;
+        binary_data.extend_from_slice(&chunk);
+        
+        // 每 10% 记录一次进度
+        if expected_size > 0 {
+            let percent = ((downloaded as f64 / expected_size as f64) * 100.0) as u8;
+            if percent >= last_logged_percent + 10 {
+                info!("Download progress: {}% ({}/{} bytes)", percent, downloaded, expected_size);
+                last_logged_percent = percent;
+            }
+        }
+    }
+    
+    info!("Download complete: {} bytes", downloaded);
 
     // Verify file size
     let actual_size = binary_data.len() as u64;
@@ -137,28 +188,37 @@ pub async fn upgrade_binary(state: &Arc<AppState>) -> AppResult<String> {
     let sha256_hash = compute_sha256(&binary_data);
     info!("Downloaded binary SHA256: {}", sha256_hash);
 
-    let temp_path = "/tmp/miao-new";
-    fs::write(temp_path, &binary_data)
+    let temp_path = get_temp_binary_path();
+    fs::write(&temp_path, &binary_data)
         .map_err(|e| AppError::context("Failed to write temp file", e))?;
-    fs::set_permissions(temp_path, fs::Permissions::from_mode(0o755))
+    fs::set_permissions(&temp_path, fs::Permissions::from_mode(0o755))
         .map_err(|e| AppError::context("Failed to set permissions on temp file", e))?;
 
     // Verify the new binary is a valid miao binary by checking --version output
-    let verify = tokio::process::Command::new(temp_path)
+    let verify = tokio::process::Command::new(&temp_path)
         .arg("--version")
         .output()
         .await;
     match verify {
         Ok(output) => {
             let stdout = String::from_utf8_lossy(&output.stdout);
-            if !stdout.contains("miao") && !stdout.contains(&release.tag_name) {
-                let _ = fs::remove_file(temp_path);
-                return Err(AppError::message("New binary verification failed: unexpected --version output"));
+            // 检查是否包含版本号或程序名，使用更严格的验证
+            let version_pattern = format!("v{}", &release.tag_name.trim_start_matches('v'));
+            let has_valid_version = stdout.contains(&version_pattern) || 
+                                   stdout.contains(&release.tag_name);
+            let has_program_name = stdout.contains("miao") || stdout.contains("miao-rust");
+            
+            if !has_valid_version && !has_program_name {
+                let _ = fs::remove_file(&temp_path);
+                return Err(AppError::message(format!(
+                    "New binary verification failed: unexpected --version output: {}", 
+                    stdout.trim()
+                )));
             }
         }
-        Err(_) => {
-            let _ = fs::remove_file(temp_path);
-            return Err(AppError::message("New binary verification failed"));
+        Err(e) => {
+            let _ = fs::remove_file(&temp_path);
+            return Err(AppError::context("New binary verification failed", e));
         }
     }
 
@@ -172,17 +232,19 @@ pub async fn upgrade_binary(state: &Arc<AppState>) -> AppResult<String> {
     fs::rename(&current_exe, &backup_path)
         .map_err(|e| AppError::context("Failed to backup current binary", e))?;
 
-    if let Err(e) = fs::copy(temp_path, &current_exe) {
+    if let Err(e) = fs::copy(&temp_path, &current_exe) {
         // Restore from backup on failure
         let _ = fs::rename(&backup_path, &current_exe);
+        let _ = fs::remove_file(&temp_path);
         return Err(AppError::context("Failed to install new binary", e));
     }
     if let Err(e) = fs::set_permissions(&current_exe, fs::Permissions::from_mode(0o755)) {
         let _ = fs::remove_file(&current_exe);
         let _ = fs::rename(&backup_path, &current_exe);
+        let _ = fs::remove_file(&temp_path);
         return Err(AppError::context("Failed to set permissions on new binary", e));
     }
-    let _ = fs::remove_file(temp_path);
+    let _ = fs::remove_file(&temp_path);
 
     info!("Upgrade successful! Restarting...");
 

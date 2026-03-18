@@ -1,20 +1,23 @@
 use std::collections::HashMap;
 use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
 use std::time::Instant;
-use tokio::sync::Mutex;
+use arc_swap::ArcSwap;
+use tokio::sync::{Mutex, RwLock};
 
 use crate::models::{Config, GitHubRelease, SubStatus};
 
 /// 应用状态容器 - 包含所有运行时状态
 /// 通过依赖注入传递，避免全局静态变量
 pub struct AppState {
-    pub config: Mutex<Config>,
+    pub config: RwLock<Config>,  // 使用 RwLock 支持并发读
     pub sing_process: Mutex<Option<SingBoxProcess>>,
     pub sub_status: Mutex<HashMap<String, SubStatus>>,
     pub config_warning: Mutex<Option<String>>,
     pub initializing: AtomicBool,
     pub http_client: reqwest::Client,
-    pub version_cache: Mutex<VersionCache>,
+    pub version_cache: ArcSwap<VersionCache>,  // 使用 ArcSwap 实现无锁读取
+    pub upgrading: AtomicBool,  // 防止并发升级
 }
 
 impl AppState {
@@ -25,16 +28,17 @@ impl AppState {
             .build()?;
 
         Ok(Self {
-            config: Mutex::new(config),
+            config: RwLock::new(config),
             sing_process: Mutex::new(None),
             sub_status: Mutex::new(HashMap::new()),
             config_warning: Mutex::new(None),
             initializing: AtomicBool::new(true),
             http_client,
-            version_cache: Mutex::new(VersionCache {
+            version_cache: ArcSwap::new(Arc::new(VersionCache {
                 release: None,
                 fetched_at: None,
-            }),
+            })),
+            upgrading: AtomicBool::new(false),
         })
     }
 }
@@ -71,7 +75,7 @@ mod tests {
         
         // 验证配置被正确存储
         let locked_config = tokio::runtime::Runtime::new().unwrap().block_on(async {
-            state.config.lock().await.clone()
+            state.config.read().await.clone()
         });
         assert_eq!(locked_config.port, Some(8080));
         assert_eq!(locked_config.subs.len(), 1);
@@ -87,9 +91,7 @@ mod tests {
         };
         
         let state = AppState::new(config).unwrap();
-        let cache = tokio::runtime::Runtime::new().unwrap().block_on(async {
-            state.version_cache.lock().await.clone()
-        });
+        let cache = state.version_cache.load();
         
         assert!(cache.release.is_none());
         assert!(cache.fetched_at.is_none());

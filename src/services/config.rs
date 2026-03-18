@@ -308,7 +308,7 @@ fn get_config_template() -> serde_json::Value {
 
 #[cfg(test)]
 mod tests {
-    use super::{build_sing_box_config, collect_manual_outbounds, save_config};
+    use super::{build_sing_box_config, collect_manual_outbounds};
     use crate::models::Config;
     use serde_json::json;
 

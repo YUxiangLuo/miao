@@ -10,7 +10,7 @@ use crate::state::AppState;
 use crate::validation::Validator;
 
 pub async fn get_nodes(State(state): State<Arc<AppState>>) -> Json<ApiResponse<Vec<NodeInfo>>> {
-    let config = state.config.lock().await;
+    let config = state.config.read().await;
 
     let mut nodes = Vec::new();
     let mut parse_errors = Vec::new();
@@ -51,7 +51,7 @@ pub async fn add_node(
 
     let config_clone;
     {
-        let mut config = state.config.lock().await;
+        let mut config = state.config.write().await;
 
         for node_str in &config.nodes {
             if let Ok(v) = serde_json::from_str::<serde_json::Value>(node_str) {
@@ -109,11 +109,11 @@ pub async fn add_node(
         }.map_err(|e| status_error(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to serialize node: {}", e)))?;
 
         config.nodes.push(node_json);
-
-        if let Err(e) = save_config(&config).await {
-            return Err(status_error(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to save config: {}", e)));
-        }
         config_clone = config.clone();
+    }
+
+    if let Err(e) = save_config(&config_clone).await {
+        return Err(status_error(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to save config: {}", e)));
     }
 
     match regenerate_and_restart(&config_clone, &state).await {
@@ -128,7 +128,7 @@ pub async fn delete_node(
 ) -> HandlerResult {
     let config_clone;
     {
-        let mut config = state.config.lock().await;
+        let mut config = state.config.write().await;
 
         let original_len = config.nodes.len();
         config.nodes.retain(|node_str| {
@@ -143,10 +143,11 @@ pub async fn delete_node(
             return Err(status_error(StatusCode::NOT_FOUND, "Node not found"));
         }
 
-        if let Err(e) = save_config(&config).await {
-            return Err(status_error(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to save config: {}", e)));
-        }
         config_clone = config.clone();
+    }
+
+    if let Err(e) = save_config(&config_clone).await {
+        return Err(status_error(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to save config: {}", e)));
     }
 
     match regenerate_and_restart(&config_clone, &state).await {

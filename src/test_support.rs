@@ -18,9 +18,10 @@ pub fn app_state(config: Config) -> Arc<AppState> {
 }
 
 pub async fn reset_version_cache(state: &Arc<AppState>) {
-    let mut cache = state.version_cache.lock().await;
-    cache.release = None;
-    cache.fetched_at = None;
+    state.version_cache.store(Arc::new(crate::state::VersionCache {
+        release: None,
+        fetched_at: None,
+    }));
 }
 
 pub async fn test_app(config: Config) -> Router {

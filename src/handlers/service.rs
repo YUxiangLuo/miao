@@ -15,23 +15,27 @@ use crate::state::AppState;
 pub async fn get_status(
     State(state): State<Arc<AppState>>,
 ) -> Json<ApiResponse<StatusData>> {
-    let mut lock = state.sing_process.lock().await;
-
-    let (running, pid, uptime_secs) = if let Some(ref mut proc) = *lock {
-        match proc.child.try_wait() {
-            Ok(Some(_)) => {
-                *lock = None;
-                (false, None, None)
+    // 快速获取进程状态并立即释放锁
+    let (running, pid, uptime_secs) = {
+        let mut lock = state.sing_process.lock().await;
+        
+        let result = if let Some(ref mut proc) = *lock {
+            match proc.child.try_wait() {
+                Ok(Some(_)) => {
+                    *lock = None;
+                    (false, None, None)
+                }
+                Ok(None) => {
+                    let uptime = proc.started_at.elapsed().as_secs();
+                    (true, proc.child.id(), Some(uptime))
+                }
+                Err(_) => (false, None, None),
             }
-            Ok(None) => {
-                let uptime = proc.started_at.elapsed().as_secs();
-                (true, proc.child.id(), Some(uptime))
-            }
-            Err(_) => (false, None, None),
-        }
-    } else {
-        (false, None, None)
-    };
+        } else {
+            (false, None, None)
+        };
+        result
+    }; // sing_process 锁在此处释放
 
     let initializing = state.initializing.load(std::sync::atomic::Ordering::Relaxed);
     let warning = state.config_warning.lock().await.clone();

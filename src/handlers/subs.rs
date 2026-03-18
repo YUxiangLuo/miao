@@ -8,7 +8,7 @@ use crate::state::AppState;
 use crate::validation::Validator;
 
 pub async fn get_subs(State(state): State<Arc<AppState>>) -> Json<ApiResponse<Vec<SubStatus>>> {
-    let config = state.config.lock().await;
+    let config = state.config.read().await;
     let status_map = state.sub_status.lock().await;
 
     let subs_with_status: Vec<SubStatus> = config
@@ -37,18 +37,18 @@ pub async fn add_sub(
 
     let config_clone;
     {
-        let mut config = state.config.lock().await;
+        let mut config = state.config.write().await;
 
         if config.subs.contains(&req.url) {
             return Err(status_error(StatusCode::BAD_REQUEST, "Subscription already exists"));
         }
 
         config.subs.push(req.url);
-
-        if let Err(e) = save_config(&config).await {
-            return Err(status_error(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to save config: {}", e)));
-        }
         config_clone = config.clone();
+    }
+
+    if let Err(e) = save_config(&config_clone).await {
+        return Err(status_error(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to save config: {}", e)));
     }
 
     match regenerate_and_restart(&config_clone, &state).await {
@@ -63,7 +63,7 @@ pub async fn delete_sub(
 ) -> HandlerResult {
     let config_clone;
     {
-        let mut config = state.config.lock().await;
+        let mut config = state.config.write().await;
 
         let original_len = config.subs.len();
         config.subs.retain(|s| s != &req.url);
@@ -72,10 +72,11 @@ pub async fn delete_sub(
             return Err(status_error(StatusCode::NOT_FOUND, "Subscription not found"));
         }
 
-        if let Err(e) = save_config(&config).await {
-            return Err(status_error(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to save config: {}", e)));
-        }
         config_clone = config.clone();
+    }
+
+    if let Err(e) = save_config(&config_clone).await {
+        return Err(status_error(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to save config: {}", e)));
     }
 
     match regenerate_and_restart(&config_clone, &state).await {
@@ -87,7 +88,7 @@ pub async fn delete_sub(
 pub async fn refresh_subs(
     State(state): State<Arc<AppState>>,
 ) -> HandlerResult {
-    let config = state.config.lock().await;
+    let config = state.config.read().await;
     let config_clone = config.clone();
     drop(config);
 
