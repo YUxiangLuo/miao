@@ -75,6 +75,17 @@ button {
 }
 .brand-icon {
     color: var(--accent);
+    filter: drop-shadow(0 0 6px rgba(167, 139, 250, 0.5));
+    animation: logoPulse 3s ease-in-out infinite;
+}
+
+@keyframes logoPulse {
+    0%, 100% {
+        filter: drop-shadow(0 0 4px rgba(167, 139, 250, 0.4));
+    }
+    50% {
+        filter: drop-shadow(0 0 8px rgba(167, 139, 250, 0.7));
+    }
 }
 .brand-name {
     color: var(--text);

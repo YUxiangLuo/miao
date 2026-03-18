@@ -6,6 +6,7 @@ node_modules
 out
 dist
 public/index.html
+public/icon.svg
 *.tgz
 
 # code coverage
