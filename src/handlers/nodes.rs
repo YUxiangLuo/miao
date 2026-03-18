@@ -5,6 +5,7 @@ use crate::models::{AnyTls, ApiResponse, DeleteNodeRequest, Hysteria2, NodeInfo,
 use crate::responses::{status_error, success, success_no_data, HandlerResult};
 use crate::services::config::{regenerate_and_restart, save_config};
 use crate::state::AppState;
+use crate::validation::Validator;
 
 pub async fn get_nodes(State(state): State<Arc<AppState>>) -> Json<ApiResponse<Vec<NodeInfo>>> {
     let config = state.config.lock().await;
@@ -34,6 +35,9 @@ pub async fn add_node(
     State(state): State<Arc<AppState>>,
     Json(req): Json<NodeRequest>,
 ) -> HandlerResult {
+    Validator::validate_node_request(&req)
+        .map_err(|e| status_error(StatusCode::BAD_REQUEST, e))?;
+
     let config_clone;
     {
         let mut config = state.config.lock().await;

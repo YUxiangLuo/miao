@@ -103,6 +103,49 @@ function maskSubscription(url) {
   }
 }
 
+function validateSubscriptionUrl(url) {
+  if (!url || !url.trim()) return '订阅链接不能为空'
+  if (url.length > 4096) return '订阅链接过长'
+  try {
+    const parsed = new URL(url)
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      return '订阅链接必须使用 HTTP 或 HTTPS 协议'
+    }
+    if (!parsed.hostname) return '订阅链接缺少有效的主机名'
+  } catch {
+    return '无效的订阅链接格式'
+  }
+  return null
+}
+
+function validateNodeTag(tag) {
+  if (!tag || !tag.trim()) return '节点名称不能为空'
+  if (tag.length > 64) return '节点名称不能超过 64 个字符'
+  if (!/^[a-zA-Z0-9\-_\s]+$/.test(tag)) return '节点名称只能包含字母、数字、空格、下划线和连字符'
+  return null
+}
+
+function validateServer(server) {
+  if (!server || !server.trim()) return '服务器地址不能为空'
+  if (server.length > 253) return '服务器地址过长'
+  if (/\s/.test(server)) return '服务器地址不能包含空格'
+  return null
+}
+
+function validatePort(port) {
+  const num = Number(port)
+  if (!Number.isInteger(num) || num <= 0) return '端口号必须为正整数'
+  if (num > 65535) return '端口号超出范围'
+  return null
+}
+
+function validatePassword(password) {
+  if (!password || !password.trim()) return '密码不能为空'
+  if (password.length < 4) return '密码太短（至少 4 个字符）'
+  if (password.length > 256) return '密码过长（最多 256 个字符）'
+  return null
+}
+
 function Button({ children, tone = 'default', size = 'md', icon, loading, className, ...props }) {
   return (
     <button className={classNames('btn', `btn-${tone}`, `btn-${size}`, className)} {...props}>
@@ -489,7 +532,11 @@ export default function App() {
   }
 
   const handleAddSubscription = async () => {
-    if (!newSubUrl.trim()) return
+    const error = validateSubscriptionUrl(newSubUrl.trim())
+    if (error) {
+      showToast(error, 'error')
+      return
+    }
     try {
       await apiCall('subs', { method: 'POST', body: JSON.stringify({ url: newSubUrl.trim() }) }, 'addSub')
       setNewSubUrl('')
@@ -525,6 +572,27 @@ export default function App() {
   }
 
   const handleAddNode = async () => {
+    const tagError = validateNodeTag(nodeForm.tag)
+    if (tagError) {
+      showToast(tagError, 'error')
+      return
+    }
+    const serverError = validateServer(nodeForm.server)
+    if (serverError) {
+      showToast(serverError, 'error')
+      return
+    }
+    const portError = validatePort(nodeForm.server_port)
+    if (portError) {
+      showToast(portError, 'error')
+      return
+    }
+    const passwordError = validatePassword(nodeForm.password)
+    if (passwordError) {
+      showToast(passwordError, 'error')
+      return
+    }
+
     const payload = {
       node_type: nodeType,
       tag: nodeForm.tag.trim(),

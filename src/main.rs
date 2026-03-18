@@ -5,6 +5,7 @@ mod responses;
 mod router;
 mod services;
 mod state;
+mod validation;
 #[cfg(test)]
 mod test_support;
 

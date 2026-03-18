@@ -5,6 +5,7 @@ use crate::models::{ApiResponse, SubRequest, SubStatus};
 use crate::responses::{status_error, success, success_no_data, HandlerResult};
 use crate::services::config::{regenerate_and_restart, save_config};
 use crate::state::{AppState, SUB_STATUS};
+use crate::validation::Validator;
 
 pub async fn get_subs(State(state): State<Arc<AppState>>) -> Json<ApiResponse<Vec<SubStatus>>> {
     let config = state.config.lock().await;
@@ -30,6 +31,10 @@ pub async fn add_sub(
     State(state): State<Arc<AppState>>,
     Json(req): Json<SubRequest>,
 ) -> HandlerResult {
+    if let Err(e) = Validator::subscription_url(&req.url) {
+        return Err(status_error(StatusCode::BAD_REQUEST, e));
+    }
+
     let config_clone;
     {
         let mut config = state.config.lock().await;
