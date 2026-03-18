@@ -161,10 +161,6 @@ pub async fn gen_config(
     )
     .await?;
 
-    println!(
-        "Generated config: {}",
-        serde_json::to_string(&sing_box_config).unwrap()
-    );
     Ok(has_sub_nodes)
 }
 

@@ -4,13 +4,20 @@ use std::{
     sync::LazyLock,
 };
 
+use sha2::{Sha256, Digest};
 use tokio::sync::RwLock;
 use tokio::time::{sleep, Duration, Instant};
 
 use crate::error::{AppError, AppResult};
-use crate::models::{GitHubRelease, VersionInfo};
+use crate::models::{GitHubRelease, GitHubAsset, VersionInfo};
 use crate::services::singbox::{get_sing_box_home, stop_sing_internal};
 use crate::VERSION;
+
+fn compute_sha256(data: &[u8]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(data);
+    hex::encode(hasher.finalize())
+}
 
 const CACHE_TTL: Duration = Duration::from_secs(300);
 
@@ -140,21 +147,36 @@ pub async fn upgrade_binary() -> AppResult<String> {
 
     let asset_name =
         current_arch_asset_name().ok_or_else(|| AppError::message("Unsupported architecture"))?;
-    let download_url = release
+    let asset: &GitHubAsset = release
         .assets
         .iter()
         .find(|a| a.name == asset_name)
-        .map(|a| a.browser_download_url.clone())
         .ok_or_else(|| AppError::message("No binary found for current architecture"))?;
+    
+    let download_url = &asset.browser_download_url;
+    let expected_size = asset.size;
 
     println!("Downloading update from: {}", download_url);
     let binary_data = crate::state::CLIENT
-        .get(&download_url)
+        .get(download_url)
         .timeout(Duration::from_secs(60))
         .send()
         .await?
         .bytes()
         .await?;
+
+    // Verify file size
+    let actual_size = binary_data.len() as u64;
+    if actual_size != expected_size {
+        return Err(AppError::message(format!(
+            "Downloaded file size mismatch: expected {} bytes, got {} bytes",
+            expected_size, actual_size
+        )));
+    }
+
+    // Compute and log SHA256 for verification
+    let sha256_hash = compute_sha256(&binary_data);
+    println!("Downloaded binary SHA256: {}", sha256_hash);
 
     let temp_path = "/tmp/miao-new";
     fs::write(temp_path, &binary_data)
