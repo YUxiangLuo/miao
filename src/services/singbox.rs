@@ -3,11 +3,12 @@ use nix::unistd::Pid;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Instant;
 use tokio::time::{sleep, Duration};
 
 use crate::error::{AppError, AppResult};
-use crate::state::{SingBoxProcess, SING_PROCESS};
+use crate::state::{AppState, SingBoxProcess};
 
 #[cfg(target_arch = "x86_64")]
 const SING_BOX_BINARY: &[u8] = include_bytes!("../../embedded/sing-box-amd64");
@@ -62,8 +63,8 @@ pub fn extract_sing_box() -> AppResult<PathBuf> {
     Ok(sing_box_home)
 }
 
-pub async fn start_sing_internal() -> AppResult<()> {
-    let mut lock = SING_PROCESS.lock().await;
+pub async fn start_sing_internal(state: &Arc<AppState>) -> AppResult<()> {
+    let mut lock = state.sing_process.lock().await;
     if let Some(ref mut proc) = *lock {
         if proc
             .child
@@ -116,8 +117,8 @@ pub async fn start_sing_internal() -> AppResult<()> {
     Ok(())
 }
 
-pub async fn stop_sing_internal() {
-    let mut lock = SING_PROCESS.lock().await;
+pub async fn stop_sing_internal(state: &Arc<AppState>) {
+    let mut lock = state.sing_process.lock().await;
     if let Some(ref mut proc) = *lock {
         if proc.child.try_wait().ok().flatten().is_none() {
             if let Some(pid) = proc.child.id() {

@@ -4,12 +4,12 @@ use std::sync::Arc;
 use crate::models::{ApiResponse, SubRequest, SubStatus};
 use crate::responses::{status_error, success, success_no_data, HandlerResult};
 use crate::services::config::{regenerate_and_restart, save_config};
-use crate::state::{AppState, SUB_STATUS};
+use crate::state::AppState;
 use crate::validation::Validator;
 
 pub async fn get_subs(State(state): State<Arc<AppState>>) -> Json<ApiResponse<Vec<SubStatus>>> {
     let config = state.config.lock().await;
-    let status_map = SUB_STATUS.lock().await;
+    let status_map = state.sub_status.lock().await;
 
     let subs_with_status: Vec<SubStatus> = config
         .subs
@@ -51,7 +51,7 @@ pub async fn add_sub(
         config_clone = config.clone();
     }
 
-    match regenerate_and_restart(&config_clone).await {
+    match regenerate_and_restart(&config_clone, &state).await {
         Ok(_) => Ok(success_no_data("Subscription added and sing-box restarted")),
         Err(e) => Err(status_error(StatusCode::INTERNAL_SERVER_ERROR, e)),
     }
@@ -78,7 +78,7 @@ pub async fn delete_sub(
         config_clone = config.clone();
     }
 
-    match regenerate_and_restart(&config_clone).await {
+    match regenerate_and_restart(&config_clone, &state).await {
         Ok(_) => Ok(success_no_data("Subscription deleted and sing-box restarted")),
         Err(e) => Err(status_error(StatusCode::INTERNAL_SERVER_ERROR, e)),
     }
@@ -91,7 +91,7 @@ pub async fn refresh_subs(
     let config_clone = config.clone();
     drop(config);
 
-    match regenerate_and_restart(&config_clone).await {
+    match regenerate_and_restart(&config_clone, &state).await {
         Ok(_) => Ok(success_no_data("Subscriptions refreshed and sing-box restarted")),
         Err(e) => Err(status_error(StatusCode::INTERNAL_SERVER_ERROR, e)),
     }
@@ -104,13 +104,11 @@ mod tests {
     use super::get_subs;
     use crate::{
         models::Config,
-        test_support::{app_state, reset_test_globals},
+        test_support::app_state,
     };
 
     #[tokio::test]
     async fn get_subs_returns_default_pending_status_when_status_missing() {
-        reset_test_globals().await;
-
         let state = app_state(Config {
             port: None,
             subs: vec!["https://example.com/sub".to_string()],

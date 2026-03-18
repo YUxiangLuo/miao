@@ -1,16 +1,17 @@
 use std::{
     fs,
     os::unix::{fs::PermissionsExt, process::CommandExt},
-    sync::LazyLock,
+    sync::Arc,
+    time::Instant,
 };
 
 use sha2::{Sha256, Digest};
-use tokio::sync::RwLock;
-use tokio::time::{sleep, Duration, Instant};
+use tokio::time::{sleep, Duration};
 
 use crate::error::{AppError, AppResult};
 use crate::models::{GitHubRelease, GitHubAsset, VersionInfo};
 use crate::services::singbox::{get_sing_box_home, stop_sing_internal};
+use crate::state::{AppState, VERSION_CACHE};
 use crate::VERSION;
 
 fn compute_sha256(data: &[u8]) -> String {
@@ -21,54 +22,8 @@ fn compute_sha256(data: &[u8]) -> String {
 
 const CACHE_TTL: Duration = Duration::from_secs(300);
 
-struct ReleaseCache {
-    release: Option<GitHubRelease>,
-    fetched_at: Option<Instant>,
-}
-
-static RELEASE_CACHE: LazyLock<RwLock<ReleaseCache>> = LazyLock::new(|| {
-    RwLock::new(ReleaseCache {
-        release: None,
-        fetched_at: None,
-    })
-});
-
-fn parse_version(v: &str) -> Option<(u32, u32, u32)> {
-    let v = v.strip_prefix('v').unwrap_or(v);
-    let parts: Vec<&str> = v.split('.').collect();
-    if parts.len() != 3 {
-        return None;
-    }
-    Some((
-        parts[0].parse().ok()?,
-        parts[1].parse().ok()?,
-        parts[2].parse().ok()?,
-    ))
-}
-
-fn is_newer_version(current: &str, latest: &str) -> bool {
-    match (parse_version(current), parse_version(latest)) {
-        (Some(c), Some(l)) => l > c,
-        _ => false,
-    }
-}
-
-fn current_version() -> String {
-    format!("v{}", VERSION)
-}
-
-fn current_arch_asset_name() -> Option<&'static str> {
-    if cfg!(target_arch = "x86_64") {
-        Some("miao-rust-linux-amd64")
-    } else if cfg!(target_arch = "aarch64") {
-        Some("miao-rust-linux-arm64")
-    } else {
-        None
-    }
-}
-
-async fn fetch_latest_release_uncached() -> AppResult<GitHubRelease> {
-    let release = crate::state::CLIENT
+async fn fetch_latest_release_uncached(client: &reqwest::Client) -> AppResult<GitHubRelease> {
+    let release = client
         .get("https://api.github.com/repos/YUxiangLuo/miao/releases/latest")
         .timeout(Duration::from_secs(60))
         .header("User-Agent", "miao")
@@ -80,9 +35,9 @@ async fn fetch_latest_release_uncached() -> AppResult<GitHubRelease> {
     Ok(release)
 }
 
-async fn fetch_latest_release() -> AppResult<GitHubRelease> {
+async fn fetch_latest_release(client: &reqwest::Client) -> AppResult<GitHubRelease> {
     {
-        let cache = RELEASE_CACHE.read().await;
+        let cache = VERSION_CACHE.read().await;
         if let (Some(release), Some(fetched_at)) = (&cache.release, cache.fetched_at) {
             if fetched_at.elapsed() < CACHE_TTL {
                 return Ok(release.clone());
@@ -90,9 +45,9 @@ async fn fetch_latest_release() -> AppResult<GitHubRelease> {
         }
     }
 
-    let release = fetch_latest_release_uncached().await?;
+    let release = fetch_latest_release_uncached(client).await?;
     {
-        let mut cache = RELEASE_CACHE.write().await;
+        let mut cache = VERSION_CACHE.write().await;
         cache.release = Some(release.clone());
         cache.fetched_at = Some(Instant::now());
     }
@@ -100,16 +55,16 @@ async fn fetch_latest_release() -> AppResult<GitHubRelease> {
 }
 
 async fn invalidate_release_cache() {
-    let mut cache = RELEASE_CACHE.write().await;
+    let mut cache = VERSION_CACHE.write().await;
     cache.release = None;
     cache.fetched_at = None;
 }
 
-pub async fn get_version_info() -> VersionInfo {
+pub async fn get_version_info(client: &reqwest::Client) -> VersionInfo {
     let current = current_version();
     let asset_name = current_arch_asset_name().unwrap_or("");
 
-    match fetch_latest_release().await {
+    match fetch_latest_release(client).await {
         Ok(release) => {
             let latest = release.tag_name.clone();
             let has_update = is_newer_version(&current, &latest);
@@ -135,10 +90,10 @@ pub async fn get_version_info() -> VersionInfo {
     }
 }
 
-pub async fn upgrade_binary() -> AppResult<String> {
+pub async fn upgrade_binary(state: &Arc<AppState>) -> AppResult<String> {
     // Force fresh fetch for upgrade to ensure we have the latest info
     invalidate_release_cache().await;
-    let release = fetch_latest_release().await?;
+    let release = fetch_latest_release(&state.http_client).await?;
     let current = current_version();
 
     if !is_newer_version(&current, &release.tag_name) {
@@ -157,7 +112,7 @@ pub async fn upgrade_binary() -> AppResult<String> {
     let expected_size = asset.size;
 
     println!("Downloading update from: {}", download_url);
-    let binary_data = crate::state::CLIENT
+    let binary_data = state.http_client
         .get(download_url)
         .timeout(Duration::from_secs(60))
         .send()
@@ -206,7 +161,7 @@ pub async fn upgrade_binary() -> AppResult<String> {
     let current_exe = std::env::current_exe()?;
 
     println!("Stopping sing-box before upgrade...");
-    stop_sing_internal().await;
+    stop_sing_internal(state).await;
 
     // Use rename for atomic replacement instead of remove + copy
     let backup_path = format!("{}.bak", current_exe.display());
@@ -261,6 +216,40 @@ pub async fn upgrade_binary() -> AppResult<String> {
     });
 
     Ok(new_version)
+}
+
+fn parse_version(v: &str) -> Option<(u32, u32, u32)> {
+    let v = v.strip_prefix('v').unwrap_or(v);
+    let parts: Vec<&str> = v.split('.').collect();
+    if parts.len() != 3 {
+        return None;
+    }
+    Some((
+        parts[0].parse().ok()?,
+        parts[1].parse().ok()?,
+        parts[2].parse().ok()?,
+    ))
+}
+
+fn is_newer_version(current: &str, latest: &str) -> bool {
+    match (parse_version(current), parse_version(latest)) {
+        (Some(c), Some(l)) => l > c,
+        _ => false,
+    }
+}
+
+fn current_version() -> String {
+    format!("v{}", VERSION)
+}
+
+fn current_arch_asset_name() -> Option<&'static str> {
+    if cfg!(target_arch = "x86_64") {
+        Some("miao-rust-linux-amd64")
+    } else if cfg!(target_arch = "aarch64") {
+        Some("miao-rust-linux-arm64")
+    } else {
+        None
+    }
 }
 
 #[cfg(test)]

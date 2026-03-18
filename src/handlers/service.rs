@@ -10,10 +10,12 @@ use crate::services::{
     proxy::restore_last_proxy,
     singbox::{start_sing_internal, stop_sing_internal},
 };
-use crate::state::{AppState, CLIENT, CONFIG_WARNING, INITIALIZING, SING_PROCESS};
+use crate::state::AppState;
 
-pub async fn get_status() -> Json<ApiResponse<StatusData>> {
-    let mut lock = SING_PROCESS.lock().await;
+pub async fn get_status(
+    State(state): State<Arc<AppState>>,
+) -> Json<ApiResponse<StatusData>> {
+    let mut lock = state.sing_process.lock().await;
 
     let (running, pid, uptime_secs) = if let Some(ref mut proc) = *lock {
         match proc.child.try_wait() {
@@ -31,8 +33,8 @@ pub async fn get_status() -> Json<ApiResponse<StatusData>> {
         (false, None, None)
     };
 
-    let initializing = INITIALIZING.load(std::sync::atomic::Ordering::Relaxed);
-    let warning = CONFIG_WARNING.lock().await.clone();
+    let initializing = state.initializing.load(std::sync::atomic::Ordering::Relaxed);
+    let warning = state.config_warning.lock().await.clone();
 
     success(
         if running { "running" } else { "stopped" },
@@ -47,12 +49,13 @@ pub async fn get_status() -> Json<ApiResponse<StatusData>> {
 }
 
 pub async fn start_service(
-    State(_): State<Arc<AppState>>,
+    State(state): State<Arc<AppState>>,
 ) -> HandlerResult {
-    match start_sing_internal().await {
+    match start_sing_internal(&state).await {
         Ok(_) => {
-            tokio::spawn(async {
-                restore_last_proxy().await;
+            let state_for_proxy = state.clone();
+            tokio::spawn(async move {
+                restore_last_proxy(&state_for_proxy).await;
             });
             Ok(success_no_data("sing-box started successfully"))
         }
@@ -65,8 +68,10 @@ pub async fn start_service(
     }
 }
 
-pub async fn stop_service() -> Json<ApiResponse<()>> {
-    stop_sing_internal().await;
+pub async fn stop_service(
+    State(state): State<Arc<AppState>>,
+) -> Json<ApiResponse<()>> {
+    stop_sing_internal(&state).await;
     success_no_data("sing-box stopped")
 }
 
@@ -76,10 +81,11 @@ pub(crate) struct ConnectivityRequest {
 }
 
 pub async fn test_connectivity(
+    State(state): State<Arc<AppState>>,
     Json(req): Json<ConnectivityRequest>,
 ) -> Json<ApiResponse<ConnectivityResult>> {
     let start = Instant::now();
-    let result = match CLIENT
+    let result = match state.http_client
         .head(&req.url)
         .timeout(Duration::from_secs(5))
         .send()
@@ -104,14 +110,22 @@ pub async fn test_connectivity(
 
 #[cfg(test)]
 mod tests {
+    use axum::extract::State;
+
     use super::get_status;
-    use crate::test_support::reset_test_globals;
+    use crate::test_support::app_state;
+    use crate::models::Config;
 
     #[tokio::test]
     async fn get_status_reports_stopped_when_no_process_exists() {
-        reset_test_globals().await;
+        let state = app_state(Config {
+            port: None,
+            subs: vec![],
+            nodes: vec![],
+            custom_rules: vec![],
+        });
 
-        let axum::response::Json(response) = get_status().await;
+        let axum::response::Json(response) = get_status(State(state)).await;
 
         assert!(response.success);
         assert_eq!(response.message, "stopped");

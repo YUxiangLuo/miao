@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use tokio::time::{sleep, Duration};
 
 use crate::error::{AppError, AppResult};
@@ -7,7 +8,7 @@ use crate::services::{
     singbox::{get_sing_box_home, start_sing_internal, stop_sing_internal},
     subscription::fetch_sub,
 };
-use crate::state::SUB_STATUS;
+use crate::state::AppState;
 
 const CONFIG_CACHE_PATH: &str = "/tmp/miao-sing-box/config.json.cache";
 
@@ -41,33 +42,37 @@ pub async fn restore_config_from_cache() -> AppResult<()> {
     Ok(())
 }
 
-pub async fn regenerate_and_restart(config: &Config) -> AppResult<()> {
-    let has_sub_nodes = gen_config(config)
+pub async fn regenerate_and_restart(
+    config: &Config,
+    state: &Arc<AppState>,
+) -> AppResult<()> {
+    let has_sub_nodes = gen_config(config, state)
         .await
         .map_err(|e| AppError::context("Failed to regenerate config", e))?;
     println!("Config regenerated successfully");
 
-    stop_sing_internal().await;
+    stop_sing_internal(state).await;
     sleep(Duration::from_millis(500)).await;
 
-    start_sing_internal()
+    start_sing_internal(state)
         .await
         .map_err(|e| AppError::context("Failed to restart sing-box", e))?;
     println!("sing-box restarted successfully");
 
     if has_sub_nodes {
         save_config_cache().await;
-        *crate::state::CONFIG_WARNING.lock().await = None;
+        *state.config_warning.lock().await = None;
     } else if !config.subs.is_empty() {
-        *crate::state::CONFIG_WARNING.lock().await = Some(
+        *state.config_warning.lock().await = Some(
             "所有订阅获取失败，请检查当前订阅".to_string()
         );
     } else {
-        *crate::state::CONFIG_WARNING.lock().await = None;
+        *state.config_warning.lock().await = None;
     }
 
-    tokio::spawn(async {
-        restore_last_proxy().await;
+    let state_for_proxy = state.clone();
+    tokio::spawn(async move {
+        restore_last_proxy(&state_for_proxy).await;
     });
 
     Ok(())
@@ -76,13 +81,14 @@ pub async fn regenerate_and_restart(config: &Config) -> AppResult<()> {
 /// Returns `true` if at least one subscription node was fetched successfully.
 pub async fn gen_config(
     config: &Config,
+    state: &Arc<AppState>,
 ) -> AppResult<bool> {
     let (my_outbounds, my_names) = collect_manual_outbounds(config);
     let mut final_outbounds: Vec<serde_json::Value> = vec![];
     let mut final_node_names: Vec<String> = vec![];
 
     {
-        let mut status_map = SUB_STATUS.lock().await;
+        let mut status_map = state.sub_status.lock().await;
         status_map.retain(|url, _| config.subs.contains(url));
     }
 
@@ -91,9 +97,13 @@ pub async fn gen_config(
         .iter()
         .map(|sub| {
             let sub = sub.clone();
+            let client = state.http_client.clone();
             async move {
                 println!("Fetching subscription: {}", sub);
-                let result = tokio::time::timeout(Duration::from_secs(30), fetch_sub(&sub)).await;
+                let result = tokio::time::timeout(
+                    Duration::from_secs(30),
+                    fetch_sub(&sub, &client)
+                ).await;
 
                 match result {
                     Ok(Ok(fetch_result)) => {
@@ -156,7 +166,7 @@ pub async fn gen_config(
                 error: Some(e),
             },
         };
-        SUB_STATUS.lock().await.insert(url, status);
+        state.sub_status.lock().await.insert(url, status);
     }
 
     let has_sub_nodes = !final_node_names.is_empty();

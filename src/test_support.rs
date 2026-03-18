@@ -6,29 +6,25 @@ use axum::{
     Router,
 };
 use serde_json::Value;
-use tokio::sync::Mutex;
 
 use crate::{
     models::Config,
     router::build_router,
-    state::{AppState, CONFIG_WARNING, INITIALIZING, SING_PROCESS, SUB_STATUS},
+    state::AppState,
 };
 
 pub fn app_state(config: Config) -> Arc<AppState> {
-    Arc::new(AppState {
-        config: Mutex::new(config),
-    })
+    Arc::new(AppState::new(config))
 }
 
-pub async fn reset_test_globals() {
-    *SING_PROCESS.lock().await = None;
-    SUB_STATUS.lock().await.clear();
-    *CONFIG_WARNING.lock().await = None;
-    INITIALIZING.store(false, std::sync::atomic::Ordering::Relaxed);
+pub async fn reset_version_cache() {
+    let mut cache = crate::state::VERSION_CACHE.write().await;
+    cache.release = None;
+    cache.fetched_at = None;
 }
 
 pub async fn test_app(config: Config) -> Router {
-    reset_test_globals().await;
+    reset_version_cache().await;
     build_router(app_state(config))
 }
 

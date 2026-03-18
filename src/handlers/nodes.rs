@@ -115,7 +115,7 @@ pub async fn add_node(
         config_clone = config.clone();
     }
 
-    match regenerate_and_restart(&config_clone).await {
+    match regenerate_and_restart(&config_clone, &state).await {
         Ok(_) => Ok(success_no_data("Node added and sing-box restarted")),
         Err(e) => Err(status_error(StatusCode::INTERNAL_SERVER_ERROR, e)),
     }
@@ -148,7 +148,7 @@ pub async fn delete_node(
         config_clone = config.clone();
     }
 
-    match regenerate_and_restart(&config_clone).await {
+    match regenerate_and_restart(&config_clone, &state).await {
         Ok(_) => Ok(success_no_data("Node deleted and sing-box restarted")),
         Err(e) => Err(status_error(StatusCode::INTERNAL_SERVER_ERROR, e)),
     }

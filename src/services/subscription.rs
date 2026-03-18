@@ -9,8 +9,8 @@ pub struct FetchResult {
     pub total_count: usize,
 }
 
-pub async fn fetch_sub(link: &str) -> AppResult<FetchResult> {
-    let res = crate::state::CLIENT
+pub async fn fetch_sub(link: &str, client: &reqwest::Client) -> AppResult<FetchResult> {
+    let res = client
         .get(link)
         .timeout(std::time::Duration::from_secs(30))
         .header("User-Agent", "clash-meta")

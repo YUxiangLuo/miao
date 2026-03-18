@@ -49,11 +49,12 @@ async fn main() -> AppResult<()> {
 
     let _ = extract_sing_box()?;
 
+    // 初始化应用状态
+    let app_state = Arc::new(AppState::new(config.clone()));
+    let state_for_init = app_state.clone();
+
     // Start web server immediately so the panel is accessible during initialization
-    let app_state = Arc::new(AppState {
-        config: tokio::sync::Mutex::new(config.clone()),
-    });
-    let app = router::build_router(app_state);
+    let app = router::build_router(app_state.clone());
     let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", port)).await?;
     println!("✅ Miao 控制面板已启动: http://localhost:{}", port);
 
@@ -61,7 +62,7 @@ async fn main() -> AppResult<()> {
     tokio::spawn(async move {
         println!("Generating initial config...");
         let mut all_subs_failed = false;
-        match gen_config(&config).await {
+        match gen_config(&config, &state_for_init).await {
             Ok(has_sub_nodes) => {
                 if has_sub_nodes {
                     save_config_cache().await;
@@ -78,10 +79,10 @@ async fn main() -> AppResult<()> {
                     }
                     Err(cache_err) => {
                         eprintln!("No cached config available: {}", cache_err);
-                        *state::CONFIG_WARNING.lock().await = Some(
+                        *state_for_init.config_warning.lock().await = Some(
                             "所有订阅获取失败且无可用缓存，请添加订阅或手动节点".to_string()
                         );
-                        state::INITIALIZING.store(false, std::sync::atomic::Ordering::Relaxed);
+                        state_for_init.initializing.store(false, std::sync::atomic::Ordering::Relaxed);
                         return;
                     }
                 }
@@ -93,30 +94,32 @@ async fn main() -> AppResult<()> {
             eprintln!("Failed to check or install OpenWrt dependencies: {}", e);
         }
 
-        match start_sing_internal().await {
+        match start_sing_internal(&state_for_init).await {
             Ok(_) => {
                 println!("sing-box started successfully");
                 if all_subs_failed {
-                    *state::CONFIG_WARNING.lock().await = Some(
+                    *state_for_init.config_warning.lock().await = Some(
                         "所有订阅获取失败，请检查当前订阅".to_string()
                     );
                 }
-                tokio::spawn(async {
-                    restore_last_proxy().await;
+                let state_for_proxy = state_for_init.clone();
+                tokio::spawn(async move {
+                    restore_last_proxy(&state_for_proxy).await;
                 });
             }
             Err(e) => eprintln!("Failed to start sing-box: {}", e),
         }
-        state::INITIALIZING.store(false, std::sync::atomic::Ordering::Relaxed);
+        state_for_init.initializing.store(false, std::sync::atomic::Ordering::Relaxed);
     });
 
+    let state_for_shutdown = app_state.clone();
     axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal())
+        .with_graceful_shutdown(shutdown_signal(state_for_shutdown))
         .await?;
     Ok(())
 }
 
-async fn shutdown_signal() {
+async fn shutdown_signal(state: Arc<AppState>) {
     let mut sigterm =
         tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
             .expect("failed to install SIGTERM handler");
@@ -129,5 +132,5 @@ async fn shutdown_signal() {
     }
 
     println!("Shutting down, stopping sing-box...");
-    stop_sing_internal().await;
+    stop_sing_internal(&state).await;
 }

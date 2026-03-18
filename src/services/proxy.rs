@@ -1,10 +1,12 @@
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use tokio::time::{sleep, Duration};
 
 use crate::error::AppResult;
 use crate::models::LastProxy;
 use crate::services::singbox::get_sing_box_home;
+use crate::state::AppState;
 
 fn get_last_proxy_path() -> PathBuf {
     get_sing_box_home().join(".last_proxy")
@@ -27,7 +29,7 @@ async fn load_last_proxy() -> Option<LastProxy> {
     }
 }
 
-pub async fn restore_last_proxy() {
+pub async fn restore_last_proxy(state: &Arc<AppState>) {
     let proxy = match load_last_proxy().await {
         Some(p) => p,
         None => return,
@@ -44,7 +46,7 @@ pub async fn restore_last_proxy() {
         "http://127.0.0.1:6262/proxies/{}",
         urlencoding::encode(&proxy.group)
     );
-    let group_info = match crate::state::CLIENT
+    let group_info = match state.http_client
         .get(&url)
         .timeout(Duration::from_secs(5))
         .send()
@@ -71,7 +73,7 @@ pub async fn restore_last_proxy() {
         return;
     }
 
-    match crate::state::CLIENT
+    match state.http_client
         .put(&url)
         .timeout(Duration::from_secs(5))
         .json(&serde_json::json!({ "name": proxy.name }))
