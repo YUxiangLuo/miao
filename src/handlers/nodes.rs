@@ -62,7 +62,7 @@ pub async fn add_node(
                     tls: Tls {
                         enabled: true,
                         server_name: req.sni,
-                        insecure: true,
+                        insecure: req.skip_cert_verify,
                     },
                 };
                 serde_json::to_string(&node)
@@ -90,7 +90,7 @@ pub async fn add_node(
                     tls: Tls {
                         enabled: true,
                         server_name: req.sni,
-                        insecure: true,
+                        insecure: req.skip_cert_verify,
                     },
                 };
                 serde_json::to_string(&node)

@@ -5,6 +5,7 @@ node_modules
 # output
 out
 dist
+public/index.html
 *.tgz
 
 # code coverage

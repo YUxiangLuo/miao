@@ -727,6 +727,21 @@ button {
     color: var(--text-muted);
     font-size: 12px;
 }
+.field.checkbox-field {
+    flex-direction: row;
+    align-items: center;
+    gap: 10px;
+}
+.field.checkbox-field input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+    accent-color: var(--accent);
+    cursor: pointer;
+}
+.field.checkbox-field span {
+    color: var(--text-secondary);
+    font-size: 13px;
+}
 .modal-message {
     margin: 0 0 18px;
     white-space: pre-line;

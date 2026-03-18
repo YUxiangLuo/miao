@@ -54,6 +54,8 @@ pub struct NodeRequest {
     pub sni: Option<String>,
     #[serde(default)]
     pub cipher: Option<String>,
+    #[serde(default)]
+    pub skip_cert_verify: bool,
 }
 
 #[derive(Deserialize)]

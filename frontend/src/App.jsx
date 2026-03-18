@@ -37,6 +37,7 @@ const EMPTY_NODE_FORM = {
   password: '',
   sni: '',
   cipher: '2022-blake3-aes-128-gcm',
+  skip_cert_verify: false,
 }
 const CIPHER_OPTIONS = [
   '2022-blake3-aes-128-gcm',
@@ -257,6 +258,19 @@ function NodeModal({ open, nodeType, setNodeType, form, setForm, loading, onClos
             <label className="field">
               <span>SNI（可选）</span>
               <input value={form.sni} onChange={(event) => setForm((prev) => ({ ...prev, sni: event.target.value }))} placeholder="留空使用服务器地址" />
+            </label>
+          </div>
+        )}
+
+        {nodeType !== 'ss' && (
+          <div className="form-grid single">
+            <label className="field checkbox-field">
+              <input
+                type="checkbox"
+                checked={form.skip_cert_verify}
+                onChange={(event) => setForm((prev) => ({ ...prev, skip_cert_verify: event.target.checked }))}
+              />
+              <span>跳过证书验证（不推荐）</span>
             </label>
           </div>
         )}
@@ -600,8 +614,12 @@ export default function App() {
       server_port: nodeForm.server_port,
       password: nodeForm.password.trim(),
     }
-    if (nodeType === 'ss') payload.cipher = nodeForm.cipher
-    else if (nodeForm.sni.trim()) payload.sni = nodeForm.sni.trim()
+    if (nodeType === 'ss') {
+      payload.cipher = nodeForm.cipher
+    } else {
+      if (nodeForm.sni.trim()) payload.sni = nodeForm.sni.trim()
+      payload.skip_cert_verify = nodeForm.skip_cert_verify
+    }
 
     try {
       await apiCall('nodes', { method: 'POST', body: JSON.stringify(payload) }, 'addNode')

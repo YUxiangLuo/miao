@@ -63,7 +63,10 @@ fn parse_subscription_content(text: &str) -> AppResult<(Vec<String>, Vec<serde_j
                             .get("sni")
                             .and_then(|s| s.as_str())
                             .map(|s| s.to_string()),
-                        insecure: true,
+                        insecure: node
+                            .get("skip-cert-verify")
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(false),
                     },
                 };
                 node_names.push(name.to_string());
