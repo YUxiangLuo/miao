@@ -96,10 +96,19 @@ pub async fn gen_config(
                 let result = tokio::time::timeout(Duration::from_secs(30), fetch_sub(&sub)).await;
 
                 match result {
-                    Ok(Ok((node_names, outbounds))) => {
-                        let count = node_names.len();
-                        println!("  -> Success: fetched {} nodes from {}", count, sub);
-                        (sub.clone(), Ok((node_names, outbounds)))
+                    Ok(Ok(fetch_result)) => {
+                        let valid_count = fetch_result.node_names.len();
+                        let total_count = fetch_result.total_count;
+                        let error_count = fetch_result.parse_errors.len();
+                        
+                        if error_count > 0 {
+                            eprintln!("  -> Partial: fetched {}/{} valid nodes from {} ({} parse errors)", 
+                                valid_count, total_count, sub, error_count);
+                        } else {
+                            println!("  -> Success: fetched {} nodes from {}", valid_count, sub);
+                        }
+                        
+                        (sub.clone(), Ok(fetch_result))
                     }
                     Ok(Err(e)) => {
                         eprintln!("  -> Failed to fetch subscription {}: {}", sub, e);
@@ -118,19 +127,26 @@ pub async fn gen_config(
 
     for (url, result) in results {
         let status = match result {
-            Ok((node_names, outbounds)) => {
-                let count = node_names.len();
-                final_node_names.extend(node_names);
-                final_outbounds.extend(outbounds);
+            Ok(fetch_result) => {
+                let count = fetch_result.node_names.len();
+                final_node_names.extend(fetch_result.node_names);
+                final_outbounds.extend(fetch_result.outbounds);
+                
+                let error_info = if !fetch_result.parse_errors.is_empty() {
+                    Some(format!("{} nodes skipped due to parse errors", fetch_result.parse_errors.len()))
+                } else if count == 0 && fetch_result.total_count > 0 {
+                    Some("All nodes invalid (missing required fields)".into())
+                } else if count == 0 {
+                    Some("No nodes found".into())
+                } else {
+                    None
+                };
+                
                 SubStatus {
                     url: url.clone(),
                     success: count > 0,
                     node_count: count,
-                    error: if count == 0 {
-                        Some("No nodes found".into())
-                    } else {
-                        None
-                    },
+                    error: error_info,
                 }
             }
             Err(e) => SubStatus {
@@ -165,15 +181,26 @@ pub async fn gen_config(
 }
 
 fn collect_manual_outbounds(config: &Config) -> (Vec<serde_json::Value>, Vec<String>) {
-    let my_outbounds: Vec<serde_json::Value> = config
-        .nodes
-        .iter()
-        .filter_map(|s| serde_json::from_str(s).ok())
-        .collect();
-    let my_names: Vec<String> = my_outbounds
-        .iter()
-        .filter_map(|o| o.get("tag").and_then(|v| v.as_str()).map(String::from))
-        .collect();
+    use crate::services::node_parser::parse_node_json;
+
+    let mut my_outbounds = vec![];
+    let mut my_names = vec![];
+
+    for (idx, node_str) in config.nodes.iter().enumerate() {
+        // 先用 parse_node_json 验证节点必需字段
+        match parse_node_json(node_str) {
+            Ok(info) => {
+                // 验证通过，使用原始 JSON 作为 outbound
+                if let Ok(outbound) = serde_json::from_str::<serde_json::Value>(node_str) {
+                    my_names.push(info.tag);
+                    my_outbounds.push(outbound);
+                }
+            }
+            Err(e) => {
+                eprintln!("[collect_manual_outbounds] Skipping node #{}: {}", idx, e);
+            }
+        }
+    }
 
     (my_outbounds, my_names)
 }
@@ -350,5 +377,137 @@ mod tests {
         assert!(err
             .to_string()
             .contains("No nodes available: all subscriptions failed and no manual nodes configured"));
+    }
+
+    #[test]
+    fn collect_manual_outbounds_handles_empty_nodes() {
+        let config = Config {
+            port: None,
+            subs: vec![],
+            nodes: vec![],
+            custom_rules: vec![],
+        };
+
+        let (outbounds, names) = collect_manual_outbounds(&config);
+
+        assert!(outbounds.is_empty());
+        assert!(names.is_empty());
+    }
+
+    #[test]
+    fn collect_manual_outbounds_handles_all_invalid_nodes() {
+        let config = Config {
+            port: None,
+            subs: vec![],
+            nodes: vec![
+                "not-json".to_string(),
+                r#"{}"#.to_string(), // Valid JSON but no tag
+                r#"{"type":"hysteria2"}"#.to_string(), // Valid JSON but no tag
+            ],
+            custom_rules: vec![],
+        };
+
+        let (outbounds, names) = collect_manual_outbounds(&config);
+
+        // All nodes fail validation (missing required fields)
+        assert!(outbounds.is_empty());
+        assert!(names.is_empty());
+    }
+
+    #[test]
+    fn build_sing_box_config_preserves_node_order() {
+        let config = Config {
+            port: None,
+            subs: vec![],
+            nodes: vec![],
+            custom_rules: vec![],
+        };
+
+        let my_outbounds = vec![
+            json!({"type": "hysteria2", "tag": "node-1", "server": "s1.example.com", "server_port": 443, "password": "p1"}),
+            json!({"type": "hysteria2", "tag": "node-2", "server": "s2.example.com", "server_port": 443, "password": "p2"}),
+            json!({"type": "hysteria2", "tag": "node-3", "server": "s3.example.com", "server_port": 443, "password": "p3"}),
+        ];
+
+        let built = build_sing_box_config(
+            &config,
+            vec!["node-1".to_string(), "node-2".to_string(), "node-3".to_string()],
+            my_outbounds,
+            vec![],
+            vec![],
+        )
+        .unwrap();
+
+        let selector = built["outbounds"][0]["outbounds"].as_array().unwrap();
+        assert_eq!(selector.len(), 3);
+        assert_eq!(selector[0], "node-1");
+        assert_eq!(selector[1], "node-2");
+        assert_eq!(selector[2], "node-3");
+    }
+
+    #[test]
+    fn build_sing_box_config_handles_no_custom_rules() {
+        let config = Config {
+            port: None,
+            subs: vec![],
+            nodes: vec![],
+            custom_rules: vec![],
+        };
+
+        let my_outbounds = vec![json!({
+            "type": "hysteria2",
+            "tag": "manual-a",
+            "server": "manual.example.com",
+            "server_port": 443,
+            "password": "secret"
+        })];
+
+        let built = build_sing_box_config(
+            &config,
+            vec!["manual-a".to_string()],
+            my_outbounds,
+            vec![],
+            vec![],
+        )
+        .unwrap();
+
+        let rules = built["route"]["rules"].as_array().unwrap();
+        // Should have only the default 3 rules (sniff, hijack-dns, private ip)
+        assert_eq!(rules.len(), 3);
+    }
+
+    #[test]
+    fn build_sing_box_config_ignores_all_invalid_custom_rules() {
+        let config = Config {
+            port: None,
+            subs: vec![],
+            nodes: vec![],
+            custom_rules: vec![
+                "not-json".to_string(),
+                "{invalid".to_string(),
+                "".to_string(),
+            ],
+        };
+
+        let my_outbounds = vec![json!({
+            "type": "hysteria2",
+            "tag": "manual-a",
+            "server": "manual.example.com",
+            "server_port": 443,
+            "password": "secret"
+        })];
+
+        let built = build_sing_box_config(
+            &config,
+            vec!["manual-a".to_string()],
+            my_outbounds,
+            vec![],
+            vec![],
+        )
+        .unwrap();
+
+        let rules = built["route"]["rules"].as_array().unwrap();
+        // Should have only the default 3 rules
+        assert_eq!(rules.len(), 3);
     }
 }

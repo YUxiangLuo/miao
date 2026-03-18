@@ -4,29 +4,39 @@ use std::sync::Arc;
 use crate::models::{AnyTls, ApiResponse, DeleteNodeRequest, Hysteria2, NodeInfo, NodeRequest, Shadowsocks, Tls};
 use crate::responses::{status_error, success, success_no_data, HandlerResult};
 use crate::services::config::{regenerate_and_restart, save_config};
+use crate::services::node_parser::parse_node_json;
 use crate::state::AppState;
 use crate::validation::Validator;
 
 pub async fn get_nodes(State(state): State<Arc<AppState>>) -> Json<ApiResponse<Vec<NodeInfo>>> {
     let config = state.config.lock().await;
 
-    let nodes: Vec<NodeInfo> = config
-        .nodes
-        .iter()
-        .filter_map(|s| {
-            serde_json::from_str::<serde_json::Value>(s).ok().map(|v| NodeInfo {
-                tag: v.get("tag").and_then(|t| t.as_str()).unwrap_or("").to_string(),
-                server: v.get("server").and_then(|s| s.as_str()).unwrap_or("").to_string(),
-                server_port: v.get("server_port").and_then(|p| p.as_u64()).unwrap_or(0) as u16,
-                node_type: v.get("type").and_then(|t| t.as_str()).unwrap_or("unknown").to_string(),
-                sni: v
-                    .get("tls")
-                    .and_then(|t| t.get("server_name"))
-                    .and_then(|s| s.as_str())
-                    .map(|s| s.to_string()),
-            })
-        })
-        .collect();
+    let mut nodes = Vec::new();
+    let mut parse_errors = Vec::new();
+
+    for (idx, node_str) in config.nodes.iter().enumerate() {
+        match parse_node_json(node_str) {
+            Ok(display_info) => {
+                nodes.push(NodeInfo {
+                    tag: display_info.tag,
+                    server: display_info.server,
+                    server_port: display_info.server_port,
+                    node_type: display_info.node_type,
+                    sni: display_info.sni,
+                });
+            }
+            Err(e) => {
+                let error_msg = format!("Node #{}: {}", idx, e);
+                eprintln!("[get_nodes] {}", error_msg);
+                parse_errors.push(error_msg);
+            }
+        }
+    }
+
+    // 如果有解析错误，记录到日志但不影响返回有效节点
+    if !parse_errors.is_empty() {
+        eprintln!("[get_nodes] Skipped {} invalid node(s)", parse_errors.len());
+    }
 
     success("Nodes loaded", nodes)
 }
@@ -177,5 +187,158 @@ mod tests {
         assert_eq!(nodes[0].server_port, 443);
         assert_eq!(nodes[0].node_type, "hysteria2");
         assert_eq!(nodes[0].sni.as_deref(), Some("sni.example.com"));
+    }
+
+    #[tokio::test]
+    async fn get_nodes_skips_invalid_nodes_and_returns_valid_ones() {
+        let state = app_state(Config {
+            port: None,
+            subs: vec![],
+            nodes: vec![
+                // Valid node
+                r#"{"type":"hysteria2","tag":"valid-node","server":"valid.example.com","server_port":443,"password":"secret"}"#.to_string(),
+                // Invalid: missing tag
+                r#"{"type":"hysteria2","server":"invalid1.example.com","server_port":443,"password":"secret"}"#.to_string(),
+                // Invalid: zero port
+                r#"{"type":"hysteria2","tag":"invalid-port","server":"invalid2.example.com","server_port":0,"password":"secret"}"#.to_string(),
+                // Invalid: missing server
+                r#"{"type":"hysteria2","tag":"invalid-server","server_port":443,"password":"secret"}"#.to_string(),
+            ],
+            custom_rules: vec![],
+        });
+
+        let Json(response) = get_nodes(State(state)).await;
+
+        assert!(response.success);
+        let nodes = response.data.unwrap();
+        assert_eq!(nodes.len(), 1);
+        assert_eq!(nodes[0].tag, "valid-node");
+    }
+
+    #[tokio::test]
+    async fn get_nodes_returns_empty_for_no_nodes() {
+        let state = app_state(Config {
+            port: None,
+            subs: vec![],
+            nodes: vec![],
+            custom_rules: vec![],
+        });
+
+        let Json(response) = get_nodes(State(state)).await;
+
+        assert!(response.success);
+        assert_eq!(response.message, "Nodes loaded");
+        let nodes = response.data.unwrap();
+        assert!(nodes.is_empty());
+    }
+
+    #[tokio::test]
+    async fn get_nodes_handles_all_invalid_nodes() {
+        let state = app_state(Config {
+            port: None,
+            subs: vec![],
+            nodes: vec![
+                "not-json".to_string(),
+                r#"{}"#.to_string(),
+                r#"{"type":"hysteria2"}"#.to_string(),
+            ],
+            custom_rules: vec![],
+        });
+
+        let Json(response) = get_nodes(State(state)).await;
+
+        assert!(response.success);
+        let nodes = response.data.unwrap();
+        assert!(nodes.is_empty());
+    }
+
+    #[tokio::test]
+    async fn get_nodes_handles_mixed_node_types() {
+        let state = app_state(Config {
+            port: None,
+            subs: vec![],
+            nodes: vec![
+                r#"{"type":"hysteria2","tag":"hy2-node","server":"hy2.example.com","server_port":443,"password":"secret"}"#.to_string(),
+                r#"{"type":"shadowsocks","tag":"ss-node","server":"ss.example.com","server_port":8388,"password":"secret","method":"aes-128-gcm"}"#.to_string(),
+                r#"{"type":"anytls","tag":"anytls-node","server":"any.example.com","server_port":8443,"password":"secret"}"#.to_string(),
+            ],
+            custom_rules: vec![],
+        });
+
+        let Json(response) = get_nodes(State(state)).await;
+
+        assert!(response.success);
+        let nodes = response.data.unwrap();
+        assert_eq!(nodes.len(), 3);
+        
+        let types: Vec<String> = nodes.iter().map(|n| n.node_type.clone()).collect();
+        assert!(types.contains(&"hysteria2".to_string()));
+        assert!(types.contains(&"shadowsocks".to_string()));
+        assert!(types.contains(&"anytls".to_string()));
+    }
+
+    #[tokio::test]
+    async fn get_nodes_preserves_node_order() {
+        let state = app_state(Config {
+            port: None,
+            subs: vec![],
+            nodes: vec![
+                r#"{"type":"hysteria2","tag":"first","server":"first.example.com","server_port":443,"password":"secret"}"#.to_string(),
+                r#"{"type":"hysteria2","tag":"second","server":"second.example.com","server_port":443,"password":"secret"}"#.to_string(),
+                r#"{"type":"hysteria2","tag":"third","server":"third.example.com","server_port":443,"password":"secret"}"#.to_string(),
+            ],
+            custom_rules: vec![],
+        });
+
+        let Json(response) = get_nodes(State(state)).await;
+
+        assert!(response.success);
+        let nodes = response.data.unwrap();
+        assert_eq!(nodes.len(), 3);
+        assert_eq!(nodes[0].tag, "first");
+        assert_eq!(nodes[1].tag, "second");
+        assert_eq!(nodes[2].tag, "third");
+    }
+
+    #[tokio::test]
+    async fn get_nodes_handles_ipv6_addresses() {
+        let state = app_state(Config {
+            port: None,
+            subs: vec![],
+            nodes: vec![
+                r#"{"type":"hysteria2","tag":"ipv6-node","server":"2001:db8::1","server_port":443,"password":"secret"}"#.to_string(),
+                r#"{"type":"hysteria2","tag":"localhost-ipv6","server":"::1","server_port":443,"password":"secret"}"#.to_string(),
+            ],
+            custom_rules: vec![],
+        });
+
+        let Json(response) = get_nodes(State(state)).await;
+
+        assert!(response.success);
+        let nodes = response.data.unwrap();
+        assert_eq!(nodes.len(), 2);
+        assert_eq!(nodes[0].server, "2001:db8::1");
+        assert_eq!(nodes[1].server, "::1");
+    }
+
+    #[tokio::test]
+    async fn get_nodes_handles_unicode_tags() {
+        let state = app_state(Config {
+            port: None,
+            subs: vec![],
+            nodes: vec![
+                r#"{"type":"hysteria2","tag":"香港节点","server":"hk.example.com","server_port":443,"password":"secret"}"#.to_string(),
+                r#"{"type":"hysteria2","tag":"日本サーバー","server":"jp.example.com","server_port":443,"password":"secret"}"#.to_string(),
+            ],
+            custom_rules: vec![],
+        });
+
+        let Json(response) = get_nodes(State(state)).await;
+
+        assert!(response.success);
+        let nodes = response.data.unwrap();
+        assert_eq!(nodes.len(), 2);
+        assert_eq!(nodes[0].tag, "香港节点");
+        assert_eq!(nodes[1].tag, "日本サーバー");
     }
 }
