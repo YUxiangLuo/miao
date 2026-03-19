@@ -144,7 +144,11 @@ pub async fn upgrade_binary(state: &Arc<AppState>) -> AppResult<String> {
     let download_url = &asset.browser_download_url;
     let expected_size = asset.size;
 
-    info!("Downloading update from: {} ({} bytes)", download_url, expected_size);
+    info!(
+        url = %download_url,
+        size_bytes = expected_size,
+        "Downloading update"
+    );
     
     // 使用流式下载并记录进度
     let response = state.http_client
@@ -167,13 +171,18 @@ pub async fn upgrade_binary(state: &Arc<AppState>) -> AppResult<String> {
         if expected_size > 0 {
             let percent = ((downloaded as f64 / expected_size as f64) * 100.0) as u8;
             if percent >= last_logged_percent + 10 {
-                info!("Download progress: {}% ({}/{} bytes)", percent, downloaded, expected_size);
+                info!(
+                    percent = percent,
+                    downloaded = downloaded,
+                    total = expected_size,
+                    "Download progress"
+                );
                 last_logged_percent = percent;
             }
         }
     }
     
-    info!("Download complete: {} bytes", downloaded);
+    info!(bytes = downloaded, "Download complete");
 
     // Verify file size
     let actual_size = binary_data.len() as u64;
@@ -186,7 +195,7 @@ pub async fn upgrade_binary(state: &Arc<AppState>) -> AppResult<String> {
 
     // Compute and log SHA256 for verification
     let sha256_hash = compute_sha256(&binary_data);
-    info!("Downloaded binary SHA256: {}", sha256_hash);
+    info!(sha256 = %sha256_hash, "Downloaded binary hash");
 
     let temp_path = get_temp_binary_path();
     fs::write(&temp_path, &binary_data)

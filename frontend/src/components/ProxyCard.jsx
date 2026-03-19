@@ -1,3 +1,4 @@
+import { memo } from 'react'
 import { Radio, Zap, LoaderCircle, Plus } from 'lucide-react'
 import { Button, SectionCard } from './ui.jsx'
 import { 
@@ -6,6 +7,31 @@ import {
   getDelayTone,
   protocolLabel 
 } from '../utils.js'
+
+const ProxyTile = memo(function ProxyTile({ nodeName, delay, isActive, isTesting, onSwitchProxy, onTestDelay, group }) {
+  return (
+    <div 
+      className={classNames('proxy-tile', isActive && 'active')} 
+      onClick={() => !isTesting && onSwitchProxy(group, nodeName)}
+    >
+      <div className="proxy-tile-top">
+        {isActive
+          ? <div className="proxy-tag"><span className="proxy-tag-dot" /><span>{nodeName}</span></div>
+          : <span className="proxy-node-name">{nodeName}</span>}
+      </div>
+      <button 
+        className={classNames('proxy-test-chip', getDelayTone(delay))} 
+        onClick={(event) => { event.stopPropagation(); onTestDelay(nodeName); }} 
+        disabled={isTesting}
+      >
+        {isTesting 
+          ? <LoaderCircle size={10} className="spin" /> 
+          : <Zap size={10} />}
+        <span>{isTesting ? '测试中…' : formatDelay(delay)}</span>
+      </button>
+    </div>
+  )
+})
 
 export function ProxyCard({ 
   status, 
@@ -74,34 +100,18 @@ export function ProxyCard({
       <div className="proxy-grid-wrap">
         {primaryGroup ? (
           <div className="proxy-grid">
-            {primaryGroup.all.map((nodeName) => {
-              const delay = delays[nodeName]
-              const isActive = primaryGroup.now === nodeName
-              const isTesting = Boolean(testingNodes[nodeName])
-              return (
-                <div 
-                  key={nodeName} 
-                  className={classNames('proxy-tile', isActive && 'active')} 
-                  onClick={() => !isTesting && onSwitchProxy(primaryGroupName, nodeName)}
-                >
-                  <div className="proxy-tile-top">
-                    {isActive
-                      ? <div className="proxy-tag"><span className="proxy-tag-dot" /><span>{nodeName}</span></div>
-                      : <span className="proxy-node-name">{nodeName}</span>}
-                  </div>
-                  <button 
-                    className={classNames('proxy-test-chip', getDelayTone(delay))} 
-                    onClick={(event) => { event.stopPropagation(); onTestDelay(nodeName); }} 
-                    disabled={isTesting}
-                  >
-                    {isTesting 
-                      ? <LoaderCircle size={10} className="spin" /> 
-                      : <Zap size={10} />}
-                    <span>{isTesting ? '测试中…' : formatDelay(delay)}</span>
-                  </button>
-                </div>
-              )
-            })}
+            {primaryGroup.all.map((nodeName) => (
+              <ProxyTile
+                key={nodeName}
+                nodeName={nodeName}
+                delay={delays[nodeName]}
+                isActive={primaryGroup.now === nodeName}
+                isTesting={Boolean(testingNodes[nodeName])}
+                group={primaryGroupName}
+                onSwitchProxy={onSwitchProxy}
+                onTestDelay={onTestDelay}
+              />
+            ))}
             <button className="proxy-tile add-tile" onClick={onOpenAddNode}>
               <Plus size={13} />
               <span>添加节点</span>

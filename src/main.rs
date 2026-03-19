@@ -53,6 +53,15 @@ async fn main() -> AppResult<()> {
     info!("Reading configuration...");
     let config: Config = serde_yaml::from_str(&tokio::fs::read_to_string("config.yaml").await?)?;
     let port = config.port.unwrap_or(DEFAULT_PORT);
+    let subs_count = config.subs.len();
+    let nodes_count = config.nodes.len();
+
+    info!(
+        port = port,
+        subs = subs_count,
+        nodes = nodes_count,
+        "Configuration loaded"
+    );
 
     let _ = extract_sing_box()?;
 
@@ -64,7 +73,7 @@ async fn main() -> AppResult<()> {
     // Start web server immediately so the panel is accessible during initialization
     let app = router::build_router(app_state.clone());
     let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", port)).await?;
-    info!("✅ Miao 控制面板已启动: http://localhost:{}", port);
+    info!(port = port, url = %format!("http://localhost:{}", port), "Miao panel started");
 
     // Background: generate config, check dependencies, and start sing-box
     tokio::spawn(async move {
@@ -79,14 +88,14 @@ async fn main() -> AppResult<()> {
                 }
             }
             Err(e) => {
-                error!("Failed to generate config: {}", e);
+                error!(error = %e, "Failed to generate config");
                 match restore_config_from_cache().await {
                     Ok(_) => {
                         warn!("Using cached config as fallback");
                         all_subs_failed = true;
                     }
                     Err(cache_err) => {
-                        error!("No cached config available: {}", cache_err);
+                        error!(error = %cache_err, "No cached config available");
                         *state_for_init.config_warning.lock().await = Some(
                             "所有订阅获取失败且无可用缓存，请添加订阅或手动节点".to_string()
                         );

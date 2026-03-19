@@ -1,6 +1,25 @@
+import { memo } from 'react'
 import { Shield, Trash2 } from 'lucide-react'
 import { SectionCard } from './ui.jsx'
 import { classNames, protocolLabel } from '../utils.js'
+
+const NodeRow = memo(function NodeRow({ node, onDelete }) {
+  return (
+    <div className="list-row">
+      <Shield size={13} className="list-leading-icon" />
+      <div className="list-row-content">
+        <div className="list-row-title">{node.tag}</div>
+        <div className="list-row-meta">{node.server}:{node.server_port} · {protocolLabel(node.node_type)}</div>
+      </div>
+      <button 
+        className="icon-button subtle" 
+        onClick={() => onDelete(node.tag)}
+      >
+        <Trash2 size={13} />
+      </button>
+    </div>
+  )
+})
 
 export function NodesCard({ nodes, onDeleteNode, onOpenAddNode }) {
   return (
@@ -25,19 +44,7 @@ export function NodesCard({ nodes, onDeleteNode, onOpenAddNode }) {
         {nodes.length === 0 
           ? <div className="empty-block">暂无手动节点</div> 
           : nodes.map((node) => (
-            <div key={node.tag} className="list-row">
-              <Shield size={13} className="list-leading-icon" />
-              <div className="list-row-content">
-                <div className="list-row-title">{node.tag}</div>
-                <div className="list-row-meta">{node.server}:{node.server_port} · {protocolLabel(node.node_type)}</div>
-              </div>
-              <button 
-                className="icon-button subtle" 
-                onClick={() => onDeleteNode(node.tag)}
-              >
-                <Trash2 size={13} />
-              </button>
-            </div>
+            <NodeRow key={node.tag} node={node} onDelete={onDeleteNode} />
           ))}
       </div>
     </SectionCard>

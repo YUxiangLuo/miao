@@ -116,7 +116,7 @@ pub async fn gen_config(
             let sub = sub.clone();
             let client = state.http_client.clone();
             async move {
-                info!("Fetching subscription: {}", sub);
+                info!(url = %sub, "Fetching subscription");
                 let result = tokio::time::timeout(
                     Duration::from_secs(30),
                     fetch_sub(&sub, &client)
@@ -129,20 +129,29 @@ pub async fn gen_config(
                         let error_count = fetch_result.parse_errors.len();
                         
                         if error_count > 0 {
-                            warn!("  -> Partial: fetched {}/{} valid nodes from {} ({} parse errors)", 
-                                valid_count, total_count, sub, error_count);
+                            warn!(
+                                url = %sub,
+                                valid = valid_count,
+                                total = total_count,
+                                errors = error_count,
+                                "Partial fetch: some nodes failed to parse"
+                            );
                         } else {
-                            info!("  -> Success: fetched {} nodes from {}", valid_count, sub);
+                            info!(
+                                url = %sub,
+                                nodes = valid_count,
+                                "Subscription fetched successfully"
+                            );
                         }
                         
                         (sub.clone(), Ok(fetch_result))
                     }
                     Ok(Err(e)) => {
-                        error!("  -> Failed to fetch subscription {}: {}", sub, e);
+                        error!(url = %sub, error = %e, "Failed to fetch subscription");
                         (sub.clone(), Err(e.to_string()))
                     }
                     Err(_) => {
-                        error!("  -> Subscription {} timed out after 30s", sub);
+                        error!(url = %sub, timeout_secs = 30, "Subscription fetch timed out");
                         (sub.clone(), Err("Request timeout".to_string()))
                     }
                 }

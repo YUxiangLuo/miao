@@ -84,8 +84,7 @@ pub async fn start_sing_internal(state: &Arc<AppState>) -> AppResult<()> {
     let sing_box_path = sing_box_home.join("sing-box");
     let config_path = sing_box_home.join("config.json");
 
-    info!("Starting sing-box from: {:?}", sing_box_path);
-    info!("Using config: {:?}", config_path);
+    info!(binary = ?sing_box_path, config = ?config_path, "Starting sing-box");
 
     let mut child = tokio::process::Command::new(&sing_box_path)
         .current_dir(&sing_box_home)
@@ -98,7 +97,7 @@ pub async fn start_sing_internal(state: &Arc<AppState>) -> AppResult<()> {
         .map_err(|e| AppError::context("Failed to spawn sing-box process", e))?;
 
     let pid = child.id();
-    info!("sing-box process spawned with PID: {:?}", pid);
+    info!(pid = pid, "sing-box process spawned");
 
     sleep(Duration::from_millis(500)).await;
     if let Some(exit_status) = child
