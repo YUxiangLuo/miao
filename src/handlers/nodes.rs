@@ -49,19 +49,36 @@ pub async fn add_node(
     Validator::validate_node_request(&req)
         .map_err(|e| status_error(StatusCode::BAD_REQUEST, e))?;
 
+    let node_type = req.node_type.as_deref().unwrap_or("hysteria2");
+    
+    // 验证节点类型是否支持
+    const VALID_NODE_TYPES: &[&str] = &["hysteria2", "anytls", "ss"];
+    if !VALID_NODE_TYPES.contains(&node_type) {
+        return Err(status_error(
+            StatusCode::BAD_REQUEST, 
+            format!("不支持的节点类型: {}，支持的类型: {}", node_type, VALID_NODE_TYPES.join(", "))
+        ));
+    }
+
     let config_clone;
     {
         let mut config = state.config.write().await;
 
+        // 检查标签唯一性（大小写不敏感）
+        let req_tag_lower = req.tag.to_lowercase();
         for node_str in &config.nodes {
             if let Ok(v) = serde_json::from_str::<serde_json::Value>(node_str) {
-                if v.get("tag").and_then(|t| t.as_str()) == Some(&req.tag) {
-                    return Err(status_error(StatusCode::BAD_REQUEST, "Node with this tag already exists"));
+                if let Some(existing_tag) = v.get("tag").and_then(|t| t.as_str()) {
+                    if existing_tag.to_lowercase() == req_tag_lower {
+                        return Err(status_error(
+                            StatusCode::BAD_REQUEST, 
+                            format!("标签 '{}' 与已存在的节点 '{}' 重复（不区分大小写）", req.tag, existing_tag)
+                        ));
+                    }
                 }
             }
         }
 
-        let node_type = req.node_type.as_deref().unwrap_or("hysteria2");
         let node_json = match node_type {
             "anytls" => {
                 let node = AnyTls {

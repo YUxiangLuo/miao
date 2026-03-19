@@ -1,7 +1,6 @@
 use serde_yaml::Value;
 
 use crate::error::{AppError, AppResult};
-use crate::models::{AnyTls, Hysteria2, Shadowsocks, Tls};
 
 /// 节点解析结果，包含有效节点和错误记录
 #[derive(Debug)]
@@ -64,7 +63,7 @@ fn is_supported_node_type(node_type: &str) -> bool {
 
 fn parse_single_node(node: &Value) -> Option<(String, serde_json::Value)> {
     let typ = node.get("type")?.as_str()?;
-    let name = node.get("name")?.as_str()?.to_string();
+    let name = node.get("name")?.as_str()?;
 
     // 验证必需字段
     let server = node.get("server")?.as_str()?;
@@ -75,62 +74,71 @@ fn parse_single_node(node: &Value) -> Option<(String, serde_json::Value)> {
     let password = node.get("password")?.as_str()?;
 
     let outbound = match typ {
-        "hysteria2" => serde_json::to_value(Hysteria2 {
-            outbound_type: "hysteria2".to_string(),
-            tag: name.clone(),
-            server: server.to_string(),
-            server_port: port as u16,
-            password: password.to_string(),
-            up_mbps: None,
-            down_mbps: None,
-            tls: Tls {
-                enabled: true,
-                server_name: node
-                    .get("sni")
-                    .and_then(|s| s.as_str())
-                    .map(|s| s.to_string()),
-                insecure: node
-                    .get("skip-cert-verify")
-                    .and_then(|v| v.as_bool())
-                    .unwrap_or(false),
-            },
-        })
-        .ok()?,
-        "anytls" => serde_json::to_value(AnyTls {
-            outbound_type: "anytls".to_string(),
-            tag: name.clone(),
-            server: server.to_string(),
-            server_port: port as u16,
-            password: password.to_string(),
-            tls: Tls {
-                enabled: true,
-                server_name: node
-                    .get("sni")
-                    .and_then(|s| s.as_str())
-                    .map(|s| s.to_string()),
-                insecure: node
-                    .get("skip-cert-verify")
-                    .and_then(|v| v.as_bool())
-                    .unwrap_or(false),
-            },
-        })
-        .ok()?,
+        "hysteria2" => {
+            let sni = node.get("sni").and_then(|s| s.as_str());
+            let insecure = node
+                .get("skip-cert-verify")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+
+            let mut obj = serde_json::json!({
+                "type": "hysteria2",
+                "tag": name,
+                "server": server,
+                "server_port": port,
+                "password": password,
+                "tls": {
+                    "enabled": true,
+                    "insecure": insecure
+                }
+            });
+
+            if let Some(sni_val) = sni {
+                obj["tls"]["server_name"] = serde_json::Value::String(sni_val.to_string());
+            }
+
+            obj
+        }
+        "anytls" => {
+            let sni = node.get("sni").and_then(|s| s.as_str());
+            let insecure = node
+                .get("skip-cert-verify")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+
+            let mut obj = serde_json::json!({
+                "type": "anytls",
+                "tag": name,
+                "server": server,
+                "server_port": port,
+                "password": password,
+                "tls": {
+                    "enabled": true,
+                    "insecure": insecure
+                }
+            });
+
+            if let Some(sni_val) = sni {
+                obj["tls"]["server_name"] = serde_json::Value::String(sni_val.to_string());
+            }
+
+            obj
+        }
         "ss" => {
             let method = node.get("cipher")?.as_str()?;
-            serde_json::to_value(Shadowsocks {
-                outbound_type: "shadowsocks".to_string(),
-                tag: name.clone(),
-                server: server.to_string(),
-                server_port: port as u16,
-                method: method.to_string(),
-                password: password.to_string(),
+            serde_json::json!({
+                "type": "shadowsocks",
+                "tag": name,
+                "server": server,
+                "server_port": port,
+                "method": method,
+                "password": password
             })
-            .ok()?
         }
         _ => return None, // 不支持的类型
     };
 
-    Some((name, outbound))
+    Some((name.to_string(), outbound))
 }
 
 /// 解析单个节点 JSON 字符串，返回验证后的 Value 和显示信息

@@ -111,7 +111,30 @@ export function validateNodeTag(tag) {
 export function validateServer(server) {
   if (!server || !server.trim()) return '服务器地址不能为空'
   if (server.length > 253) return '服务器地址过长'
-  if (/\s/.test(server)) return '服务器地址不能包含空格'
+
+  // 检查是否为有效的 IP 地址
+  const ipv4Regex = /^(\d{1,3}\.){3}\d{1,3}$/
+  const ipv6Regex = /^([0-9a-fA-F]{0,4}:){2,7}[0-9a-fA-F]{0,4}$/
+  if (ipv4Regex.test(server) || ipv6Regex.test(server)) {
+    return null
+  }
+
+  // 处理 FQDN 末尾的点号
+  const trimmed = server.replace(/\.$/, '')
+
+  // 域名验证
+  if (!trimmed.includes('.')) {
+    return '域名必须包含点号'
+  }
+
+  const parts = trimmed.split('.')
+  for (const part of parts) {
+    if (!part) return '域名部分不能为空'
+    if (part.length > 63) return '域名的每个部分不能超过 63 个字符'
+    if (part.startsWith('-') || part.endsWith('-')) return '域名部分不能以连字符开头或结尾'
+    if (!/^[a-zA-Z0-9-]+$/.test(part)) return '域名部分只能包含字母、数字和连字符'
+  }
+
   return null
 }
 
@@ -124,7 +147,7 @@ export function validatePort(port) {
 
 export function validatePassword(password) {
   if (!password || !password.trim()) return '密码不能为空'
-  if (password.length < 4) return '密码太短（至少 4 个字符）'
+  if (password.length < 8) return '密码太短（至少 8 个字符）'
   if (password.length > 256) return '密码过长（最多 256 个字符）'
   return null
 }

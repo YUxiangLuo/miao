@@ -215,7 +215,7 @@ mod tests {
             port: None,
             subs: vec![],
             nodes: vec![
-                r#"{"type":"hysteria2","tag":"router-node","server":"node.example.com","server_port":443,"password":"secret","up_mbps":40,"down_mbps":350,"tls":{"enabled":true,"insecure":true}}"#.to_string(),
+                r#"{"type":"hysteria2","tag":"router-node","server":"node.example.com","server_port":443,"password":"password123","up_mbps":40,"down_mbps":350,"tls":{"enabled":true,"insecure":true}}"#.to_string(),
             ],
             custom_rules: vec![],
         })
@@ -229,7 +229,7 @@ mod tests {
                     "tag": "router-node",
                     "server": "node.example.com",
                     "server_port": 443,
-                    "password": "secret"
+                    "password": "password123"
                 }),
             ))
             .await
@@ -238,7 +238,7 @@ mod tests {
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
         let json = response_json(response).await;
         assert_eq!(json["success"], false);
-        assert_eq!(json["message"], "Node with this tag already exists");
+        assert!(json["message"].as_str().unwrap().contains("重复"));
     }
 
     #[tokio::test]

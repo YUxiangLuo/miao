@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use futures::{StreamExt, stream};
 use tokio::time::{sleep, Duration};
 use tracing::{error, info, warn};
 
@@ -12,25 +13,28 @@ use crate::services::{
 use crate::state::AppState;
 
 const CONFIG_CACHE_PATH: &str = "/tmp/miao-sing-box/config.json.cache";
+const MAX_CONCURRENT_SUBS: usize = 5;
+
+/// 原子写入文件：先写入临时文件，再重命名为目标文件
+async fn write_file_atomic(path: &std::path::Path, content: &str) -> AppResult<()> {
+    let temp_path = path.with_extension("tmp");
+    
+    // 先写入临时文件
+    tokio::fs::write(&temp_path, content).await
+        .map_err(|e| AppError::context("Failed to write temp file", e))?;
+    
+    // 原子重命名为最终文件
+    tokio::fs::rename(&temp_path, path).await
+        .map_err(|e| AppError::context("Failed to atomically rename file", e))?;
+    
+    Ok(())
+}
 
 pub async fn save_config(
     config: &Config,
 ) -> AppResult<()> {
     let yaml = serde_yaml::to_string(config)?;
-    
-    // 使用临时文件+重命名实现原子写入，防止并发修改时配置文件损坏
-    let temp_path = "config.yaml.tmp";
-    let final_path = "config.yaml";
-    
-    // 先写入临时文件
-    tokio::fs::write(temp_path, yaml).await
-        .map_err(|e| AppError::context("Failed to write temp config file", e))?;
-    
-    // 原子重命名为最终文件
-    tokio::fs::rename(temp_path, final_path).await
-        .map_err(|e| AppError::context("Failed to atomically rename config file", e))?;
-    
-    Ok(())
+    write_file_atomic(std::path::Path::new("config.yaml"), &yaml).await
 }
 
 pub async fn save_config_cache() {
@@ -146,7 +150,17 @@ pub async fn gen_config(
         })
         .collect();
 
-    let results = futures::future::join_all(sub_futures).await;
+    // 使用 buffer_unordered 限制并发数，避免同时发起过多请求
+    let mut results: Vec<_> = stream::iter(sub_futures)
+        .buffer_unordered(MAX_CONCURRENT_SUBS)
+        .collect()
+        .await;
+
+    // 按原始顺序排序结果
+    let subs_order: Vec<String> = config.subs.clone();
+    results.sort_by_key(|(url, _)| {
+        subs_order.iter().position(|s| s == url).unwrap_or(usize::MAX)
+    });
 
     for (url, result) in results {
         let status = match result {
@@ -194,11 +208,7 @@ pub async fn gen_config(
 
     let sing_box_home = get_sing_box_home();
     let config_output_loc = sing_box_home.join("config.json");
-    tokio::fs::write(
-        &config_output_loc,
-        serde_json::to_string(&sing_box_config)?,
-    )
-    .await?;
+    write_file_atomic(&config_output_loc, &serde_json::to_string(&sing_box_config)?).await?;
 
     Ok(has_sub_nodes)
 }

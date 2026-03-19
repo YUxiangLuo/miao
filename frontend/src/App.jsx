@@ -20,10 +20,10 @@ import {
   useTraffic,
   useVersion,
   useDelays,
-  useConnectivity
+  useConnectivity,
+  usePolling
 } from './hooks/index.js'
 import {
-  POLL_INTERVAL,
   EMPTY_NODE_FORM,
   validateSubscriptionUrl,
   validateNodeTag,
@@ -79,24 +79,28 @@ export default function App() {
     setConfirmState({ open: false, title: '', message: '', onConfirm: null })
   }, [])
 
-  // Initialize data polling
-  useEffect(() => {
-    fetchStatus()
-    fetchSubs()
-    fetchNodes()
-    fetchVersion()
-
-    const timer = window.setInterval(() => {
-      fetchStatus()
-      fetchSubs()
-      fetchNodes()
-    }, POLL_INTERVAL)
-
-    return () => {
-      window.clearInterval(timer)
-      closeSockets()
+  // 统一轮询管理：合并所有定时任务到单个定时器
+  const pollingTasks = useMemo(() => {
+    const tasks = [fetchStatus, fetchSubs, fetchNodes]
+    // 服务运行时才轮询 proxies
+    if (status.running) {
+      tasks.push(fetchProxies)
     }
-  }, [fetchStatus, fetchSubs, fetchNodes, fetchVersion, closeSockets])
+    return tasks
+  }, [fetchStatus, fetchSubs, fetchNodes, fetchProxies, status.running])
+
+  // 使用统一的轮询管理（始终启用，由 tasks 数组内部决定是否执行）
+  usePolling(pollingTasks, true)
+
+  // 初始化：获取版本信息（不需要轮询）
+  useEffect(() => {
+    fetchVersion()
+  }, [fetchVersion])
+
+  // 清理 WebSocket 连接
+  useEffect(() => {
+    return () => closeSockets()
+  }, [closeSockets])
 
   // Show warning toast when config has warning
   useEffect(() => {
@@ -221,7 +225,7 @@ export default function App() {
     if (nodeType === 'ss') {
       payload.cipher = nodeForm.cipher
     } else {
-      if (nodeForm.sni.trim()) payload.sni = nodeForm.sni.trim()
+      if (nodeForm.sni?.trim()) payload.sni = nodeForm.sni.trim()
       payload.skip_cert_verify = nodeForm.skip_cert_verify
     }
 

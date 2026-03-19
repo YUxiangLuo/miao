@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react'
 import { POLL_INTERVAL, API_HEADERS } from '../utils.js'
+import { useWebSocket } from './useWebSocket.js'
 
 export function useToast() {
   const [toasts, setToasts] = useState([])
@@ -110,67 +111,35 @@ export function useProxies(status) {
   const primaryGroupName = selectorGroups.proxy ? 'proxy' : Object.keys(selectorGroups)[0]
   const primaryGroup = primaryGroupName ? selectorGroups[primaryGroupName] : null
 
+  // 服务停止时清空 proxies
   useEffect(() => {
-    if (status.running) {
-      fetchProxies()
-      const proxyTimer = window.setInterval(fetchProxies, POLL_INTERVAL)
-      return () => window.clearInterval(proxyTimer)
-    } else {
+    if (!status.running) {
       setProxies({})
     }
-  }, [status.running, fetchProxies])
+  }, [status.running])
 
   return { proxies, setProxies, fetchProxies, selectorGroups, primaryGroupName, primaryGroup }
 }
 
 export function useTraffic(status) {
   const [traffic, setTraffic] = useState({})
-  const trafficWsRef = useRef(null)
 
-  const closeSockets = useCallback(() => {
-    if (trafficWsRef.current) {
-      trafficWsRef.current.close()
-      trafficWsRef.current = null
+  const trafficUrl = useMemo(() => `ws://${window.location.hostname}:6262/traffic`, [])
+
+  const handleMessage = useCallback((data) => {
+    if (data && typeof data.up === 'number' && typeof data.down === 'number') {
+      setTraffic({ up: data.up, down: data.down })
     }
   }, [])
 
-  const retryDelayRef = useRef(1000)
+  const { close: closeSockets } = useWebSocket(trafficUrl, handleMessage, status.running)
 
-  const connectTrafficWs = useCallback(() => {
-    if (trafficWsRef.current || !status.running) return
-    const ws = new WebSocket(`ws://${window.location.hostname}:6262/traffic`)
-    trafficWsRef.current = ws
-    ws.onopen = () => {
-      retryDelayRef.current = 1000
-    }
-    ws.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data)
-        setTraffic({ up: data.up, down: data.down })
-      } catch {
-        // ignore
-      }
-    }
-    ws.onclose = () => {
-      trafficWsRef.current = null
-      if (status.running) {
-        const delay = retryDelayRef.current
-        retryDelayRef.current = Math.min(delay * 2, 30000)
-        window.setTimeout(() => connectTrafficWs(), delay)
-      }
+  // 服务停止时清空流量数据
+  useEffect(() => {
+    if (!status.running) {
+      setTraffic({})
     }
   }, [status.running])
-
-  useEffect(() => {
-    if (status.running) {
-      connectTrafficWs()
-    } else {
-      setTraffic({})
-      closeSockets()
-    }
-    
-    return () => closeSockets()
-  }, [status.running, connectTrafficWs, closeSockets])
 
   return { traffic, closeSockets }
 }

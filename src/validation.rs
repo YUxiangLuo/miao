@@ -127,8 +127,8 @@ impl Validator {
             return Err("密码不能为空".to_string());
         }
 
-        if password.len() < 4 {
-            return Err("密码太短（至少 4 个字符）".to_string());
+        if password.len() < 8 {
+            return Err("密码太短（至少 8 个字符）".to_string());
         }
 
         if password.len() > 256 {
@@ -254,14 +254,15 @@ mod tests {
 
     #[test]
     fn test_valid_passwords() {
-        assert!(Validator::password("secret").is_ok());
-        assert!(Validator::password("a".repeat(4).as_str()).is_ok());
+        assert!(Validator::password("password123").is_ok());
+        assert!(Validator::password("a".repeat(8).as_str()).is_ok());
     }
 
     #[test]
     fn test_invalid_passwords() {
         assert!(Validator::password("").is_err());
         assert!(Validator::password("abc").is_err());
+        assert!(Validator::password("secret").is_err()); // 6 字符，不够
         assert!(Validator::password(&"a".repeat(257)).is_err());
     }
 }
