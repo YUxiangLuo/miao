@@ -116,16 +116,24 @@ jobs:
       - name: Prepare release asset
         run: |
           mv target/${{ matrix.rust_target }}/release/miao-rust miao-rust-linux-${{ matrix.target }}
-          echo "RELEASE_ASSET=miao-rust-linux-${{ matrix.target }}" >> $GITHUB_ENV
+          ASSET="miao-rust-linux-${{ matrix.target }}"
+          # GNU sha256sum 标准一行：`<hex>  <filename>`，供本机校验与程序解析
+          sha256sum "$ASSET" | tee "${ASSET}.sha256"
+          echo "RELEASE_ASSET=$ASSET" >> $GITHUB_ENV
+          echo "RELEASE_SHA256=${ASSET}.sha256" >> $GITHUB_ENV
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: miao-rust-${{ matrix.target }}
-          path: ${{ env.RELEASE_ASSET }}
+          path: |
+            ${{ env.RELEASE_ASSET }}
+            ${{ env.RELEASE_SHA256 }}
 
       - name: Release
         uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/')
         with:
-          files: ${{ env.RELEASE_ASSET }}
+          files: |
+            ${{ env.RELEASE_ASSET }}
+            ${{ env.RELEASE_SHA256 }}

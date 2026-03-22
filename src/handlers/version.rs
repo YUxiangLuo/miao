@@ -15,15 +15,6 @@ pub async fn get_version(
 pub async fn upgrade(
     State(state): State<Arc<AppState>>,
 ) -> Json<ApiResponse<String>> {
-    // 检查是否已有升级正在进行
-    if state.upgrading.load(std::sync::atomic::Ordering::SeqCst) {
-        return Json(ApiResponse {
-            success: false,
-            message: "Upgrade already in progress".to_string(),
-            data: None,
-        });
-    }
-    
     match upgrade_binary(&state).await {
         Ok(message) if message == "Already up to date" => {
             success_no_data(message)
