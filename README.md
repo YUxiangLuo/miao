@@ -12,7 +12,7 @@
 - **Web 控制面板** — 订阅管理、节点切换、延迟测速、流量监控
 - **协议支持** — Hysteria2 / AnyTLS / Shadowsocks
 - **静默升级** — 一键更新到最新 Release（SHA256 校验）
-- **OpenWrt 适配** — 自动安装 TUN 所需内核模块
+- **OpenWrt 适配** — 自动安装 TUN 所需内核模块（新版 **apk** / 旧版 **opkg**）
 
 ## 快速开始
 
