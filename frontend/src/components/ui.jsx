@@ -1,9 +1,25 @@
 import { LoaderCircle } from 'lucide-react'
 import { classNames } from '../utils.js'
 
-export function Button({ children, tone = 'default', size = 'md', icon, loading, className, ...props }) {
+export function Button({
+  children,
+  tone = 'default',
+  size = 'md',
+  icon,
+  loading,
+  className,
+  disabled,
+  ...props
+}) {
+  const isDisabled = Boolean(disabled || loading)
   return (
-    <button className={classNames('btn', `btn-${tone}`, `btn-${size}`, className)} {...props}>
+    <button
+      type="button"
+      className={classNames('btn', `btn-${tone}`, `btn-${size}`, className)}
+      {...props}
+      disabled={isDisabled}
+      aria-busy={loading ? true : undefined}
+    >
       {loading ? <LoaderCircle className="spin" size={size === 'sm' ? 12 : 14} /> : icon}
       <span>{children}</span>
     </button>

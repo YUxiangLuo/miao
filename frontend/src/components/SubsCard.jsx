@@ -70,6 +70,7 @@ export function SubsCard({ subs, newSubUrl, setNewSubUrl, loadingAction, onAddSu
             size="sm" 
             icon={<Plus size={12} />} 
             loading={loadingAction === 'addSub'} 
+            disabled={isInitializing}
             onClick={onAddSub}
           >
             添加
