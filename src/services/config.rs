@@ -1,5 +1,5 @@
+use futures::{stream, StreamExt};
 use std::sync::Arc;
-use futures::{StreamExt, stream};
 use tokio::time::{sleep, Duration};
 use tracing::{error, info, warn};
 
@@ -18,21 +18,21 @@ const MAX_CONCURRENT_SUBS: usize = 5;
 /// 原子写入文件：先写入临时文件，再重命名为目标文件
 async fn write_file_atomic(path: &std::path::Path, content: &str) -> AppResult<()> {
     let temp_path = path.with_extension("tmp");
-    
+
     // 先写入临时文件
-    tokio::fs::write(&temp_path, content).await
+    tokio::fs::write(&temp_path, content)
+        .await
         .map_err(|e| AppError::context("Failed to write temp file", e))?;
-    
+
     // 原子重命名为最终文件
-    tokio::fs::rename(&temp_path, path).await
+    tokio::fs::rename(&temp_path, path)
+        .await
         .map_err(|e| AppError::context("Failed to atomically rename file", e))?;
-    
+
     Ok(())
 }
 
-pub async fn save_config(
-    config: &Config,
-) -> AppResult<()> {
+pub async fn save_config(config: &Config) -> AppResult<()> {
     let yaml = serde_yaml::to_string(config)?;
     write_file_atomic(std::path::Path::new("config.yaml"), &yaml).await
 }
@@ -59,10 +59,7 @@ pub async fn restore_config_from_cache() -> AppResult<()> {
     Ok(())
 }
 
-pub async fn regenerate_and_restart(
-    config: &Config,
-    state: &Arc<AppState>,
-) -> AppResult<()> {
+pub async fn regenerate_and_restart(config: &Config, state: &Arc<AppState>) -> AppResult<()> {
     let has_sub_nodes = gen_config(config, state)
         .await
         .map_err(|e| AppError::context("Failed to regenerate config", e))?;
@@ -80,9 +77,7 @@ pub async fn regenerate_and_restart(
         save_config_cache().await;
         *state.config_warning.lock().await = None;
     } else if !config.subs.is_empty() {
-        *state.config_warning.lock().await = Some(
-            "所有订阅获取失败，请检查当前订阅".to_string()
-        );
+        *state.config_warning.lock().await = Some("所有订阅获取失败，请检查当前订阅".to_string());
     } else {
         *state.config_warning.lock().await = None;
     }
@@ -95,11 +90,44 @@ pub async fn regenerate_and_restart(
     Ok(())
 }
 
-/// Returns `true` if at least one subscription node was fetched successfully.
-pub async fn gen_config(
-    config: &Config,
+pub async fn apply_config_change(
     state: &Arc<AppState>,
-) -> AppResult<bool> {
+    old_config: &Config,
+    new_config: &Config,
+) -> AppResult<()> {
+    save_config(new_config).await?;
+
+    match regenerate_and_restart(new_config, state).await {
+        Ok(()) => {
+            *state.config.write().await = new_config.clone();
+            Ok(())
+        }
+        Err(apply_err) => {
+            error!(error = %apply_err, "Failed to apply config change, attempting rollback");
+
+            let rollback_result = async {
+                save_config(old_config).await?;
+                regenerate_and_restart(old_config, state).await?;
+                Ok::<(), AppError>(())
+            }
+            .await;
+
+            match rollback_result {
+                Ok(()) => Err(AppError::context(
+                    "Failed to apply config change; rolled back to previous config",
+                    apply_err,
+                )),
+                Err(rollback_err) => Err(AppError::message(format!(
+                    "Failed to apply config change: {}. Rollback failed: {}",
+                    apply_err, rollback_err
+                ))),
+            }
+        }
+    }
+}
+
+/// Returns `true` if at least one subscription node was fetched successfully.
+pub async fn gen_config(config: &Config, state: &Arc<AppState>) -> AppResult<bool> {
     let (my_outbounds, my_names) = collect_manual_outbounds(config);
     let mut final_outbounds: Vec<serde_json::Value> = vec![];
     let mut final_node_names: Vec<String> = vec![];
@@ -117,17 +145,15 @@ pub async fn gen_config(
             let client = state.http_client.clone();
             async move {
                 info!(url = %sub, "Fetching subscription");
-                let result = tokio::time::timeout(
-                    Duration::from_secs(30),
-                    fetch_sub(&sub, &client)
-                ).await;
+                let result =
+                    tokio::time::timeout(Duration::from_secs(30), fetch_sub(&sub, &client)).await;
 
                 match result {
                     Ok(Ok(fetch_result)) => {
                         let valid_count = fetch_result.node_names.len();
                         let total_count = fetch_result.total_count;
                         let error_count = fetch_result.parse_errors.len();
-                        
+
                         if error_count > 0 {
                             warn!(
                                 url = %sub,
@@ -143,7 +169,7 @@ pub async fn gen_config(
                                 "Subscription fetched successfully"
                             );
                         }
-                        
+
                         (sub.clone(), Ok(fetch_result))
                     }
                     Ok(Err(e)) => {
@@ -168,7 +194,10 @@ pub async fn gen_config(
     // 按原始顺序排序结果
     let subs_order: Vec<String> = config.subs.clone();
     results.sort_by_key(|(url, _)| {
-        subs_order.iter().position(|s| s == url).unwrap_or(usize::MAX)
+        subs_order
+            .iter()
+            .position(|s| s == url)
+            .unwrap_or(usize::MAX)
     });
 
     for (url, result) in results {
@@ -177,9 +206,12 @@ pub async fn gen_config(
                 let count = fetch_result.node_names.len();
                 final_node_names.extend(fetch_result.node_names);
                 final_outbounds.extend(fetch_result.outbounds);
-                
+
                 let error_info = if !fetch_result.parse_errors.is_empty() {
-                    Some(format!("{} nodes skipped due to parse errors", fetch_result.parse_errors.len()))
+                    Some(format!(
+                        "{} nodes skipped due to parse errors",
+                        fetch_result.parse_errors.len()
+                    ))
                 } else if count == 0 && fetch_result.total_count > 0 {
                     Some("All nodes invalid (missing required fields)".into())
                 } else if count == 0 {
@@ -187,7 +219,7 @@ pub async fn gen_config(
                 } else {
                     None
                 };
-                
+
                 SubStatus {
                     url: url.clone(),
                     success: count > 0,
@@ -217,7 +249,11 @@ pub async fn gen_config(
 
     let sing_box_home = get_sing_box_home();
     let config_output_loc = sing_box_home.join("config.json");
-    write_file_atomic(&config_output_loc, &serde_json::to_string(&sing_box_config)?).await?;
+    write_file_atomic(
+        &config_output_loc,
+        &serde_json::to_string(&sing_box_config)?,
+    )
+    .await?;
 
     Ok(has_sub_nodes)
 }
@@ -379,7 +415,8 @@ mod tests {
             subs: vec![],
             nodes: vec![],
             custom_rules: vec![
-                r#"{"domain_suffix":["example.com"],"action":"route","outbound":"proxy"}"#.to_string(),
+                r#"{"domain_suffix":["example.com"],"action":"route","outbound":"proxy"}"#
+                    .to_string(),
                 "not-json".to_string(),
             ],
         };
@@ -435,9 +472,9 @@ mod tests {
 
         let err = build_sing_box_config(&config, vec![], vec![], vec![], vec![]).unwrap_err();
 
-        assert!(err
-            .to_string()
-            .contains("No nodes available: all subscriptions failed and no manual nodes configured"));
+        assert!(err.to_string().contains(
+            "No nodes available: all subscriptions failed and no manual nodes configured"
+        ));
     }
 
     #[test]
@@ -462,7 +499,7 @@ mod tests {
             subs: vec![],
             nodes: vec![
                 "not-json".to_string(),
-                r#"{}"#.to_string(), // Valid JSON but no tag
+                r#"{}"#.to_string(),                   // Valid JSON but no tag
                 r#"{"type":"hysteria2"}"#.to_string(), // Valid JSON but no tag
             ],
             custom_rules: vec![],
@@ -492,7 +529,11 @@ mod tests {
 
         let built = build_sing_box_config(
             &config,
-            vec!["node-1".to_string(), "node-2".to_string(), "node-3".to_string()],
+            vec![
+                "node-1".to_string(),
+                "node-2".to_string(),
+                "node-3".to_string(),
+            ],
             my_outbounds,
             vec![],
             vec![],
@@ -576,42 +617,50 @@ mod tests {
     async fn save_config_performs_atomic_write() {
         let temp_dir = std::env::temp_dir().join(format!("miao-test-{}", std::process::id()));
         tokio::fs::create_dir_all(&temp_dir).await.unwrap();
-        
+
         let config = Config {
             port: Some(8080),
             subs: vec!["https://example.com/sub".to_string()],
             nodes: vec![],
             custom_rules: vec![],
         };
-        
+
         // 使用绝对路径保存配置
         let config_path = temp_dir.join("config.yaml");
         let temp_config_path = temp_dir.join("config.yaml.tmp");
         let yaml = serde_yaml::to_string(&config).unwrap();
-        
+
         tokio::fs::write(&temp_config_path, yaml).await.unwrap();
-        tokio::fs::rename(&temp_config_path, &config_path).await.unwrap();
-        
+        tokio::fs::rename(&temp_config_path, &config_path)
+            .await
+            .unwrap();
+
         // 验证文件存在且格式正确
         let content = tokio::fs::read_to_string(&config_path).await.unwrap();
         let parsed: Config = serde_yaml::from_str(&content).unwrap();
         assert_eq!(parsed.port, Some(8080));
         assert_eq!(parsed.subs.len(), 1);
-        
+
         // 清理
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }
 
     #[tokio::test]
     async fn save_config_overwrites_existing_file() {
-        let temp_dir = std::env::temp_dir().join(format!("miao-test-overwrite-{}", std::process::id()));
+        let temp_dir =
+            std::env::temp_dir().join(format!("miao-test-overwrite-{}", std::process::id()));
         tokio::fs::create_dir_all(&temp_dir).await.unwrap();
-        
+
         let config_path = temp_dir.join("config.yaml");
-        
+
         // 先创建旧配置
-        tokio::fs::write(&config_path, "port: 9999\nsubs: []\nnodes: []\ncustom_rules: []").await.unwrap();
-        
+        tokio::fs::write(
+            &config_path,
+            "port: 9999\nsubs: []\nnodes: []\ncustom_rules: []",
+        )
+        .await
+        .unwrap();
+
         // 使用原子写入保存新配置
         let config = Config {
             port: Some(7777),
@@ -622,13 +671,15 @@ mod tests {
         let yaml = serde_yaml::to_string(&config).unwrap();
         let temp_config_path = temp_dir.join("config.yaml.tmp");
         tokio::fs::write(&temp_config_path, yaml).await.unwrap();
-        tokio::fs::rename(&temp_config_path, &config_path).await.unwrap();
-        
+        tokio::fs::rename(&temp_config_path, &config_path)
+            .await
+            .unwrap();
+
         // 验证被覆盖
         let content = tokio::fs::read_to_string(&config_path).await.unwrap();
         let parsed: Config = serde_yaml::from_str(&content).unwrap();
         assert_eq!(parsed.port, Some(7777));
-        
+
         // 清理
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }

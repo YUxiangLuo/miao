@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use crate::models::{ApiResponse, SubRequest, SubStatus};
 use crate::responses::{status_error, success, success_no_data, HandlerResult};
-use crate::services::config::{regenerate_and_restart, save_config};
+use crate::services::config::{apply_config_change, regenerate_and_restart};
 use crate::state::AppState;
 use crate::validation::Validator;
 
@@ -35,23 +35,20 @@ pub async fn add_sub(
         return Err(status_error(StatusCode::BAD_REQUEST, e));
     }
 
-    let config_clone;
-    {
-        let mut config = state.config.write().await;
+    let _config_update = state.config_update.lock().await;
+    let old_config = state.config.read().await.clone();
+    let mut new_config = old_config.clone();
 
-        if config.subs.contains(&req.url) {
-            return Err(status_error(StatusCode::BAD_REQUEST, "Subscription already exists"));
-        }
-
-        config.subs.push(req.url);
-        config_clone = config.clone();
+    if new_config.subs.contains(&req.url) {
+        return Err(status_error(
+            StatusCode::BAD_REQUEST,
+            "Subscription already exists",
+        ));
     }
 
-    if let Err(e) = save_config(&config_clone).await {
-        return Err(status_error(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to save config: {}", e)));
-    }
+    new_config.subs.push(req.url);
 
-    match regenerate_and_restart(&config_clone, &state).await {
+    match apply_config_change(&state, &old_config, &new_config).await {
         Ok(_) => Ok(success_no_data("Subscription added and sing-box restarted")),
         Err(e) => Err(status_error(StatusCode::INTERNAL_SERVER_ERROR, e)),
     }
@@ -61,39 +58,38 @@ pub async fn delete_sub(
     State(state): State<Arc<AppState>>,
     Json(req): Json<SubRequest>,
 ) -> HandlerResult {
-    let config_clone;
-    {
-        let mut config = state.config.write().await;
+    let _config_update = state.config_update.lock().await;
+    let old_config = state.config.read().await.clone();
+    let mut new_config = old_config.clone();
 
-        let original_len = config.subs.len();
-        config.subs.retain(|s| s != &req.url);
+    let original_len = new_config.subs.len();
+    new_config.subs.retain(|s| s != &req.url);
 
-        if config.subs.len() == original_len {
-            return Err(status_error(StatusCode::NOT_FOUND, "Subscription not found"));
-        }
-
-        config_clone = config.clone();
+    if new_config.subs.len() == original_len {
+        return Err(status_error(
+            StatusCode::NOT_FOUND,
+            "Subscription not found",
+        ));
     }
 
-    if let Err(e) = save_config(&config_clone).await {
-        return Err(status_error(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to save config: {}", e)));
-    }
-
-    match regenerate_and_restart(&config_clone, &state).await {
-        Ok(_) => Ok(success_no_data("Subscription deleted and sing-box restarted")),
+    match apply_config_change(&state, &old_config, &new_config).await {
+        Ok(_) => Ok(success_no_data(
+            "Subscription deleted and sing-box restarted",
+        )),
         Err(e) => Err(status_error(StatusCode::INTERNAL_SERVER_ERROR, e)),
     }
 }
 
-pub async fn refresh_subs(
-    State(state): State<Arc<AppState>>,
-) -> HandlerResult {
+pub async fn refresh_subs(State(state): State<Arc<AppState>>) -> HandlerResult {
+    let _config_update = state.config_update.lock().await;
     let config = state.config.read().await;
     let config_clone = config.clone();
     drop(config);
 
     match regenerate_and_restart(&config_clone, &state).await {
-        Ok(_) => Ok(success_no_data("Subscriptions refreshed and sing-box restarted")),
+        Ok(_) => Ok(success_no_data(
+            "Subscriptions refreshed and sing-box restarted",
+        )),
         Err(e) => Err(status_error(StatusCode::INTERNAL_SERVER_ERROR, e)),
     }
 }
@@ -103,10 +99,20 @@ mod tests {
     use axum::{extract::State, response::Json};
 
     use super::get_subs;
-    use crate::{
-        models::Config,
-        test_support::app_state,
-    };
+    use crate::{error::AppError, models::Config, test_support::app_state};
+
+    #[test]
+    fn app_error_context_message_stays_user_visible() {
+        let err = AppError::context(
+            "Failed to apply config change; rolled back to previous config",
+            AppError::message("new config invalid"),
+        );
+
+        assert_eq!(
+            err.to_string(),
+            "Failed to apply config change; rolled back to previous config: new config invalid"
+        );
+    }
 
     #[tokio::test]
     async fn get_subs_returns_default_pending_status_when_status_missing() {

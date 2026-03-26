@@ -136,11 +136,15 @@ export default function App() {
 
   const handleSwitchProxy = useCallback(async (groupName, nodeName) => {
     try {
-      await fetch(`${clashApiBase}/proxies/${encodeURIComponent(groupName)}`, {
+      const response = await fetch(`${clashApiBase}/proxies/${encodeURIComponent(groupName)}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: nodeName }),
       })
+      if (!response.ok) {
+        const details = (await response.text()).trim()
+        throw new Error(details || `切换节点失败 (${response.status})`)
+      }
       await fetchProxies()
       fetch('/api/last-proxy', {
         method: 'POST',

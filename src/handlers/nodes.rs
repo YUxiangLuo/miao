@@ -2,9 +2,11 @@ use axum::{extract::State, http::StatusCode, response::Json};
 use std::sync::Arc;
 use tracing::warn;
 
-use crate::models::{AnyTls, ApiResponse, DeleteNodeRequest, Hysteria2, NodeInfo, NodeRequest, Shadowsocks, Tls};
+use crate::models::{
+    AnyTls, ApiResponse, DeleteNodeRequest, Hysteria2, NodeInfo, NodeRequest, Shadowsocks, Tls,
+};
 use crate::responses::{status_error, success, success_no_data, HandlerResult};
-use crate::services::config::{regenerate_and_restart, save_config};
+use crate::services::config::apply_config_change;
 use crate::services::node_parser::parse_node_json;
 use crate::state::AppState;
 use crate::validation::Validator;
@@ -46,94 +48,102 @@ pub async fn add_node(
     State(state): State<Arc<AppState>>,
     Json(req): Json<NodeRequest>,
 ) -> HandlerResult {
-    Validator::validate_node_request(&req)
-        .map_err(|e| status_error(StatusCode::BAD_REQUEST, e))?;
+    Validator::validate_node_request(&req).map_err(|e| status_error(StatusCode::BAD_REQUEST, e))?;
 
     let node_type = req.node_type.as_deref().unwrap_or("hysteria2");
-    
+
     // 验证节点类型是否支持
     const VALID_NODE_TYPES: &[&str] = &["hysteria2", "anytls", "ss"];
     if !VALID_NODE_TYPES.contains(&node_type) {
         return Err(status_error(
-            StatusCode::BAD_REQUEST, 
-            format!("不支持的节点类型: {}，支持的类型: {}", node_type, VALID_NODE_TYPES.join(", "))
+            StatusCode::BAD_REQUEST,
+            format!(
+                "不支持的节点类型: {}，支持的类型: {}",
+                node_type,
+                VALID_NODE_TYPES.join(", ")
+            ),
         ));
     }
 
-    let config_clone;
-    {
-        let mut config = state.config.write().await;
+    let _config_update = state.config_update.lock().await;
+    let old_config = state.config.read().await.clone();
+    let mut new_config = old_config.clone();
 
-        // 检查标签唯一性（大小写不敏感）
-        let req_tag_lower = req.tag.to_lowercase();
-        for node_str in &config.nodes {
-            if let Ok(v) = serde_json::from_str::<serde_json::Value>(node_str) {
-                if let Some(existing_tag) = v.get("tag").and_then(|t| t.as_str()) {
-                    if existing_tag.to_lowercase() == req_tag_lower {
-                        return Err(status_error(
-                            StatusCode::BAD_REQUEST, 
-                            format!("标签 '{}' 与已存在的节点 '{}' 重复（不区分大小写）", req.tag, existing_tag)
-                        ));
-                    }
+    // 检查标签唯一性（大小写不敏感）
+    let req_tag_lower = req.tag.to_lowercase();
+    for node_str in &new_config.nodes {
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(node_str) {
+            if let Some(existing_tag) = v.get("tag").and_then(|t| t.as_str()) {
+                if existing_tag.to_lowercase() == req_tag_lower {
+                    return Err(status_error(
+                        StatusCode::BAD_REQUEST,
+                        format!(
+                            "标签 '{}' 与已存在的节点 '{}' 重复（不区分大小写）",
+                            req.tag, existing_tag
+                        ),
+                    ));
                 }
             }
         }
-
-        let node_json = match node_type {
-            "anytls" => {
-                let node = AnyTls {
-                    outbound_type: "anytls".to_string(),
-                    tag: req.tag,
-                    server: req.server,
-                    server_port: req.server_port,
-                    password: req.password,
-                    tls: Tls {
-                        enabled: true,
-                        server_name: req.sni,
-                        insecure: req.skip_cert_verify,
-                    },
-                };
-                serde_json::to_string(&node)
-            }
-            "ss" => {
-                let node = Shadowsocks {
-                    outbound_type: "shadowsocks".to_string(),
-                    tag: req.tag,
-                    server: req.server,
-                    server_port: req.server_port,
-                    method: req.cipher.unwrap_or_else(|| "2022-blake3-aes-128-gcm".to_string()),
-                    password: req.password,
-                };
-                serde_json::to_string(&node)
-            }
-            _ => {
-                let node = Hysteria2 {
-                    outbound_type: "hysteria2".to_string(),
-                    tag: req.tag,
-                    server: req.server,
-                    server_port: req.server_port,
-                    password: req.password,
-                    up_mbps: None,
-                    down_mbps: None,
-                    tls: Tls {
-                        enabled: true,
-                        server_name: req.sni,
-                        insecure: req.skip_cert_verify,
-                    },
-                };
-                serde_json::to_string(&node)
-            }
-        }.map_err(|e| status_error(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to serialize node: {}", e)))?;
-
-        config.nodes.push(node_json);
-        config_clone = config.clone();
     }
 
-    if let Err(e) = save_config(&config_clone).await {
-        return Err(status_error(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to save config: {}", e)));
+    let node_json = match node_type {
+        "anytls" => {
+            let node = AnyTls {
+                outbound_type: "anytls".to_string(),
+                tag: req.tag,
+                server: req.server,
+                server_port: req.server_port,
+                password: req.password,
+                tls: Tls {
+                    enabled: true,
+                    server_name: req.sni,
+                    insecure: req.skip_cert_verify,
+                },
+            };
+            serde_json::to_string(&node)
+        }
+        "ss" => {
+            let node = Shadowsocks {
+                outbound_type: "shadowsocks".to_string(),
+                tag: req.tag,
+                server: req.server,
+                server_port: req.server_port,
+                method: req
+                    .cipher
+                    .unwrap_or_else(|| "2022-blake3-aes-128-gcm".to_string()),
+                password: req.password,
+            };
+            serde_json::to_string(&node)
+        }
+        _ => {
+            let node = Hysteria2 {
+                outbound_type: "hysteria2".to_string(),
+                tag: req.tag,
+                server: req.server,
+                server_port: req.server_port,
+                password: req.password,
+                up_mbps: None,
+                down_mbps: None,
+                tls: Tls {
+                    enabled: true,
+                    server_name: req.sni,
+                    insecure: req.skip_cert_verify,
+                },
+            };
+            serde_json::to_string(&node)
+        }
     }
+    .map_err(|e| {
+        status_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to serialize node: {}", e),
+        )
+    })?;
 
-    match regenerate_and_restart(&config_clone, &state).await {
+    new_config.nodes.push(node_json);
+
+    match apply_config_change(&state, &old_config, &new_config).await {
         Ok(_) => Ok(success_no_data("Node added and sing-box restarted")),
         Err(e) => Err(status_error(StatusCode::INTERNAL_SERVER_ERROR, e)),
     }
@@ -143,31 +153,24 @@ pub async fn delete_node(
     State(state): State<Arc<AppState>>,
     Json(req): Json<DeleteNodeRequest>,
 ) -> HandlerResult {
-    let config_clone;
-    {
-        let mut config = state.config.write().await;
+    let _config_update = state.config_update.lock().await;
+    let old_config = state.config.read().await.clone();
+    let mut new_config = old_config.clone();
 
-        let original_len = config.nodes.len();
-        config.nodes.retain(|node_str| {
-            if let Ok(v) = serde_json::from_str::<serde_json::Value>(node_str) {
-                v.get("tag").and_then(|t| t.as_str()) != Some(&req.tag)
-            } else {
-                true
-            }
-        });
-
-        if config.nodes.len() == original_len {
-            return Err(status_error(StatusCode::NOT_FOUND, "Node not found"));
+    let original_len = new_config.nodes.len();
+    new_config.nodes.retain(|node_str| {
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(node_str) {
+            v.get("tag").and_then(|t| t.as_str()) != Some(&req.tag)
+        } else {
+            true
         }
+    });
 
-        config_clone = config.clone();
+    if new_config.nodes.len() == original_len {
+        return Err(status_error(StatusCode::NOT_FOUND, "Node not found"));
     }
 
-    if let Err(e) = save_config(&config_clone).await {
-        return Err(status_error(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to save config: {}", e)));
-    }
-
-    match regenerate_and_restart(&config_clone, &state).await {
+    match apply_config_change(&state, &old_config, &new_config).await {
         Ok(_) => Ok(success_no_data("Node deleted and sing-box restarted")),
         Err(e) => Err(status_error(StatusCode::INTERNAL_SERVER_ERROR, e)),
     }
@@ -178,10 +181,7 @@ mod tests {
     use axum::{extract::State, response::Json};
 
     use super::get_nodes;
-    use crate::{
-        models::Config,
-        test_support::app_state,
-    };
+    use crate::{models::Config, test_support::app_state};
 
     #[tokio::test]
     async fn get_nodes_returns_parsed_manual_nodes() {
@@ -312,7 +312,7 @@ mod tests {
         assert!(response.success);
         let nodes = response.data.unwrap();
         assert_eq!(nodes.len(), 3);
-        
+
         let types: Vec<String> = nodes.iter().map(|n| n.node_type.clone()).collect();
         assert!(types.contains(&"hysteria2".to_string()));
         assert!(types.contains(&"shadowsocks".to_string()));
