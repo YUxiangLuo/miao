@@ -12,13 +12,11 @@ use crate::services::{
 };
 use crate::state::AppState;
 
-pub async fn get_status(
-    State(state): State<Arc<AppState>>,
-) -> Json<ApiResponse<StatusData>> {
+pub async fn get_status(State(state): State<Arc<AppState>>) -> Json<ApiResponse<StatusData>> {
     // 快速获取进程状态并立即释放锁
     let (running, pid, uptime_secs) = {
         let mut lock = state.sing_process.lock().await;
-        
+
         let result = if let Some(ref mut proc) = *lock {
             match proc.child.try_wait() {
                 Ok(Some(_)) => {
@@ -37,7 +35,9 @@ pub async fn get_status(
         result
     }; // sing_process 锁在此处释放
 
-    let initializing = state.initializing.load(std::sync::atomic::Ordering::Relaxed);
+    let initializing = state
+        .initializing
+        .load(std::sync::atomic::Ordering::Relaxed);
     let warning = state.config_warning.lock().await.clone();
 
     success(
@@ -52,9 +52,7 @@ pub async fn get_status(
     )
 }
 
-pub async fn start_service(
-    State(state): State<Arc<AppState>>,
-) -> HandlerResult {
+pub async fn start_service(State(state): State<Arc<AppState>>) -> HandlerResult {
     match start_sing_internal(&state).await {
         Ok(_) => {
             let state_for_proxy = state.clone();
@@ -63,18 +61,18 @@ pub async fn start_service(
             });
             Ok(success_no_data("sing-box started successfully"))
         }
-        Err(AppError::AlreadyRunning) => {
-            Err(status_error(StatusCode::BAD_REQUEST, "sing-box is already running"))
-        }
-        Err(e) => {
-            Err(status_error(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to start: {}", e)))
-        }
+        Err(AppError::AlreadyRunning) => Err(status_error(
+            StatusCode::BAD_REQUEST,
+            "sing-box is already running",
+        )),
+        Err(e) => Err(status_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to start: {}", e),
+        )),
     }
 }
 
-pub async fn stop_service(
-    State(state): State<Arc<AppState>>,
-) -> Json<ApiResponse<()>> {
+pub async fn stop_service(State(state): State<Arc<AppState>>) -> Json<ApiResponse<()>> {
     stop_sing_internal(&state).await;
     success_no_data("sing-box stopped")
 }
@@ -89,7 +87,8 @@ pub async fn test_connectivity(
     Json(req): Json<ConnectivityRequest>,
 ) -> Json<ApiResponse<ConnectivityResult>> {
     let start = Instant::now();
-    let result = match state.http_client
+    let result = match state
+        .http_client
         .head(&req.url)
         .timeout(Duration::from_secs(5))
         .send()
@@ -117,8 +116,8 @@ mod tests {
     use axum::extract::State;
 
     use super::get_status;
-    use crate::test_support::app_state;
     use crate::models::Config;
+    use crate::test_support::app_state;
 
     #[tokio::test]
     async fn get_status_reports_stopped_when_no_process_exists() {

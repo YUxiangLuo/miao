@@ -5,9 +5,7 @@ use serde::Serialize;
 
 use crate::models::ApiResponse;
 
-pub type HandlerResult<T = ()> =
-    Result<Json<ApiResponse<T>>, (StatusCode, Json<ApiResponse<T>>)>
-;
+pub type HandlerResult<T = ()> = Result<Json<ApiResponse<T>>, (StatusCode, Json<ApiResponse<T>>)>;
 
 pub fn success<T: Serialize>(message: impl Display, data: T) -> Json<ApiResponse<T>> {
     Json(ApiResponse::success(message.to_string(), data))
@@ -73,7 +71,8 @@ mod tests {
 
     #[test]
     fn status_error_preserves_http_status_and_response_body() {
-        let (status, Json(response)) = status_error::<()>(StatusCode::BAD_REQUEST, TestMessage("bad request"));
+        let (status, Json(response)) =
+            status_error::<()>(StatusCode::BAD_REQUEST, TestMessage("bad request"));
 
         assert_eq!(status, StatusCode::BAD_REQUEST);
         assert!(!response.success);

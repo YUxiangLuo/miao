@@ -32,9 +32,7 @@ pub async fn check_and_install_openwrt_dependencies() -> AppResult<()> {
     }
 
     if packages_to_install.is_empty() {
-        info!(
-            "Required dependencies (kmod-tun, kmod-nft-queue) are already installed."
-        );
+        info!("Required dependencies (kmod-tun, kmod-nft-queue) are already installed.");
         return Ok(());
     }
 
@@ -51,9 +49,7 @@ pub async fn check_and_install_openwrt_dependencies() -> AppResult<()> {
         .map_err(|e| AppError::context("Failed to run 'opkg update'", e))?;
 
     if !update_status.success() {
-        warn!(
-            "'opkg update' finished with error, but proceeding with installation attempt..."
-        );
+        warn!("'opkg update' finished with error, but proceeding with installation attempt...");
     }
 
     for pkg in packages_to_install {

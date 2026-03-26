@@ -2,7 +2,7 @@ use std::{
     fs,
     os::unix::{fs::PermissionsExt, process::CommandExt},
     path::Path,
-    sync::{Arc, atomic::Ordering},
+    sync::{atomic::Ordering, Arc},
     time::Instant,
 };
 
@@ -190,14 +190,8 @@ async fn download_binary_streaming_retried(
                 "retrying binary download"
             );
         }
-        match download_binary_streaming_once(
-            client,
-            url,
-            expected_size,
-            expected_hex,
-            temp_path,
-        )
-        .await
+        match download_binary_streaming_once(client, url, expected_size, expected_hex, temp_path)
+            .await
         {
             Ok(()) => return Ok(()),
             Err(e) => last_err = Some(e),
@@ -320,10 +314,7 @@ fn parse_semver_tag(tag: &str) -> Option<semver::Version> {
 
 /// 当前运行版本字符串（如 `v0.12.2`）与 Release `tag_name` 比较。
 fn release_is_newer_than_current(current: &str, release_tag: &str) -> bool {
-    match (
-        parse_semver_tag(current),
-        parse_semver_tag(release_tag),
-    ) {
+    match (parse_semver_tag(current), parse_semver_tag(release_tag)) {
         (Some(c), Some(r)) => r > c,
         (None, _) => {
             error!(
@@ -413,7 +404,8 @@ pub async fn upgrade_binary(state: &Arc<AppState>) -> AppResult<String> {
     let (binary_asset, checksum_asset) = find_binary_and_checksum_assets(&release, asset_name)?;
 
     let expected_hex =
-        fetch_checksum_hex_retried(&state.http_client, &checksum_asset.browser_download_url).await?;
+        fetch_checksum_hex_retried(&state.http_client, &checksum_asset.browser_download_url)
+            .await?;
 
     let temp_path = get_temp_binary_path();
     let temp_path = Path::new(&temp_path);
@@ -458,7 +450,10 @@ pub async fn upgrade_binary(state: &Arc<AppState>) -> AppResult<String> {
         let _ = fs::remove_file(&current_exe);
         let _ = fs::rename(&backup_path, &current_exe);
         let _ = tokio::fs::remove_file(temp_path).await;
-        return Err(AppError::context("Failed to set permissions on new binary", e));
+        return Err(AppError::context(
+            "Failed to set permissions on new binary",
+            e,
+        ));
     }
     let _ = tokio::fs::remove_file(temp_path).await;
 
@@ -521,8 +516,8 @@ fn current_arch_asset_name() -> Option<&'static str> {
 #[cfg(test)]
 mod tests {
     use super::{
-        current_arch_asset_name, parse_semver_tag, parse_sha256sum_line, release_is_newer_than_current,
-        stdout_version_matches_release,
+        current_arch_asset_name, parse_semver_tag, parse_sha256sum_line,
+        release_is_newer_than_current, stdout_version_matches_release,
     };
 
     #[test]
@@ -568,7 +563,10 @@ mod tests {
     #[test]
     fn stdout_version_matches_release_requires_miao_and_tag_or_version() {
         assert!(stdout_version_matches_release("miao v0.12.2\n", "v0.12.2"));
-        assert!(stdout_version_matches_release("miao-rust v1.0.0\n", "v1.0.0"));
+        assert!(stdout_version_matches_release(
+            "miao-rust v1.0.0\n",
+            "v1.0.0"
+        ));
         assert!(!stdout_version_matches_release("other v1.0.0\n", "v1.0.0"));
     }
 

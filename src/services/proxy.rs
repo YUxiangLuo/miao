@@ -13,9 +13,7 @@ fn get_last_proxy_path() -> PathBuf {
     get_sing_box_home().join(".last_proxy")
 }
 
-pub async fn save_last_proxy(
-    proxy: &LastProxy,
-) -> AppResult<()> {
+pub async fn save_last_proxy(proxy: &LastProxy) -> AppResult<()> {
     let json = serde_json::to_string(proxy)?;
     tokio::fs::write(get_last_proxy_path(), json).await?;
     Ok(())
@@ -47,7 +45,8 @@ pub async fn restore_last_proxy(state: &Arc<AppState>) {
         "http://127.0.0.1:6262/proxies/{}",
         urlencoding::encode(&proxy.group)
     );
-    let group_info = match state.http_client
+    let group_info = match state
+        .http_client
         .get(&url)
         .timeout(Duration::from_secs(5))
         .send()
@@ -74,7 +73,8 @@ pub async fn restore_last_proxy(state: &Arc<AppState>) {
         return;
     }
 
-    match state.http_client
+    match state
+        .http_client
         .put(&url)
         .timeout(Duration::from_secs(5))
         .json(&serde_json::json!({ "name": proxy.name }))

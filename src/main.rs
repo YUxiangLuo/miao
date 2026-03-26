@@ -5,9 +5,9 @@ mod responses;
 mod router;
 mod services;
 mod state;
-mod validation;
 #[cfg(test)]
 mod test_support;
+mod validation;
 
 use crate::error::{AppError, AppResult};
 use nix::unistd::Uid;
@@ -29,8 +29,10 @@ pub(crate) const VERSION: &str = env!("CARGO_PKG_VERSION");
 async fn main() -> AppResult<()> {
     // 初始化结构化日志
     tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env()
-            .add_directive(tracing::Level::INFO.into()))
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::from_default_env()
+                .add_directive(tracing::Level::INFO.into()),
+        )
         .init();
 
     if std::env::args().any(|a| a == "--version" || a == "-V") {
@@ -66,8 +68,10 @@ async fn main() -> AppResult<()> {
     let _ = extract_sing_box()?;
 
     // 初始化应用状态
-    let app_state = Arc::new(AppState::new(config.clone())
-        .map_err(|e| AppError::context("Failed to create HTTP client", e))?);
+    let app_state = Arc::new(
+        AppState::new(config.clone())
+            .map_err(|e| AppError::context("Failed to create HTTP client", e))?,
+    );
     let state_for_init = app_state.clone();
 
     // Start web server immediately so the panel is accessible during initialization
@@ -96,10 +100,11 @@ async fn main() -> AppResult<()> {
                     }
                     Err(cache_err) => {
                         error!(error = %cache_err, "No cached config available");
-                        *state_for_init.config_warning.lock().await = Some(
-                            "所有订阅获取失败且无可用缓存，请添加订阅或手动节点".to_string()
-                        );
-                        state_for_init.initializing.store(false, std::sync::atomic::Ordering::Relaxed);
+                        *state_for_init.config_warning.lock().await =
+                            Some("所有订阅获取失败且无可用缓存，请添加订阅或手动节点".to_string());
+                        state_for_init
+                            .initializing
+                            .store(false, std::sync::atomic::Ordering::Relaxed);
                         return;
                     }
                 }
@@ -116,9 +121,8 @@ async fn main() -> AppResult<()> {
                 info!("sing-box started successfully");
                 if all_subs_failed {
                     warn!("所有订阅获取失败，请检查当前订阅");
-                    *state_for_init.config_warning.lock().await = Some(
-                        "所有订阅获取失败，请检查当前订阅".to_string()
-                    );
+                    *state_for_init.config_warning.lock().await =
+                        Some("所有订阅获取失败，请检查当前订阅".to_string());
                 }
                 let state_for_proxy = state_for_init.clone();
                 tokio::spawn(async move {
@@ -127,7 +131,9 @@ async fn main() -> AppResult<()> {
             }
             Err(e) => error!("Failed to start sing-box: {}", e),
         }
-        state_for_init.initializing.store(false, std::sync::atomic::Ordering::Relaxed);
+        state_for_init
+            .initializing
+            .store(false, std::sync::atomic::Ordering::Relaxed);
     });
 
     let state_for_shutdown = app_state.clone();
@@ -138,9 +144,8 @@ async fn main() -> AppResult<()> {
 }
 
 async fn shutdown_signal(state: Arc<AppState>) {
-    let mut sigterm =
-        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-            .expect("failed to install SIGTERM handler");
+    let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+        .expect("failed to install SIGTERM handler");
 
     tokio::select! {
         result = tokio::signal::ctrl_c() => {

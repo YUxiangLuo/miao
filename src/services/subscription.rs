@@ -18,17 +18,24 @@ pub async fn fetch_sub(link: &str, client: &reqwest::Client) -> AppResult<FetchR
         .await
         .map_err(|e| AppError::context(format!("Failed to fetch subscription from {}", link), e))?;
 
-    let text = res
-        .text()
-        .await
-        .map_err(|e| AppError::context(format!("Failed to read subscription response from {}", link), e))?;
+    let text = res.text().await.map_err(|e| {
+        AppError::context(
+            format!("Failed to read subscription response from {}", link),
+            e,
+        )
+    })?;
 
-    let parse_result = parse_clash_proxies(&text)
-        .map_err(|e| AppError::context(format!("Failed to parse subscription content from {}", link), e))?;
+    let parse_result = parse_clash_proxies(&text).map_err(|e| {
+        AppError::context(
+            format!("Failed to parse subscription content from {}", link),
+            e,
+        )
+    })?;
 
     let total_count = parse_result.total_count;
     let node_names: Vec<String> = parse_result.nodes.iter().map(|(n, _)| n.clone()).collect();
-    let outbounds: Vec<serde_json::Value> = parse_result.nodes.into_iter().map(|(_, o)| o).collect();
+    let outbounds: Vec<serde_json::Value> =
+        parse_result.nodes.into_iter().map(|(_, o)| o).collect();
 
     // 解析错误将由调用方统一处理，此处不再打印
 
@@ -116,8 +123,14 @@ proxies:
 
         assert_eq!(result.nodes.len(), 1);
         assert_eq!(result.errors.len(), 2);
-        assert!(result.errors.iter().any(|e| e.contains("invalid-missing-server")));
-        assert!(result.errors.iter().any(|e| e.contains("invalid-zero-port")));
+        assert!(result
+            .errors
+            .iter()
+            .any(|e| e.contains("invalid-missing-server")));
+        assert!(result
+            .errors
+            .iter()
+            .any(|e| e.contains("invalid-zero-port")));
     }
 
     #[test]
@@ -134,7 +147,9 @@ proxies:
     fn parse_clash_proxies_reports_invalid_yaml() {
         let err = parse_clash_proxies("proxies: [").unwrap_err();
 
-        assert!(err.to_string().contains("Failed to parse subscription YAML"));
+        assert!(err
+            .to_string()
+            .contains("Failed to parse subscription YAML"));
     }
 
     #[test]
@@ -208,14 +223,17 @@ proxies:
     #[test]
     fn parse_clash_proxies_handles_very_long_node_names() {
         let long_name = "a".repeat(200);
-        let yaml = format!(r#"
+        let yaml = format!(
+            r#"
 proxies:
   - name: "{}"
     type: hysteria2
     server: hy.example.com
     port: 443
     password: pass
-"#, long_name);
+"#,
+            long_name
+        );
 
         let result = parse_clash_proxies(&yaml).unwrap();
 

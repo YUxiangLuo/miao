@@ -1,4 +1,7 @@
-use std::{error::Error, fmt::{self, Display, Formatter}};
+use std::{
+    error::Error,
+    fmt::{self, Display, Formatter},
+};
 
 #[derive(Debug)]
 pub enum AppError {

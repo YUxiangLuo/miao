@@ -7,21 +7,19 @@ use axum::{
 };
 use serde_json::Value;
 
-use crate::{
-    models::Config,
-    router::build_router,
-    state::AppState,
-};
+use crate::{models::Config, router::build_router, state::AppState};
 
 pub fn app_state(config: Config) -> Arc<AppState> {
     Arc::new(AppState::new(config).expect("Failed to create AppState in test"))
 }
 
 pub async fn reset_version_cache(state: &Arc<AppState>) {
-    state.version_cache.store(Arc::new(crate::state::VersionCache {
-        release: None,
-        fetched_at: None,
-    }));
+    state
+        .version_cache
+        .store(Arc::new(crate::state::VersionCache {
+            release: None,
+            fetched_at: None,
+        }));
 }
 
 pub async fn test_app(config: Config) -> Router {

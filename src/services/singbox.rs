@@ -73,7 +73,9 @@ pub async fn start_sing_internal(state: &Arc<AppState>) -> AppResult<()> {
         if proc
             .child
             .try_wait()
-            .map_err(|e| AppError::context("Failed to check whether sing-box is already running", e))?
+            .map_err(|e| {
+                AppError::context("Failed to check whether sing-box is already running", e)
+            })?
             .is_none()
         {
             return Err(AppError::AlreadyRunning);
@@ -127,13 +129,11 @@ pub async fn stop_sing_internal(state: &Arc<AppState>) {
             if let Some(pid) = proc.child.id() {
                 // 发送 SIGTERM 信号请求进程优雅退出
                 let _ = kill(Pid::from_raw(pid as i32), Signal::SIGTERM);
-                
+
                 // 使用 timeout 等待进程退出，避免忙等待
-                let wait_result = tokio::time::timeout(
-                    Duration::from_secs(3),
-                    proc.child.wait()
-                ).await;
-                
+                let wait_result =
+                    tokio::time::timeout(Duration::from_secs(3), proc.child.wait()).await;
+
                 match wait_result {
                     Ok(Ok(_)) => {
                         // 进程正常退出
