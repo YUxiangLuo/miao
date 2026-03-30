@@ -32,4 +32,4 @@ npm --prefix frontend run build
 echo "==> 编译 miao-rust (release)..."
 cargo build --release
 
-echo "==> 完成: target/debug/miao-rust"
+echo "==> 完成: target/release/miao-rust"
