@@ -492,6 +492,12 @@ pub async fn upgrade_binary(state: &Arc<AppState>) -> AppResult<String> {
                 .args(&args[1..])
                 .exec();
         }
+        let diag = format!(
+            "miao upgrade failure: exec and backup restore both failed.\nbinary: {:?}\nbackup: {}\n",
+            current_exe, backup_path
+        );
+        let _ = std::fs::write("/tmp/miao-upgrade-failure.log", &diag);
+        error!("Diagnostics written to /tmp/miao-upgrade-failure.log");
         error!("Failed to restore from backup, manual intervention required");
         std::process::exit(1);
     });

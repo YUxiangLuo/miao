@@ -67,6 +67,32 @@ pub fn extract_sing_box() -> AppResult<PathBuf> {
     Ok(sing_box_home)
 }
 
+/// 在停止运行中的实例前验证 sing-box 配置，避免不必要的服务中断
+pub async fn validate_sing_box_config() -> AppResult<()> {
+    let sing_box_home = get_sing_box_home();
+    let sing_box_path = sing_box_home.join("sing-box");
+    let config_path = sing_box_home.join("config.json");
+
+    let output = tokio::process::Command::new(&sing_box_path)
+        .current_dir(&sing_box_home)
+        .arg("check")
+        .arg("-c")
+        .arg(&config_path)
+        .output()
+        .await
+        .map_err(|e| AppError::context("Failed to run sing-box config check", e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(AppError::message(format!(
+            "Config validation failed: {}",
+            stderr.trim()
+        )));
+    }
+
+    Ok(())
+}
+
 pub async fn start_sing_internal(state: &Arc<AppState>) -> AppResult<()> {
     let mut lock = state.sing_process.lock().await;
     if let Some(ref mut proc) = *lock {

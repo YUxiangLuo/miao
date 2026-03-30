@@ -1,13 +1,13 @@
 use futures::{stream, StreamExt};
 use std::sync::Arc;
-use tokio::time::{sleep, Duration};
+use tokio::time::Duration;
 use tracing::{error, info, warn};
 
 use crate::error::{AppError, AppResult};
 use crate::models::{Config, SubStatus};
 use crate::services::{
     proxy::restore_last_proxy,
-    singbox::{get_sing_box_home, start_sing_internal, stop_sing_internal},
+    singbox::{get_sing_box_home, start_sing_internal, stop_sing_internal, validate_sing_box_config},
     subscription::fetch_sub,
 };
 use crate::state::AppState;
@@ -65,8 +65,11 @@ pub async fn regenerate_and_restart(config: &Config, state: &Arc<AppState>) -> A
         .map_err(|e| AppError::context("Failed to regenerate config", e))?;
     info!("Config regenerated successfully");
 
+    validate_sing_box_config()
+        .await
+        .map_err(|e| AppError::context("Config validation failed, not restarting", e))?;
+
     stop_sing_internal(state).await;
-    sleep(Duration::from_millis(500)).await;
 
     start_sing_internal(state)
         .await
@@ -95,22 +98,89 @@ pub async fn apply_config_change(
     old_config: &Config,
     new_config: &Config,
 ) -> AppResult<()> {
+    let config_path = std::path::Path::new("config.yaml");
+    let backup_path = std::path::Path::new("config.yaml.bak");
+
+    // 修改前先备份当前配置文件，确保回滚时可从磁盘恢复
+    if config_path.exists() {
+        tokio::fs::copy(config_path, backup_path)
+            .await
+            .map_err(|e| AppError::context("Failed to backup config before applying change", e))?;
+    }
+
     save_config(new_config).await?;
 
     match regenerate_and_restart(new_config, state).await {
         Ok(()) => {
             *state.config.write().await = new_config.clone();
+            let _ = tokio::fs::remove_file(backup_path).await;
             Ok(())
         }
         Err(apply_err) => {
             error!(error = %apply_err, "Failed to apply config change, attempting rollback");
 
             let rollback_result = async {
-                save_config(old_config).await?;
-                regenerate_and_restart(old_config, state).await?;
+                // 从备份文件恢复，避免重新序列化导致格式差异或磁盘满时失败
+                if backup_path.exists() {
+                    tokio::fs::copy(backup_path, config_path)
+                        .await
+                        .map_err(|e| {
+                            AppError::context("Failed to restore config from backup", e)
+                        })?;
+                } else {
+                    save_config(old_config).await?;
+                }
+
+                // 检查 sing-box 是否仍在运行（配置校验或生成失败时进程未被停止）
+                let still_running = {
+                    let mut lock = state.sing_process.lock().await;
+                    match &mut *lock {
+                        Some(proc) => proc.child.try_wait().ok().flatten().is_none(),
+                        None => false,
+                    }
+                };
+
+                if still_running {
+                    // sing-box 仍以旧配置运行，无需重启，config.yaml 已恢复
+                    info!("sing-box still running with previous config, skipping restart");
+                } else {
+                    // 优先从 config.json 缓存恢复，避免重新拉取订阅
+                    let cache_path = std::path::Path::new(CONFIG_CACHE_PATH);
+                    let config_json_path = get_sing_box_home().join("config.json");
+                    if cache_path.exists() {
+                        info!("Restoring config.json from cache for rollback");
+                        tokio::fs::copy(cache_path, &config_json_path)
+                            .await
+                            .map_err(|e| {
+                                AppError::context(
+                                    "Failed to restore config.json from cache",
+                                    e,
+                                )
+                            })?;
+                        start_sing_internal(state)
+                            .await
+                            .map_err(|e| {
+                                AppError::context(
+                                    "Failed to restart sing-box with cached config",
+                                    e,
+                                )
+                            })?;
+                        *state.config_warning.lock().await = None;
+                        let state_for_proxy = state.clone();
+                        tokio::spawn(async move {
+                            restore_last_proxy(&state_for_proxy).await;
+                        });
+                    } else {
+                        // 无缓存，只能重新生成（会重新拉取订阅）
+                        warn!("No config cache available, falling back to full regeneration");
+                        regenerate_and_restart(old_config, state).await?;
+                    }
+                }
                 Ok::<(), AppError>(())
             }
             .await;
+
+            let _ = tokio::fs::remove_file(backup_path).await;
 
             match rollback_result {
                 Ok(()) => Err(AppError::context(
