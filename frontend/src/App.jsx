@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, useCallback } from 'react'
-import { 
+import {
   TopBar,
   StatusCard,
   ProxyCard,
@@ -8,7 +8,8 @@ import {
   ConnectivityCard,
   ConfirmModal,
   NodeModal,
-  ToastStack
+  ToastStack,
+  OnboardingScreen
 } from './components/index.js'
 import {
   useToast,
@@ -34,6 +35,7 @@ import {
 } from './utils.js'
 
 export default function App() {
+  const [firstLoadDone, setFirstLoadDone] = useState(false)
   const [loadingAction, setLoadingAction] = useState('')
   const [upgrading, setUpgrading] = useState(false)
   const [newSubUrl, setNewSubUrl] = useState('')
@@ -78,6 +80,18 @@ export default function App() {
   const closeConfirm = useCallback(() => {
     setConfirmState({ open: false, title: '', message: '', onConfirm: null })
   }, [])
+
+  // 首次加载：获取初始状态后再决定显示 onboarding 还是 dashboard
+  useEffect(() => {
+    Promise.all([fetchStatus(), fetchSubs(), fetchNodes()])
+      .finally(() => setFirstLoadDone(true))
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const needsOnboarding = firstLoadDone
+    && !status.initializing
+    && !status.running
+    && subs.length === 0
+    && nodes.length === 0
 
   // 统一轮询管理：合并所有定时任务到单个定时器
   const pollingTasks = useMemo(() => {
@@ -173,6 +187,17 @@ export default function App() {
       showToast(error.message, 'error')
     }
   }, [newSubUrl, apiCall, clearDelays, fetchSubs, showToast])
+
+  const handleOnboardingAddSub = useCallback(async (url) => {
+    try {
+      await apiCall('subs', { method: 'POST', body: JSON.stringify({ url }) }, 'addSub')
+      clearDelays()
+      await fetchSubs()
+      showToast('订阅已添加', 'success')
+    } catch (error) {
+      showToast(error.message, 'error')
+    }
+  }, [apiCall, clearDelays, fetchSubs, showToast])
 
   const handleDeleteSubscription = useCallback(async (url) => {
     try {
@@ -324,13 +349,41 @@ export default function App() {
     openConfirm('删除订阅', `确定要删除此订阅吗？\n${url}`, () => handleDeleteSubscription(url))
   }, [openConfirm, handleDeleteSubscription])
 
+  if (!firstLoadDone) {
+    return <div className="shell"><div className="onboarding-loading">加载中…</div></div>
+  }
+
+  if (needsOnboarding) {
+    return (
+      <div className="shell">
+        <OnboardingScreen
+          onAddSub={handleOnboardingAddSub}
+          loadingAction={loadingAction}
+          onOpenAddNode={() => setShowNodeModal(true)}
+          showToast={showToast}
+        />
+        <ToastStack toasts={toasts} />
+        <NodeModal
+          open={showNodeModal}
+          nodeType={nodeType}
+          setNodeType={setNodeType}
+          form={nodeForm}
+          setForm={setNodeForm}
+          loading={loadingAction === 'addNode'}
+          onClose={() => setShowNodeModal(false)}
+          onSubmit={handleAddNode}
+        />
+      </div>
+    )
+  }
+
   return (
     <div className="shell">
-      <TopBar 
-        status={status} 
-        versionInfo={versionInfo} 
-        upgrading={upgrading} 
-        onUpgradeClick={handleUpgradeClick} 
+      <TopBar
+        status={status}
+        versionInfo={versionInfo}
+        upgrading={upgrading}
+        onUpgradeClick={handleUpgradeClick}
       />
 
       <main className="workspace">

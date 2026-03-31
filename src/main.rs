@@ -16,7 +16,7 @@ use tracing::{error, info, warn};
 
 use models::{Config, DEFAULT_PORT};
 use services::{
-    config::{gen_config, restore_config_from_cache, save_config_cache},
+    config::{gen_config, restore_config_from_cache, save_config, save_config_cache},
     openwrt::check_and_install_openwrt_dependencies,
     proxy::restore_last_proxy,
     singbox::{extract_sing_box, start_sing_internal, stop_sing_internal},
@@ -53,7 +53,16 @@ async fn main() -> AppResult<()> {
     }
 
     info!("Reading configuration...");
-    let config: Config = serde_yaml::from_str(&tokio::fs::read_to_string("config.yaml").await?)?;
+    let config: Config = match tokio::fs::read_to_string("config.yaml").await {
+        Ok(content) => serde_yaml::from_str(&content)?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            info!("No config.yaml found, creating default configuration");
+            let config = Config::default();
+            save_config(&config).await?;
+            config
+        }
+        Err(e) => return Err(e.into()),
+    };
     let port = config.port.unwrap_or(DEFAULT_PORT);
     let subs_count = config.subs.len();
     let nodes_count = config.nodes.len();
@@ -81,6 +90,14 @@ async fn main() -> AppResult<()> {
 
     // Background: generate config, check dependencies, and start sing-box
     tokio::spawn(async move {
+        if config.subs.is_empty() && config.nodes.is_empty() {
+            info!("No subscriptions or nodes configured, waiting for onboarding");
+            state_for_init
+                .initializing
+                .store(false, std::sync::atomic::Ordering::Relaxed);
+            return;
+        }
+
         info!("Generating initial config...");
         let mut all_subs_failed = false;
         match gen_config(&config, &state_for_init).await {
