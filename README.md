@@ -21,7 +21,10 @@
 mkdir ~/miao && cd ~/miao
 # amd64
 wget https://github.com/YUxiangLuo/miao/releases/latest/download/miao-rust-linux-amd64 -O miao && chmod +x miao
+```
 
+```bash
+mkdir ~/miao && cd ~/miao
 # arm64
 wget https://github.com/YUxiangLuo/miao/releases/latest/download/miao-rust-linux-arm64 -O miao && chmod +x miao
 ```
