@@ -25,6 +25,81 @@ use state::AppState;
 
 pub(crate) const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+fn browser_launch_env() -> Vec<(String, String)> {
+    let mut envs = Vec::new();
+
+    for key in ["DISPLAY", "WAYLAND_DISPLAY", "XAUTHORITY"] {
+        if let Ok(value) = std::env::var(key) {
+            envs.push((key.to_string(), value));
+        }
+    }
+
+    let runtime_dir = std::env::var("XDG_RUNTIME_DIR").ok().or_else(|| {
+        std::env::var("SUDO_UID")
+            .ok()
+            .map(|uid| format!("/run/user/{uid}"))
+    });
+
+    if let Some(runtime_dir) = runtime_dir {
+        envs.push(("XDG_RUNTIME_DIR".to_string(), runtime_dir.clone()));
+
+        let bus_address = std::env::var("DBUS_SESSION_BUS_ADDRESS")
+            .ok()
+            .unwrap_or_else(|| format!("unix:path={runtime_dir}/bus"));
+        envs.push(("DBUS_SESSION_BUS_ADDRESS".to_string(), bus_address));
+    } else if let Ok(bus_address) = std::env::var("DBUS_SESSION_BUS_ADDRESS") {
+        envs.push(("DBUS_SESSION_BUS_ADDRESS".to_string(), bus_address));
+    }
+
+    envs
+}
+
+async fn open_onboarding_browser(url: String) {
+    let has_graphical_session =
+        std::env::var_os("DISPLAY").is_some() || std::env::var_os("WAYLAND_DISPLAY").is_some();
+    if !has_graphical_session {
+        return;
+    }
+
+    let launch_env = browser_launch_env();
+    let sudo_user = std::env::var("SUDO_USER")
+        .ok()
+        .filter(|user| !user.is_empty());
+    let use_runuser = sudo_user.is_some();
+    let mut command = if let Some(sudo_user) = sudo_user {
+        let mut command = tokio::process::Command::new("runuser");
+        command.arg("-u").arg(sudo_user).arg("--").arg("env");
+        for (key, value) in &launch_env {
+            command.arg(format!("{key}={value}"));
+        }
+        command.arg("xdg-open");
+        command
+    } else {
+        tokio::process::Command::new("xdg-open")
+    };
+
+    command.arg(&url);
+    if !use_runuser {
+        command.envs(launch_env);
+    }
+
+    match command
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .await
+    {
+        Ok(status) if status.success() => {}
+        Ok(status) => warn!(
+            url = %url,
+            status = ?status.code(),
+            "Failed to auto-open onboarding URL in browser"
+        ),
+        Err(err) => warn!(url = %url, error = %err, "Failed to launch browser opener"),
+    }
+}
+
 #[tokio::main]
 async fn main() -> AppResult<()> {
     // 初始化结构化日志
@@ -92,13 +167,7 @@ async fn main() -> AppResult<()> {
     if config.subs.is_empty() && config.nodes.is_empty() {
         let url = format!("http://localhost:{}", port);
         tokio::spawn(async move {
-            let _ = tokio::process::Command::new("xdg-open")
-                .arg(&url)
-                .stdin(std::process::Stdio::null())
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null())
-                .status()
-                .await;
+            open_onboarding_browser(url).await;
         });
     }
 
