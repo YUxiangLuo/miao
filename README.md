@@ -12,6 +12,7 @@
 - **Web 控制面板** — 订阅管理、节点切换、延迟测速、流量监控
 - **协议支持** — Hysteria2 / AnyTLS / Shadowsocks
 - **静默升级** — 一键更新到最新 Release（SHA256 校验）
+- **开箱引导** — 无需手写配置文件，首次启动通过 Web 面板添加订阅或节点即可使用
 - **OpenWrt 适配** — 自动安装 TUN 所需内核模块
 
 ## 快速开始
@@ -26,7 +27,17 @@ wget https://github.com/YUxiangLuo/miao/releases/latest/download/miao-rust-linux
 wget https://github.com/YUxiangLuo/miao/releases/latest/download/miao-rust-linux-arm64 -O miao && chmod +x miao
 ```
 
-创建 `config.yaml`：
+运行（需要 root 权限以创建 TUN 网卡）：
+
+```bash
+sudo ./miao
+```
+
+访问 `http://localhost:6161`，首次启动会进入引导页面，添加订阅链接或手动节点即可开始使用。
+
+### 进阶：手动编写配置文件
+
+你也可以预先创建 `config.yaml` 跳过引导：
 
 ```yaml
 port: 6161  # Web 面板端口，默认 6161
@@ -41,11 +52,3 @@ nodes:
   - '{"type":"anytls","tag":"AnyTLS","server":"example.com","server_port":443,"password":"xxx","tls":{"enabled":true}}'
   - '{"type":"shadowsocks","tag":"SS","server":"example.com","server_port":443,"method":"2022-blake3-aes-128-gcm","password":"xxx"}'
 ```
-
-运行（需要 root 权限以创建 TUN 网卡）：
-
-```bash
-sudo ./miao
-```
-
-访问 `http://localhost:6161` 进入控制面板。
