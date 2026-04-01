@@ -88,6 +88,20 @@ async fn main() -> AppResult<()> {
     let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", port)).await?;
     info!(port = port, url = %format!("http://localhost:{}", port), "Miao panel started");
 
+    // Auto-open browser for onboarding when no subs/nodes configured
+    if config.subs.is_empty() && config.nodes.is_empty() {
+        let url = format!("http://localhost:{}", port);
+        tokio::spawn(async move {
+            let _ = tokio::process::Command::new("xdg-open")
+                .arg(&url)
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status()
+                .await;
+        });
+    }
+
     // Background: generate config, check dependencies, and start sing-box
     tokio::spawn(async move {
         if config.subs.is_empty() && config.nodes.is_empty() {
