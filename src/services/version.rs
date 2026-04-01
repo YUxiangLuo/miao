@@ -242,8 +242,33 @@ async fn invalidate_release_cache(state: &Arc<AppState>) {
     }));
 }
 
+async fn sing_box_is_running(state: &Arc<AppState>) -> bool {
+    let mut lock = state.sing_process.lock().await;
+
+    match &mut *lock {
+        Some(proc) => match proc.child.try_wait() {
+            Ok(Some(_)) => {
+                *lock = None;
+                false
+            }
+            Ok(None) => true,
+            Err(_) => false,
+        },
+        None => false,
+    }
+}
+
 pub async fn get_version_info(state: &Arc<AppState>) -> VersionInfo {
     let current = current_version();
+    if !sing_box_is_running(state).await {
+        return VersionInfo {
+            current,
+            latest: None,
+            has_update: false,
+            download_url: None,
+        };
+    }
+
     let asset_name = current_arch_asset_name().unwrap_or("");
 
     match fetch_latest_release(&state.http_client, state).await {

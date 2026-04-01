@@ -51,7 +51,7 @@ export default function App() {
   const { nodes, setNodes, fetchNodes } = useNodes()
   const { primaryGroupName, primaryGroup, fetchProxies } = useProxies(status)
   const { traffic, closeSockets } = useTraffic(status)
-  const { versionInfo, setVersionInfo, fetchVersion } = useVersion()
+  const { versionInfo, fetchVersion } = useVersion()
   const { delays, testingNodes, testingGroup, testDelay, testGroupDelays, clearDelays } = useDelays()
   const { 
     connectivityResults, 
@@ -106,10 +106,10 @@ export default function App() {
   // 使用统一的轮询管理（始终启用，由 tasks 数组内部决定是否执行）
   usePolling(pollingTasks, true)
 
-  // 初始化：获取版本信息（不需要轮询）
+  // 始终获取版本信息；后端会在服务停止时仅返回当前版本而不检测更新
   useEffect(() => {
     fetchVersion()
-  }, [fetchVersion])
+  }, [status.running, fetchVersion])
 
   // 清理 WebSocket 连接
   useEffect(() => {
@@ -298,6 +298,11 @@ export default function App() {
   }, [testAllConnectivity])
 
   const handleUpgradeClick = useCallback(async () => {
+    if (!status.running) {
+      showToast('sing-box 未运行，暂不检测更新', 'info')
+      return
+    }
+
     if (!versionInfo.has_update) {
       const fresh = await fetchVersion()
       if (fresh?.has_update) {
@@ -339,7 +344,7 @@ export default function App() {
         setUpgrading(false)
       }
     })
-  }, [versionInfo, fetchVersion, showToast, openConfirm])
+  }, [status.running, versionInfo, fetchVersion, showToast, openConfirm])
 
   const handleOpenDeleteNodeConfirm = useCallback((tag) => {
     openConfirm('删除节点', `确定要删除节点 "${tag}" 吗？`, () => handleDeleteNode(tag))
