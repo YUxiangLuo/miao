@@ -18,11 +18,10 @@
 ## 快速开始
 
 ```bash
-# 下载（按架构二选一）
 mkdir ~/miao && cd ~/miao
-
 # amd64
 wget https://github.com/YUxiangLuo/miao/releases/latest/download/miao-rust-linux-amd64 -O miao && chmod +x miao
+
 # arm64
 wget https://github.com/YUxiangLuo/miao/releases/latest/download/miao-rust-linux-arm64 -O miao && chmod +x miao
 ```
