@@ -7,7 +7,9 @@ use crate::error::{AppError, AppResult};
 use crate::models::{Config, SubStatus};
 use crate::services::{
     proxy::restore_last_proxy,
-    singbox::{get_sing_box_home, start_sing_internal, stop_sing_internal, validate_sing_box_config},
+    singbox::{
+        get_sing_box_home, start_sing_internal, stop_sing_internal, validate_sing_box_config,
+    },
     subscription::fetch_sub,
 };
 use crate::state::AppState;
@@ -152,19 +154,11 @@ pub async fn apply_config_change(
                         tokio::fs::copy(cache_path, &config_json_path)
                             .await
                             .map_err(|e| {
-                                AppError::context(
-                                    "Failed to restore config.json from cache",
-                                    e,
-                                )
+                                AppError::context("Failed to restore config.json from cache", e)
                             })?;
-                        start_sing_internal(state)
-                            .await
-                            .map_err(|e| {
-                                AppError::context(
-                                    "Failed to restart sing-box with cached config",
-                                    e,
-                                )
-                            })?;
+                        start_sing_internal(state).await.map_err(|e| {
+                            AppError::context("Failed to restart sing-box with cached config", e)
+                        })?;
                         *state.config_warning.lock().await = None;
                         let state_for_proxy = state.clone();
                         tokio::spawn(async move {

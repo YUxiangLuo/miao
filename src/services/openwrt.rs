@@ -37,10 +37,7 @@ impl PkgManager {
                     .status()
                     .await
                     .map_err(|e| {
-                        AppError::context(
-                            format!("Failed to check package '{}' via apk", pkg),
-                            e,
-                        )
+                        AppError::context(format!("Failed to check package '{}' via apk", pkg), e)
                     })?;
                 Ok(status.success())
             }
@@ -50,10 +47,7 @@ impl PkgManager {
                     .output()
                     .await
                     .map_err(|e| {
-                        AppError::context(
-                            format!("Failed to check package '{}' via opkg", pkg),
-                            e,
-                        )
+                        AppError::context(format!("Failed to check package '{}' via opkg", pkg), e)
                     })?;
                 let stdout = String::from_utf8_lossy(&output.stdout);
                 Ok(stdout.contains("Status:") && stdout.contains("installed"))
@@ -77,9 +71,7 @@ impl PkgManager {
                     .await
             }
         }
-        .map_err(|e| {
-            AppError::context(format!("Failed to run '{} update'", self.name()), e)
-        })?;
+        .map_err(|e| AppError::context(format!("Failed to run '{} update'", self.name()), e))?;
 
         if !status.success() {
             warn!(
@@ -145,7 +137,10 @@ pub async fn check_and_install_openwrt_dependencies() -> AppResult<()> {
     }
 
     if missing.is_empty() {
-        info!("Required dependencies ({}) are already installed.", required.join(", "));
+        info!(
+            "Required dependencies ({}) are already installed.",
+            required.join(", ")
+        );
         return Ok(());
     }
 
