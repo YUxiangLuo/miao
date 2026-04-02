@@ -10,8 +10,12 @@ export function LogoIcon({ size = 20 }) {
       xmlns="http://www.w3.org/2000/svg"
       className="brand-icon"
     >
-      <circle cx="32" cy="32" r="24" fill="none" stroke="#a78bfa" strokeWidth="3"/>
-      <circle cx="32" cy="32" r="8" fill="#a78bfa"/>
+      <circle cx="32" cy="37" r="21" fill="#a78bfa"/>
+      <polygon points="13,30 21,8 30,25" fill="#a78bfa"/>
+      <polygon points="51,30 43,8 34,25" fill="#a78bfa"/>
+      <circle cx="24" cy="35" r="3.5" fill="#fff"/>
+      <circle cx="40" cy="35" r="3.5" fill="#fff"/>
+      <path d="M30 42 L34 42 L32 45Z" fill="#fff"/>
     </svg>
   )
 }
