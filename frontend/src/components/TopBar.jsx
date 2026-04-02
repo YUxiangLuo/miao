@@ -6,7 +6,7 @@ export function TopBar({ status, versionInfo, upgrading, onUpgradeClick }) {
   return (
     <header className="topbar">
       <div className="brand">
-        <LogoIcon size={22} />
+        <LogoIcon size={36} />
         <span className="brand-name">Miao</span>
       </div>
       <div className="topbar-spacer" />
