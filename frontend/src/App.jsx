@@ -251,9 +251,10 @@ export default function App() {
       server_port: nodeForm.server_port,
       password: nodeForm.password.trim(),
     }
-    if (nodeType === 'ss') {
+    if (nodeType === 'ss' || nodeType === 'vmess' || nodeType === 'vless' || nodeType === 'tuic') {
       payload.cipher = nodeForm.cipher
-    } else {
+    }
+    if (nodeType !== 'ss') {
       if (nodeForm.sni?.trim()) payload.sni = nodeForm.sni.trim()
       payload.skip_cert_verify = nodeForm.skip_cert_verify
     }

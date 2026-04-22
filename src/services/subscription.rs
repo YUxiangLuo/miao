@@ -75,19 +75,18 @@ proxies:
     cipher: 2022-blake3-aes-128-gcm
     password: pass-ss
   - name: ignored-node
-    type: vmess
-    server: vmess.example.com
-    port: 443
-    uuid: xxx
+    type: socks5
+    server: socks.example.com
+    port: 1080
 "#;
 
         let result = parse_clash_proxies(yaml).unwrap();
 
-        // 3 valid nodes + 1 unsupported type (vmess) silently skipped
+        // 3 valid nodes + 1 unsupported type (socks5) silently skipped
         let names: Vec<String> = result.nodes.iter().map(|(n, _)| n.clone()).collect();
         assert_eq!(names, vec!["hy2-node", "anytls-node", "ss-node"]);
         assert_eq!(result.nodes.len(), 3);
-        assert!(result.errors.is_empty()); // vmess is silently skipped, not reported as error
+        assert!(result.errors.is_empty()); // socks5 is silently skipped, not reported as error
 
         let outbounds: Vec<serde_json::Value> = result.nodes.into_iter().map(|(_, o)| o).collect();
         assert_eq!(outbounds[0]["type"], "hysteria2");
@@ -262,5 +261,65 @@ proxies:
         assert_eq!(result.nodes.len(), 1);
         assert_eq!(result.errors.len(), 1);
         assert!(result.errors[0].contains("<index 0>"));
+    }
+
+    #[test]
+    fn parse_clash_proxies_extracts_all_supported_protocols() {
+        let yaml = r#"
+proxies:
+  - name: trojan-sub
+    type: trojan
+    server: tr.example.com
+    port: 443
+    password: pass-tr
+    sni: tr.example.com
+  - name: vmess-sub
+    type: vmess
+    server: vm.example.com
+    port: 443
+    uuid: bf000d23-0752-40b4-affe-68f7707a9661
+    cipher: auto
+    tls: true
+    servername: vm.example.com
+  - name: vless-sub
+    type: vless
+    server: vl.example.com
+    port: 443
+    uuid: bf000d23-0752-40b4-affe-68f7707a9661
+    flow: xtls-rprx-vision
+    tls: true
+    servername: vl.example.com
+  - name: tuic-sub
+    type: tuic
+    server: tu.example.com
+    port: 443
+    token: my-token
+    congestion-controller: bbr
+    sni: tu.example.com
+  - name: ignored-wireguard
+    type: wireguard
+    server: wg.example.com
+    port: 51820
+"#;
+
+        let result = parse_clash_proxies(yaml).unwrap();
+
+        let names: Vec<String> = result.nodes.iter().map(|(n, _)| n.clone()).collect();
+        assert_eq!(
+            names,
+            vec!["trojan-sub", "vmess-sub", "vless-sub", "tuic-sub"]
+        );
+        assert_eq!(result.nodes.len(), 4);
+        assert!(result.errors.is_empty()); // wireguard is silently skipped
+
+        let types: Vec<String> = result
+            .nodes
+            .iter()
+            .map(|(_, o)| o.get("type").unwrap().as_str().unwrap().to_string())
+            .collect();
+        assert_eq!(
+            types,
+            vec!["trojan", "vmess", "vless", "tuic"]
+        );
     }
 }

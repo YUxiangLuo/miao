@@ -3,6 +3,9 @@ import { Button, SectionCard } from './ui.jsx'
 import { 
   classNames, 
   CIPHER_OPTIONS, 
+  VMESS_SECURITY_OPTIONS,
+  VLESS_FLOW_OPTIONS,
+  TUIC_CONGESTION_OPTIONS,
   EMPTY_NODE_FORM 
 } from '../utils.js'
 
@@ -49,13 +52,13 @@ export function NodeModal({ open, nodeType, setNodeType, form, setForm, loading,
         </div>
 
         <div className="tab-row">
-          {['hysteria2', 'anytls', 'ss'].map((value) => (
+          {['hysteria2', 'anytls', 'ss', 'trojan', 'vmess', 'vless', 'tuic'].map((value) => (
             <button
               key={value}
               className={classNames('tab-button', nodeType === value && 'active')}
               onClick={() => setNodeType(value)}
             >
-              {value === 'ss' ? 'Shadowsocks' : value === 'anytls' ? 'AnyTLS' : 'Hysteria2'}
+              {value === 'ss' ? 'Shadowsocks' : value === 'anytls' ? 'AnyTLS' : value === 'vmess' ? 'VMess' : value === 'trojan' ? 'Trojan' : value === 'vless' ? 'VLESS' : value === 'tuic' ? 'TUIC' : 'Hysteria2'}
             </button>
           ))}
         </div>
@@ -105,39 +108,146 @@ export function NodeModal({ open, nodeType, setNodeType, form, setForm, loading,
               </select>
             </label>
           </div>
+        ) : nodeType === 'vmess' ? (
+          <>
+            <div className="form-grid single">
+              <label className="field">
+                <span>加密方式</span>
+                <select 
+                  value={form.cipher} 
+                  onChange={(event) => setForm((prev) => ({ ...prev, cipher: event.target.value }))}
+                >
+                  {VMESS_SECURITY_OPTIONS.map((sec) => (
+                    <option key={sec} value={sec}>{sec}</option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <div className="form-grid single">
+              <label className="field">
+                <span>SNI（可选）</span>
+                <input 
+                  value={form.sni} 
+                  onChange={(event) => setForm((prev) => ({ ...prev, sni: event.target.value }))} 
+                  placeholder="留空使用服务器地址" 
+                />
+              </label>
+            </div>
+            <div className="form-grid single">
+              <label className="field checkbox-field">
+                <input
+                  type="checkbox"
+                  checked={form.skip_cert_verify}
+                  onChange={(event) => setForm((prev) => ({ ...prev, skip_cert_verify: event.target.checked }))}
+                />
+                <span>跳过证书验证（不推荐）</span>
+              </label>
+            </div>
+          </>
+        ) : nodeType === 'vless' ? (
+          <>
+            <div className="form-grid single">
+              <label className="field">
+                <span>Flow（可选）</span>
+                <select 
+                  value={form.cipher} 
+                  onChange={(event) => setForm((prev) => ({ ...prev, cipher: event.target.value }))}
+                >
+                  {VLESS_FLOW_OPTIONS.map((flow) => (
+                    <option key={flow} value={flow}>{flow || '无'}</option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <div className="form-grid single">
+              <label className="field">
+                <span>SNI（可选）</span>
+                <input 
+                  value={form.sni} 
+                  onChange={(event) => setForm((prev) => ({ ...prev, sni: event.target.value }))} 
+                  placeholder="留空使用服务器地址" 
+                />
+              </label>
+            </div>
+            <div className="form-grid single">
+              <label className="field checkbox-field">
+                <input
+                  type="checkbox"
+                  checked={form.skip_cert_verify}
+                  onChange={(event) => setForm((prev) => ({ ...prev, skip_cert_verify: event.target.checked }))}
+                />
+                <span>跳过证书验证（不推荐）</span>
+              </label>
+            </div>
+          </>
+        ) : nodeType === 'tuic' ? (
+          <>
+            <div className="form-grid single">
+              <label className="field">
+                <span>拥塞控制</span>
+                <select 
+                  value={form.cipher} 
+                  onChange={(event) => setForm((prev) => ({ ...prev, cipher: event.target.value }))}
+                >
+                  {TUIC_CONGESTION_OPTIONS.map((cc) => (
+                    <option key={cc} value={cc}>{cc}</option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <div className="form-grid single">
+              <label className="field">
+                <span>SNI（可选）</span>
+                <input 
+                  value={form.sni} 
+                  onChange={(event) => setForm((prev) => ({ ...prev, sni: event.target.value }))} 
+                  placeholder="留空使用服务器地址" 
+                />
+              </label>
+            </div>
+            <div className="form-grid single">
+              <label className="field checkbox-field">
+                <input
+                  type="checkbox"
+                  checked={form.skip_cert_verify}
+                  onChange={(event) => setForm((prev) => ({ ...prev, skip_cert_verify: event.target.checked }))}
+                />
+                <span>跳过证书验证（不推荐）</span>
+              </label>
+            </div>
+          </>
         ) : (
-          <div className="form-grid single">
-            <label className="field">
-              <span>SNI（可选）</span>
-              <input 
-                value={form.sni} 
-                onChange={(event) => setForm((prev) => ({ ...prev, sni: event.target.value }))} 
-                placeholder="留空使用服务器地址" 
-              />
-            </label>
-          </div>
-        )}
-
-        {nodeType !== 'ss' && (
-          <div className="form-grid single">
-            <label className="field checkbox-field">
-              <input
-                type="checkbox"
-                checked={form.skip_cert_verify}
-                onChange={(event) => setForm((prev) => ({ ...prev, skip_cert_verify: event.target.checked }))}
-              />
-              <span>跳过证书验证（不推荐）</span>
-            </label>
-          </div>
+          <>
+            <div className="form-grid single">
+              <label className="field">
+                <span>SNI（可选）</span>
+                <input 
+                  value={form.sni} 
+                  onChange={(event) => setForm((prev) => ({ ...prev, sni: event.target.value }))} 
+                  placeholder="留空使用服务器地址" 
+                />
+              </label>
+            </div>
+            <div className="form-grid single">
+              <label className="field checkbox-field">
+                <input
+                  type="checkbox"
+                  checked={form.skip_cert_verify}
+                  onChange={(event) => setForm((prev) => ({ ...prev, skip_cert_verify: event.target.checked }))}
+                />
+                <span>跳过证书验证（不推荐）</span>
+              </label>
+            </div>
+          </>
         )}
 
         <div className="form-grid single">
           <label className="field">
-            <span>密码</span>
+            <span>{nodeType === 'vmess' || nodeType === 'vless' ? 'UUID' : nodeType === 'tuic' ? 'Token / UUID' : '密码'}</span>
             <input 
               value={form.password} 
               onChange={(event) => setForm((prev) => ({ ...prev, password: event.target.value }))} 
-              placeholder="密码" 
+              placeholder={nodeType === 'vmess' || nodeType === 'vless' ? '例如：bf000d23-0752-40b4-affe-68f7707a9661' : nodeType === 'tuic' ? 'Token 或 UUID' : '密码'} 
             />
           </label>
         </div>
@@ -149,7 +259,7 @@ export function NodeModal({ open, nodeType, setNodeType, form, setForm, loading,
           disabled={!canSubmit || loading} 
           onClick={onSubmit}
         >
-          添加 {nodeType === 'ss' ? 'Shadowsocks' : nodeType === 'anytls' ? 'AnyTLS' : 'Hysteria2'} 节点
+          添加 {nodeType === 'ss' ? 'Shadowsocks' : nodeType === 'anytls' ? 'AnyTLS' : nodeType === 'vmess' ? 'VMess' : nodeType === 'trojan' ? 'Trojan' : nodeType === 'vless' ? 'VLESS' : nodeType === 'tuic' ? 'TUIC' : 'Hysteria2'} 节点
         </Button>
       </div>
     </div>

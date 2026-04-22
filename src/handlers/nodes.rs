@@ -4,12 +4,13 @@ use tracing::warn;
 
 use crate::models::{
     AnyTls, ApiResponse, DeleteNodeRequest, Hysteria2, NodeInfo, NodeRequest, Shadowsocks, Tls,
+    Trojan, Tuic, VMess, Vless,
 };
 use crate::responses::{status_error, success, success_no_data, HandlerResult};
 use crate::services::config::apply_config_change;
 use crate::services::node_parser::parse_node_json;
 use crate::state::AppState;
-use crate::validation::Validator;
+use crate::validation::{Validator, VALID_VMESS_SECURITY};
 
 pub async fn get_nodes(State(state): State<Arc<AppState>>) -> Json<ApiResponse<Vec<NodeInfo>>> {
     let config = state.config.read().await;
@@ -53,7 +54,7 @@ pub async fn add_node(
     let node_type = req.node_type.as_deref().unwrap_or("hysteria2");
 
     // 验证节点类型是否支持
-    const VALID_NODE_TYPES: &[&str] = &["hysteria2", "anytls", "ss"];
+    const VALID_NODE_TYPES: &[&str] = &["hysteria2", "anytls", "ss", "trojan", "vmess", "vless", "tuic"];
     if !VALID_NODE_TYPES.contains(&node_type) {
         return Err(status_error(
             StatusCode::BAD_REQUEST,
@@ -63,6 +64,18 @@ pub async fn add_node(
                 VALID_NODE_TYPES.join(", ")
             ),
         ));
+    }
+
+    // VMess 需要验证 security 字段
+    if node_type == "vmess" {
+        if let Some(ref cipher) = req.cipher {
+            if !VALID_VMESS_SECURITY.contains(&cipher.as_str()) {
+                return Err(status_error(
+                    StatusCode::BAD_REQUEST,
+                    format!("不支持的 VMess 加密方式: {}", cipher),
+                ));
+            }
+        }
     }
 
     let _config_update = state.config_update.lock().await;
@@ -113,6 +126,75 @@ pub async fn add_node(
                     .cipher
                     .unwrap_or_else(|| "2022-blake3-aes-128-gcm".to_string()),
                 password: req.password,
+            };
+            serde_json::to_string(&node)
+        }
+        "trojan" => {
+            let node = Trojan {
+                outbound_type: "trojan".to_string(),
+                tag: req.tag,
+                server: req.server,
+                server_port: req.server_port,
+                password: req.password,
+                tls: Tls {
+                    enabled: true,
+                    server_name: req.sni,
+                    insecure: req.skip_cert_verify,
+                },
+            };
+            serde_json::to_string(&node)
+        }
+        "vmess" => {
+            let node = VMess {
+                outbound_type: "vmess".to_string(),
+                tag: req.tag,
+                server: req.server,
+                server_port: req.server_port,
+                uuid: req.password,
+                security: req.cipher,
+                alter_id: None,
+                tls: if req.skip_cert_verify || req.sni.is_some() {
+                    Some(Tls {
+                        enabled: true,
+                        server_name: req.sni,
+                        insecure: req.skip_cert_verify,
+                    })
+                } else {
+                    None
+                },
+            };
+            serde_json::to_string(&node)
+        }
+        "vless" => {
+            let node = Vless {
+                outbound_type: "vless".to_string(),
+                tag: req.tag,
+                server: req.server,
+                server_port: req.server_port,
+                uuid: req.password,
+                flow: req.cipher,
+                tls: Tls {
+                    enabled: true,
+                    server_name: req.sni,
+                    insecure: req.skip_cert_verify,
+                },
+            };
+            serde_json::to_string(&node)
+        }
+        "tuic" => {
+            let node = Tuic {
+                outbound_type: "tuic".to_string(),
+                tag: req.tag,
+                server: req.server,
+                server_port: req.server_port,
+                uuid: req.password,
+                token: None,
+                congestion_control: req.cipher,
+                tls: Tls {
+                    enabled: true,
+                    server_name: req.sni,
+                    insecure: req.skip_cert_verify,
+                },
             };
             serde_json::to_string(&node)
         }
@@ -382,5 +464,76 @@ mod tests {
         assert_eq!(nodes.len(), 2);
         assert_eq!(nodes[0].tag, "香港节点");
         assert_eq!(nodes[1].tag, "日本サーバー");
+    }
+
+    #[tokio::test]
+    async fn get_nodes_handles_trojan_and_vmess() {
+        let state = app_state(Config {
+            port: None,
+            subs: vec![],
+            nodes: vec![
+                r#"{"type":"trojan","tag":"tr-node","server":"tr.example.com","server_port":443,"password":"secret","tls":{"enabled":true,"server_name":"tr.example.com","insecure":false}}"#.to_string(),
+                r#"{"type":"vmess","tag":"vm-node","server":"vm.example.com","server_port":443,"uuid":"bf000d23-0752-40b4-affe-68f7707a9661","security":"auto","alter_id":0,"tls":{"enabled":true,"server_name":"vm.example.com","insecure":false}}"#.to_string(),
+            ],
+            custom_rules: vec![],
+        });
+
+        let Json(response) = get_nodes(State(state)).await;
+
+        assert!(response.success);
+        let nodes = response.data.unwrap();
+        assert_eq!(nodes.len(), 2);
+
+        let types: Vec<String> = nodes.iter().map(|n| n.node_type.clone()).collect();
+        assert!(types.contains(&"trojan".to_string()));
+        assert!(types.contains(&"vmess".to_string()));
+    }
+
+    #[tokio::test]
+    async fn get_nodes_handles_vless_and_tuic() {
+        let state = app_state(Config {
+            port: None,
+            subs: vec![],
+            nodes: vec![
+                r#"{"type":"vless","tag":"vl-node","server":"vl.example.com","server_port":443,"uuid":"bf000d23-0752-40b4-affe-68f7707a9661","flow":"xtls-rprx-vision","tls":{"enabled":true,"server_name":"vl.example.com","insecure":false}}"#.to_string(),
+                r#"{"type":"tuic","tag":"tu-node","server":"tu.example.com","server_port":443,"uuid":"bf000d23-0752-40b4-affe-68f7707a9661","congestion_control":"bbr","tls":{"enabled":true,"server_name":"tu.example.com","insecure":false}}"#.to_string(),
+            ],
+            custom_rules: vec![],
+        });
+
+        let Json(response) = get_nodes(State(state)).await;
+
+        assert!(response.success);
+        let nodes = response.data.unwrap();
+        assert_eq!(nodes.len(), 2);
+
+        let types: Vec<String> = nodes.iter().map(|n| n.node_type.clone()).collect();
+        assert!(types.contains(&"vless".to_string()));
+        assert!(types.contains(&"tuic".to_string()));
+    }
+
+    #[tokio::test]
+    async fn get_nodes_preserves_sni_for_all_protocols() {
+        let state = app_state(Config {
+            port: None,
+            subs: vec![],
+            nodes: vec![
+                r#"{"type":"trojan","tag":"tr","server":"s","server_port":443,"password":"p","tls":{"enabled":true,"server_name":"sni-trojan","insecure":false}}"#.to_string(),
+                r#"{"type":"vless","tag":"vl","server":"s","server_port":443,"uuid":"bf000d23-0752-40b4-affe-68f7707a9661","tls":{"enabled":true,"server_name":"sni-vless","insecure":false}}"#.to_string(),
+                r#"{"type":"vmess","tag":"vm","server":"s","server_port":443,"uuid":"bf000d23-0752-40b4-affe-68f7707a9661","tls":{"enabled":true,"server_name":"sni-vmess","insecure":false}}"#.to_string(),
+            ],
+            custom_rules: vec![],
+        });
+
+        let Json(response) = get_nodes(State(state)).await;
+
+        assert!(response.success);
+        let nodes = response.data.unwrap();
+        assert_eq!(nodes.len(), 3);
+
+        let snis: Vec<Option<String>> = nodes.iter().map(|n| n.sni.clone()).collect();
+        assert_eq!(snis[0], Some("sni-trojan".to_string()));
+        assert_eq!(snis[1], Some("sni-vless".to_string()));
+        assert_eq!(snis[2], Some("sni-vmess".to_string()));
     }
 }

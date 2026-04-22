@@ -29,6 +29,26 @@ export const CIPHER_OPTIONS = [
   'chacha20-ietf-poly1305',
 ]
 
+export const VMESS_SECURITY_OPTIONS = [
+  'auto',
+  'none',
+  'zero',
+  'aes-128-gcm',
+  'chacha20-poly1305',
+  'aes-128-ctr',
+]
+
+export const VLESS_FLOW_OPTIONS = [
+  '',
+  'xtls-rprx-vision',
+]
+
+export const TUIC_CONGESTION_OPTIONS = [
+  'bbr',
+  'cubic',
+  'new_reno',
+]
+
 export function classNames(...items) {
   return items.filter(Boolean).join(' ')
 }
@@ -71,6 +91,10 @@ export function protocolLabel(type) {
     anytls: 'anytls',
     shadowsocks: 'shadowsocks',
     ss: 'shadowsocks',
+    trojan: 'trojan',
+    vmess: 'vmess',
+    vless: 'vless',
+    tuic: 'tuic',
   }
   return map[type] || type || 'unknown'
 }

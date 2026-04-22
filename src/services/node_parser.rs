@@ -58,7 +58,7 @@ pub fn parse_clash_proxies(clash_yaml: &str) -> AppResult<ParseResult> {
 }
 
 fn is_supported_node_type(node_type: &str) -> bool {
-    matches!(node_type, "hysteria2" | "anytls" | "ss")
+    matches!(node_type, "hysteria2" | "anytls" | "ss" | "trojan" | "vmess" | "vless" | "tuic")
 }
 
 fn parse_single_node(node: &Value) -> Option<(String, serde_json::Value)> {
@@ -71,10 +71,10 @@ fn parse_single_node(node: &Value) -> Option<(String, serde_json::Value)> {
     if port == 0 || port > 65535 {
         return None;
     }
-    let password = node.get("password")?.as_str()?;
 
     let outbound = match typ {
         "hysteria2" => {
+            let password = node.get("password")?.as_str()?;
             let sni = node.get("sni").and_then(|s| s.as_str());
             let insecure = node
                 .get("skip-cert-verify")
@@ -100,6 +100,7 @@ fn parse_single_node(node: &Value) -> Option<(String, serde_json::Value)> {
             obj
         }
         "anytls" => {
+            let password = node.get("password")?.as_str()?;
             let sni = node.get("sni").and_then(|s| s.as_str());
             let insecure = node
                 .get("skip-cert-verify")
@@ -125,6 +126,7 @@ fn parse_single_node(node: &Value) -> Option<(String, serde_json::Value)> {
             obj
         }
         "ss" => {
+            let password = node.get("password")?.as_str()?;
             let method = node.get("cipher")?.as_str()?;
             serde_json::json!({
                 "type": "shadowsocks",
@@ -134,6 +136,154 @@ fn parse_single_node(node: &Value) -> Option<(String, serde_json::Value)> {
                 "method": method,
                 "password": password
             })
+        }
+        "trojan" => {
+            let password = node.get("password")?.as_str()?;
+            let sni = node.get("sni").and_then(|s| s.as_str());
+            let insecure = node
+                .get("skip-cert-verify")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+
+            let mut obj = serde_json::json!({
+                "type": "trojan",
+                "tag": name,
+                "server": server,
+                "server_port": port,
+                "password": password,
+                "tls": {
+                    "enabled": true,
+                    "insecure": insecure
+                }
+            });
+
+            if let Some(sni_val) = sni {
+                obj["tls"]["server_name"] = serde_json::Value::String(sni_val.to_string());
+            }
+
+            obj
+        }
+        "vmess" => {
+            let uuid = node
+                .get("uuid")
+                .or_else(|| node.get("password"))
+                ?.as_str()?;
+            let security = node.get("cipher").and_then(|s| s.as_str()).unwrap_or("auto");
+            let alter_id = node.get("alterId").and_then(|v| v.as_u64()).unwrap_or(0) as u16;
+            let tls_enabled = node
+                .get("tls")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            let sni = node
+                .get("servername")
+                .or_else(|| node.get("sni"))
+                .and_then(|s| s.as_str());
+            let insecure = node
+                .get("skip-cert-verify")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+
+            let mut obj = serde_json::json!({
+                "type": "vmess",
+                "tag": name,
+                "server": server,
+                "server_port": port,
+                "uuid": uuid,
+                "security": security,
+                "alter_id": alter_id
+            });
+
+            if tls_enabled {
+                let mut tls_obj = serde_json::json!({
+                    "enabled": true,
+                    "insecure": insecure
+                });
+                if let Some(sni_val) = sni {
+                    tls_obj["server_name"] = serde_json::Value::String(sni_val.to_string());
+                }
+                obj["tls"] = tls_obj;
+            }
+
+            obj
+        }
+        "vless" => {
+            let uuid = node.get("uuid")?.as_str()?;
+            let flow = node.get("flow").and_then(|s| s.as_str());
+            let tls_enabled = node
+                .get("tls")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            let sni = node
+                .get("servername")
+                .or_else(|| node.get("sni"))
+                .and_then(|s| s.as_str());
+            let insecure = node
+                .get("skip-cert-verify")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+
+            let mut obj = serde_json::json!({
+                "type": "vless",
+                "tag": name,
+                "server": server,
+                "server_port": port,
+                "uuid": uuid
+            });
+
+            if let Some(flow_val) = flow {
+                obj["flow"] = serde_json::Value::String(flow_val.to_string());
+            }
+
+            if tls_enabled {
+                let mut tls_obj = serde_json::json!({
+                    "enabled": true,
+                    "insecure": insecure
+                });
+                if let Some(sni_val) = sni {
+                    tls_obj["server_name"] = serde_json::Value::String(sni_val.to_string());
+                }
+                obj["tls"] = tls_obj;
+            }
+
+            obj
+        }
+        "tuic" => {
+            // TUIC v5: sing-box uses `uuid` field; Clash Meta may use `token` or `uuid`
+            let token = node
+                .get("token")
+                .or_else(|| node.get("uuid"))
+                ?.as_str()?;
+            let congestion_control = node
+                .get("congestion-controller")
+                .and_then(|s| s.as_str())
+                .unwrap_or("bbr");
+            let sni = node
+                .get("sni")
+                .and_then(|s| s.as_str());
+            let insecure = node
+                .get("skip-cert-verify")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+
+            let mut obj = serde_json::json!({
+                "type": "tuic",
+                "tag": name,
+                "server": server,
+                "server_port": port,
+                "uuid": token,
+                "congestion_control": congestion_control
+            });
+
+            let mut tls_obj = serde_json::json!({
+                "enabled": true,
+                "insecure": insecure
+            });
+            if let Some(sni_val) = sni {
+                tls_obj["server_name"] = serde_json::Value::String(sni_val.to_string());
+            }
+            obj["tls"] = tls_obj;
+
+            obj
         }
         _ => return None, // 不支持的类型
     };
@@ -247,14 +397,14 @@ proxies:
     type: vmess
     server: vmess.example.com
     port: 443
-    uuid: xxx
 "#;
 
         let result = parse_clash_proxies(yaml).unwrap();
 
-        // 3 valid nodes + 1 unsupported type (vmess) silently skipped
+        // 3 valid nodes + 1 invalid vmess (missing uuid) skipped
         assert_eq!(result.nodes.len(), 3);
-        assert!(result.errors.is_empty()); // vmess is silently skipped, not reported as error
+        assert_eq!(result.errors.len(), 1);
+        assert!(result.errors[0].contains("ignored-node"));
         assert_eq!(result.nodes[0].0, "hy2-node");
         assert_eq!(result.nodes[1].0, "anytls-node");
         assert_eq!(result.nodes[2].0, "ss-node");
@@ -283,10 +433,9 @@ proxies:
     server: hy.example.com
     port: 443
   - name: unsupported-type
-    type: vmess
-    server: vm.example.com
-    port: 443
-    uuid: xxx
+    type: socks5
+    server: socks.example.com
+    port: 1080
 "#;
 
         let result = parse_clash_proxies(yaml).unwrap();
@@ -294,7 +443,7 @@ proxies:
         assert_eq!(result.nodes.len(), 1);
         assert_eq!(result.nodes[0].0, "valid-node");
         // 3 errors: missing-server, zero-port, missing-password
-        // unsupported-type (vmess) is silently skipped, not reported as error
+        // unsupported-type (socks5) is silently skipped, not reported as error
         assert_eq!(result.errors.len(), 3);
 
         // Verify error messages contain node names
@@ -522,12 +671,12 @@ proxies:
     server: hy.example.com
     port: 443
     password: pass
-  - name: unsupported-vmess
+  - name: valid-vmess
     type: vmess
     server: vm.example.com
     port: 443
-    uuid: xxx
-  - name: unsupported-trojan
+    uuid: bf000d23-0752-40b4-affe-68f7707a9661
+  - name: valid-trojan
     type: trojan
     server: tr.example.com
     port: 443
@@ -538,16 +687,20 @@ proxies:
     port: 8388
     cipher: aes-128-gcm
     password: pass
+  - name: unsupported-socks5
+    type: socks5
+    server: socks.example.com
+    port: 1080
 "#;
 
         let result = parse_clash_proxies(yaml).unwrap();
 
-        // Only 2 valid nodes (hysteria2 and ss), vmess and trojan silently skipped
-        assert_eq!(result.nodes.len(), 2);
+        // 4 valid nodes + 1 unsupported type (socks5) silently skipped
+        assert_eq!(result.nodes.len(), 4);
         assert!(result.errors.is_empty());
 
         let names: Vec<String> = result.nodes.iter().map(|(n, _)| n.clone()).collect();
-        assert_eq!(names, vec!["valid-hy2", "valid-ss"]);
+        assert_eq!(names, vec!["valid-hy2", "valid-vmess", "valid-trojan", "valid-ss"]);
     }
 
     #[test]
@@ -644,5 +797,323 @@ proxies:
 
         let display = format!("{}", info);
         assert_eq!(display, "Test Node (192.168.1.1:8388) [shadowsocks]");
+    }
+
+    #[test]
+    fn parse_clash_proxies_extracts_trojan_node() {
+        let yaml = r#"
+proxies:
+  - name: trojan-node
+    type: trojan
+    server: tr.example.com
+    port: 443
+    password: trojan-pass
+    sni: tr.example.com
+    skip-cert-verify: true
+"#;
+
+        let result = parse_clash_proxies(yaml).unwrap();
+
+        assert_eq!(result.nodes.len(), 1);
+        assert!(result.errors.is_empty());
+        assert_eq!(result.nodes[0].0, "trojan-node");
+
+        let outbound = &result.nodes[0].1;
+        assert_eq!(outbound["type"], "trojan");
+        assert_eq!(outbound["tag"], "trojan-node");
+        assert_eq!(outbound["server"], "tr.example.com");
+        assert_eq!(outbound["server_port"], 443);
+        assert_eq!(outbound["password"], "trojan-pass");
+        assert_eq!(outbound["tls"]["enabled"], true);
+        assert_eq!(outbound["tls"]["server_name"], "tr.example.com");
+        assert_eq!(outbound["tls"]["insecure"], true);
+    }
+
+    #[test]
+    fn parse_clash_proxies_extracts_vmess_node() {
+        let yaml = r#"
+proxies:
+  - name: vmess-node
+    type: vmess
+    server: vm.example.com
+    port: 443
+    uuid: bf000d23-0752-40b4-affe-68f7707a9661
+    alterId: 0
+    cipher: auto
+    tls: true
+    servername: vm.example.com
+    skip-cert-verify: false
+"#;
+
+        let result = parse_clash_proxies(yaml).unwrap();
+
+        assert_eq!(result.nodes.len(), 1);
+        assert!(result.errors.is_empty());
+        assert_eq!(result.nodes[0].0, "vmess-node");
+
+        let outbound = &result.nodes[0].1;
+        assert_eq!(outbound["type"], "vmess");
+        assert_eq!(outbound["tag"], "vmess-node");
+        assert_eq!(outbound["server"], "vm.example.com");
+        assert_eq!(outbound["server_port"], 443);
+        assert_eq!(outbound["uuid"], "bf000d23-0752-40b4-affe-68f7707a9661");
+        assert_eq!(outbound["security"], "auto");
+        assert_eq!(outbound["alter_id"], 0);
+        assert_eq!(outbound["tls"]["enabled"], true);
+        assert_eq!(outbound["tls"]["server_name"], "vm.example.com");
+        assert_eq!(outbound["tls"]["insecure"], false);
+    }
+
+    #[test]
+    fn parse_clash_proxies_extracts_vmess_without_tls() {
+        let yaml = r#"
+proxies:
+  - name: vmess-plain
+    type: vmess
+    server: vm.example.com
+    port: 80
+    uuid: bf000d23-0752-40b4-affe-68f7707a9661
+"#;
+
+        let result = parse_clash_proxies(yaml).unwrap();
+
+        assert_eq!(result.nodes.len(), 1);
+        let outbound = &result.nodes[0].1;
+        assert_eq!(outbound["type"], "vmess");
+        assert!(outbound.get("tls").is_none());
+    }
+
+    #[test]
+    fn parse_clash_proxies_vmess_fallback_to_password_as_uuid() {
+        // 某些 Clash 配置可能将 uuid 放在 password 字段
+        let yaml = r#"
+proxies:
+  - name: vmess-pwd
+    type: vmess
+    server: vm.example.com
+    port: 443
+    password: bf000d23-0752-40b4-affe-68f7707a9661
+"#;
+
+        let result = parse_clash_proxies(yaml).unwrap();
+
+        assert_eq!(result.nodes.len(), 1);
+        let outbound = &result.nodes[0].1;
+        assert_eq!(outbound["uuid"], "bf000d23-0752-40b4-affe-68f7707a9661");
+    }
+
+    #[test]
+    fn parse_clash_proxies_skips_trojan_missing_password() {
+        let yaml = r#"
+proxies:
+  - name: trojan-no-pwd
+    type: trojan
+    server: tr.example.com
+    port: 443
+"#;
+
+        let result = parse_clash_proxies(yaml).unwrap();
+
+        assert!(result.nodes.is_empty());
+        assert_eq!(result.errors.len(), 1);
+        assert!(result.errors[0].contains("trojan-no-pwd"));
+    }
+
+    #[test]
+    fn parse_clash_proxies_skips_vmess_missing_uuid() {
+        let yaml = r#"
+proxies:
+  - name: vmess-no-uuid
+    type: vmess
+    server: vm.example.com
+    port: 443
+"#;
+
+        let result = parse_clash_proxies(yaml).unwrap();
+
+        assert!(result.nodes.is_empty());
+        assert_eq!(result.errors.len(), 1);
+        assert!(result.errors[0].contains("vmess-no-uuid"));
+    }
+
+    #[test]
+    fn parse_clash_proxies_extracts_vless_node() {
+        let yaml = r#"
+proxies:
+  - name: vless-node
+    type: vless
+    server: vl.example.com
+    port: 443
+    uuid: bf000d23-0752-40b4-affe-68f7707a9661
+    flow: xtls-rprx-vision
+    tls: true
+    servername: vl.example.com
+    skip-cert-verify: false
+"#;
+
+        let result = parse_clash_proxies(yaml).unwrap();
+
+        assert_eq!(result.nodes.len(), 1);
+        assert!(result.errors.is_empty());
+        assert_eq!(result.nodes[0].0, "vless-node");
+
+        let outbound = &result.nodes[0].1;
+        assert_eq!(outbound["type"], "vless");
+        assert_eq!(outbound["tag"], "vless-node");
+        assert_eq!(outbound["server"], "vl.example.com");
+        assert_eq!(outbound["server_port"], 443);
+        assert_eq!(outbound["uuid"], "bf000d23-0752-40b4-affe-68f7707a9661");
+        assert_eq!(outbound["flow"], "xtls-rprx-vision");
+        assert_eq!(outbound["tls"]["enabled"], true);
+        assert_eq!(outbound["tls"]["server_name"], "vl.example.com");
+        assert_eq!(outbound["tls"]["insecure"], false);
+    }
+
+    #[test]
+    fn parse_clash_proxies_extracts_vless_without_tls() {
+        let yaml = r#"
+proxies:
+  - name: vless-plain
+    type: vless
+    server: vl.example.com
+    port: 80
+    uuid: bf000d23-0752-40b4-affe-68f7707a9661
+"#;
+
+        let result = parse_clash_proxies(yaml).unwrap();
+
+        assert_eq!(result.nodes.len(), 1);
+        let outbound = &result.nodes[0].1;
+        assert_eq!(outbound["type"], "vless");
+        assert!(outbound.get("tls").is_none());
+    }
+
+    #[test]
+    fn parse_clash_proxies_extracts_tuic_node() {
+        let yaml = r#"
+proxies:
+  - name: tuic-node
+    type: tuic
+    server: tu.example.com
+    port: 443
+    token: my-secret-token
+    uuid: bf000d23-0752-40b4-affe-68f7707a9661
+    congestion-controller: bbr
+    sni: tu.example.com
+    skip-cert-verify: true
+"#;
+
+        let result = parse_clash_proxies(yaml).unwrap();
+
+        assert_eq!(result.nodes.len(), 1);
+        assert!(result.errors.is_empty());
+        assert_eq!(result.nodes[0].0, "tuic-node");
+
+        let outbound = &result.nodes[0].1;
+        assert_eq!(outbound["type"], "tuic");
+        assert_eq!(outbound["tag"], "tuic-node");
+        assert_eq!(outbound["server"], "tu.example.com");
+        assert_eq!(outbound["server_port"], 443);
+        assert_eq!(outbound["uuid"], "my-secret-token");
+        assert_eq!(outbound["congestion_control"], "bbr");
+        assert_eq!(outbound["tls"]["enabled"], true);
+        assert_eq!(outbound["tls"]["server_name"], "tu.example.com");
+        assert_eq!(outbound["tls"]["insecure"], true);
+    }
+
+    #[test]
+    fn parse_clash_proxies_extracts_tuic_with_uuid_fallback() {
+        let yaml = r#"
+proxies:
+  - name: tuic-uuid
+    type: tuic
+    server: tu.example.com
+    port: 443
+    uuid: bf000d23-0752-40b4-affe-68f7707a9661
+"#;
+
+        let result = parse_clash_proxies(yaml).unwrap();
+
+        assert_eq!(result.nodes.len(), 1);
+        let outbound = &result.nodes[0].1;
+        assert_eq!(outbound["uuid"], "bf000d23-0752-40b4-affe-68f7707a9661");
+        assert_eq!(outbound["congestion_control"], "bbr");
+    }
+
+    #[test]
+    fn parse_clash_proxies_skips_vless_missing_uuid() {
+        let yaml = r#"
+proxies:
+  - name: vless-no-uuid
+    type: vless
+    server: vl.example.com
+    port: 443
+"#;
+
+        let result = parse_clash_proxies(yaml).unwrap();
+
+        assert!(result.nodes.is_empty());
+        assert_eq!(result.errors.len(), 1);
+        assert!(result.errors[0].contains("vless-no-uuid"));
+    }
+
+    #[test]
+    fn parse_clash_proxies_skips_tuic_missing_token() {
+        let yaml = r#"
+proxies:
+  - name: tuic-no-token
+    type: tuic
+    server: tu.example.com
+    port: 443
+"#;
+
+        let result = parse_clash_proxies(yaml).unwrap();
+
+        assert!(result.nodes.is_empty());
+        assert_eq!(result.errors.len(), 1);
+        assert!(result.errors[0].contains("tuic-no-token"));
+    }
+
+    #[test]
+    fn parse_node_json_extracts_trojan_info() {
+        let json = r#"{"type":"trojan","tag":"tr-test","server":"tr.example.com","server_port":443,"password":"secret","tls":{"enabled":true,"server_name":"sni.example.com"}}"#;
+
+        let (info, _) = parse_node_json(json).unwrap();
+        assert_eq!(info.tag, "tr-test");
+        assert_eq!(info.server, "tr.example.com");
+        assert_eq!(info.server_port, 443);
+        assert_eq!(info.node_type, "trojan");
+        assert_eq!(info.sni, Some("sni.example.com".to_string()));
+    }
+
+    #[test]
+    fn parse_node_json_extracts_vmess_info() {
+        let json = r#"{"type":"vmess","tag":"vm-test","server":"vm.example.com","server_port":443,"uuid":"bf000d23-0752-40b4-affe-68f7707a9661","security":"auto","tls":{"enabled":true,"server_name":"sni.example.com"}}"#;
+
+        let (info, _) = parse_node_json(json).unwrap();
+        assert_eq!(info.tag, "vm-test");
+        assert_eq!(info.server, "vm.example.com");
+        assert_eq!(info.node_type, "vmess");
+        assert_eq!(info.sni, Some("sni.example.com".to_string()));
+    }
+
+    #[test]
+    fn parse_node_json_extracts_vless_info() {
+        let json = r#"{"type":"vless","tag":"vl-test","server":"vl.example.com","server_port":443,"uuid":"bf000d23-0752-40b4-affe-68f7707a9661","flow":"xtls-rprx-vision","tls":{"enabled":true}}"#;
+
+        let (info, _) = parse_node_json(json).unwrap();
+        assert_eq!(info.tag, "vl-test");
+        assert_eq!(info.server, "vl.example.com");
+        assert_eq!(info.node_type, "vless");
+    }
+
+    #[test]
+    fn parse_node_json_extracts_tuic_info() {
+        let json = r#"{"type":"tuic","tag":"tu-test","server":"tu.example.com","server_port":443,"uuid":"bf000d23-0752-40b4-affe-68f7707a9661","congestion_control":"bbr","tls":{"enabled":true}}"#;
+
+        let (info, _) = parse_node_json(json).unwrap();
+        assert_eq!(info.tag, "tu-test");
+        assert_eq!(info.server, "tu.example.com");
+        assert_eq!(info.node_type, "tuic");
     }
 }

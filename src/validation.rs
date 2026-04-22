@@ -13,6 +13,15 @@ static VALID_CIPHERS: &[&str] = &[
     "chacha20-ietf-poly1305",
 ];
 
+pub static VALID_VMESS_SECURITY: &[&str] = &[
+    "auto",
+    "none",
+    "zero",
+    "aes-128-gcm",
+    "chacha20-poly1305",
+    "aes-128-ctr",
+];
+
 use crate::models::NodeRequest;
 
 pub struct Validator;
@@ -264,5 +273,17 @@ mod tests {
         assert!(Validator::password("abc").is_err());
         assert!(Validator::password("secret").is_err()); // 6 字符，不够
         assert!(Validator::password(&"a".repeat(257)).is_err());
+    }
+
+    #[test]
+    fn test_valid_vmess_security_values() {
+        // auto, none, zero, aes-128-gcm, chacha20-poly1305, aes-128-ctr
+        assert!(VALID_VMESS_SECURITY.contains(&"auto"));
+        assert!(VALID_VMESS_SECURITY.contains(&"none"));
+        assert!(VALID_VMESS_SECURITY.contains(&"zero"));
+        assert!(VALID_VMESS_SECURITY.contains(&"aes-128-gcm"));
+        assert!(VALID_VMESS_SECURITY.contains(&"chacha20-poly1305"));
+        assert!(VALID_VMESS_SECURITY.contains(&"aes-128-ctr"));
+        assert!(!VALID_VMESS_SECURITY.contains(&"invalid"));
     }
 }

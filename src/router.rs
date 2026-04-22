@@ -267,4 +267,67 @@ mod tests {
         assert_eq!(json["success"], false);
         assert_eq!(json["message"], "Node not found");
     }
+
+    #[tokio::test]
+    async fn router_rejects_unsupported_node_type() {
+        let app = test_app(Config {
+            port: None,
+            subs: vec![],
+            nodes: vec![],
+            custom_rules: vec![],
+        })
+        .await;
+
+        let response = app
+            .oneshot(json_request(
+                "POST",
+                "/api/nodes",
+                json!({
+                    "node_type": "socks5",
+                    "tag": "bad-node",
+                    "server": "example.com",
+                    "server_port": 1080,
+                    "password": "password123"
+                }),
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let json = response_json(response).await;
+        assert_eq!(json["success"], false);
+        assert!(json["message"].as_str().unwrap().contains("不支持"));
+    }
+
+    #[tokio::test]
+    async fn router_rejects_vmess_invalid_security() {
+        let app = test_app(Config {
+            port: None,
+            subs: vec![],
+            nodes: vec![],
+            custom_rules: vec![],
+        })
+        .await;
+
+        let response = app
+            .oneshot(json_request(
+                "POST",
+                "/api/nodes",
+                json!({
+                    "node_type": "vmess",
+                    "tag": "vm-bad",
+                    "server": "vm.example.com",
+                    "server_port": 443,
+                    "password": "bf000d23-0752-40b4-affe-68f7707a9661",
+                    "cipher": "invalid-security"
+                }),
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let json = response_json(response).await;
+        assert_eq!(json["success"], false);
+        assert!(json["message"].as_str().unwrap().contains("加密方式"));
+    }
 }

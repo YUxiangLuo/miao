@@ -709,6 +709,72 @@ mod tests {
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }
 
+    #[test]
+    fn collect_manual_outbounds_handles_new_protocols() {
+        let config = Config {
+            port: None,
+            subs: vec![],
+            nodes: vec![
+                r#"{"type":"trojan","tag":"tr-a","server":"tr.example.com","server_port":443,"password":"secret","tls":{"enabled":true}}"#.to_string(),
+                r#"{"type":"vmess","tag":"vm-a","server":"vm.example.com","server_port":443,"uuid":"bf000d23-0752-40b4-affe-68f7707a9661","security":"auto"}"#.to_string(),
+                r#"{"type":"vless","tag":"vl-a","server":"vl.example.com","server_port":443,"uuid":"bf000d23-0752-40b4-affe-68f7707a9661","flow":"xtls-rprx-vision","tls":{"enabled":true}}"#.to_string(),
+                r#"{"type":"tuic","tag":"tu-a","server":"tu.example.com","server_port":443,"uuid":"bf000d23-0752-40b4-affe-68f7707a9661","congestion_control":"bbr","tls":{"enabled":true}}"#.to_string(),
+            ],
+            custom_rules: vec![],
+        };
+
+        let (outbounds, names) = collect_manual_outbounds(&config);
+
+        assert_eq!(outbounds.len(), 4);
+        assert_eq!(names, vec!["tr-a", "vm-a", "vl-a", "tu-a"]);
+        assert_eq!(outbounds[0]["type"], "trojan");
+        assert_eq!(outbounds[1]["type"], "vmess");
+        assert_eq!(outbounds[2]["type"], "vless");
+        assert_eq!(outbounds[3]["type"], "tuic");
+    }
+
+    #[test]
+    fn build_sing_box_config_merges_new_protocols() {
+        let config = Config {
+            port: None,
+            subs: vec![],
+            nodes: vec![],
+            custom_rules: vec![],
+        };
+
+        let my_outbounds = vec![
+            json!({"type": "trojan", "tag": "manual-tr", "server": "tr.example.com", "server_port": 443, "password": "secret"}),
+            json!({"type": "vless", "tag": "manual-vl", "server": "vl.example.com", "server_port": 443, "uuid": "bf000d23-0752-40b4-affe-68f7707a9661", "flow": "xtls-rprx-vision"}),
+        ];
+        let final_outbounds = vec![
+            json!({"type": "vmess", "tag": "sub-vm", "server": "vm.example.com", "server_port": 443, "uuid": "bf000d23-0752-40b4-affe-68f7707a9661", "security": "auto"}),
+            json!({"type": "tuic", "tag": "sub-tu", "server": "tu.example.com", "server_port": 443, "uuid": "bf000d23-0752-40b4-affe-68f7707a9661", "congestion_control": "bbr"}),
+        ];
+
+        let built = build_sing_box_config(
+            &config,
+            vec!["manual-tr".to_string(), "manual-vl".to_string()],
+            my_outbounds,
+            vec!["sub-vm".to_string(), "sub-tu".to_string()],
+            final_outbounds,
+        )
+        .unwrap();
+
+        let selector = built["outbounds"][0]["outbounds"].as_array().unwrap();
+        assert_eq!(selector.len(), 4);
+        assert_eq!(selector[0], "manual-tr");
+        assert_eq!(selector[1], "manual-vl");
+        assert_eq!(selector[2], "sub-vm");
+        assert_eq!(selector[3], "sub-tu");
+
+        let all_outbounds = built["outbounds"].as_array().unwrap();
+        assert_eq!(all_outbounds.len(), 6); // selector + direct + 4 nodes
+        assert_eq!(all_outbounds[2]["type"], "trojan");
+        assert_eq!(all_outbounds[3]["type"], "vless");
+        assert_eq!(all_outbounds[4]["type"], "vmess");
+        assert_eq!(all_outbounds[5]["type"], "tuic");
+    }
+
     #[tokio::test]
     async fn save_config_overwrites_existing_file() {
         let temp_dir =

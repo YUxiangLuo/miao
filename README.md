@@ -10,7 +10,7 @@
 - **TUN 透明代理** — 自动创建虚拟网卡接管全局流量
 - **国内外自动分流** — 内置 GEOIP/GEOSITE 规则，大陆直连、海外走代理
 - **Web 控制面板** — 订阅管理、节点切换、延迟测速、流量监控
-- **协议支持** — Hysteria2 / AnyTLS / Shadowsocks
+- **协议支持** — Hysteria2 / AnyTLS / Shadowsocks / Trojan / VMess / VLESS / TUIC
 - **静默升级** — 一键更新到最新 Release（SHA256 校验）
 - **开箱引导** — 无需手写配置文件，首次启动通过 Web 面板添加订阅或节点即可使用
 - **OpenWrt 适配** — 自动安装 TUN 所需内核模块
@@ -53,4 +53,8 @@ nodes:
   - '{"type":"hysteria2","tag":"HY2","server":"example.com","server_port":443,"password":"xxx","tls":{"enabled":true}}'
   - '{"type":"anytls","tag":"AnyTLS","server":"example.com","server_port":443,"password":"xxx","tls":{"enabled":true}}'
   - '{"type":"shadowsocks","tag":"SS","server":"example.com","server_port":443,"method":"2022-blake3-aes-128-gcm","password":"xxx"}'
+  - '{"type":"trojan","tag":"Trojan","server":"example.com","server_port":443,"password":"xxx","tls":{"enabled":true}}'
+  - '{"type":"vmess","tag":"VMess","server":"example.com","server_port":443,"uuid":"bf000d23-0752-40b4-affe-68f7707a9661","security":"auto","tls":{"enabled":true}}'
+  - '{"type":"vless","tag":"VLESS","server":"example.com","server_port":443,"uuid":"bf000d23-0752-40b4-affe-68f7707a9661","flow":"xtls-rprx-vision","tls":{"enabled":true}}'
+  - '{"type":"tuic","tag":"TUIC","server":"example.com","server_port":443,"uuid":"bf000d23-0752-40b4-affe-68f7707a9661","congestion_control":"bbr","tls":{"enabled":true}}'
 ```
