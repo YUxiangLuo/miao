@@ -86,6 +86,10 @@ jobs:
           mkdir -p embedded
           cd sing-box-src
 
+          # Build host binary first for rule-set compile (SRS is architecture-independent)
+          go build -ldflags "-s -w -buildid=" ./cmd/sing-box
+          mv sing-box ../embedded/sing-box-host
+
           SING_BOX_VERSION=$(git describe --tags --always)
           echo "Building sing-box version: ${SING_BOX_VERSION}"
 
@@ -103,11 +107,41 @@ jobs:
           echo "Built sing-box ${SING_BOX_VERSION}"
           ls -lh embedded/
 
-      - name: Download geo rule files
+      - name: Download and compile geo rule files
         run: |
+          # Download geoip
           curl -L -o embedded/geoip-cn.srs https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/geoip-cn.srs
-          curl -L -o embedded/geosite-geolocation-cn.srs https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-geolocation-cn.srs
-          echo "Downloaded geo rule files:"
+
+          # Fetch direct-list.txt, parse and compile to SRS (referencing index.ts)
+          curl -L -o /tmp/direct-list.txt https://raw.githubusercontent.com/Loyalsoldier/v2ray-rules-dat/release/direct-list.txt
+
+          node -e '
+            const fs = require("fs");
+            const text = fs.readFileSync("/tmp/direct-list.txt", "utf-8");
+            const domainList = [], suffixList = [], regexList = [];
+            for (const raw of text.split("\n")) {
+              const line = raw.trim();
+              if (!line || line.startsWith("#")) continue;
+              if (line.startsWith("full:")) domainList.push(line.slice(5));
+              else if (line.startsWith("regexp:")) regexList.push(line.slice(7));
+              else if (line.startsWith("domain:")) suffixList.push(line.slice(7));
+              else suffixList.push(line);
+            }
+            const rules = {};
+            if (domainList.length) rules.domain = domainList;
+            if (suffixList.length) rules.domain_suffix = suffixList;
+            if (regexList.length) rules.domain_regex = regexList;
+            const ruleset = { version: 4, rules: [rules] };
+            fs.writeFileSync("/tmp/direct-list.json", JSON.stringify(ruleset, null, 2));
+            const total = domainList.length + suffixList.length + regexList.length;
+            console.log("Parsed " + total + " rules: domain=" + domainList.length + ", domain_suffix=" + suffixList.length + ", domain_regex=" + regexList.length);
+          '
+
+          ./embedded/sing-box-host rule-set compile /tmp/direct-list.json -o embedded/geosite-geolocation-cn.srs
+
+          rm -f /tmp/direct-list.txt /tmp/direct-list.json
+
+          echo "Downloaded/Compiled geo rule files:"
           ls -lh embedded/*.srs
 
       - name: Build release for ${{ matrix.target }}
