@@ -394,7 +394,6 @@ fn get_config_template() -> serde_json::Value {
             "final": "googledns",
             "strategy": "ipv4_only",
             "disable_cache": false,
-            "independent_cache": true,
             "servers": [
                 {"type": "udp", "tag": "googledns", "server": "8.8.8.8", "detour": "proxy"},
                 {"tag": "local", "type": "udp", "server": "223.5.5.5"}
