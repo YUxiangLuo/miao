@@ -391,11 +391,11 @@ fn get_config_template() -> serde_json::Value {
         "log": {"disabled": false, "timestamp": true, "level": "info"},
         "experimental": {"clash_api": {"external_controller": "0.0.0.0:6262", "access_control_allow_origin": ["*"]}},
         "dns": {
-            "final": "googledns",
+            "final": "cfdns",
             "strategy": "ipv4_only",
             "disable_cache": false,
             "servers": [
-                {"type": "udp", "tag": "googledns", "server": "8.8.8.8", "detour": "proxy"},
+                {"type": "udp", "tag": "cfdns", "server": "1.1.1.1", "detour": "proxy"},
                 {"tag": "local", "type": "udp", "server": "223.5.5.5"}
             ],
             "rules": [{"rule_set": ["chinasite"], "action": "route", "server": "local"}]
