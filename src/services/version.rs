@@ -1,10 +1,10 @@
-use std::{
-    fs,
-    os::unix::{fs::PermissionsExt, process::CommandExt},
-    path::Path,
-    sync::{atomic::Ordering, Arc},
-    time::Instant,
-};
+#[cfg(not(target_os = "windows"))]
+use std::fs;
+#[cfg(not(target_os = "windows"))]
+use std::os::unix::{fs::PermissionsExt, process::CommandExt};
+#[cfg(not(target_os = "windows"))]
+use std::sync::atomic::Ordering;
+use std::{path::Path, sync::Arc, time::Instant};
 
 use futures::StreamExt;
 use sha2::{Digest, Sha256};
@@ -14,6 +14,7 @@ use tracing::{error, info, warn};
 
 use crate::error::{AppError, AppResult};
 use crate::models::{GitHubAsset, GitHubRelease, VersionInfo};
+#[cfg(not(target_os = "windows"))]
 use crate::services::singbox::{get_sing_box_home, stop_sing_internal};
 use crate::state::{AppState, VersionCache};
 use crate::VERSION;
@@ -359,6 +360,7 @@ fn release_is_newer_than_current(current: &str, release_tag: &str) -> bool {
 }
 
 /// 对已通过 SHA256 校验的临时文件 chmod 并执行 `--version` 核对。
+#[cfg(not(target_os = "windows"))]
 async fn verify_temp_binary_executable(temp_path: &Path, tag_name: &str) -> AppResult<()> {
     std::fs::set_permissions(temp_path, std::fs::Permissions::from_mode(0o755))
         .map_err(|e| AppError::context("Failed to chmod temp binary", e))?;
@@ -399,6 +401,14 @@ fn stdout_version_matches_release(stdout: &str, tag_name: &str) -> bool {
     stdout.contains(tag_trim) || stdout.contains(no_v)
 }
 
+#[cfg(target_os = "windows")]
+pub async fn upgrade_binary(_state: &Arc<AppState>) -> AppResult<String> {
+    Err(AppError::message(
+        "Windows 一键升级暂不支持，请下载最新 miao-rust-windows-amd64.exe 后手动替换",
+    ))
+}
+
+#[cfg(not(target_os = "windows"))]
 pub async fn upgrade_binary(state: &Arc<AppState>) -> AppResult<String> {
     if state
         .upgrading
@@ -535,10 +545,12 @@ fn current_version() -> String {
 }
 
 fn current_arch_asset_name() -> Option<&'static str> {
-    if cfg!(target_arch = "x86_64") {
+    if cfg!(all(target_os = "linux", target_arch = "x86_64")) {
         Some("miao-rust-linux-amd64")
-    } else if cfg!(target_arch = "aarch64") {
+    } else if cfg!(all(target_os = "linux", target_arch = "aarch64")) {
         Some("miao-rust-linux-arm64")
+    } else if cfg!(all(target_os = "windows", target_arch = "x86_64")) {
+        Some("miao-rust-windows-amd64.exe")
     } else {
         None
     }
@@ -603,10 +615,15 @@ mod tests {
 
     #[test]
     fn current_arch_asset_name_matches_supported_targets() {
-        if cfg!(target_arch = "x86_64") {
+        if cfg!(all(target_os = "linux", target_arch = "x86_64")) {
             assert_eq!(current_arch_asset_name(), Some("miao-rust-linux-amd64"));
-        } else if cfg!(target_arch = "aarch64") {
+        } else if cfg!(all(target_os = "linux", target_arch = "aarch64")) {
             assert_eq!(current_arch_asset_name(), Some("miao-rust-linux-arm64"));
+        } else if cfg!(all(target_os = "windows", target_arch = "x86_64")) {
+            assert_eq!(
+                current_arch_asset_name(),
+                Some("miao-rust-windows-amd64.exe")
+            );
         } else {
             assert_eq!(current_arch_asset_name(), None);
         }

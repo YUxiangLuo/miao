@@ -8,6 +8,9 @@ import { Button, SectionCard } from './ui.jsx'
 import { classNames, formatUptime, formatSpeed } from '../utils.js'
 
 export function StatusCard({ status, traffic, loadingAction, onToggleService }) {
+  const isSocksMode = status.proxy_mode === 'socks5'
+  const socksAddress = `127.0.0.1:${status.socks_port || 6162}`
+
   return (
     <SectionCard className="status-card" bodyClassName="status-card-body" header={null}>
       <div className="status-left-wrap">
@@ -17,11 +20,13 @@ export function StatusCard({ status, traffic, loadingAction, onToggleService }) 
             Sing-box {status.initializing ? '初始化中' : status.running ? '运行中' : '已停止'}
           </div>
           <div className="status-subtitle">
-            {status.running 
-              ? `PID: ${status.pid ?? '--'} · 运行时长: ${formatUptime(status.uptime_secs)}` 
-              : status.initializing 
-                ? '正在获取订阅并启动服务…' 
-                : '等待启动服务'}
+            {status.running
+              ? `PID: ${status.pid ?? '--'} · 运行时长: ${formatUptime(status.uptime_secs)}${isSocksMode ? ` · SOCKS5 ${socksAddress}` : ''}`
+              : status.initializing
+                ? '正在获取订阅并启动服务…'
+                : isSocksMode
+                  ? `Windows SOCKS5 模式：请将代理设置为 ${socksAddress}`
+                  : '等待启动服务'}
           </div>
         </div>
       </div>

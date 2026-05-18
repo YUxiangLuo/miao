@@ -38,6 +38,9 @@ impl<T: Serialize> ApiResponse<T> {
 pub struct StatusData {
     pub running: bool,
     pub initializing: bool,
+    pub proxy_mode: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub socks_port: Option<u16>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pid: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]

@@ -4,6 +4,8 @@ use tokio::time::Duration;
 use tracing::{error, info, warn};
 
 use crate::error::{AppError, AppResult};
+#[cfg(target_os = "windows")]
+use crate::models::WINDOWS_SOCKS_PORT;
 use crate::models::{Config, SubStatus};
 use crate::services::{
     proxy::restore_last_proxy,
@@ -14,8 +16,11 @@ use crate::services::{
 };
 use crate::state::AppState;
 
-const CONFIG_CACHE_PATH: &str = "/tmp/miao-sing-box/config.json.cache";
 const MAX_CONCURRENT_SUBS: usize = 5;
+
+fn config_cache_path() -> std::path::PathBuf {
+    get_sing_box_home().join("config.json.cache")
+}
 
 /// 原子写入文件：先写入临时文件，再重命名为目标文件
 async fn write_file_atomic(path: &std::path::Path, content: &str) -> AppResult<()> {
@@ -41,20 +46,21 @@ pub async fn save_config(config: &Config) -> AppResult<()> {
 
 pub async fn save_config_cache() {
     let config_path = get_sing_box_home().join("config.json");
-    if let Err(e) = tokio::fs::copy(&config_path, CONFIG_CACHE_PATH).await {
+    let cache_path = config_cache_path();
+    if let Err(e) = tokio::fs::copy(&config_path, &cache_path).await {
         error!("Failed to save config cache: {}", e);
     } else {
-        info!("Config cache saved to {}", CONFIG_CACHE_PATH);
+        info!("Config cache saved to {}", cache_path.display());
     }
 }
 
 pub async fn restore_config_from_cache() -> AppResult<()> {
-    let cache = std::path::Path::new(CONFIG_CACHE_PATH);
-    if !cache.exists() {
+    let cache_path = config_cache_path();
+    if !cache_path.exists() {
         return Err(AppError::message("No cached config available"));
     }
     let config_path = get_sing_box_home().join("config.json");
-    tokio::fs::copy(CONFIG_CACHE_PATH, &config_path)
+    tokio::fs::copy(&cache_path, &config_path)
         .await
         .map_err(|e| AppError::context("Failed to restore config from cache", e))?;
     info!("Restored config from cache");
@@ -147,11 +153,11 @@ pub async fn apply_config_change(
                     info!("sing-box still running with previous config, skipping restart");
                 } else {
                     // 优先从 config.json 缓存恢复，避免重新拉取订阅
-                    let cache_path = std::path::Path::new(CONFIG_CACHE_PATH);
+                    let cache_path = config_cache_path();
                     let config_json_path = get_sing_box_home().join("config.json");
                     if cache_path.exists() {
                         info!("Restoring config.json from cache for rollback");
-                        tokio::fs::copy(cache_path, &config_json_path)
+                        tokio::fs::copy(&cache_path, &config_json_path)
                             .await
                             .map_err(|e| {
                                 AppError::context("Failed to restore config.json from cache", e)
@@ -364,13 +370,13 @@ fn build_sing_box_config(
             arr.extend(
                 my_names
                     .into_iter()
-                    .chain(final_node_names.into_iter())
+                    .chain(final_node_names)
                     .map(serde_json::Value::String),
             );
         }
     }
     if let Some(arr) = sing_box_config["outbounds"].as_array_mut() {
-        arr.extend(my_outbounds.into_iter().chain(final_outbounds.into_iter()));
+        arr.extend(my_outbounds.into_iter().chain(final_outbounds));
     }
 
     if let Some(rules) = sing_box_config["route"]["rules"].as_array_mut() {
@@ -400,9 +406,7 @@ fn get_config_template() -> serde_json::Value {
             ],
             "rules": [{"rule_set": ["chinasite"], "action": "route", "server": "local"}]
         },
-        "inbounds": [
-            {"type": "tun", "tag": "tun-in", "interface_name": "sing-tun", "address": ["172.18.0.1/30"], "mtu": 9000, "auto_route": true, "strict_route": true, "auto_redirect": true}
-        ],
+        "inbounds": platform_inbounds(),
         "outbounds": [
             {"type": "selector", "tag": "proxy", "outbounds": []},
             {"type": "direct", "tag": "direct"}
@@ -422,6 +426,35 @@ fn get_config_template() -> serde_json::Value {
             ]
         }
     })
+}
+
+#[cfg(target_os = "windows")]
+fn platform_inbounds() -> serde_json::Value {
+    serde_json::json!([
+        {
+            "type": "socks",
+            "tag": "socks-in",
+            "listen": "127.0.0.1",
+            "listen_port": WINDOWS_SOCKS_PORT,
+            "sniff": true
+        }
+    ])
+}
+
+#[cfg(not(target_os = "windows"))]
+fn platform_inbounds() -> serde_json::Value {
+    serde_json::json!([
+        {
+            "type": "tun",
+            "tag": "tun-in",
+            "interface_name": "sing-tun",
+            "address": ["172.18.0.1/30"],
+            "mtu": 9000,
+            "auto_route": true,
+            "strict_route": true,
+            "auto_redirect": true
+        }
+    ])
 }
 
 #[cfg(test)]

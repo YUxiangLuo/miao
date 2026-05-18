@@ -4,7 +4,7 @@ use std::{sync::Arc, time::Instant};
 use tokio::time::Duration;
 
 use crate::error::AppError;
-use crate::models::{ApiResponse, ConnectivityResult, StatusData};
+use crate::models::{ApiResponse, ConnectivityResult, StatusData, WINDOWS_SOCKS_PORT};
 use crate::responses::{status_error, success, success_no_data, HandlerResult};
 use crate::services::{
     proxy::restore_last_proxy,
@@ -17,7 +17,7 @@ pub async fn get_status(State(state): State<Arc<AppState>>) -> Json<ApiResponse<
     let (running, pid, uptime_secs) = {
         let mut lock = state.sing_process.lock().await;
 
-        let result = if let Some(ref mut proc) = *lock {
+        if let Some(ref mut proc) = *lock {
             match proc.child.try_wait() {
                 Ok(Some(_)) => {
                     *lock = None;
@@ -31,8 +31,7 @@ pub async fn get_status(State(state): State<Arc<AppState>>) -> Json<ApiResponse<
             }
         } else {
             (false, None, None)
-        };
-        result
+        }
     }; // sing_process 锁在此处释放
 
     let initializing = state
@@ -45,11 +44,29 @@ pub async fn get_status(State(state): State<Arc<AppState>>) -> Json<ApiResponse<
         StatusData {
             running,
             initializing,
+            proxy_mode: platform_proxy_mode().to_string(),
+            socks_port: platform_socks_port(),
             pid,
             uptime_secs,
             warning,
         },
     )
+}
+
+fn platform_proxy_mode() -> &'static str {
+    if cfg!(target_os = "windows") {
+        "socks5"
+    } else {
+        "tun"
+    }
+}
+
+fn platform_socks_port() -> Option<u16> {
+    if cfg!(target_os = "windows") {
+        Some(WINDOWS_SOCKS_PORT)
+    } else {
+        None
+    }
 }
 
 pub async fn start_service(State(state): State<Arc<AppState>>) -> HandlerResult {

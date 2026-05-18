@@ -40,10 +40,25 @@ jobs:
         include:
           - target: amd64
             rust_target: x86_64-unknown-linux-musl
+            goos: linux
             goarch: amd64
+            sing_box_asset: sing-box-amd64
+            release_asset: miao-rust-linux-amd64
+            binary_ext: ""
           - target: arm64
             rust_target: aarch64-unknown-linux-musl
+            goos: linux
             goarch: arm64
+            sing_box_asset: sing-box-arm64
+            release_asset: miao-rust-linux-arm64
+            binary_ext: ""
+          - target: windows-amd64
+            rust_target: x86_64-pc-windows-gnu
+            goos: windows
+            goarch: amd64
+            sing_box_asset: sing-box-windows-amd64.exe
+            release_asset: miao-rust-windows-amd64.exe
+            binary_ext: ".exe"
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -93,13 +108,13 @@ jobs:
           SING_BOX_VERSION=$(git describe --tags --always)
           echo "Building sing-box version: ${SING_BOX_VERSION}"
 
-          GOARCH=${{ matrix.goarch }} GOOS=linux CGO_ENABLED=0 go build \
+          GOARCH=${{ matrix.goarch }} GOOS=${{ matrix.goos }} CGO_ENABLED=0 go build \
             -v \
             -trimpath \
             -ldflags "-s -w -buildid=" \
             -tags "with_quic,with_clash_api" \
             ./cmd/sing-box
-          mv sing-box ../embedded/sing-box-${{ matrix.target }}
+          mv sing-box${{ matrix.binary_ext }} ../embedded/${{ matrix.sing_box_asset }}
 
           cd ..
           rm -rf sing-box-src
@@ -149,8 +164,8 @@ jobs:
 
       - name: Prepare release asset
         run: |
-          mv target/${{ matrix.rust_target }}/release/miao-rust miao-rust-linux-${{ matrix.target }}
-          ASSET="miao-rust-linux-${{ matrix.target }}"
+          mv target/${{ matrix.rust_target }}/release/miao-rust${{ matrix.binary_ext }} ${{ matrix.release_asset }}
+          ASSET="${{ matrix.release_asset }}"
           # GNU sha256sum 标准一行：`<hex>  <filename>`，供本机校验与程序解析
           sha256sum "$ASSET" | tee "${ASSET}.sha256"
           echo "RELEASE_ASSET=$ASSET" >> $GITHUB_ENV

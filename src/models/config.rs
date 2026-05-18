@@ -13,3 +13,4 @@ pub struct Config {
 }
 
 pub const DEFAULT_PORT: u16 = 6161;
+pub const WINDOWS_SOCKS_PORT: u16 = 6162;

@@ -29,13 +29,19 @@ mkdir ~/miao && cd ~/miao
 wget https://github.com/YUxiangLuo/miao/releases/latest/download/miao-rust-linux-arm64 -O miao && chmod +x miao
 ```
 
-运行（需要 root 权限以创建 TUN 网卡）：
+运行（Linux/OpenWrt 需要 root 权限以创建 TUN 网卡）：
 
 ```bash
 sudo ./miao
 ```
 
-访问 `http://localhost:6161`，首次启动会进入引导页面，添加订阅链接或手动节点即可开始使用。
+Windows 版本无需 TUN，启动后会以 SOCKS5 入站运行：
+
+```powershell
+.\miao-rust-windows-amd64.exe
+```
+
+访问 `http://localhost:6161`，首次启动会进入引导页面，添加订阅链接或手动节点即可开始使用。Windows 下请将系统或浏览器代理设置为 `SOCKS5 127.0.0.1:6162`。
 
 ### 进阶：手动编写配置文件
 

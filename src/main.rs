@@ -10,14 +10,16 @@ mod test_support;
 mod validation;
 
 use crate::error::{AppError, AppResult};
+#[cfg(unix)]
 use nix::unistd::Uid;
 use std::{fs, sync::Arc};
 use tracing::{error, info, warn};
 
 use models::{Config, DEFAULT_PORT};
+#[cfg(target_os = "linux")]
+use services::openwrt::check_and_install_openwrt_dependencies;
 use services::{
     config::{gen_config, restore_config_from_cache, save_config, save_config_cache},
-    openwrt::check_and_install_openwrt_dependencies,
     proxy::restore_last_proxy,
     singbox::{extract_sing_box, start_sing_internal, stop_sing_internal},
 };
@@ -25,6 +27,7 @@ use state::AppState;
 
 pub(crate) const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+#[cfg(not(target_os = "windows"))]
 fn browser_launch_env() -> Vec<(String, String)> {
     let mut envs = Vec::new();
 
@@ -55,50 +58,85 @@ fn browser_launch_env() -> Vec<(String, String)> {
 }
 
 async fn open_onboarding_browser(url: String) {
-    let has_graphical_session =
-        std::env::var_os("DISPLAY").is_some() || std::env::var_os("WAYLAND_DISPLAY").is_some();
-    if !has_graphical_session {
-        return;
-    }
-
-    let launch_env = browser_launch_env();
-    let sudo_user = std::env::var("SUDO_USER")
-        .ok()
-        .filter(|user| !user.is_empty());
-    let use_runuser = sudo_user.is_some();
-    let mut command = if let Some(sudo_user) = sudo_user {
-        let mut command = tokio::process::Command::new("runuser");
-        command.arg("-u").arg(sudo_user).arg("--").arg("env");
-        for (key, value) in &launch_env {
-            command.arg(format!("{key}={value}"));
-        }
-        command.arg("xdg-open");
-        command
-    } else {
-        tokio::process::Command::new("xdg-open")
-    };
-
-    command.arg(&url);
-    if !use_runuser {
-        command.envs(launch_env);
-    }
-
-    match command
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .await
+    #[cfg(target_os = "windows")]
     {
-        Ok(status) if status.success() => {}
-        Ok(status) => warn!(
-            url = %url,
-            status = ?status.code(),
-            "Failed to auto-open onboarding URL in browser"
-        ),
-        Err(err) => warn!(url = %url, error = %err, "Failed to launch browser opener"),
+        let mut command = tokio::process::Command::new("cmd");
+        command.args(["/C", "start", "", &url]);
+        match command
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .await
+        {
+            Ok(status) if status.success() => {}
+            Ok(status) => warn!(
+                url = %url,
+                status = ?status.code(),
+                "Failed to auto-open onboarding URL in browser"
+            ),
+            Err(err) => warn!(url = %url, error = %err, "Failed to launch browser opener"),
+        }
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let has_graphical_session =
+            std::env::var_os("DISPLAY").is_some() || std::env::var_os("WAYLAND_DISPLAY").is_some();
+        if !has_graphical_session {
+            return;
+        }
+
+        let launch_env = browser_launch_env();
+        let sudo_user = std::env::var("SUDO_USER")
+            .ok()
+            .filter(|user| !user.is_empty());
+        let use_runuser = sudo_user.is_some();
+        let mut command = if let Some(sudo_user) = sudo_user {
+            let mut command = tokio::process::Command::new("runuser");
+            command.arg("-u").arg(sudo_user).arg("--").arg("env");
+            for (key, value) in &launch_env {
+                command.arg(format!("{key}={value}"));
+            }
+            command.arg("xdg-open");
+            command
+        } else {
+            tokio::process::Command::new("xdg-open")
+        };
+
+        command.arg(&url);
+        if !use_runuser {
+            command.envs(launch_env);
+        }
+
+        match command
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .await
+        {
+            Ok(status) if status.success() => {}
+            Ok(status) => warn!(
+                url = %url,
+                status = ?status.code(),
+                "Failed to auto-open onboarding URL in browser"
+            ),
+            Err(err) => warn!(url = %url, error = %err, "Failed to launch browser opener"),
+        }
     }
 }
+
+#[cfg(unix)]
+fn ensure_platform_privileges() {
+    if !Uid::effective().is_root() {
+        error!("This application must be run as root");
+        std::process::exit(1);
+    }
+}
+
+#[cfg(not(unix))]
+fn ensure_platform_privileges() {}
 
 #[tokio::main]
 async fn main() -> AppResult<()> {
@@ -115,10 +153,7 @@ async fn main() -> AppResult<()> {
         return Ok(());
     }
 
-    if !Uid::effective().is_root() {
-        error!("This application must be run as root");
-        std::process::exit(1);
-    }
+    ensure_platform_privileges();
 
     if let Ok(current_exe) = std::env::current_exe() {
         let backup_path = format!("{}.bak", current_exe.display());
@@ -211,9 +246,12 @@ async fn main() -> AppResult<()> {
             }
         }
 
-        info!("Checking dependencies...");
-        if let Err(e) = check_and_install_openwrt_dependencies().await {
-            error!("Failed to check or install OpenWrt dependencies: {}", e);
+        #[cfg(target_os = "linux")]
+        {
+            info!("Checking dependencies...");
+            if let Err(e) = check_and_install_openwrt_dependencies().await {
+                error!("Failed to check or install OpenWrt dependencies: {}", e);
+            }
         }
 
         match start_sing_internal(&state_for_init).await {
@@ -243,6 +281,7 @@ async fn main() -> AppResult<()> {
     Ok(())
 }
 
+#[cfg(unix)]
 async fn shutdown_signal(state: Arc<AppState>) {
     let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
         .expect("failed to install SIGTERM handler");
@@ -253,6 +292,16 @@ async fn shutdown_signal(state: Arc<AppState>) {
         }
         _ = sigterm.recv() => {}
     }
+
+    info!("Shutting down, stopping sing-box...");
+    stop_sing_internal(&state).await;
+}
+
+#[cfg(not(unix))]
+async fn shutdown_signal(state: Arc<AppState>) {
+    tokio::signal::ctrl_c()
+        .await
+        .expect("failed to install Ctrl+C handler");
 
     info!("Shutting down, stopping sing-box...");
     stop_sing_internal(&state).await;
