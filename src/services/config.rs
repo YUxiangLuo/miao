@@ -364,13 +364,13 @@ fn build_sing_box_config(
             arr.extend(
                 my_names
                     .into_iter()
-                    .chain(final_node_names.into_iter())
+                    .chain(final_node_names)
                     .map(serde_json::Value::String),
             );
         }
     }
     if let Some(arr) = sing_box_config["outbounds"].as_array_mut() {
-        arr.extend(my_outbounds.into_iter().chain(final_outbounds.into_iter()));
+        arr.extend(my_outbounds.into_iter().chain(final_outbounds));
     }
 
     if let Some(rules) = sing_box_config["route"]["rules"].as_array_mut() {
@@ -398,7 +398,10 @@ fn get_config_template() -> serde_json::Value {
                 {"type": "udp", "tag": "cfdns", "server": "1.1.1.1", "detour": "proxy"},
                 {"tag": "local", "type": "udp", "server": "223.5.5.5"}
             ],
-            "rules": [{"rule_set": ["chinasite"], "action": "route", "server": "local"}]
+            "rules": [
+                {"domain_suffix": ["hdslb.com"], "action": "route", "server": "local"},
+                {"rule_set": ["chinasite"], "action": "route", "server": "local"}
+            ]
         },
         "inbounds": [
             {"type": "tun", "tag": "tun-in", "interface_name": "sing-tun", "address": ["172.18.0.1/30"], "mtu": 9000, "auto_route": true, "strict_route": true, "auto_redirect": true}
@@ -414,7 +417,10 @@ fn get_config_template() -> serde_json::Value {
             "rules": [
                 {"action": "sniff"},
                 {"protocol": "dns", "action": "hijack-dns"},
-                {"ip_is_private": true, "rule_set": ["chinaip", "chinasite"], "action": "route", "outbound": "direct"}
+                {"ip_is_private": true, "action": "route", "outbound": "direct"},
+                {"domain_suffix": ["hdslb.com"], "action": "route", "outbound": "direct"},
+                {"rule_set": ["chinasite"], "action": "route", "outbound": "direct"},
+                {"rule_set": ["chinaip"], "action": "route", "outbound": "direct"}
             ],
             "rule_set": [
                 {"type": "local", "tag": "chinasite", "format": "binary", "path": "./chinasite.srs"},
@@ -520,8 +526,8 @@ mod tests {
         assert_eq!(all_outbounds[3]["tag"], "sub-a");
 
         let rules = built["route"]["rules"].as_array().unwrap();
-        assert_eq!(rules.len(), 4);
-        assert_eq!(rules[3]["domain_suffix"][0], "example.com");
+        assert_eq!(rules.len(), 7);
+        assert_eq!(rules[6]["domain_suffix"][0], "example.com");
     }
 
     #[test]
@@ -637,8 +643,61 @@ mod tests {
         .unwrap();
 
         let rules = built["route"]["rules"].as_array().unwrap();
-        // Should have only the default 3 rules (sniff, hijack-dns, private ip)
-        assert_eq!(rules.len(), 3);
+        // Should have only the default direct-split rules.
+        assert_eq!(rules.len(), 6);
+    }
+
+    #[test]
+    fn build_sing_box_config_splits_direct_route_rules() {
+        let config = Config {
+            port: None,
+            subs: vec![],
+            nodes: vec![],
+            custom_rules: vec![],
+        };
+
+        let my_outbounds = vec![json!({
+            "type": "hysteria2",
+            "tag": "manual-a",
+            "server": "manual.example.com",
+            "server_port": 443,
+            "password": "secret"
+        })];
+
+        let built = build_sing_box_config(
+            &config,
+            vec!["manual-a".to_string()],
+            my_outbounds,
+            vec![],
+            vec![],
+        )
+        .unwrap();
+
+        let rules = built["route"]["rules"].as_array().unwrap();
+
+        assert_eq!(rules[2]["ip_is_private"], true);
+        assert_eq!(rules[2]["outbound"], "direct");
+        assert!(rules[2].get("rule_set").is_none());
+
+        assert_eq!(rules[3]["domain_suffix"], json!(["hdslb.com"]));
+        assert_eq!(rules[3]["outbound"], "direct");
+        assert!(rules[3].get("rule_set").is_none());
+        assert!(rules[3].get("ip_is_private").is_none());
+
+        assert_eq!(rules[4]["rule_set"], json!(["chinasite"]));
+        assert_eq!(rules[4]["outbound"], "direct");
+        assert!(rules[4].get("ip_is_private").is_none());
+
+        assert_eq!(rules[5]["rule_set"], json!(["chinaip"]));
+        assert_eq!(rules[5]["outbound"], "direct");
+        assert!(rules[5].get("ip_is_private").is_none());
+
+        let dns_rules = built["dns"]["rules"].as_array().unwrap();
+        assert_eq!(dns_rules.len(), 2);
+        assert_eq!(dns_rules[0]["domain_suffix"], json!(["hdslb.com"]));
+        assert_eq!(dns_rules[0]["server"], "local");
+        assert_eq!(dns_rules[1]["rule_set"], json!(["chinasite"]));
+        assert_eq!(dns_rules[1]["server"], "local");
     }
 
     #[test]
@@ -672,8 +731,8 @@ mod tests {
         .unwrap();
 
         let rules = built["route"]["rules"].as_array().unwrap();
-        // Should have only the default 3 rules
-        assert_eq!(rules.len(), 3);
+        // Should have only the default direct-split rules.
+        assert_eq!(rules.len(), 6);
     }
 
     #[tokio::test]

@@ -17,7 +17,7 @@ pub async fn get_status(State(state): State<Arc<AppState>>) -> Json<ApiResponse<
     let (running, pid, uptime_secs) = {
         let mut lock = state.sing_process.lock().await;
 
-        let result = if let Some(ref mut proc) = *lock {
+        if let Some(ref mut proc) = *lock {
             match proc.child.try_wait() {
                 Ok(Some(_)) => {
                     *lock = None;
@@ -31,8 +31,7 @@ pub async fn get_status(State(state): State<Arc<AppState>>) -> Json<ApiResponse<
             }
         } else {
             (false, None, None)
-        };
-        result
+        }
     }; // sing_process 锁在此处释放
 
     let initializing = state
