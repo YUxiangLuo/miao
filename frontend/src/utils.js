@@ -103,8 +103,8 @@ export function validateSubscriptionUrl(url) {
 
 export function validateNodeTag(tag) {
   if (!tag || !tag.trim()) return '节点名称不能为空'
-  if (tag.length > 64) return '节点名称不能超过 64 个字符'
-  if (!/^[a-zA-Z0-9\-_\s]+$/.test(tag)) return '节点名称只能包含字母、数字、空格、下划线和连字符'
+  if (Array.from(tag).length > 64) return '节点名称不能超过 64 个字符'
+  if (!/^[\p{L}\p{N}\-_\s]+$/u.test(tag)) return '节点名称只能包含字母、数字、空格、下划线和连字符'
   return null
 }
 

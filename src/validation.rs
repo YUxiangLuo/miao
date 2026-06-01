@@ -2,7 +2,7 @@ use regex::Regex;
 use std::sync::LazyLock;
 
 static VALID_TAG_REGEX: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^[a-zA-Z0-9\-_\s]{1,64}$").unwrap());
+    LazyLock::new(|| Regex::new(r"^[\p{L}\p{N}\-_\s]{1,64}$").unwrap());
 
 static VALID_CIPHERS: &[&str] = &[
     "2022-blake3-aes-128-gcm",
@@ -63,7 +63,7 @@ impl Validator {
             return Err("节点名称不能为空".to_string());
         }
 
-        if tag.len() > 64 {
+        if tag.chars().count() > 64 {
             return Err("节点名称不能超过 64 个字符".to_string());
         }
 
@@ -186,12 +186,16 @@ mod tests {
         assert!(Validator::node_tag("Node_123").is_ok());
         assert!(Validator::node_tag("My Node").is_ok());
         assert!(Validator::node_tag("a").is_ok());
+        assert!(Validator::node_tag("香港节点").is_ok());
+        assert!(Validator::node_tag("日本サーバー").is_ok());
+        assert!(Validator::node_tag("节点 01-日本").is_ok());
     }
 
     #[test]
     fn test_invalid_node_tags() {
         assert!(Validator::node_tag("").is_err());
         assert!(Validator::node_tag(&"a".repeat(65)).is_err());
+        assert!(Validator::node_tag(&"节".repeat(65)).is_err());
         assert!(Validator::node_tag("node<script>").is_err());
     }
 
