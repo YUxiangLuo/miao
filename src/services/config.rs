@@ -401,12 +401,14 @@ fn get_config_template() -> serde_json::Value {
             "strategy": "ipv4_only",
             "disable_cache": false,
             "servers": [
-                {"type": "udp", "tag": "cfdns", "server": "1.1.1.1", "detour": "proxy"},
-                {"tag": "local", "type": "udp", "server": "223.5.5.5"}
+                {"type": "https", "tag": "cfdns", "server": "1.1.1.1", "server_port": 443, "path": "/dns-query", "detour": "proxy", "tls": {"enabled": true, "server_name": "cloudflare-dns.com"}},
+                {"tag": "local", "type": "udp", "server": "223.5.5.5"},
+                {"type": "fakeip", "tag": "fakeip", "inet4_range": "198.18.0.0/15"}
             ],
             "rules": [
                 {"domain_suffix": ["hdslb.com"], "action": "route", "server": "local"},
-                {"rule_set": ["chinasite"], "action": "route", "server": "local"}
+                {"rule_set": ["chinasite"], "action": "route", "server": "local"},
+                {"action": "route", "server": "fakeip"}
             ]
         },
         "inbounds": [
@@ -702,11 +704,27 @@ mod tests {
         assert!(rules[5].get("ip_is_private").is_none());
 
         let dns_rules = built["dns"]["rules"].as_array().unwrap();
-        assert_eq!(dns_rules.len(), 2);
+        assert_eq!(dns_rules.len(), 3);
         assert_eq!(dns_rules[0]["domain_suffix"], json!(["hdslb.com"]));
         assert_eq!(dns_rules[0]["server"], "local");
         assert_eq!(dns_rules[1]["rule_set"], json!(["chinasite"]));
         assert_eq!(dns_rules[1]["server"], "local");
+        assert_eq!(dns_rules[2]["server"], "fakeip");
+
+        let dns_servers = built["dns"]["servers"].as_array().unwrap();
+        let cfdns = dns_servers
+            .iter()
+            .find(|server| server["tag"] == "cfdns")
+            .unwrap();
+        assert_eq!(cfdns["type"], "https");
+        assert_eq!(cfdns["server"], "1.1.1.1");
+        assert_eq!(cfdns["path"], "/dns-query");
+        assert_eq!(cfdns["detour"], "proxy");
+        assert_eq!(cfdns["tls"]["server_name"], "cloudflare-dns.com");
+
+        assert!(dns_servers
+            .iter()
+            .any(|server| server["type"] == "fakeip" && server["tag"] == "fakeip"));
     }
 
     #[test]
