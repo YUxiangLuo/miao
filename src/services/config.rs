@@ -395,18 +395,29 @@ fn build_sing_box_config(
 fn get_config_template() -> serde_json::Value {
     serde_json::json!({
         "log": {"disabled": false, "timestamp": true, "level": "info"},
-        "experimental": {"clash_api": {"external_controller": "0.0.0.0:6262", "access_control_allow_origin": ["*"]}},
+        "experimental": {
+            "cache_file": {
+                "enabled": true,
+                "path": "/tmp/miao-sing-box/cache.db",
+                "store_fakeip": true,
+                "store_dns": false
+            },
+            "clash_api": {"external_controller": "0.0.0.0:6262", "access_control_allow_origin": ["*"]}
+        },
         "dns": {
             "final": "cfdns",
             "strategy": "ipv4_only",
-            "disable_cache": false,
+            "cache_capacity": 16384,
+            "optimistic": {"enabled": true, "timeout": "3d"},
             "servers": [
-                {"type": "udp", "tag": "cfdns", "server": "1.1.1.1", "detour": "proxy"},
-                {"tag": "local", "type": "udp", "server": "223.5.5.5"}
+                {"type": "https", "tag": "cfdns", "server": "1.1.1.1", "server_port": 443, "path": "/dns-query", "detour": "proxy", "tls": {"enabled": true, "server_name": "cloudflare-dns.com"}},
+                {"tag": "local", "type": "udp", "server": "223.5.5.5"},
+                {"type": "fakeip", "tag": "fakeip", "inet4_range": "198.18.0.0/15"}
             ],
             "rules": [
                 {"domain_suffix": ["hdslb.com"], "action": "route", "server": "local"},
-                {"rule_set": ["chinasite"], "action": "route", "server": "local"}
+                {"rule_set": ["chinasite"], "action": "route", "server": "local"},
+                {"action": "route", "server": "fakeip"}
             ]
         },
         "inbounds": [
@@ -702,11 +713,38 @@ mod tests {
         assert!(rules[5].get("ip_is_private").is_none());
 
         let dns_rules = built["dns"]["rules"].as_array().unwrap();
-        assert_eq!(dns_rules.len(), 2);
+        assert_eq!(dns_rules.len(), 3);
         assert_eq!(dns_rules[0]["domain_suffix"], json!(["hdslb.com"]));
         assert_eq!(dns_rules[0]["server"], "local");
         assert_eq!(dns_rules[1]["rule_set"], json!(["chinasite"]));
         assert_eq!(dns_rules[1]["server"], "local");
+        assert_eq!(dns_rules[2]["server"], "fakeip");
+
+        assert_eq!(built["dns"]["cache_capacity"], 16384);
+        assert_eq!(built["dns"]["optimistic"]["enabled"], true);
+        assert_eq!(built["dns"]["optimistic"]["timeout"], "3d");
+        assert!(built["dns"].get("disable_cache").is_none());
+
+        let dns_servers = built["dns"]["servers"].as_array().unwrap();
+        let cfdns = dns_servers
+            .iter()
+            .find(|server| server["tag"] == "cfdns")
+            .unwrap();
+        assert_eq!(cfdns["type"], "https");
+        assert_eq!(cfdns["server"], "1.1.1.1");
+        assert_eq!(cfdns["path"], "/dns-query");
+        assert_eq!(cfdns["detour"], "proxy");
+        assert_eq!(cfdns["tls"]["server_name"], "cloudflare-dns.com");
+
+        assert!(dns_servers
+            .iter()
+            .any(|server| server["type"] == "fakeip" && server["tag"] == "fakeip"));
+
+        let cache_file = &built["experimental"]["cache_file"];
+        assert_eq!(cache_file["enabled"], true);
+        assert_eq!(cache_file["path"], "/tmp/miao-sing-box/cache.db");
+        assert_eq!(cache_file["store_fakeip"], true);
+        assert_eq!(cache_file["store_dns"], false);
     }
 
     #[test]
