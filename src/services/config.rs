@@ -415,6 +415,7 @@ fn get_config_template() -> serde_json::Value {
                 {"type": "fakeip", "tag": "fakeip", "inet4_range": "198.18.0.0/15"}
             ],
             "rules": [
+                {"rule_set": ["adblock"], "action": "reject"},
                 {"domain_suffix": ["hdslb.com"], "action": "route", "server": "local"},
                 {"rule_set": ["chinasite"], "action": "route", "server": "local"},
                 {"action": "route", "server": "fakeip"}
@@ -434,12 +435,19 @@ fn get_config_template() -> serde_json::Value {
             "rules": [
                 {"action": "sniff"},
                 {"protocol": "dns", "action": "hijack-dns"},
+                {"rule_set": ["adblock"], "action": "reject"},
                 {"ip_is_private": true, "action": "route", "outbound": "direct"},
                 {"domain_suffix": ["hdslb.com"], "action": "route", "outbound": "direct"},
                 {"rule_set": ["chinasite"], "action": "route", "outbound": "direct"},
                 {"rule_set": ["chinaip"], "action": "route", "outbound": "direct"}
             ],
             "rule_set": [
+                {
+                    "type": "local",
+                    "tag": "adblock",
+                    "format": "binary",
+                    "path": "./adblock_reject.srs"
+                },
                 {"type": "local", "tag": "chinasite", "format": "binary", "path": "./chinasite.srs"},
                 {"type": "local", "tag": "chinaip", "format": "binary", "path": "./chinaip.srs"}
             ]
@@ -543,11 +551,13 @@ mod tests {
         assert_eq!(all_outbounds[3]["tag"], "sub-a");
 
         let rules = built["route"]["rules"].as_array().unwrap();
-        assert_eq!(rules.len(), 7);
+        assert_eq!(rules.len(), 8);
         assert_eq!(rules[0]["action"], "sniff");
         assert_eq!(rules[1]["action"], "hijack-dns");
         assert_eq!(rules[2]["domain_suffix"][0], "example.com");
-        assert_eq!(rules[3]["ip_is_private"], true);
+        assert_eq!(rules[3]["rule_set"], json!(["adblock"]));
+        assert_eq!(rules[3]["action"], "reject");
+        assert_eq!(rules[4]["ip_is_private"], true);
     }
 
     #[test]
@@ -663,8 +673,8 @@ mod tests {
         .unwrap();
 
         let rules = built["route"]["rules"].as_array().unwrap();
-        // Should have only the default direct-split rules.
-        assert_eq!(rules.len(), 6);
+        // Should have the default adblock and direct-split rules.
+        assert_eq!(rules.len(), 7);
     }
 
     #[test]
@@ -695,30 +705,36 @@ mod tests {
 
         let rules = built["route"]["rules"].as_array().unwrap();
 
-        assert_eq!(rules[2]["ip_is_private"], true);
-        assert_eq!(rules[2]["outbound"], "direct");
-        assert!(rules[2].get("rule_set").is_none());
+        assert_eq!(rules[2]["rule_set"], json!(["adblock"]));
+        assert_eq!(rules[2]["action"], "reject");
+        assert!(rules[2].get("outbound").is_none());
 
-        assert_eq!(rules[3]["domain_suffix"], json!(["hdslb.com"]));
+        assert_eq!(rules[3]["ip_is_private"], true);
         assert_eq!(rules[3]["outbound"], "direct");
         assert!(rules[3].get("rule_set").is_none());
-        assert!(rules[3].get("ip_is_private").is_none());
 
-        assert_eq!(rules[4]["rule_set"], json!(["chinasite"]));
+        assert_eq!(rules[4]["domain_suffix"], json!(["hdslb.com"]));
         assert_eq!(rules[4]["outbound"], "direct");
+        assert!(rules[4].get("rule_set").is_none());
         assert!(rules[4].get("ip_is_private").is_none());
 
-        assert_eq!(rules[5]["rule_set"], json!(["chinaip"]));
+        assert_eq!(rules[5]["rule_set"], json!(["chinasite"]));
         assert_eq!(rules[5]["outbound"], "direct");
         assert!(rules[5].get("ip_is_private").is_none());
 
+        assert_eq!(rules[6]["rule_set"], json!(["chinaip"]));
+        assert_eq!(rules[6]["outbound"], "direct");
+        assert!(rules[6].get("ip_is_private").is_none());
+
         let dns_rules = built["dns"]["rules"].as_array().unwrap();
-        assert_eq!(dns_rules.len(), 3);
-        assert_eq!(dns_rules[0]["domain_suffix"], json!(["hdslb.com"]));
-        assert_eq!(dns_rules[0]["server"], "local");
-        assert_eq!(dns_rules[1]["rule_set"], json!(["chinasite"]));
+        assert_eq!(dns_rules.len(), 4);
+        assert_eq!(dns_rules[0]["rule_set"], json!(["adblock"]));
+        assert_eq!(dns_rules[0]["action"], "reject");
+        assert_eq!(dns_rules[1]["domain_suffix"], json!(["hdslb.com"]));
         assert_eq!(dns_rules[1]["server"], "local");
-        assert_eq!(dns_rules[2]["server"], "fakeip");
+        assert_eq!(dns_rules[2]["rule_set"], json!(["chinasite"]));
+        assert_eq!(dns_rules[2]["server"], "local");
+        assert_eq!(dns_rules[3]["server"], "fakeip");
 
         assert_eq!(built["dns"]["cache_capacity"], 16384);
         assert_eq!(built["dns"]["optimistic"]["enabled"], true);
@@ -739,6 +755,18 @@ mod tests {
         assert!(dns_servers
             .iter()
             .any(|server| server["type"] == "fakeip" && server["tag"] == "fakeip"));
+
+        let route_rule_sets = built["route"]["rule_set"].as_array().unwrap();
+        let adblock = route_rule_sets
+            .iter()
+            .find(|rule_set| rule_set["tag"] == "adblock")
+            .unwrap();
+        assert_eq!(adblock["type"], "local");
+        assert_eq!(adblock["format"], "binary");
+        assert_eq!(adblock["path"], "./adblock_reject.srs");
+        assert!(adblock.get("url").is_none());
+        assert!(adblock.get("download_detour").is_none());
+        assert!(adblock.get("update_interval").is_none());
 
         let cache_file = &built["experimental"]["cache_file"];
         assert_eq!(cache_file["enabled"], true);
@@ -778,8 +806,8 @@ mod tests {
         .unwrap();
 
         let rules = built["route"]["rules"].as_array().unwrap();
-        // Should have only the default direct-split rules.
-        assert_eq!(rules.len(), 6);
+        // Should have only the default adblock and direct-split rules.
+        assert_eq!(rules.len(), 7);
     }
 
     #[tokio::test]

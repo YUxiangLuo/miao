@@ -4,6 +4,7 @@ set -e
 cd "$(dirname "$0")"
 
 SING_BOX_BIN="embedded/sing-box-amd64"
+ADBLOCK_RULE="embedded/adblock_reject.srs"
 
 # 检查 sing-box 是否需要编译
 if [ ! -s "$SING_BOX_BIN" ]; then
@@ -24,6 +25,10 @@ if [ ! -s "$SING_BOX_BIN" ]; then
 else
   echo "==> sing-box 已存在，跳过"
 fi
+
+echo "==> 下载 AdBlock SRS 规则..."
+curl -fL -o "$ADBLOCK_RULE" \
+  https://raw.githubusercontent.com/REIJI007/AdBlock_Rule_For_Sing-box/main/adblock_reject.srs
 
 echo "==> 构建 Vite + React 前端..."
 npm --prefix frontend install

@@ -493,7 +493,12 @@ pub async fn upgrade_binary(state: &Arc<AppState>) -> AppResult<String> {
     tokio::spawn(async move {
         sleep(Duration::from_millis(500)).await;
 
-        let files_to_remove = ["sing-box", "chinaip.srs", "chinasite.srs"];
+        let files_to_remove = [
+            "sing-box",
+            "chinaip.srs",
+            "chinasite.srs",
+            "adblock_reject.srs",
+        ];
         for file in &files_to_remove {
             let path = sing_box_home.join(file);
             if path.exists() {
