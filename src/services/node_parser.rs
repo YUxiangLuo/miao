@@ -61,6 +61,33 @@ fn is_supported_node_type(node_type: &str) -> bool {
     matches!(node_type, "hysteria2" | "anytls" | "ss")
 }
 
+fn parse_hysteria2_obfs(node: &Value) -> Option<Option<serde_json::Value>> {
+    let obfs_type = node
+        .get("obfs")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+
+    let Some(obfs_type) = obfs_type else {
+        return Some(None);
+    };
+
+    if !matches!(obfs_type, "salamander" | "gecko") {
+        return None;
+    }
+
+    let password = node
+        .get("obfs-password")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())?;
+
+    Some(Some(serde_json::json!({
+        "type": obfs_type,
+        "password": password
+    })))
+}
+
 fn parse_single_node(node: &Value) -> Option<(String, serde_json::Value)> {
     let typ = node.get("type")?.as_str()?;
     let name = node.get("name")?.as_str()?;
@@ -95,6 +122,10 @@ fn parse_single_node(node: &Value) -> Option<(String, serde_json::Value)> {
 
             if let Some(sni_val) = sni {
                 obj["tls"]["server_name"] = serde_json::Value::String(sni_val.to_string());
+            }
+
+            if let Some(obfs) = parse_hysteria2_obfs(node)? {
+                obj["obfs"] = obfs;
             }
 
             obj
@@ -511,6 +542,103 @@ proxies:
         assert_eq!(result.nodes.len(), 1);
         let outbound = &result.nodes[0].1;
         assert_eq!(outbound["tls"]["insecure"], false);
+    }
+
+    #[test]
+    fn parse_clash_proxies_maps_hysteria2_obfs() {
+        let yaml = r#"
+proxies:
+  - name: hy2-obfs
+    type: hysteria2
+    server: hy.example.com
+    port: 443
+    password: pass
+    obfs: salamander
+    obfs-password: obfs-pass
+"#;
+
+        let result = parse_clash_proxies(yaml).unwrap();
+
+        assert_eq!(result.nodes.len(), 1);
+        assert!(result.errors.is_empty());
+        let outbound = &result.nodes[0].1;
+        assert_eq!(outbound["obfs"]["type"], "salamander");
+        assert_eq!(outbound["obfs"]["password"], "obfs-pass");
+    }
+
+    #[test]
+    fn parse_clash_proxies_maps_hysteria2_gecko_obfs() {
+        let yaml = r#"
+proxies:
+  - name: hy2-gecko-obfs
+    type: hysteria2
+    server: hy.example.com
+    port: 443
+    password: pass
+    obfs: gecko
+    obfs-password: gecko-pass
+"#;
+
+        let result = parse_clash_proxies(yaml).unwrap();
+
+        assert_eq!(result.nodes.len(), 1);
+        assert!(result.errors.is_empty());
+        let outbound = &result.nodes[0].1;
+        assert_eq!(outbound["obfs"]["type"], "gecko");
+        assert_eq!(outbound["obfs"]["password"], "gecko-pass");
+    }
+
+    #[test]
+    fn parse_clash_proxies_omits_empty_hysteria2_obfs() {
+        let yaml = r#"
+proxies:
+  - name: hy2-no-obfs
+    type: hysteria2
+    server: hy.example.com
+    port: 443
+    password: pass
+    obfs: ""
+"#;
+
+        let result = parse_clash_proxies(yaml).unwrap();
+
+        assert_eq!(result.nodes.len(), 1);
+        assert!(result.errors.is_empty());
+        let outbound = &result.nodes[0].1;
+        assert!(outbound.get("obfs").is_none());
+    }
+
+    #[test]
+    fn parse_clash_proxies_rejects_invalid_hysteria2_obfs() {
+        let yaml = r#"
+proxies:
+  - name: hy2-invalid-obfs
+    type: hysteria2
+    server: hy.example.com
+    port: 443
+    password: pass
+    obfs: unsupported
+    obfs-password: obfs-pass
+  - name: hy2-missing-obfs-password
+    type: hysteria2
+    server: hy2.example.com
+    port: 443
+    password: pass
+    obfs: salamander
+"#;
+
+        let result = parse_clash_proxies(yaml).unwrap();
+
+        assert!(result.nodes.is_empty());
+        assert_eq!(result.errors.len(), 2);
+        assert!(result
+            .errors
+            .iter()
+            .any(|error| error.contains("hy2-invalid-obfs")));
+        assert!(result
+            .errors
+            .iter()
+            .any(|error| error.contains("hy2-missing-obfs-password")));
     }
 
     #[test]

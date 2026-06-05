@@ -61,6 +61,8 @@ proxies:
     port: 443
     password: pass-hy
     sni: hy.example.com
+    obfs: salamander
+    obfs-password: obfs-pass
   - name: anytls-node
     type: anytls
     server: any.example.com
@@ -93,6 +95,8 @@ proxies:
         assert_eq!(outbounds[0]["type"], "hysteria2");
         assert_eq!(outbounds[0]["tag"], "hy2-node");
         assert_eq!(outbounds[0]["tls"]["server_name"], "hy.example.com");
+        assert_eq!(outbounds[0]["obfs"]["type"], "salamander");
+        assert_eq!(outbounds[0]["obfs"]["password"], "obfs-pass");
         assert_eq!(outbounds[1]["type"], "anytls");
         assert_eq!(outbounds[1]["tls"]["insecure"], true);
         assert_eq!(outbounds[2]["type"], "shadowsocks");

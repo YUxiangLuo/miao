@@ -1,9 +1,9 @@
-import { X, CircleAlert, Plus, LoaderCircle } from 'lucide-react'
-import { Button, SectionCard } from './ui.jsx'
+import { X, CircleAlert, Plus } from 'lucide-react'
+import { Button } from './ui.jsx'
 import { 
   classNames, 
   CIPHER_OPTIONS, 
-  EMPTY_NODE_FORM 
+  HYSTERIA2_OBFS_OPTIONS
 } from '../utils.js'
 
 export function ConfirmModal({ open, title, message, onCancel, onConfirm }) {
@@ -33,7 +33,11 @@ export function ConfirmModal({ open, title, message, onCancel, onConfirm }) {
 export function NodeModal({ open, nodeType, setNodeType, form, setForm, loading, onClose, onSubmit }) {
   if (!open) return null
 
-  const canSubmit = form.tag.trim() && form.server.trim() && form.server_port && form.password.trim()
+  const canSubmit = form.tag.trim()
+    && form.server.trim()
+    && form.server_port
+    && form.password.trim()
+    && (nodeType !== 'hysteria2' || !form.obfs_type || form.obfs_password.trim())
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -116,6 +120,40 @@ export function NodeModal({ open, nodeType, setNodeType, form, setForm, loading,
               />
             </label>
           </div>
+        )}
+
+        {nodeType === 'hysteria2' && (
+          <>
+            <div className="form-grid two">
+              <label className="field">
+                <span>混淆类型</span>
+                <select
+                  value={form.obfs_type}
+                  onChange={(event) => {
+                    const obfsType = event.target.value
+                    setForm((prev) => ({
+                      ...prev,
+                      obfs_type: obfsType,
+                      obfs_password: obfsType ? prev.obfs_password : '',
+                    }))
+                  }}
+                >
+                  {HYSTERIA2_OBFS_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="field">
+                <span>混淆密码</span>
+                <input
+                  value={form.obfs_password}
+                  disabled={!form.obfs_type}
+                  onChange={(event) => setForm((prev) => ({ ...prev, obfs_password: event.target.value }))}
+                  placeholder={form.obfs_type ? 'obfs password' : '未启用'}
+                />
+              </label>
+            </div>
+          </>
         )}
 
         {nodeType !== 'ss' && (

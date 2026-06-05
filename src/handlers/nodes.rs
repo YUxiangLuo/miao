@@ -3,7 +3,8 @@ use std::sync::Arc;
 use tracing::warn;
 
 use crate::models::{
-    AnyTls, ApiResponse, DeleteNodeRequest, Hysteria2, NodeInfo, NodeRequest, Shadowsocks, Tls,
+    AnyTls, ApiResponse, DeleteNodeRequest, Hysteria2, Hysteria2Obfs, NodeInfo, NodeRequest,
+    Shadowsocks, Tls,
 };
 use crate::responses::{status_error, success, success_no_data, HandlerResult};
 use crate::services::config::apply_config_change;
@@ -117,6 +118,10 @@ pub async fn add_node(
             serde_json::to_string(&node)
         }
         _ => {
+            let obfs = req.obfs_type.map(|obfs_type| Hysteria2Obfs {
+                obfs_type,
+                password: req.obfs_password.unwrap_or_default().trim().to_string(),
+            });
             let node = Hysteria2 {
                 outbound_type: "hysteria2".to_string(),
                 tag: req.tag,
@@ -125,6 +130,7 @@ pub async fn add_node(
                 password: req.password,
                 up_mbps: None,
                 down_mbps: None,
+                obfs,
                 tls: Tls {
                     enabled: true,
                     server_name: req.sni,

@@ -18,7 +18,15 @@ export const EMPTY_NODE_FORM = {
   sni: '',
   cipher: '2022-blake3-aes-128-gcm',
   skip_cert_verify: false,
+  obfs_type: '',
+  obfs_password: '',
 }
+
+export const HYSTERIA2_OBFS_OPTIONS = [
+  { value: '', label: '禁用混淆' },
+  { value: 'salamander', label: 'Salamander' },
+  { value: 'gecko', label: 'Gecko' },
+]
 
 export const CIPHER_OPTIONS = [
   '2022-blake3-aes-128-gcm',
@@ -149,5 +157,16 @@ export function validatePassword(password) {
   if (!password || !password.trim()) return '密码不能为空'
   if (password.length < 8) return '密码太短（至少 8 个字符）'
   if (password.length > 256) return '密码过长（最多 256 个字符）'
+  return null
+}
+
+export function validateHysteria2Obfs(type, password) {
+  if (!type) {
+    if (password?.trim()) return '请先选择混淆类型'
+    return null
+  }
+  if (!['salamander', 'gecko'].includes(type)) return '不支持的 Hysteria2 混淆类型'
+  if (!password || !password.trim()) return '混淆密码不能为空'
+  if (password.length > 256) return '混淆密码过长（最多 256 个字符）'
   return null
 }

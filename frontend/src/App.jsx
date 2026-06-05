@@ -31,6 +31,7 @@ import {
   validateServer,
   validatePort,
   validatePassword,
+  validateHysteria2Obfs,
   CONNECTIVITY_SITES
 } from './utils.js'
 
@@ -243,6 +244,13 @@ export default function App() {
       showToast(passwordError, 'error')
       return
     }
+    const obfsError = nodeType === 'hysteria2'
+      ? validateHysteria2Obfs(nodeForm.obfs_type, nodeForm.obfs_password)
+      : null
+    if (obfsError) {
+      showToast(obfsError, 'error')
+      return
+    }
 
     const payload = {
       node_type: nodeType,
@@ -256,6 +264,10 @@ export default function App() {
     } else {
       if (nodeForm.sni?.trim()) payload.sni = nodeForm.sni.trim()
       payload.skip_cert_verify = nodeForm.skip_cert_verify
+      if (nodeType === 'hysteria2' && nodeForm.obfs_type) {
+        payload.obfs_type = nodeForm.obfs_type
+        payload.obfs_password = nodeForm.obfs_password.trim()
+      }
     }
 
     try {

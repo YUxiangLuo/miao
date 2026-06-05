@@ -13,6 +13,8 @@ static VALID_CIPHERS: &[&str] = &[
     "chacha20-ietf-poly1305",
 ];
 
+static VALID_HYSTERIA2_OBFS_TYPES: &[&str] = &["salamander", "gecko"];
+
 use crate::models::NodeRequest;
 
 pub struct Validator;
@@ -28,6 +30,26 @@ impl Validator {
         }
         if let Some(ref cipher) = req.cipher {
             Self::cipher(cipher)?;
+        }
+        let node_type = req.node_type.as_deref().unwrap_or("hysteria2");
+        let has_obfs_password = req
+            .obfs_password
+            .as_deref()
+            .is_some_and(|password| !password.trim().is_empty());
+        if node_type != "hysteria2" && (req.obfs_type.is_some() || has_obfs_password) {
+            return Err("只有 Hysteria2 节点支持混淆配置".to_string());
+        }
+        if let Some(ref obfs_type) = req.obfs_type {
+            Self::hysteria2_obfs_type(obfs_type)?;
+            let password = req.obfs_password.as_deref().unwrap_or_default().trim();
+            if password.is_empty() {
+                return Err("混淆密码不能为空".to_string());
+            }
+            if password.len() > 256 {
+                return Err("混淆密码过长（最多 256 个字符）".to_string());
+            }
+        } else if has_obfs_password {
+            return Err("请先选择混淆类型".to_string());
         }
         Ok(())
     }
@@ -146,6 +168,14 @@ impl Validator {
         Ok(())
     }
 
+    pub fn hysteria2_obfs_type(obfs_type: &str) -> Result<(), String> {
+        if !VALID_HYSTERIA2_OBFS_TYPES.contains(&obfs_type) {
+            return Err(format!("不支持的 Hysteria2 混淆类型: {}", obfs_type));
+        }
+
+        Ok(())
+    }
+
     pub fn sni(sni: &str) -> Result<(), String> {
         if sni.is_empty() {
             return Ok(());
@@ -229,6 +259,52 @@ mod tests {
         // Invalid ciphers
         assert!(Validator::cipher("invalid-cipher").is_err());
         assert!(Validator::cipher("").is_err());
+    }
+
+    #[test]
+    fn test_hysteria2_obfs_type_validation() {
+        assert!(Validator::hysteria2_obfs_type("salamander").is_ok());
+        assert!(Validator::hysteria2_obfs_type("gecko").is_ok());
+        assert!(Validator::hysteria2_obfs_type("invalid").is_err());
+    }
+
+    #[test]
+    fn test_hysteria2_obfs_request_validation() {
+        let valid = NodeRequest {
+            node_type: Some("hysteria2".to_string()),
+            tag: "hy2".to_string(),
+            server: "example.com".to_string(),
+            server_port: 443,
+            password: "password123".to_string(),
+            sni: None,
+            cipher: None,
+            skip_cert_verify: false,
+            obfs_type: Some("salamander".to_string()),
+            obfs_password: Some("obfs-secret".to_string()),
+        };
+        assert!(Validator::validate_node_request(&valid).is_ok());
+
+        let mut missing_password = valid;
+        missing_password.obfs_password = Some(" ".to_string());
+        assert!(Validator::validate_node_request(&missing_password).is_err());
+    }
+
+    #[test]
+    fn test_non_hysteria2_rejects_obfs_request() {
+        let req = NodeRequest {
+            node_type: Some("anytls".to_string()),
+            tag: "anytls".to_string(),
+            server: "example.com".to_string(),
+            server_port: 443,
+            password: "password123".to_string(),
+            sni: None,
+            cipher: None,
+            skip_cert_verify: false,
+            obfs_type: Some("salamander".to_string()),
+            obfs_password: Some("obfs-secret".to_string()),
+        };
+
+        assert!(Validator::validate_node_request(&req).is_err());
     }
 
     #[test]
