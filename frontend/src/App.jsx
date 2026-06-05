@@ -57,7 +57,14 @@ export default function App() {
   const { nodes, setNodes, fetchNodes } = useNodes()
   const { primaryGroupName, primaryGroup, fetchProxies } = useProxies(status)
   const { traffic, closeSockets } = useTraffic(status)
-  const { connectionsInfo, connectionsLoading, connectionsError, fetchConnections } = useConnections(status, clashApiBase)
+  const {
+    connectionsInfo,
+    connectionsLoading,
+    connectionsError,
+    fetchConnections,
+    closeConnection,
+    closeAllConnections,
+  } = useConnections(status, clashApiBase)
   const { versionInfo, fetchVersion } = useVersion()
   const { delays, testingNodes, testingGroup, testDelay, testGroupDelays, clearDelays } = useDelays()
   const { 
@@ -493,6 +500,9 @@ export default function App() {
         error={connectionsError}
         onClose={() => setShowConnectionsModal(false)}
         onRefresh={fetchConnections}
+        onCloseConnection={closeConnection}
+        onCloseAllConnections={closeAllConnections}
+        showToast={showToast}
       />
 
       <ConfirmModal

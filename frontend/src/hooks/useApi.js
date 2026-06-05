@@ -148,6 +148,7 @@ export function useConnections(status, clashApiBase) {
   const [connectionsInfo, setConnectionsInfo] = useState({ uploadTotal: 0, downloadTotal: 0, connections: [] })
   const [connectionsLoading, setConnectionsLoading] = useState(false)
   const [connectionsError, setConnectionsError] = useState('')
+  const lastConnectionsRef = useRef({ at: 0, connections: new Map() })
 
   const fetchConnections = useCallback(async () => {
     if (!status.running) {
@@ -165,11 +166,27 @@ export function useConnections(status, clashApiBase) {
       }
       const payload = await response.json()
       const connections = Array.isArray(payload.connections) ? payload.connections : []
+      const now = Date.now()
+      const previous = lastConnectionsRef.current
+      const elapsedSecs = previous.at ? Math.max((now - previous.at) / 1000, 1) : 0
+      const currentMap = new Map()
+      const enrichedConnections = connections.map((connection) => {
+        currentMap.set(connection.id, connection)
+        const last = previous.connections.get(connection.id)
+        const uploadSpeed = last && elapsedSecs
+          ? Math.max(0, Number(connection.upload || 0) - Number(last.upload || 0)) / elapsedSecs
+          : 0
+        const downloadSpeed = last && elapsedSecs
+          ? Math.max(0, Number(connection.download || 0) - Number(last.download || 0)) / elapsedSecs
+          : 0
+        return { ...connection, uploadSpeed, downloadSpeed }
+      })
+      lastConnectionsRef.current = { at: now, connections: currentMap }
       setConnectionsInfo({
         ...payload,
         uploadTotal: Number(payload.uploadTotal || 0),
         downloadTotal: Number(payload.downloadTotal || 0),
-        connections,
+        connections: enrichedConnections,
       })
       setConnectionsError('')
       return payload
@@ -186,10 +203,36 @@ export function useConnections(status, clashApiBase) {
       setConnectionsInfo({ uploadTotal: 0, downloadTotal: 0, connections: [] })
       setConnectionsError('')
       setConnectionsLoading(false)
+      lastConnectionsRef.current = { at: 0, connections: new Map() }
     }
   }, [status.running])
 
-  return { connectionsInfo, connectionsLoading, connectionsError, fetchConnections }
+  const closeConnection = useCallback(async (id) => {
+    const response = await fetch(`${clashApiBase}/connections/${encodeURIComponent(id)}`, { method: 'DELETE' })
+    if (!response.ok) {
+      const details = (await response.text()).trim()
+      throw new Error(details || `关闭连接失败 (${response.status})`)
+    }
+    await fetchConnections()
+  }, [clashApiBase, fetchConnections])
+
+  const closeAllConnections = useCallback(async () => {
+    const response = await fetch(`${clashApiBase}/connections`, { method: 'DELETE' })
+    if (!response.ok) {
+      const details = (await response.text()).trim()
+      throw new Error(details || `关闭全部连接失败 (${response.status})`)
+    }
+    await fetchConnections()
+  }, [clashApiBase, fetchConnections])
+
+  return {
+    connectionsInfo,
+    connectionsLoading,
+    connectionsError,
+    fetchConnections,
+    closeConnection,
+    closeAllConnections,
+  }
 }
 
 export function useVersion() {
