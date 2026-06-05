@@ -40,7 +40,7 @@ export function NodeModal({ open, nodeType, setNodeType, form, setForm, loading,
     && (nodeType !== 'hysteria2' || !form.obfs_type || form.obfs_password.trim())
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
+    <div className="modal-overlay">
       <div className="modal-card" onClick={(event) => event.stopPropagation()}>
         <div className="modal-title-row">
           <div className="modal-title-wrap">
