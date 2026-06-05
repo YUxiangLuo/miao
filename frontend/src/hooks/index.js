@@ -6,6 +6,7 @@ export {
   useNodes,
   useProxies,
   useTraffic,
+  useConnections,
   useVersion,
   useDelays,
   useConnectivity

@@ -1,9 +1,10 @@
-import { X, CircleAlert, Plus } from 'lucide-react'
+import { X, CircleAlert, Plus, Activity, ArrowDown, ArrowUp, Network, RefreshCw, Route } from 'lucide-react'
 import { Button } from './ui.jsx'
 import { 
   classNames, 
   CIPHER_OPTIONS, 
-  HYSTERIA2_OBFS_OPTIONS
+  HYSTERIA2_OBFS_OPTIONS,
+  formatBytes
 } from '../utils.js'
 
 export function ConfirmModal({ open, title, message, onCancel, onConfirm }) {
@@ -189,6 +190,141 @@ export function NodeModal({ open, nodeType, setNodeType, form, setForm, loading,
         >
           添加 {nodeType === 'ss' ? 'Shadowsocks' : nodeType === 'anytls' ? 'AnyTLS' : 'Hysteria2'} 节点
         </Button>
+      </div>
+    </div>
+  )
+}
+
+function countBy(items, mapper) {
+  return items.reduce((acc, item) => {
+    const key = mapper(item) || 'unknown'
+    acc[key] = (acc[key] || 0) + 1
+    return acc
+  }, {})
+}
+
+function topEntries(counts, limit = 5) {
+  return Object.entries(counts)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, limit)
+}
+
+function connectionTarget(connection) {
+  const metadata = connection.metadata || {}
+  const host = metadata.host || metadata.destinationIP || metadata.remoteDestination || metadata.destination
+  const port = metadata.destinationPort || metadata.remoteDestinationPort
+  if (!host) return 'unknown'
+  return port ? `${host}:${port}` : host
+}
+
+function connectionOutbound(connection) {
+  if (Array.isArray(connection.chains) && connection.chains.length > 0) {
+    return connection.chains[connection.chains.length - 1]
+  }
+  return connection.rule || 'direct'
+}
+
+export function ConnectionsModal({ open, status, data, loading, error, onClose, onRefresh }) {
+  if (!open) return null
+
+  const connections = Array.isArray(data?.connections) ? data.connections : []
+  const uploadTotal = Number(data?.uploadTotal || connections.reduce((sum, item) => sum + Number(item.upload || 0), 0))
+  const downloadTotal = Number(data?.downloadTotal || connections.reduce((sum, item) => sum + Number(item.download || 0), 0))
+  const networkCounts = topEntries(countBy(connections, (item) => item.metadata?.network), 4)
+  const outboundCounts = topEntries(countBy(connections, connectionOutbound), 5)
+  const topConnections = [...connections]
+    .sort((a, b) => (Number(b.upload || 0) + Number(b.download || 0)) - (Number(a.upload || 0) + Number(a.download || 0)))
+    .slice(0, 8)
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-card connections-modal" onClick={(event) => event.stopPropagation()}>
+        <div className="modal-title-row">
+          <div className="modal-title-wrap">
+            <Activity size={18} className="icon-accent" />
+            <h3>连接统计</h3>
+          </div>
+          <div className="modal-title-actions">
+            <button className="icon-button" onClick={onRefresh} disabled={loading || !status.running} title="刷新">
+              <RefreshCw size={16} className={loading ? 'spin' : undefined} />
+            </button>
+            <button className="icon-button" onClick={onClose} title="关闭">
+              <X size={16} />
+            </button>
+          </div>
+        </div>
+
+        {!status.running ? (
+          <div className="connections-empty">服务未运行，暂无连接统计。</div>
+        ) : (
+          <>
+            <div className="connection-stat-grid">
+              <div className="connection-stat">
+                <span>活跃连接</span>
+                <strong>{connections.length}</strong>
+              </div>
+              <div className="connection-stat">
+                <span>累计上传</span>
+                <strong>{formatBytes(uploadTotal)}</strong>
+              </div>
+              <div className="connection-stat">
+                <span>累计下载</span>
+                <strong>{formatBytes(downloadTotal)}</strong>
+              </div>
+              <div className="connection-stat">
+                <span>总流量</span>
+                <strong>{formatBytes(uploadTotal + downloadTotal)}</strong>
+              </div>
+            </div>
+
+            {error && <div className="connections-error">{error}</div>}
+
+            <div className="connections-split">
+              <div className="connections-panel">
+                <div className="connections-panel-title">
+                  <Network size={14} />
+                  <span>协议分布</span>
+                </div>
+                {networkCounts.length > 0 ? networkCounts.map(([name, count]) => (
+                  <div className="connection-count-row" key={name}>
+                    <span>{name}</span>
+                    <strong>{count}</strong>
+                  </div>
+                )) : <div className="connections-muted">暂无数据</div>}
+              </div>
+
+              <div className="connections-panel">
+                <div className="connections-panel-title">
+                  <Route size={14} />
+                  <span>出口分布</span>
+                </div>
+                {outboundCounts.length > 0 ? outboundCounts.map(([name, count]) => (
+                  <div className="connection-count-row" key={name}>
+                    <span title={name}>{name}</span>
+                    <strong>{count}</strong>
+                  </div>
+                )) : <div className="connections-muted">暂无数据</div>}
+              </div>
+            </div>
+
+            <div className="connections-table">
+              <div className="connections-table-header">
+                <span>目标</span>
+                <span>出口</span>
+                <span>上传</span>
+                <span>下载</span>
+              </div>
+              {topConnections.length > 0 ? topConnections.map((connection, index) => (
+                <div className="connections-table-row" key={connection.id || `${connectionTarget(connection)}-${index}`}>
+                  <span title={connectionTarget(connection)}>{connectionTarget(connection)}</span>
+                  <span title={connectionOutbound(connection)}>{connectionOutbound(connection)}</span>
+                  <span><ArrowUp size={12} />{formatBytes(Number(connection.upload || 0))}</span>
+                  <span><ArrowDown size={12} />{formatBytes(Number(connection.download || 0))}</span>
+                </div>
+              )) : <div className="connections-empty inline">暂无活跃连接</div>}
+            </div>
+          </>
+        )}
       </div>
     </div>
   )

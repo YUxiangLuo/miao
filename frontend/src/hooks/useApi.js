@@ -144,6 +144,54 @@ export function useTraffic(status) {
   return { traffic, closeSockets }
 }
 
+export function useConnections(status, clashApiBase) {
+  const [connectionsInfo, setConnectionsInfo] = useState({ uploadTotal: 0, downloadTotal: 0, connections: [] })
+  const [connectionsLoading, setConnectionsLoading] = useState(false)
+  const [connectionsError, setConnectionsError] = useState('')
+
+  const fetchConnections = useCallback(async () => {
+    if (!status.running) {
+      setConnectionsInfo({ uploadTotal: 0, downloadTotal: 0, connections: [] })
+      setConnectionsError('')
+      return null
+    }
+
+    setConnectionsLoading(true)
+    try {
+      const response = await fetch(`${clashApiBase}/connections`)
+      if (!response.ok) {
+        const details = (await response.text()).trim()
+        throw new Error(details || `连接统计获取失败 (${response.status})`)
+      }
+      const payload = await response.json()
+      const connections = Array.isArray(payload.connections) ? payload.connections : []
+      setConnectionsInfo({
+        ...payload,
+        uploadTotal: Number(payload.uploadTotal || 0),
+        downloadTotal: Number(payload.downloadTotal || 0),
+        connections,
+      })
+      setConnectionsError('')
+      return payload
+    } catch (error) {
+      setConnectionsError(error.message || '连接统计获取失败')
+      return null
+    } finally {
+      setConnectionsLoading(false)
+    }
+  }, [clashApiBase, status.running])
+
+  useEffect(() => {
+    if (!status.running) {
+      setConnectionsInfo({ uploadTotal: 0, downloadTotal: 0, connections: [] })
+      setConnectionsError('')
+      setConnectionsLoading(false)
+    }
+  }, [status.running])
+
+  return { connectionsInfo, connectionsLoading, connectionsError, fetchConnections }
+}
+
 export function useVersion() {
   const [versionInfo, setVersionInfo] = useState({ current: '', latest: null, has_update: false })
 

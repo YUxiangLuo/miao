@@ -7,7 +7,7 @@ import {
 import { Button, SectionCard } from './ui.jsx'
 import { classNames, formatUptime, formatSpeed } from '../utils.js'
 
-export function StatusCard({ status, traffic, loadingAction, onToggleService }) {
+export function StatusCard({ status, traffic, loadingAction, onToggleService, onOpenConnections }) {
   return (
     <SectionCard className="status-card" bodyClassName="status-card-body" header={null}>
       <div className="status-left-wrap">
@@ -26,7 +26,7 @@ export function StatusCard({ status, traffic, loadingAction, onToggleService }) 
         </div>
       </div>
 
-      <div className="traffic-chip">
+      <button type="button" className="traffic-chip" onClick={onOpenConnections} title="查看连接统计">
         <div className="traffic-item">
           <ArrowUp size={14} className="traffic-icon up" />
           <span>{formatSpeed(traffic.up)}</span>
@@ -35,7 +35,7 @@ export function StatusCard({ status, traffic, loadingAction, onToggleService }) 
           <ArrowDown size={14} className="traffic-icon down" />
           <span>{formatSpeed(traffic.down)}</span>
         </div>
-      </div>
+      </button>
 
       <div className="status-card-spacer" />
       <Button 

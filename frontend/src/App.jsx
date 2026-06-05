@@ -7,6 +7,7 @@ import {
   SubsCard,
   ConnectivityCard,
   ConfirmModal,
+  ConnectionsModal,
   NodeModal,
   ToastStack,
   OnboardingScreen
@@ -19,6 +20,7 @@ import {
   useNodes,
   useProxies,
   useTraffic,
+  useConnections,
   useVersion,
   useDelays,
   useConnectivity,
@@ -43,7 +45,10 @@ export default function App() {
   const [nodeForm, setNodeForm] = useState(EMPTY_NODE_FORM)
   const [nodeType, setNodeType] = useState('hysteria2')
   const [showNodeModal, setShowNodeModal] = useState(false)
+  const [showConnectionsModal, setShowConnectionsModal] = useState(false)
   const [confirmState, setConfirmState] = useState({ open: false, title: '', message: '', onConfirm: null })
+
+  const clashApiBase = useMemo(() => `http://${window.location.hostname}:6262`, [])
 
   const { toasts, showToast } = useToast()
   const { apiCall } = useApi({ loadingAction, setLoadingAction })
@@ -52,6 +57,7 @@ export default function App() {
   const { nodes, setNodes, fetchNodes } = useNodes()
   const { primaryGroupName, primaryGroup, fetchProxies } = useProxies(status)
   const { traffic, closeSockets } = useTraffic(status)
+  const { connectionsInfo, connectionsLoading, connectionsError, fetchConnections } = useConnections(status, clashApiBase)
   const { versionInfo, fetchVersion } = useVersion()
   const { delays, testingNodes, testingGroup, testDelay, testGroupDelays, clearDelays } = useDelays()
   const { 
@@ -63,8 +69,6 @@ export default function App() {
     stopConnectivity,
     clearConnectivity
   } = useConnectivity()
-
-  const clashApiBase = useMemo(() => `http://${window.location.hostname}:6262`, [])
 
   const nodeMetaMap = useMemo(() => {
     const map = new Map()
@@ -104,8 +108,11 @@ export default function App() {
     return tasks
   }, [fetchStatus, fetchSubs, fetchNodes, fetchProxies, status.running])
 
+  const connectionPollingTasks = useMemo(() => [fetchConnections], [fetchConnections])
+
   // 使用统一的轮询管理（始终启用，由 tasks 数组内部决定是否执行）
   usePolling(pollingTasks, true)
+  usePolling(connectionPollingTasks, showConnectionsModal && status.running)
 
   // 始终获取版本信息；后端会在服务停止时仅返回当前版本而不检测更新
   useEffect(() => {
@@ -309,6 +316,11 @@ export default function App() {
     testAllConnectivity(CONNECTIVITY_SITES)
   }, [testAllConnectivity])
 
+  const handleOpenConnections = useCallback(() => {
+    setShowConnectionsModal(true)
+    fetchConnections()
+  }, [fetchConnections])
+
   const handleUpgradeClick = useCallback(async () => {
     if (!status.running) {
       showToast('sing-box 未运行，暂不检测更新', 'info')
@@ -409,6 +421,7 @@ export default function App() {
           traffic={traffic} 
           loadingAction={loadingAction} 
           onToggleService={handleToggleService} 
+          onOpenConnections={handleOpenConnections}
         />
 
         <div className="content-grid">
@@ -470,6 +483,16 @@ export default function App() {
         loading={loadingAction === 'addNode'} 
         onClose={() => setShowNodeModal(false)} 
         onSubmit={handleAddNode} 
+      />
+
+      <ConnectionsModal
+        open={showConnectionsModal}
+        status={status}
+        data={connectionsInfo}
+        loading={connectionsLoading}
+        error={connectionsError}
+        onClose={() => setShowConnectionsModal(false)}
+        onRefresh={fetchConnections}
       />
 
       <ConfirmModal
