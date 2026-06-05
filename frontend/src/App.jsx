@@ -55,8 +55,8 @@ export default function App() {
   const { toasts, showToast } = useToast()
   const { apiCall } = useApi({ loadingAction, setLoadingAction })
   const { status, fetchStatus } = useStatus()
-  const { subs, setSubs, fetchSubs } = useSubs()
-  const { nodes, setNodes, fetchNodes } = useNodes()
+  const { subs, fetchSubs } = useSubs()
+  const { nodes, fetchNodes } = useNodes()
   const { primaryGroupName, primaryGroup, fetchProxies } = useProxies(status)
   const { traffic, closeSockets } = useTraffic(status)
   const {

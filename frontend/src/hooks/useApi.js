@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react'
-import { POLL_INTERVAL, API_HEADERS } from '../utils.js'
+import { API_HEADERS } from '../utils.js'
 import { useWebSocket } from './useWebSocket.js'
 
 export function useToast() {

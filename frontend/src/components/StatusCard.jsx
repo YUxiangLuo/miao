@@ -1,11 +1,10 @@
 import { 
   ArrowUp, 
   ArrowDown, 
-  Power,
-  LoaderCircle 
+  Power
 } from 'lucide-react'
 import { Button, SectionCard } from './ui.jsx'
-import { classNames, formatUptime, formatSpeed } from '../utils.js'
+import { formatUptime, formatSpeed } from '../utils.js'
 
 export function StatusCard({ status, traffic, loadingAction, onToggleService, onOpenConnections }) {
   return (

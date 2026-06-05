@@ -341,7 +341,9 @@ export function ConnectionsModal({
     if (open) setPage(0)
   }, [open, query, sourceFilter, sortKey, sortDesc])
 
-  const connections = Array.isArray(data?.connections) ? data.connections : []
+  const connections = useMemo(() => {
+    return Array.isArray(data?.connections) ? data.connections : []
+  }, [data?.connections])
   const uploadTotal = Number(data?.uploadTotal || connections.reduce((sum, item) => sum + Number(item.upload || 0), 0))
   const downloadTotal = Number(data?.downloadTotal || connections.reduce((sum, item) => sum + Number(item.download || 0), 0))
   const uploadSpeed = connections.reduce((sum, item) => sum + Number(item.uploadSpeed || 0), 0)
