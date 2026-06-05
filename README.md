@@ -48,6 +48,11 @@ port: 6161  # Web 面板端口，默认 6161
 subs:
   - "https://your-subscription-url"
 
+# 可选：自动初始化一台新 VPS。
+# 如果本机 root 环境能通过 SSH 私钥登录 root@<vps_ip>，且没有同 server 的手动节点，
+# 启动时会在该 VPS 安装 Hysteria2，使用 543 端口、自签名证书和随机密码，并写入 nodes。
+vps_ip: "203.0.113.10"
+
 # 或手动配置节点（可与 subs 混合使用）
 nodes:
   - '{"type":"hysteria2","tag":"HY2","server":"example.com","server_port":443,"password":"xxx","tls":{"enabled":true}}'

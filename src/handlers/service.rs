@@ -125,6 +125,7 @@ mod tests {
             subs: vec![],
             nodes: vec![],
             custom_rules: vec![],
+            vps_ip: None,
         });
 
         let axum::response::Json(response) = get_status(State(state)).await;

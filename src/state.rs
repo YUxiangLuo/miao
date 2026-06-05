@@ -68,6 +68,7 @@ mod tests {
             subs: vec!["https://example.com/sub".to_string()],
             nodes: vec![],
             custom_rules: vec![],
+            vps_ip: None,
         };
 
         let state = AppState::new(config.clone()).unwrap();
@@ -92,6 +93,7 @@ mod tests {
             subs: vec![],
             nodes: vec![],
             custom_rules: vec![],
+            vps_ip: None,
         };
 
         let state = AppState::new(config).unwrap();

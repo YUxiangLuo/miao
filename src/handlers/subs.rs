@@ -121,6 +121,7 @@ mod tests {
             subs: vec!["https://example.com/sub".to_string()],
             nodes: vec![],
             custom_rules: vec![],
+            vps_ip: None,
         });
 
         let Json(response) = get_subs(State(state)).await;

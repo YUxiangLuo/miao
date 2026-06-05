@@ -471,6 +471,7 @@ mod tests {
                 "{invalid-json".to_string(),
             ],
             custom_rules: vec![],
+            vps_ip: None,
         };
 
         let (outbounds, names) = collect_manual_outbounds(&config);
@@ -491,6 +492,7 @@ mod tests {
                 r#"{"type":"hysteria2","tag":"no-bandwidth","server":"example.com","server_port":443,"password":"secret","tls":{"enabled":true}}"#.to_string(),
             ],
             custom_rules: vec![],
+            vps_ip: None,
         };
 
         let (outbounds, names) = collect_manual_outbounds(&config);
@@ -513,6 +515,7 @@ mod tests {
                     .to_string(),
                 "not-json".to_string(),
             ],
+            vps_ip: None,
         };
 
         let my_outbounds = vec![json!({
@@ -567,6 +570,7 @@ mod tests {
             subs: vec![],
             nodes: vec![],
             custom_rules: vec![],
+            vps_ip: None,
         };
 
         let err = build_sing_box_config(&config, vec![], vec![], vec![], vec![]).unwrap_err();
@@ -583,6 +587,7 @@ mod tests {
             subs: vec![],
             nodes: vec![],
             custom_rules: vec![],
+            vps_ip: None,
         };
 
         let (outbounds, names) = collect_manual_outbounds(&config);
@@ -602,6 +607,7 @@ mod tests {
                 r#"{"type":"hysteria2"}"#.to_string(), // Valid JSON but no tag
             ],
             custom_rules: vec![],
+            vps_ip: None,
         };
 
         let (outbounds, names) = collect_manual_outbounds(&config);
@@ -618,6 +624,7 @@ mod tests {
             subs: vec![],
             nodes: vec![],
             custom_rules: vec![],
+            vps_ip: None,
         };
 
         let my_outbounds = vec![
@@ -653,6 +660,7 @@ mod tests {
             subs: vec![],
             nodes: vec![],
             custom_rules: vec![],
+            vps_ip: None,
         };
 
         let my_outbounds = vec![json!({
@@ -684,6 +692,7 @@ mod tests {
             subs: vec![],
             nodes: vec![],
             custom_rules: vec![],
+            vps_ip: None,
         };
 
         let my_outbounds = vec![json!({
@@ -786,6 +795,7 @@ mod tests {
                 "{invalid".to_string(),
                 "".to_string(),
             ],
+            vps_ip: None,
         };
 
         let my_outbounds = vec![json!({
@@ -820,6 +830,7 @@ mod tests {
             subs: vec!["https://example.com/sub".to_string()],
             nodes: vec![],
             custom_rules: vec![],
+            vps_ip: None,
         };
 
         // 使用绝对路径保存配置
@@ -864,6 +875,7 @@ mod tests {
             subs: vec![],
             nodes: vec![],
             custom_rules: vec![],
+            vps_ip: None,
         };
         let yaml = serde_yaml::to_string(&config).unwrap();
         let temp_config_path = temp_dir.join("config.yaml.tmp");
