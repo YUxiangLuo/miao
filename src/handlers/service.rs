@@ -1,6 +1,9 @@
 use axum::{extract::State, http::StatusCode, response::Json};
 use serde::Deserialize;
-use std::{sync::Arc, time::Instant};
+use std::{
+    sync::{atomic::Ordering, Arc},
+    time::Instant,
+};
 use tokio::time::Duration;
 
 use crate::error::AppError;
@@ -52,6 +55,15 @@ pub async fn get_status(State(state): State<Arc<AppState>>) -> Json<ApiResponse<
 }
 
 pub async fn start_service(State(state): State<Arc<AppState>>) -> HandlerResult {
+    if state.initializing.load(Ordering::Relaxed) {
+        return Err(status_error(
+            StatusCode::CONFLICT,
+            "Service is initializing, please wait",
+        ));
+    }
+
+    let _config_update = state.config_update.lock().await;
+
     match start_sing_internal(&state).await {
         Ok(_) => {
             let state_for_proxy = state.clone();
@@ -71,9 +83,18 @@ pub async fn start_service(State(state): State<Arc<AppState>>) -> HandlerResult 
     }
 }
 
-pub async fn stop_service(State(state): State<Arc<AppState>>) -> Json<ApiResponse<()>> {
+pub async fn stop_service(State(state): State<Arc<AppState>>) -> HandlerResult {
+    if state.initializing.load(Ordering::Relaxed) {
+        return Err(status_error(
+            StatusCode::CONFLICT,
+            "Service is initializing, please wait",
+        ));
+    }
+
+    let _config_update = state.config_update.lock().await;
+
     stop_sing_internal(&state).await;
-    success_no_data("sing-box stopped")
+    Ok(success_no_data("sing-box stopped"))
 }
 
 #[derive(Deserialize)]
@@ -112,9 +133,11 @@ pub async fn test_connectivity(
 
 #[cfg(test)]
 mod tests {
-    use axum::extract::State;
+    use axum::{extract::State, http::StatusCode, response::Json};
+    use std::sync::atomic::Ordering;
+    use tokio::time::{timeout, Duration};
 
-    use super::get_status;
+    use super::{get_status, start_service, stop_service};
     use crate::models::Config;
     use crate::test_support::app_state;
 
@@ -136,5 +159,87 @@ mod tests {
         assert!(!data.running);
         assert!(data.pid.is_none());
         assert!(data.uptime_secs.is_none());
+    }
+
+    #[tokio::test]
+    async fn start_service_rejects_requests_while_initializing() {
+        let state = app_state(Config {
+            port: None,
+            subs: vec![],
+            nodes: vec![],
+            custom_rules: vec![],
+            vps_ip: None,
+        });
+
+        let result = start_service(State(state)).await;
+
+        let Err((status, Json(response))) = result else {
+            panic!("start_service should reject while initializing");
+        };
+        assert_eq!(status, StatusCode::CONFLICT);
+        assert!(!response.success);
+        assert_eq!(response.message, "Service is initializing, please wait");
+    }
+
+    #[tokio::test]
+    async fn stop_service_rejects_requests_while_initializing() {
+        let state = app_state(Config {
+            port: None,
+            subs: vec![],
+            nodes: vec![],
+            custom_rules: vec![],
+            vps_ip: None,
+        });
+
+        let result = stop_service(State(state)).await;
+
+        let Err((status, Json(response))) = result else {
+            panic!("stop_service should reject while initializing");
+        };
+        assert_eq!(status, StatusCode::CONFLICT);
+        assert!(!response.success);
+        assert_eq!(response.message, "Service is initializing, please wait");
+    }
+
+    #[tokio::test]
+    async fn start_service_waits_for_config_update_lock() {
+        let state = app_state(Config {
+            port: None,
+            subs: vec![],
+            nodes: vec![],
+            custom_rules: vec![],
+            vps_ip: None,
+        });
+        state.initializing.store(false, Ordering::Relaxed);
+        let call_state = state.clone();
+        let _config_update = state.config_update.lock().await;
+
+        let result = timeout(Duration::from_millis(50), start_service(State(call_state))).await;
+
+        assert!(
+            result.is_err(),
+            "start_service should wait for config_update"
+        );
+    }
+
+    #[tokio::test]
+    async fn stop_service_waits_for_config_update_lock() {
+        let state = app_state(Config {
+            port: None,
+            subs: vec![],
+            nodes: vec![],
+            custom_rules: vec![],
+            vps_ip: None,
+        });
+        state.initializing.store(false, Ordering::Relaxed);
+        let call_state = state.clone();
+        let _config_update = state.config_update.lock().await;
+
+        let result = timeout(Duration::from_millis(50), stop_service(State(call_state))).await;
+
+        assert!(
+            result.is_err(),
+            "stop_service should wait for config_update"
+        );
     }
 }

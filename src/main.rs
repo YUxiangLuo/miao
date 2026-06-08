@@ -172,9 +172,13 @@ async fn main() -> AppResult<()> {
         });
     }
 
-    // Background: generate config, check dependencies, and start sing-box
+    // Background: generate config, check dependencies, and start sing-box.
+    // Hold config_update during initialization so API-driven config changes cannot
+    // concurrently write config.yaml/config.json or restart sing-box. Re-read the
+    // in-memory config after acquiring the lock in case a request completed first.
     tokio::spawn(async move {
-        let mut config = config;
+        let _config_update = state_for_init.config_update.lock().await;
+        let mut config = state_for_init.config.read().await.clone();
 
         match ensure_vps_hysteria_node(&mut config).await {
             Ok(_) => {
@@ -229,6 +233,12 @@ async fn main() -> AppResult<()> {
         if let Err(e) = check_and_install_openwrt_dependencies().await {
             error!("Failed to check or install OpenWrt dependencies: {}", e);
         }
+
+        // If a config-changing request completed before initialization acquired
+        // config_update, sing-box may already be running with that request's
+        // generated config. Stop the tracked process first so this freshly
+        // generated initialization config is what gets applied.
+        stop_sing_internal(&state_for_init).await;
 
         match start_sing_internal(&state_for_init).await {
             Ok(_) => {
