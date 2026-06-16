@@ -1041,6 +1041,7 @@ button {
 }
 .tab-row {
     display: flex;
+    flex-wrap: wrap;
     gap: 6px;
     padding: 4px;
     background: rgba(255, 255, 255, 0.04);
@@ -1049,6 +1050,7 @@ button {
 }
 .tab-button {
     flex: 1;
+    min-width: 104px;
     min-height: 34px;
     border-radius: 8px;
     border: none;

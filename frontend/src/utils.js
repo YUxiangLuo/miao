@@ -14,6 +14,7 @@ export const EMPTY_NODE_FORM = {
   tag: '',
   server: '',
   server_port: 443,
+  username: '',
   password: '',
   sni: '',
   cipher: '2022-blake3-aes-128-gcm',
@@ -21,6 +22,15 @@ export const EMPTY_NODE_FORM = {
   obfs_type: '',
   obfs_password: '',
 }
+
+export const NODE_TYPE_OPTIONS = [
+  { value: 'hysteria2', label: 'Hysteria2' },
+  { value: 'anytls', label: 'AnyTLS' },
+  { value: 'ss', label: 'Shadowsocks' },
+  { value: 'trojan', label: 'Trojan' },
+  { value: 'http', label: 'HTTP' },
+  { value: 'socks5', label: 'SOCKS5' },
+]
 
 export const HYSTERIA2_OBFS_OPTIONS = [
   { value: '', label: '禁用混淆' },
@@ -87,6 +97,10 @@ export function protocolLabel(type) {
     anytls: 'anytls',
     shadowsocks: 'shadowsocks',
     ss: 'shadowsocks',
+    trojan: 'trojan',
+    http: 'http',
+    socks: 'socks5',
+    socks5: 'socks5',
   }
   return map[type] || type || 'unknown'
 }
@@ -165,6 +179,22 @@ export function validatePassword(password) {
   if (!password || !password.trim()) return '密码不能为空'
   if (password.length < 8) return '密码太短（至少 8 个字符）'
   if (password.length > 256) return '密码过长（最多 256 个字符）'
+  return null
+}
+
+export function validateSecret(password) {
+  if (!password || !password.trim()) return '密码不能为空'
+  if (password.length > 256) return '密码过长（最多 256 个字符）'
+  return null
+}
+
+export function validateOptionalCredentials(username, password) {
+  const cleanUsername = username?.trim() || ''
+  const cleanPassword = password?.trim() || ''
+  if (!cleanUsername && !cleanPassword) return null
+  if (!cleanUsername) return '填写密码时用户名不能为空'
+  if (cleanUsername.length > 256) return '用户名过长（最多 256 个字符）'
+  if (cleanPassword.length > 256) return '密码过长（最多 256 个字符）'
   return null
 }
 

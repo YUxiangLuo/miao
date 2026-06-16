@@ -3,14 +3,29 @@ use std::sync::Arc;
 use tracing::warn;
 
 use crate::models::{
-    AnyTls, ApiResponse, DeleteNodeRequest, Hysteria2, Hysteria2Obfs, NodeInfo, NodeRequest,
-    Shadowsocks, Tls,
+    AnyTls, ApiResponse, DeleteNodeRequest, HttpOutbound, Hysteria2, Hysteria2Obfs, NodeInfo,
+    NodeRequest, Shadowsocks, SocksOutbound, Tls, Trojan,
 };
 use crate::responses::{status_error, success, success_no_data, HandlerResult};
 use crate::services::config::apply_config_change;
 use crate::services::node_parser::parse_node_json;
 use crate::state::AppState;
 use crate::validation::Validator;
+
+fn optional_trimmed(value: Option<String>) -> Option<String> {
+    value
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn optional_trimmed_string(value: String) -> Option<String> {
+    let value = value.trim().to_string();
+    if value.is_empty() {
+        None
+    } else {
+        Some(value)
+    }
+}
 
 pub async fn get_nodes(State(state): State<Arc<AppState>>) -> Json<ApiResponse<Vec<NodeInfo>>> {
     let config = state.config.read().await;
@@ -54,7 +69,7 @@ pub async fn add_node(
     let node_type = req.node_type.as_deref().unwrap_or("hysteria2");
 
     // 验证节点类型是否支持
-    const VALID_NODE_TYPES: &[&str] = &["hysteria2", "anytls", "ss"];
+    const VALID_NODE_TYPES: &[&str] = &["hysteria2", "anytls", "ss", "trojan", "http", "socks5"];
     if !VALID_NODE_TYPES.contains(&node_type) {
         return Err(status_error(
             StatusCode::BAD_REQUEST,
@@ -114,6 +129,44 @@ pub async fn add_node(
                     .cipher
                     .unwrap_or_else(|| "2022-blake3-aes-128-gcm".to_string()),
                 password: req.password,
+            };
+            serde_json::to_string(&node)
+        }
+        "trojan" => {
+            let node = Trojan {
+                outbound_type: "trojan".to_string(),
+                tag: req.tag,
+                server: req.server,
+                server_port: req.server_port,
+                password: req.password,
+                tls: Tls {
+                    enabled: true,
+                    server_name: req.sni,
+                    insecure: req.skip_cert_verify,
+                },
+            };
+            serde_json::to_string(&node)
+        }
+        "http" => {
+            let node = HttpOutbound {
+                outbound_type: "http".to_string(),
+                tag: req.tag,
+                server: req.server,
+                server_port: req.server_port,
+                username: optional_trimmed(req.username),
+                password: optional_trimmed_string(req.password),
+            };
+            serde_json::to_string(&node)
+        }
+        "socks5" => {
+            let node = SocksOutbound {
+                outbound_type: "socks".to_string(),
+                tag: req.tag,
+                server: req.server,
+                server_port: req.server_port,
+                version: "5".to_string(),
+                username: optional_trimmed(req.username),
+                password: optional_trimmed_string(req.password),
             };
             serde_json::to_string(&node)
         }

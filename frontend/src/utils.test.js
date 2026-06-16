@@ -8,8 +8,10 @@ import {
   protocolLabel,
   validateHysteria2Obfs,
   validateNodeTag,
+  validateOptionalCredentials,
   validatePassword,
   validatePort,
+  validateSecret,
   validateServer,
   validateSubscriptionUrl,
 } from './utils.js'
@@ -26,6 +28,8 @@ describe('formatters', () => {
   it('normalizes protocol labels and subscription display text', () => {
     expect(protocolLabel('ss')).toBe('shadowsocks')
     expect(protocolLabel('hysteria2')).toBe('hysteria2')
+    expect(protocolLabel('socks')).toBe('socks5')
+    expect(protocolLabel('trojan')).toBe('trojan')
     expect(maskSubscription('https://example.com/path/to/token123456')).toBe('example.com...en123456')
   })
 })
@@ -37,6 +41,9 @@ describe('validation', () => {
     expect(validateServer('node.example.com')).toBeNull()
     expect(validatePort(443)).toBeNull()
     expect(validatePassword('password123')).toBeNull()
+    expect(validateSecret('short')).toBeNull()
+    expect(validateOptionalCredentials('', '')).toBeNull()
+    expect(validateOptionalCredentials('user', '')).toBeNull()
     expect(validateHysteria2Obfs('salamander', 'obfs-secret')).toBeNull()
   })
 
@@ -46,6 +53,8 @@ describe('validation', () => {
     expect(validateServer('localhost')).toMatch(/点号/)
     expect(validatePort(70000)).toMatch(/范围/)
     expect(validatePassword('short')).toMatch(/太短/)
+    expect(validateSecret('')).toMatch(/密码不能为空/)
+    expect(validateOptionalCredentials('', 'secret')).toMatch(/用户名/)
     expect(validateHysteria2Obfs('', 'secret')).toMatch(/请先选择/)
   })
 })

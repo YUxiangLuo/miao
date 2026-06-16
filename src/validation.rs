@@ -24,14 +24,23 @@ impl Validator {
         Self::node_tag(&req.tag)?;
         Self::server_address(&req.server)?;
         Self::port(req.server_port)?;
-        Self::password(&req.password)?;
+        let node_type = req.node_type.as_deref().unwrap_or("hysteria2");
+
+        match node_type {
+            "http" | "socks5" => Self::optional_credentials(
+                req.username.as_deref().unwrap_or_default(),
+                req.password.as_str(),
+            )?,
+            "trojan" => Self::non_empty_secret(&req.password)?,
+            _ => Self::password(&req.password)?,
+        }
+
         if let Some(ref sni) = req.sni {
             Self::sni(sni)?;
         }
         if let Some(ref cipher) = req.cipher {
             Self::cipher(cipher)?;
         }
-        let node_type = req.node_type.as_deref().unwrap_or("hysteria2");
         let has_obfs_password = req
             .obfs_password
             .as_deref()
@@ -51,6 +60,29 @@ impl Validator {
         } else if has_obfs_password {
             return Err("请先选择混淆类型".to_string());
         }
+        Ok(())
+    }
+
+    pub fn optional_credentials(username: &str, password: &str) -> Result<(), String> {
+        let username = username.trim();
+        let password = password.trim();
+
+        if username.is_empty() && password.is_empty() {
+            return Ok(());
+        }
+
+        if username.is_empty() {
+            return Err("填写密码时用户名不能为空".to_string());
+        }
+
+        if username.len() > 256 {
+            return Err("用户名过长（最多 256 个字符）".to_string());
+        }
+
+        if password.len() > 256 {
+            return Err("密码过长（最多 256 个字符）".to_string());
+        }
+
         Ok(())
     }
 
@@ -151,6 +183,18 @@ impl Validator {
 
         if password.len() < 8 {
             return Err("密码太短（至少 8 个字符）".to_string());
+        }
+
+        if password.len() > 256 {
+            return Err("密码过长（最多 256 个字符）".to_string());
+        }
+
+        Ok(())
+    }
+
+    pub fn non_empty_secret(password: &str) -> Result<(), String> {
+        if password.is_empty() {
+            return Err("密码不能为空".to_string());
         }
 
         if password.len() > 256 {
@@ -276,6 +320,7 @@ mod tests {
             server: "example.com".to_string(),
             server_port: 443,
             password: "password123".to_string(),
+            username: None,
             sni: None,
             cipher: None,
             skip_cert_verify: false,
@@ -297,6 +342,7 @@ mod tests {
             server: "example.com".to_string(),
             server_port: 443,
             password: "password123".to_string(),
+            username: None,
             sni: None,
             cipher: None,
             skip_cert_verify: false,
@@ -305,6 +351,35 @@ mod tests {
         };
 
         assert!(Validator::validate_node_request(&req).is_err());
+    }
+
+    #[test]
+    fn test_optional_credentials_validation() {
+        assert!(Validator::optional_credentials("", "").is_ok());
+        assert!(Validator::optional_credentials("user", "").is_ok());
+        assert!(Validator::optional_credentials("user", "secret").is_ok());
+        assert!(Validator::optional_credentials("", "secret").is_err());
+        assert!(Validator::optional_credentials(&"u".repeat(257), "").is_err());
+        assert!(Validator::optional_credentials("user", &"p".repeat(257)).is_err());
+    }
+
+    #[test]
+    fn test_trojan_password_allows_short_non_empty_secret() {
+        let req = NodeRequest {
+            node_type: Some("trojan".to_string()),
+            tag: "trojan".to_string(),
+            server: "example.com".to_string(),
+            server_port: 443,
+            password: "short".to_string(),
+            username: None,
+            sni: None,
+            cipher: None,
+            skip_cert_verify: false,
+            obfs_type: None,
+            obfs_password: None,
+        };
+
+        assert!(Validator::validate_node_request(&req).is_ok());
     }
 
     #[test]

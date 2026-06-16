@@ -33,6 +33,8 @@ import {
   validateServer,
   validatePort,
   validatePassword,
+  validateSecret,
+  validateOptionalCredentials,
   validateHysteria2Obfs,
   CONNECTIVITY_SITES
 } from './utils.js'
@@ -266,7 +268,11 @@ export default function App() {
       showToast(portError, 'error')
       return
     }
-    const passwordError = validatePassword(nodeForm.password)
+    const passwordError = nodeType === 'http' || nodeType === 'socks5'
+      ? validateOptionalCredentials(nodeForm.username, nodeForm.password)
+      : nodeType === 'trojan'
+        ? validateSecret(nodeForm.password)
+        : validatePassword(nodeForm.password)
     if (passwordError) {
       showToast(passwordError, 'error')
       return
@@ -288,6 +294,8 @@ export default function App() {
     }
     if (nodeType === 'ss') {
       payload.cipher = nodeForm.cipher
+    } else if (nodeType === 'http' || nodeType === 'socks5') {
+      if (nodeForm.username?.trim()) payload.username = nodeForm.username.trim()
     } else {
       if (nodeForm.sni?.trim()) payload.sni = nodeForm.sni.trim()
       payload.skip_cert_verify = nodeForm.skip_cert_verify

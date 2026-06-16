@@ -58,7 +58,56 @@ pub fn parse_clash_proxies(clash_yaml: &str) -> AppResult<ParseResult> {
 }
 
 fn is_supported_node_type(node_type: &str) -> bool {
-    matches!(node_type, "hysteria2" | "anytls" | "ss")
+    matches!(
+        node_type,
+        "hysteria2" | "anytls" | "ss" | "trojan" | "http" | "socks" | "socks5"
+    )
+}
+
+fn string_field<'a>(node: &'a Value, key: &str) -> Option<&'a str> {
+    node.get(key)
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+}
+
+fn raw_string_field<'a>(node: &'a Value, key: &str) -> Option<&'a str> {
+    node.get(key).and_then(|value| value.as_str())
+}
+
+fn first_string_field<'a>(node: &'a Value, keys: &[&str]) -> Option<&'a str> {
+    keys.iter().find_map(|key| string_field(node, key))
+}
+
+fn bool_field(node: &Value, key: &str) -> bool {
+    node.get(key)
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false)
+}
+
+fn set_optional_string(obj: &mut serde_json::Value, key: &str, value: Option<&str>) {
+    if let Some(value) = value {
+        obj[key] = serde_json::Value::String(value.to_string());
+    }
+}
+
+fn build_tls_config(node: &Value, enabled: bool) -> Option<serde_json::Value> {
+    if !enabled {
+        return None;
+    }
+
+    let mut tls = serde_json::json!({
+        "enabled": true,
+        "insecure": bool_field(node, "skip-cert-verify")
+    });
+
+    set_optional_string(
+        &mut tls,
+        "server_name",
+        first_string_field(node, &["sni", "servername"]),
+    );
+
+    Some(tls)
 }
 
 fn parse_hysteria2_obfs(node: &Value) -> Option<Option<serde_json::Value>> {
@@ -89,24 +138,19 @@ fn parse_hysteria2_obfs(node: &Value) -> Option<Option<serde_json::Value>> {
 }
 
 fn parse_single_node(node: &Value) -> Option<(String, serde_json::Value)> {
-    let typ = node.get("type")?.as_str()?;
-    let name = node.get("name")?.as_str()?;
+    let typ = string_field(node, "type")?;
+    let name = string_field(node, "name")?;
 
     // 验证必需字段
-    let server = node.get("server")?.as_str()?;
+    let server = string_field(node, "server")?;
     let port = node.get("port")?.as_u64()?;
     if port == 0 || port > 65535 {
         return None;
     }
-    let password = node.get("password")?.as_str()?;
 
     let outbound = match typ {
         "hysteria2" => {
-            let sni = node.get("sni").and_then(|s| s.as_str());
-            let insecure = node
-                .get("skip-cert-verify")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false);
+            let password = raw_string_field(node, "password")?;
 
             let mut obj = serde_json::json!({
                 "type": "hysteria2",
@@ -116,13 +160,11 @@ fn parse_single_node(node: &Value) -> Option<(String, serde_json::Value)> {
                 "password": password,
                 "tls": {
                     "enabled": true,
-                    "insecure": insecure
+                    "insecure": bool_field(node, "skip-cert-verify")
                 }
             });
 
-            if let Some(sni_val) = sni {
-                obj["tls"]["server_name"] = serde_json::Value::String(sni_val.to_string());
-            }
+            set_optional_string(&mut obj["tls"], "server_name", string_field(node, "sni"));
 
             if let Some(obfs) = parse_hysteria2_obfs(node)? {
                 obj["obfs"] = obfs;
@@ -131,11 +173,7 @@ fn parse_single_node(node: &Value) -> Option<(String, serde_json::Value)> {
             obj
         }
         "anytls" => {
-            let sni = node.get("sni").and_then(|s| s.as_str());
-            let insecure = node
-                .get("skip-cert-verify")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false);
+            let password = raw_string_field(node, "password")?;
 
             let mut obj = serde_json::json!({
                 "type": "anytls",
@@ -145,18 +183,17 @@ fn parse_single_node(node: &Value) -> Option<(String, serde_json::Value)> {
                 "password": password,
                 "tls": {
                     "enabled": true,
-                    "insecure": insecure
+                    "insecure": bool_field(node, "skip-cert-verify")
                 }
             });
 
-            if let Some(sni_val) = sni {
-                obj["tls"]["server_name"] = serde_json::Value::String(sni_val.to_string());
-            }
+            set_optional_string(&mut obj["tls"], "server_name", string_field(node, "sni"));
 
             obj
         }
         "ss" => {
-            let method = node.get("cipher")?.as_str()?;
+            let method = string_field(node, "cipher")?;
+            let password = raw_string_field(node, "password")?;
             serde_json::json!({
                 "type": "shadowsocks",
                 "tag": name,
@@ -165,6 +202,61 @@ fn parse_single_node(node: &Value) -> Option<(String, serde_json::Value)> {
                 "method": method,
                 "password": password
             })
+        }
+        "trojan" => {
+            let password = raw_string_field(node, "password")?;
+            let network = string_field(node, "network").unwrap_or("tcp");
+            if network != "tcp" {
+                return None;
+            }
+
+            let mut obj = serde_json::json!({
+                "type": "trojan",
+                "tag": name,
+                "server": server,
+                "server_port": port,
+                "password": password,
+                "network": "tcp",
+                "tls": build_tls_config(node, true)?
+            });
+
+            set_optional_string(
+                &mut obj["tls"],
+                "server_name",
+                first_string_field(node, &["sni", "servername"]),
+            );
+
+            obj
+        }
+        "http" => {
+            let mut obj = serde_json::json!({
+                "type": "http",
+                "tag": name,
+                "server": server,
+                "server_port": port
+            });
+
+            set_optional_string(&mut obj, "username", raw_string_field(node, "username"));
+            set_optional_string(&mut obj, "password", raw_string_field(node, "password"));
+            if let Some(tls) = build_tls_config(node, bool_field(node, "tls")) {
+                obj["tls"] = tls;
+            }
+
+            obj
+        }
+        "socks" | "socks5" => {
+            let mut obj = serde_json::json!({
+                "type": "socks",
+                "tag": name,
+                "server": server,
+                "server_port": port,
+                "version": "5"
+            });
+
+            set_optional_string(&mut obj, "username", raw_string_field(node, "username"));
+            set_optional_string(&mut obj, "password", raw_string_field(node, "password"));
+
+            obj
         }
         _ => return None, // 不支持的类型
     };
@@ -477,11 +569,30 @@ proxies:
     port: 8388
     cipher: aes-256-gcm
     password: pass4
+  - name: trojan-1
+    type: trojan
+    server: trojan.example.com
+    port: 443
+    password: pass5
+    sni: trojan.example.com
+    skip-cert-verify: true
+  - name: http-1
+    type: http
+    server: http.example.com
+    port: 8080
+    username: user
+    password: pass6
+  - name: socks-1
+    type: socks5
+    server: socks.example.com
+    port: 1080
+    username: user
+    password: pass7
 "#;
 
         let result = parse_clash_proxies(yaml).unwrap();
 
-        assert_eq!(result.nodes.len(), 4);
+        assert_eq!(result.nodes.len(), 7);
         assert!(result.errors.is_empty());
 
         let types: Vec<String> = result
@@ -491,8 +602,100 @@ proxies:
             .collect();
         assert_eq!(
             types,
-            vec!["hysteria2", "hysteria2", "anytls", "shadowsocks"]
+            vec![
+                "hysteria2",
+                "hysteria2",
+                "anytls",
+                "shadowsocks",
+                "trojan",
+                "http",
+                "socks"
+            ]
         );
+
+        let trojan = &result.nodes[4].1;
+        assert_eq!(trojan["tls"]["server_name"], "trojan.example.com");
+        assert_eq!(trojan["tls"]["insecure"], true);
+
+        let http = &result.nodes[5].1;
+        assert_eq!(http["username"], "user");
+        assert_eq!(http["password"], "pass6");
+
+        let socks = &result.nodes[6].1;
+        assert_eq!(socks["version"], "5");
+        assert_eq!(socks["username"], "user");
+    }
+
+    #[test]
+    fn parse_clash_proxies_preserves_secret_whitespace() {
+        let yaml = r#"
+proxies:
+  - name: hy2-space-secret
+    type: hysteria2
+    server: hy.example.com
+    port: 443
+    password: " hy secret "
+  - name: anytls-space-secret
+    type: anytls
+    server: any.example.com
+    port: 8443
+    password: " any secret "
+  - name: ss-space-secret
+    type: ss
+    server: ss.example.com
+    port: 8388
+    cipher: aes-128-gcm
+    password: " ss secret "
+  - name: trojan-space-secret
+    type: trojan
+    server: trojan.example.com
+    port: 443
+    password: " trojan secret "
+  - name: http-space-secret
+    type: http
+    server: http.example.com
+    port: 8080
+    username: " http user "
+    password: " http secret "
+  - name: socks-space-secret
+    type: socks5
+    server: socks.example.com
+    port: 1080
+    username: " socks user "
+    password: " socks secret "
+"#;
+
+        let result = parse_clash_proxies(yaml).unwrap();
+
+        assert_eq!(result.nodes.len(), 6);
+        assert!(result.errors.is_empty());
+        assert_eq!(result.nodes[0].1["password"], " hy secret ");
+        assert_eq!(result.nodes[1].1["password"], " any secret ");
+        assert_eq!(result.nodes[2].1["password"], " ss secret ");
+        assert_eq!(result.nodes[3].1["password"], " trojan secret ");
+        assert_eq!(result.nodes[4].1["username"], " http user ");
+        assert_eq!(result.nodes[4].1["password"], " http secret ");
+        assert_eq!(result.nodes[5].1["username"], " socks user ");
+        assert_eq!(result.nodes[5].1["password"], " socks secret ");
+    }
+
+    #[test]
+    fn parse_clash_proxies_skips_trojan_non_tcp_transport() {
+        let yaml = r#"
+proxies:
+  - name: trojan-ws
+    type: trojan
+    server: trojan.example.com
+    port: 443
+    password: pass
+    network: ws
+"#;
+
+        let result = parse_clash_proxies(yaml).unwrap();
+
+        assert!(result.nodes.is_empty());
+        assert_eq!(result.errors.len(), 1);
+        assert!(result.errors[0].contains("trojan-ws"));
     }
 
     #[test]
@@ -655,7 +858,7 @@ proxies:
     server: vm.example.com
     port: 443
     uuid: xxx
-  - name: unsupported-trojan
+  - name: valid-trojan
     type: trojan
     server: tr.example.com
     port: 443
@@ -670,12 +873,12 @@ proxies:
 
         let result = parse_clash_proxies(yaml).unwrap();
 
-        // Only 2 valid nodes (hysteria2 and ss), vmess and trojan silently skipped
-        assert_eq!(result.nodes.len(), 2);
+        // vmess is still unsupported, while trojan is now parsed.
+        assert_eq!(result.nodes.len(), 3);
         assert!(result.errors.is_empty());
 
         let names: Vec<String> = result.nodes.iter().map(|(n, _)| n.clone()).collect();
-        assert_eq!(names, vec!["valid-hy2", "valid-ss"]);
+        assert_eq!(names, vec!["valid-hy2", "valid-trojan", "valid-ss"]);
     }
 
     #[test]

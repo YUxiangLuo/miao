@@ -54,13 +54,54 @@ pub struct Shadowsocks {
     pub password: String,
 }
 
+#[derive(Clone, Serialize, Deserialize)]
+pub struct Trojan {
+    #[serde(rename = "type")]
+    pub outbound_type: String,
+    pub tag: String,
+    pub server: String,
+    pub server_port: u16,
+    pub password: String,
+    pub tls: Tls,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct HttpOutbound {
+    #[serde(rename = "type")]
+    pub outbound_type: String,
+    pub tag: String,
+    pub server: String,
+    pub server_port: u16,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub username: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub password: Option<String>,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct SocksOutbound {
+    #[serde(rename = "type")]
+    pub outbound_type: String,
+    pub tag: String,
+    pub server: String,
+    pub server_port: u16,
+    pub version: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub username: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub password: Option<String>,
+}
+
 #[derive(Deserialize)]
 pub struct NodeRequest {
     pub node_type: Option<String>,
     pub tag: String,
     pub server: String,
     pub server_port: u16,
+    #[serde(default)]
     pub password: String,
+    #[serde(default)]
+    pub username: Option<String>,
     #[serde(default)]
     pub sni: Option<String>,
     #[serde(default)]
