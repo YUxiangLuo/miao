@@ -47,8 +47,10 @@ pub fn parse_clash_proxies(clash_yaml: &str) -> AppResult<ParseResult> {
                     .map(|s| s.to_string())
                     .unwrap_or_else(|| format!("<index {}>", idx));
                 result.errors.push(format!(
-                    "Node '{}' (type: {}): missing required fields (type/server/port/password)",
-                    name, node_type
+                    "Node '{}' (type: {}): {}",
+                    name,
+                    node_type,
+                    invalid_node_reason(node, node_type)
                 ));
             }
         }
@@ -83,6 +85,14 @@ fn bool_field(node: &Value, key: &str) -> bool {
     node.get(key)
         .and_then(|value| value.as_bool())
         .unwrap_or(false)
+}
+
+fn invalid_node_reason(node: &Value, node_type: &str) -> &'static str {
+    if matches!(node_type, "socks" | "socks5") && bool_field(node, "tls") {
+        return "TLS-enabled SOCKS nodes are not supported";
+    }
+
+    "missing required fields (type/server/port/password)"
 }
 
 fn set_optional_string(obj: &mut serde_json::Value, key: &str, value: Option<&str>) {
@@ -245,6 +255,10 @@ fn parse_single_node(node: &Value) -> Option<(String, serde_json::Value)> {
             obj
         }
         "socks" | "socks5" => {
+            if bool_field(node, "tls") {
+                return None;
+            }
+
             let mut obj = serde_json::json!({
                 "type": "socks",
                 "tag": name,
@@ -624,6 +638,29 @@ proxies:
         let socks = &result.nodes[6].1;
         assert_eq!(socks["version"], "5");
         assert_eq!(socks["username"], "user");
+    }
+
+    #[test]
+    fn parse_clash_proxies_rejects_tls_socks_nodes() {
+        let yaml = r#"
+proxies:
+  - name: tls-socks
+    type: socks5
+    server: socks.example.com
+    port: 1080
+    username: user
+    password: pass
+    tls: true
+    sni: socks.example.com
+    skip-cert-verify: true
+"#;
+
+        let result = parse_clash_proxies(yaml).unwrap();
+
+        assert!(result.nodes.is_empty());
+        assert_eq!(result.errors.len(), 1);
+        assert!(result.errors[0].contains("tls-socks"));
+        assert!(result.errors[0].contains("TLS-enabled SOCKS nodes are not supported"));
     }
 
     #[test]
