@@ -50,6 +50,11 @@ export function NodeModal({ open, nodeType, setNodeType, form, setForm, loading,
   const showsTlsToggle = ['vmess', 'vless'].includes(nodeType)
   const showsTlsFields = nodeType !== 'ss' && (!showsTlsToggle || form.tls_enabled || form.reality_public_key.trim())
   const pathTransport = ['ws', 'http', 'h2'].includes(form.transport_type)
+  const handleNodeTypeChange = (event) => {
+    const value = event.target.value
+    setNodeType(value)
+    setForm((prev) => ({ ...prev, ...nodeTypeDefaults(value) }))
+  }
 
   const canSubmit = form.tag.trim()
     && form.server.trim()
@@ -71,19 +76,15 @@ export function NodeModal({ open, nodeType, setNodeType, form, setForm, loading,
           </button>
         </div>
 
-        <div className="tab-row">
-          {NODE_TYPE_OPTIONS.map(({ value, label }) => (
-            <button
-              key={value}
-              className={classNames('tab-button', nodeType === value && 'active')}
-              onClick={() => {
-                setNodeType(value)
-                setForm((prev) => ({ ...prev, ...nodeTypeDefaults(value) }))
-              }}
-            >
-              {label}
-            </button>
-          ))}
+        <div className="form-grid single">
+          <label className="field">
+            <span>协议</span>
+            <select value={nodeType} onChange={handleNodeTypeChange}>
+              {NODE_TYPE_OPTIONS.map(({ value, label }) => (
+                <option key={value} value={value}>{label}</option>
+              ))}
+            </select>
+          </label>
         </div>
 
         <div className="form-grid single">

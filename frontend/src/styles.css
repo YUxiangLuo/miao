@@ -1048,33 +1048,6 @@ button {
     color: var(--text-muted);
     font-size: 12px;
 }
-.tab-row {
-    display: flex;
-    gap: 6px;
-    padding: 4px;
-    background: rgba(255, 255, 255, 0.04);
-    border-radius: 10px;
-    margin-bottom: 16px;
-}
-.node-modal .tab-row {
-    flex-wrap: wrap;
-}
-.tab-button {
-    flex: 1;
-    min-height: 34px;
-    border-radius: 8px;
-    border: none;
-    background: transparent;
-    color: var(--text-muted);
-}
-.node-modal .tab-button {
-    flex: 1 1 120px;
-}
-.tab-button.active {
-    background: var(--success);
-    color: #0d1811;
-    font-weight: 600;
-}
 .form-grid {
     display: grid;
     gap: 12px;
