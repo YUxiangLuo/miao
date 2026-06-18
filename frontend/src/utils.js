@@ -15,12 +15,38 @@ export const EMPTY_NODE_FORM = {
   server: '',
   server_port: 443,
   password: '',
+  uuid: '',
+  alter_id: 0,
   sni: '',
   cipher: '2022-blake3-aes-128-gcm',
+  vmess_cipher: 'auto',
   skip_cert_verify: false,
+  tls_enabled: true,
+  transport_type: 'tcp',
+  transport_path: '',
+  transport_host: '',
+  grpc_service_name: '',
+  client_fingerprint: '',
+  reality_public_key: '',
+  reality_short_id: '',
+  flow: '',
+  packet_encoding: '',
+  tuic_congestion_control: 'cubic',
+  tuic_udp_relay_mode: 'native',
+  tuic_zero_rtt: false,
   obfs_type: '',
   obfs_password: '',
 }
+
+export const NODE_TYPE_OPTIONS = [
+  { value: 'hysteria2', label: 'Hysteria2' },
+  { value: 'anytls', label: 'AnyTLS' },
+  { value: 'ss', label: 'Shadowsocks' },
+  { value: 'vmess', label: 'VMess' },
+  { value: 'vless', label: 'VLESS' },
+  { value: 'trojan', label: 'Trojan' },
+  { value: 'tuic', label: 'TUIC' },
+]
 
 export const HYSTERIA2_OBFS_OPTIONS = [
   { value: '', label: '禁用混淆' },
@@ -36,6 +62,69 @@ export const CIPHER_OPTIONS = [
   'aes-256-gcm',
   'chacha20-ietf-poly1305',
 ]
+
+export const VMESS_CIPHER_OPTIONS = ['auto', 'none', 'zero', 'aes-128-gcm', 'chacha20-poly1305']
+
+export const TRANSPORT_OPTIONS = [
+  { value: 'tcp', label: 'TCP' },
+  { value: 'ws', label: 'WebSocket' },
+  { value: 'http', label: 'HTTP' },
+  { value: 'h2', label: 'HTTP/2' },
+  { value: 'grpc', label: 'gRPC' },
+]
+
+export const CLIENT_FINGERPRINT_OPTIONS = [
+  { value: '', label: '默认' },
+  { value: 'chrome', label: 'Chrome' },
+  { value: 'firefox', label: 'Firefox' },
+  { value: 'edge', label: 'Edge' },
+  { value: 'safari', label: 'Safari' },
+  { value: 'ios', label: 'iOS' },
+  { value: 'android', label: 'Android' },
+  { value: 'random', label: 'Random' },
+  { value: 'randomized', label: 'Randomized' },
+]
+
+export const PACKET_ENCODING_OPTIONS = [
+  { value: '', label: '默认' },
+  { value: 'xudp', label: 'xudp' },
+  { value: 'packetaddr', label: 'packetaddr' },
+]
+
+export const TUIC_CONGESTION_OPTIONS = [
+  { value: 'cubic', label: 'cubic' },
+  { value: 'new_reno', label: 'new_reno' },
+  { value: 'bbr', label: 'bbr' },
+]
+
+export const TUIC_UDP_RELAY_OPTIONS = [
+  { value: 'native', label: 'native' },
+  { value: 'quic', label: 'quic' },
+]
+
+export function nodeTypeDefaults(type) {
+  return {
+    tls_enabled: !['ss', 'vmess'].includes(type),
+    cipher: '2022-blake3-aes-128-gcm',
+    vmess_cipher: 'auto',
+    sni: '',
+    skip_cert_verify: false,
+    transport_type: 'tcp',
+    transport_path: '',
+    transport_host: '',
+    grpc_service_name: '',
+    client_fingerprint: '',
+    reality_public_key: '',
+    reality_short_id: '',
+    flow: '',
+    packet_encoding: '',
+    tuic_congestion_control: 'cubic',
+    tuic_udp_relay_mode: 'native',
+    tuic_zero_rtt: false,
+    obfs_type: '',
+    obfs_password: '',
+  }
+}
 
 export function classNames(...items) {
   return items.filter(Boolean).join(' ')
@@ -85,6 +174,10 @@ export function protocolLabel(type) {
   const map = {
     hysteria2: 'hysteria2',
     anytls: 'anytls',
+    vmess: 'vmess',
+    vless: 'vless',
+    trojan: 'trojan',
+    tuic: 'tuic',
     shadowsocks: 'shadowsocks',
     ss: 'shadowsocks',
   }
@@ -165,6 +258,30 @@ export function validatePassword(password) {
   if (!password || !password.trim()) return '密码不能为空'
   if (password.length < 8) return '密码太短（至少 8 个字符）'
   if (password.length > 256) return '密码过长（最多 256 个字符）'
+  return null
+}
+
+export function validateUuid(uuid) {
+  if (!uuid || !uuid.trim()) return 'UUID 不能为空'
+  if (!/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(uuid.trim())) {
+    return 'UUID 格式无效'
+  }
+  return null
+}
+
+export function validateTransport(type, path, host, serviceName) {
+  if (!['tcp', 'ws', 'http', 'h2', 'grpc'].includes(type)) return '不支持的传输层类型'
+  if (['ws', 'http', 'h2'].includes(type) && path?.trim() && !path.trim().startsWith('/')) {
+    return '传输层路径必须以 / 开头'
+  }
+  if (host?.trim() && /\s/.test(host.trim())) return 'Host 不能包含空白字符'
+  if (serviceName?.length > 256) return 'gRPC service name 过长'
+  return null
+}
+
+export function validateVlessFlow(flow) {
+  if (!flow) return null
+  if (flow !== 'xtls-rprx-vision') return '不支持的 VLESS flow'
   return null
 }
 

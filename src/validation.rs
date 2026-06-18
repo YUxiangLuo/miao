@@ -3,8 +3,22 @@ use std::sync::LazyLock;
 
 static VALID_TAG_REGEX: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^[\p{L}\p{N}\-_\s]{1,64}$").unwrap());
+static UUID_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+        .unwrap()
+});
 
-static VALID_CIPHERS: &[&str] = &[
+static VALID_NODE_TYPES: &[&str] = &[
+    "hysteria2",
+    "anytls",
+    "ss",
+    "vmess",
+    "vless",
+    "trojan",
+    "tuic",
+];
+
+static VALID_SS_CIPHERS: &[&str] = &[
     "2022-blake3-aes-128-gcm",
     "2022-blake3-aes-256-gcm",
     "2022-blake3-chacha20-poly1305",
@@ -13,25 +27,122 @@ static VALID_CIPHERS: &[&str] = &[
     "chacha20-ietf-poly1305",
 ];
 
+static VALID_VMESS_CIPHERS: &[&str] = &["auto", "none", "zero", "aes-128-gcm", "chacha20-poly1305"];
+static VALID_TRANSPORT_TYPES: &[&str] = &["tcp", "ws", "http", "h2", "grpc"];
+static VALID_CLIENT_FINGERPRINTS: &[&str] = &[
+    "chrome",
+    "firefox",
+    "edge",
+    "safari",
+    "360",
+    "qq",
+    "ios",
+    "android",
+    "random",
+    "randomized",
+];
+static VALID_PACKET_ENCODINGS: &[&str] = &["packetaddr", "xudp"];
+static VALID_VLESS_FLOWS: &[&str] = &["xtls-rprx-vision"];
+static VALID_TUIC_CONGESTION_CONTROLS: &[&str] = &["cubic", "new_reno", "bbr"];
+static VALID_TUIC_UDP_RELAY_MODES: &[&str] = &["native", "quic"];
 static VALID_HYSTERIA2_OBFS_TYPES: &[&str] = &["salamander", "gecko"];
 
 use crate::models::NodeRequest;
 
 pub struct Validator;
 
+fn non_empty(value: &Option<String>) -> Option<&str> {
+    value
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+}
+
 impl Validator {
     pub fn validate_node_request(req: &NodeRequest) -> Result<(), String> {
         Self::node_tag(&req.tag)?;
         Self::server_address(&req.server)?;
         Self::port(req.server_port)?;
-        Self::password(&req.password)?;
+        let node_type = req.node_type.as_deref().unwrap_or("hysteria2");
+        Self::node_type(node_type)?;
+
+        if matches!(node_type, "hysteria2" | "anytls" | "ss" | "trojan" | "tuic") {
+            Self::password(&req.password)?;
+        }
+        if matches!(node_type, "vmess" | "vless" | "tuic") {
+            let uuid = non_empty(&req.uuid).ok_or("UUID 不能为空")?;
+            Self::uuid(uuid)?;
+        }
         if let Some(ref sni) = req.sni {
             Self::sni(sni)?;
         }
         if let Some(ref cipher) = req.cipher {
-            Self::cipher(cipher)?;
+            if !cipher.trim().is_empty() {
+                match node_type {
+                    "vmess" => Self::vmess_cipher(cipher)?,
+                    "ss" => Self::cipher(cipher)?,
+                    _ => return Err(format!("{} 节点不支持加密方式字段", node_type)),
+                }
+            }
         }
-        let node_type = req.node_type.as_deref().unwrap_or("hysteria2");
+        if let Some(transport_type) = non_empty(&req.transport_type) {
+            Self::transport_type(transport_type)?;
+            if !matches!(node_type, "vmess" | "vless" | "trojan") {
+                return Err(format!("{} 节点不支持传输层配置", node_type));
+            }
+        }
+        if let Some(path) = non_empty(&req.transport_path) {
+            Self::transport_path(path)?;
+        }
+        if let Some(host) = non_empty(&req.transport_host) {
+            Self::header_host(host)?;
+        }
+        if let Some(service_name) = non_empty(&req.grpc_service_name) {
+            Self::grpc_service_name(service_name)?;
+        }
+        if let Some(ref alpn) = req.alpn {
+            Self::alpn(alpn)?;
+        }
+        if let Some(fingerprint) = non_empty(&req.client_fingerprint) {
+            Self::client_fingerprint(fingerprint)?;
+        }
+        if non_empty(&req.reality_public_key).is_some()
+            || non_empty(&req.reality_short_id).is_some()
+        {
+            if node_type != "vless" {
+                return Err("只有 VLESS 节点支持 Reality 配置".to_string());
+            }
+            if non_empty(&req.reality_public_key).is_none() {
+                return Err("Reality public key 不能为空".to_string());
+            }
+            let fingerprint = non_empty(&req.client_fingerprint)
+                .ok_or("Reality 节点必须配置 TLS 指纹（uTLS）")?;
+            Self::client_fingerprint(fingerprint)?;
+        }
+        if let Some(flow) = non_empty(&req.flow) {
+            if node_type != "vless" {
+                return Err("只有 VLESS 节点支持 flow 字段".to_string());
+            }
+            Self::vless_flow(flow)?;
+        }
+        if let Some(packet_encoding) = non_empty(&req.packet_encoding) {
+            if !matches!(node_type, "vmess" | "vless") {
+                return Err("只有 VMess/VLESS 节点支持 packet encoding".to_string());
+            }
+            Self::packet_encoding(packet_encoding)?;
+        }
+        if let Some(congestion_control) = non_empty(&req.tuic_congestion_control) {
+            if node_type != "tuic" {
+                return Err("只有 TUIC 节点支持拥塞控制配置".to_string());
+            }
+            Self::tuic_congestion_control(congestion_control)?;
+        }
+        if let Some(udp_relay_mode) = non_empty(&req.tuic_udp_relay_mode) {
+            if node_type != "tuic" {
+                return Err("只有 TUIC 节点支持 UDP relay mode".to_string());
+            }
+            Self::tuic_udp_relay_mode(udp_relay_mode)?;
+        }
         let has_obfs_password = req
             .obfs_password
             .as_deref()
@@ -144,6 +255,26 @@ impl Validator {
         Ok(())
     }
 
+    pub fn node_type(node_type: &str) -> Result<(), String> {
+        if !VALID_NODE_TYPES.contains(&node_type) {
+            return Err(format!(
+                "不支持的节点类型: {}，支持的类型: {}",
+                node_type,
+                VALID_NODE_TYPES.join(", ")
+            ));
+        }
+
+        Ok(())
+    }
+
+    pub fn uuid(uuid: &str) -> Result<(), String> {
+        if !UUID_REGEX.is_match(uuid) {
+            return Err("UUID 格式无效".to_string());
+        }
+
+        Ok(())
+    }
+
     pub fn password(password: &str) -> Result<(), String> {
         if password.is_empty() {
             return Err("密码不能为空".to_string());
@@ -161,8 +292,111 @@ impl Validator {
     }
 
     pub fn cipher(cipher: &str) -> Result<(), String> {
-        if !VALID_CIPHERS.contains(&cipher) {
+        if !VALID_SS_CIPHERS.contains(&cipher) {
             return Err(format!("不支持的加密方式: {}", cipher));
+        }
+
+        Ok(())
+    }
+
+    pub fn vmess_cipher(cipher: &str) -> Result<(), String> {
+        if !VALID_VMESS_CIPHERS.contains(&cipher) {
+            return Err(format!("不支持的 VMess 加密方式: {}", cipher));
+        }
+
+        Ok(())
+    }
+
+    pub fn transport_type(transport_type: &str) -> Result<(), String> {
+        if !VALID_TRANSPORT_TYPES.contains(&transport_type) {
+            return Err(format!("不支持的传输层类型: {}", transport_type));
+        }
+
+        Ok(())
+    }
+
+    pub fn transport_path(path: &str) -> Result<(), String> {
+        if path.len() > 512 {
+            return Err("传输层路径过长".to_string());
+        }
+
+        if !path.starts_with('/') {
+            return Err("传输层路径必须以 / 开头".to_string());
+        }
+
+        Ok(())
+    }
+
+    pub fn header_host(host: &str) -> Result<(), String> {
+        if host.len() > 253 {
+            return Err("Host 过长".to_string());
+        }
+
+        if host.chars().any(char::is_whitespace) {
+            return Err("Host 不能包含空白字符".to_string());
+        }
+
+        Ok(())
+    }
+
+    pub fn grpc_service_name(service_name: &str) -> Result<(), String> {
+        if service_name.len() > 256 {
+            return Err("gRPC service name 过长".to_string());
+        }
+
+        Ok(())
+    }
+
+    pub fn alpn(alpn: &[String]) -> Result<(), String> {
+        for item in alpn {
+            let value = item.trim();
+            if value.is_empty() {
+                return Err("ALPN 不能为空".to_string());
+            }
+            if value.len() > 32 {
+                return Err("ALPN 过长".to_string());
+            }
+        }
+
+        Ok(())
+    }
+
+    pub fn client_fingerprint(fingerprint: &str) -> Result<(), String> {
+        let normalized = fingerprint.to_ascii_lowercase();
+        if !VALID_CLIENT_FINGERPRINTS.contains(&normalized.as_str()) {
+            return Err(format!("不支持的 TLS 指纹: {}", fingerprint));
+        }
+
+        Ok(())
+    }
+
+    pub fn packet_encoding(packet_encoding: &str) -> Result<(), String> {
+        if !VALID_PACKET_ENCODINGS.contains(&packet_encoding) {
+            return Err(format!("不支持的 packet encoding: {}", packet_encoding));
+        }
+
+        Ok(())
+    }
+
+    pub fn vless_flow(flow: &str) -> Result<(), String> {
+        if !VALID_VLESS_FLOWS.contains(&flow) {
+            return Err(format!("不支持的 VLESS flow: {}", flow));
+        }
+
+        Ok(())
+    }
+
+    pub fn tuic_congestion_control(congestion_control: &str) -> Result<(), String> {
+        if !VALID_TUIC_CONGESTION_CONTROLS.contains(&congestion_control) {
+            return Err(format!("不支持的 TUIC 拥塞控制: {}", congestion_control));
+        }
+
+        Ok(())
+    }
+
+    pub fn tuic_udp_relay_mode(udp_relay_mode: &str) -> Result<(), String> {
+        if !VALID_TUIC_UDP_RELAY_MODES.contains(&udp_relay_mode) {
+            return Err(format!("不支持的 TUIC UDP relay mode: {}", udp_relay_mode));
         }
 
         Ok(())
@@ -276,11 +510,9 @@ mod tests {
             server: "example.com".to_string(),
             server_port: 443,
             password: "password123".to_string(),
-            sni: None,
-            cipher: None,
-            skip_cert_verify: false,
             obfs_type: Some("salamander".to_string()),
             obfs_password: Some("obfs-secret".to_string()),
+            ..NodeRequest::default()
         };
         assert!(Validator::validate_node_request(&valid).is_ok());
 
@@ -297,14 +529,90 @@ mod tests {
             server: "example.com".to_string(),
             server_port: 443,
             password: "password123".to_string(),
-            sni: None,
-            cipher: None,
-            skip_cert_verify: false,
             obfs_type: Some("salamander".to_string()),
             obfs_password: Some("obfs-secret".to_string()),
+            ..NodeRequest::default()
         };
 
         assert!(Validator::validate_node_request(&req).is_err());
+    }
+
+    #[test]
+    fn test_vmess_and_vless_require_uuid_without_password() {
+        let base = NodeRequest {
+            node_type: Some("vmess".to_string()),
+            tag: "vmess".to_string(),
+            server: "example.com".to_string(),
+            server_port: 443,
+            uuid: Some("123e4567-e89b-12d3-a456-426614174000".to_string()),
+            cipher: Some("auto".to_string()),
+            ..NodeRequest::default()
+        };
+
+        assert!(Validator::validate_node_request(&base).is_ok());
+
+        let mut missing_uuid = base;
+        missing_uuid.uuid = None;
+        assert!(Validator::validate_node_request(&missing_uuid).is_err());
+
+        let vless = NodeRequest {
+            node_type: Some("vless".to_string()),
+            tag: "vless".to_string(),
+            server: "example.com".to_string(),
+            server_port: 443,
+            uuid: Some("123e4567-e89b-12d3-a456-426614174000".to_string()),
+            flow: Some("xtls-rprx-vision".to_string()),
+            packet_encoding: Some("xudp".to_string()),
+            ..NodeRequest::default()
+        };
+
+        assert!(Validator::validate_node_request(&vless).is_ok());
+    }
+
+    #[test]
+    fn test_vless_reality_requires_utls_fingerprint() {
+        let mut req = NodeRequest {
+            node_type: Some("vless".to_string()),
+            tag: "vless-reality".to_string(),
+            server: "example.com".to_string(),
+            server_port: 443,
+            uuid: Some("123e4567-e89b-12d3-a456-426614174000".to_string()),
+            reality_public_key: Some("public-key".to_string()),
+            ..NodeRequest::default()
+        };
+
+        let err = Validator::validate_node_request(&req).unwrap_err();
+        assert!(err.contains("uTLS"));
+
+        req.client_fingerprint = Some("chrome".to_string());
+        assert!(Validator::validate_node_request(&req).is_ok());
+    }
+
+    #[test]
+    fn test_tuic_requires_uuid_and_password() {
+        let req = NodeRequest {
+            node_type: Some("tuic".to_string()),
+            tag: "tuic".to_string(),
+            server: "example.com".to_string(),
+            server_port: 443,
+            password: "password123".to_string(),
+            uuid: Some("123e4567-e89b-12d3-a456-426614174000".to_string()),
+            tuic_congestion_control: Some("bbr".to_string()),
+            tuic_udp_relay_mode: Some("quic".to_string()),
+            ..NodeRequest::default()
+        };
+
+        assert!(Validator::validate_node_request(&req).is_ok());
+    }
+
+    #[test]
+    fn test_transport_and_tls_fingerprint_validation() {
+        assert!(Validator::transport_type("ws").is_ok());
+        assert!(Validator::transport_type("xhttp").is_err());
+        assert!(Validator::transport_path("/ws").is_ok());
+        assert!(Validator::transport_path("ws").is_err());
+        assert!(Validator::client_fingerprint("chrome").is_ok());
+        assert!(Validator::client_fingerprint("unknown").is_err());
     }
 
     #[test]

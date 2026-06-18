@@ -32,41 +32,52 @@ pub struct Tls {
     pub insecure: bool,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
-pub struct AnyTls {
-    #[serde(rename = "type")]
-    pub outbound_type: String,
-    pub tag: String,
-    pub server: String,
-    pub server_port: u16,
-    pub password: String,
-    pub tls: Tls,
-}
-
-#[derive(Clone, Serialize, Deserialize)]
-pub struct Shadowsocks {
-    #[serde(rename = "type")]
-    pub outbound_type: String,
-    pub tag: String,
-    pub server: String,
-    pub server_port: u16,
-    pub method: String,
-    pub password: String,
-}
-
-#[derive(Deserialize)]
+#[derive(Deserialize, Default)]
 pub struct NodeRequest {
     pub node_type: Option<String>,
     pub tag: String,
     pub server: String,
     pub server_port: u16,
+    #[serde(default)]
     pub password: String,
+    #[serde(default)]
+    pub uuid: Option<String>,
+    #[serde(default, alias = "alterId")]
+    pub alter_id: Option<u16>,
     #[serde(default)]
     pub sni: Option<String>,
     #[serde(default)]
     pub cipher: Option<String>,
     #[serde(default)]
     pub skip_cert_verify: bool,
+    #[serde(default)]
+    pub tls_enabled: Option<bool>,
+    #[serde(default)]
+    pub transport_type: Option<String>,
+    #[serde(default)]
+    pub transport_path: Option<String>,
+    #[serde(default)]
+    pub transport_host: Option<String>,
+    #[serde(default)]
+    pub grpc_service_name: Option<String>,
+    #[serde(default)]
+    pub alpn: Option<Vec<String>>,
+    #[serde(default)]
+    pub client_fingerprint: Option<String>,
+    #[serde(default)]
+    pub reality_public_key: Option<String>,
+    #[serde(default)]
+    pub reality_short_id: Option<String>,
+    #[serde(default)]
+    pub flow: Option<String>,
+    #[serde(default)]
+    pub packet_encoding: Option<String>,
+    #[serde(default)]
+    pub tuic_congestion_control: Option<String>,
+    #[serde(default)]
+    pub tuic_udp_relay_mode: Option<String>,
+    #[serde(default)]
+    pub tuic_zero_rtt: bool,
     #[serde(default)]
     pub obfs_type: Option<String>,
     #[serde(default)]

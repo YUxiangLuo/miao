@@ -28,12 +28,16 @@ import {
 } from './hooks/index.js'
 import {
   EMPTY_NODE_FORM,
+  nodeTypeDefaults,
   validateSubscriptionUrl,
   validateNodeTag,
   validateServer,
   validatePort,
   validatePassword,
   validateHysteria2Obfs,
+  validateTransport,
+  validateUuid,
+  validateVlessFlow,
   CONNECTIVITY_SITES
 } from './utils.js'
 
@@ -251,6 +255,10 @@ export default function App() {
   }, [apiCall, clearConnectivity, clearDelays, fetchSubs, showToast])
 
   const handleAddNode = useCallback(async () => {
+    const requiresPassword = ['hysteria2', 'anytls', 'ss', 'trojan', 'tuic'].includes(nodeType)
+    const requiresUuid = ['vmess', 'vless', 'tuic'].includes(nodeType)
+    const supportsTransport = ['vmess', 'vless', 'trojan'].includes(nodeType)
+
     const tagError = validateNodeTag(nodeForm.tag)
     if (tagError) {
       showToast(tagError, 'error')
@@ -266,10 +274,43 @@ export default function App() {
       showToast(portError, 'error')
       return
     }
-    const passwordError = validatePassword(nodeForm.password)
-    if (passwordError) {
-      showToast(passwordError, 'error')
-      return
+    if (requiresPassword) {
+      const passwordError = validatePassword(nodeForm.password)
+      if (passwordError) {
+        showToast(passwordError, 'error')
+        return
+      }
+    }
+    if (requiresUuid) {
+      const uuidError = validateUuid(nodeForm.uuid)
+      if (uuidError) {
+        showToast(uuidError, 'error')
+        return
+      }
+    }
+    if (supportsTransport) {
+      const transportError = validateTransport(
+        nodeForm.transport_type,
+        nodeForm.transport_path,
+        nodeForm.transport_host,
+        nodeForm.grpc_service_name,
+      )
+      if (transportError) {
+        showToast(transportError, 'error')
+        return
+      }
+    }
+    if (nodeType === 'vless') {
+      const flowError = validateVlessFlow(nodeForm.flow)
+      if (flowError) {
+        showToast(flowError, 'error')
+        return
+      }
+      const hasRealityConfig = nodeForm.reality_public_key?.trim() || nodeForm.reality_short_id?.trim()
+      if (hasRealityConfig && !nodeForm.client_fingerprint?.trim()) {
+        showToast('Reality 节点必须配置 TLS 指纹（uTLS）', 'error')
+        return
+      }
     }
     const obfsError = nodeType === 'hysteria2'
       ? validateHysteria2Obfs(nodeForm.obfs_type, nodeForm.obfs_password)
@@ -284,23 +325,50 @@ export default function App() {
       tag: nodeForm.tag.trim(),
       server: nodeForm.server.trim(),
       server_port: nodeForm.server_port,
-      password: nodeForm.password.trim(),
     }
+    if (requiresPassword) payload.password = nodeForm.password.trim()
+    if (requiresUuid) payload.uuid = nodeForm.uuid.trim()
+
     if (nodeType === 'ss') {
       payload.cipher = nodeForm.cipher
     } else {
       if (nodeForm.sni?.trim()) payload.sni = nodeForm.sni.trim()
       payload.skip_cert_verify = nodeForm.skip_cert_verify
+      if (nodeForm.client_fingerprint?.trim()) payload.client_fingerprint = nodeForm.client_fingerprint.trim()
       if (nodeType === 'hysteria2' && nodeForm.obfs_type) {
         payload.obfs_type = nodeForm.obfs_type
         payload.obfs_password = nodeForm.obfs_password.trim()
       }
     }
+    if (nodeType === 'vmess') {
+      payload.cipher = nodeForm.vmess_cipher
+      payload.alter_id = Number(nodeForm.alter_id || 0)
+      payload.tls_enabled = Boolean(nodeForm.tls_enabled)
+      if (nodeForm.packet_encoding) payload.packet_encoding = nodeForm.packet_encoding
+    }
+    if (nodeType === 'vless') {
+      payload.tls_enabled = Boolean(nodeForm.tls_enabled)
+      if (nodeForm.flow) payload.flow = nodeForm.flow
+      if (nodeForm.packet_encoding) payload.packet_encoding = nodeForm.packet_encoding
+      if (nodeForm.reality_public_key?.trim()) payload.reality_public_key = nodeForm.reality_public_key.trim()
+      if (nodeForm.reality_short_id?.trim()) payload.reality_short_id = nodeForm.reality_short_id.trim()
+    }
+    if (supportsTransport) {
+      payload.transport_type = nodeForm.transport_type
+      if (nodeForm.transport_path?.trim()) payload.transport_path = nodeForm.transport_path.trim()
+      if (nodeForm.transport_host?.trim()) payload.transport_host = nodeForm.transport_host.trim()
+      if (nodeForm.grpc_service_name?.trim()) payload.grpc_service_name = nodeForm.grpc_service_name.trim()
+    }
+    if (nodeType === 'tuic') {
+      payload.tuic_congestion_control = nodeForm.tuic_congestion_control
+      payload.tuic_udp_relay_mode = nodeForm.tuic_udp_relay_mode
+      payload.tuic_zero_rtt = Boolean(nodeForm.tuic_zero_rtt)
+    }
 
     try {
       await apiCall('nodes', { method: 'POST', body: JSON.stringify(payload) }, 'addNode')
       setShowNodeModal(false)
-      setNodeForm(EMPTY_NODE_FORM)
+      setNodeForm({ ...EMPTY_NODE_FORM, ...nodeTypeDefaults(nodeType) })
       await fetchNodes()
       clearDelays()
       showToast('节点已添加', 'success')

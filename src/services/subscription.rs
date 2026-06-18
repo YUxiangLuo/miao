@@ -108,20 +108,23 @@ proxies:
     port: 8388
     cipher: 2022-blake3-aes-128-gcm
     password: pass-ss
-  - name: ignored-node
+  - name: vmess-node
     type: vmess
     server: vmess.example.com
     port: 443
-    uuid: xxx
+    uuid: 123e4567-e89b-12d3-a456-426614174000
+    cipher: auto
 "#;
 
         let result = parse_clash_proxies(yaml).unwrap();
 
-        // 3 valid nodes + 1 unsupported type (vmess) silently skipped
         let names: Vec<String> = result.nodes.iter().map(|(n, _)| n.clone()).collect();
-        assert_eq!(names, vec!["hy2-node", "anytls-node", "ss-node"]);
-        assert_eq!(result.nodes.len(), 3);
-        assert!(result.errors.is_empty()); // vmess is silently skipped, not reported as error
+        assert_eq!(
+            names,
+            vec!["hy2-node", "anytls-node", "ss-node", "vmess-node"]
+        );
+        assert_eq!(result.nodes.len(), 4);
+        assert!(result.errors.is_empty());
 
         let outbounds: Vec<serde_json::Value> = result.nodes.into_iter().map(|(_, o)| o).collect();
         assert_eq!(outbounds[0]["type"], "hysteria2");
@@ -133,6 +136,8 @@ proxies:
         assert_eq!(outbounds[1]["tls"]["insecure"], true);
         assert_eq!(outbounds[2]["type"], "shadowsocks");
         assert_eq!(outbounds[2]["method"], "2022-blake3-aes-128-gcm");
+        assert_eq!(outbounds[3]["type"], "vmess");
+        assert_eq!(outbounds[3]["security"], "auto");
     }
 
     #[test]

@@ -4,8 +4,16 @@ import { Button } from './ui.jsx'
 import { 
   classNames, 
   CIPHER_OPTIONS, 
+  CLIENT_FINGERPRINT_OPTIONS,
   HYSTERIA2_OBFS_OPTIONS,
-  formatBytes
+  NODE_TYPE_OPTIONS,
+  PACKET_ENCODING_OPTIONS,
+  TRANSPORT_OPTIONS,
+  TUIC_CONGESTION_OPTIONS,
+  TUIC_UDP_RELAY_OPTIONS,
+  VMESS_CIPHER_OPTIONS,
+  formatBytes,
+  nodeTypeDefaults,
 } from '../utils.js'
 
 export function ConfirmModal({ open, title, message, onCancel, onConfirm }) {
@@ -35,15 +43,24 @@ export function ConfirmModal({ open, title, message, onCancel, onConfirm }) {
 export function NodeModal({ open, nodeType, setNodeType, form, setForm, loading, onClose, onSubmit }) {
   if (!open) return null
 
+  const activeLabel = NODE_TYPE_OPTIONS.find((option) => option.value === nodeType)?.label || nodeType
+  const requiresPassword = ['hysteria2', 'anytls', 'ss', 'trojan', 'tuic'].includes(nodeType)
+  const requiresUuid = ['vmess', 'vless', 'tuic'].includes(nodeType)
+  const supportsTransport = ['vmess', 'vless', 'trojan'].includes(nodeType)
+  const showsTlsToggle = ['vmess', 'vless'].includes(nodeType)
+  const showsTlsFields = nodeType !== 'ss' && (!showsTlsToggle || form.tls_enabled || form.reality_public_key.trim())
+  const pathTransport = ['ws', 'http', 'h2'].includes(form.transport_type)
+
   const canSubmit = form.tag.trim()
     && form.server.trim()
     && form.server_port
-    && form.password.trim()
+    && (!requiresPassword || form.password.trim())
+    && (!requiresUuid || form.uuid.trim())
     && (nodeType !== 'hysteria2' || !form.obfs_type || form.obfs_password.trim())
 
   return (
     <div className="modal-overlay">
-      <div className="modal-card" onClick={(event) => event.stopPropagation()}>
+      <div className="modal-card node-modal" onClick={(event) => event.stopPropagation()}>
         <div className="modal-title-row">
           <div className="modal-title-wrap">
             <Plus size={18} className="icon-accent" />
@@ -55,13 +72,16 @@ export function NodeModal({ open, nodeType, setNodeType, form, setForm, loading,
         </div>
 
         <div className="tab-row">
-          {['hysteria2', 'anytls', 'ss'].map((value) => (
+          {NODE_TYPE_OPTIONS.map(({ value, label }) => (
             <button
               key={value}
               className={classNames('tab-button', nodeType === value && 'active')}
-              onClick={() => setNodeType(value)}
+              onClick={() => {
+                setNodeType(value)
+                setForm((prev) => ({ ...prev, ...nodeTypeDefaults(value) }))
+              }}
             >
-              {value === 'ss' ? 'Shadowsocks' : value === 'anytls' ? 'AnyTLS' : 'Hysteria2'}
+              {label}
             </button>
           ))}
         </div>
@@ -97,7 +117,7 @@ export function NodeModal({ open, nodeType, setNodeType, form, setForm, loading,
           </label>
         </div>
 
-        {nodeType === 'ss' ? (
+        {nodeType === 'ss' && (
           <div className="form-grid single">
             <label className="field">
               <span>加密方式</span>
@@ -111,17 +131,215 @@ export function NodeModal({ open, nodeType, setNodeType, form, setForm, loading,
               </select>
             </label>
           </div>
-        ) : (
-          <div className="form-grid single">
+        )}
+
+        {nodeType === 'vmess' && (
+          <div className="form-grid two">
             <label className="field">
-              <span>SNI（可选）</span>
-              <input 
-                value={form.sni} 
-                onChange={(event) => setForm((prev) => ({ ...prev, sni: event.target.value }))} 
-                placeholder="留空使用服务器地址" 
+              <span>VMess security</span>
+              <select
+                value={form.vmess_cipher}
+                onChange={(event) => setForm((prev) => ({ ...prev, vmess_cipher: event.target.value }))}
+              >
+                {VMESS_CIPHER_OPTIONS.map((cipher) => (
+                  <option key={cipher} value={cipher}>{cipher}</option>
+                ))}
+              </select>
+            </label>
+            <label className="field">
+              <span>Alter ID</span>
+              <input
+                type="number"
+                value={form.alter_id}
+                onChange={(event) => setForm((prev) => ({ ...prev, alter_id: Number(event.target.value || 0) }))}
+                min="0"
               />
             </label>
           </div>
+        )}
+
+        {requiresUuid && (
+          <div className="form-grid single">
+            <label className="field">
+              <span>UUID</span>
+              <input
+                value={form.uuid}
+                onChange={(event) => setForm((prev) => ({ ...prev, uuid: event.target.value }))}
+                placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+              />
+            </label>
+          </div>
+        )}
+
+        {showsTlsToggle && (
+          <div className="form-grid single">
+            <label className="field checkbox-field">
+              <input
+                type="checkbox"
+                checked={form.tls_enabled}
+                onChange={(event) => setForm((prev) => ({ ...prev, tls_enabled: event.target.checked }))}
+              />
+              <span>启用 TLS</span>
+            </label>
+          </div>
+        )}
+
+        {nodeType === 'vless' && (
+          <div className="form-grid two">
+            <label className="field">
+              <span>Flow</span>
+              <select
+                value={form.flow}
+                onChange={(event) => setForm((prev) => ({ ...prev, flow: event.target.value }))}
+              >
+                <option value="">默认</option>
+                <option value="xtls-rprx-vision">xtls-rprx-vision</option>
+              </select>
+            </label>
+            <label className="field">
+              <span>Packet encoding</span>
+              <select
+                value={form.packet_encoding}
+                onChange={(event) => setForm((prev) => ({ ...prev, packet_encoding: event.target.value }))}
+              >
+                {PACKET_ENCODING_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+            </label>
+          </div>
+        )}
+
+        {nodeType === 'vmess' && (
+          <div className="form-grid single">
+            <label className="field">
+              <span>Packet encoding</span>
+              <select
+                value={form.packet_encoding}
+                onChange={(event) => setForm((prev) => ({ ...prev, packet_encoding: event.target.value }))}
+              >
+                {PACKET_ENCODING_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+            </label>
+          </div>
+        )}
+
+        {showsTlsFields && (
+          <>
+            <div className="form-grid two">
+              <label className="field">
+                <span>SNI（可选）</span>
+                <input
+                  value={form.sni}
+                  onChange={(event) => setForm((prev) => ({ ...prev, sni: event.target.value }))}
+                  placeholder="留空使用服务器地址"
+                />
+              </label>
+              <label className="field">
+                <span>TLS 指纹</span>
+                <select
+                  value={form.client_fingerprint}
+                  onChange={(event) => setForm((prev) => ({ ...prev, client_fingerprint: event.target.value }))}
+                >
+                  {CLIENT_FINGERPRINT_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <div className="form-grid single">
+              <label className="field checkbox-field">
+                <input
+                  type="checkbox"
+                  checked={form.skip_cert_verify}
+                  onChange={(event) => setForm((prev) => ({ ...prev, skip_cert_verify: event.target.checked }))}
+                />
+                <span>跳过证书验证（不推荐）</span>
+              </label>
+            </div>
+          </>
+        )}
+
+        {nodeType === 'vless' && (
+          <div className="form-grid two">
+            <label className="field">
+              <span>Reality public key</span>
+              <input
+                value={form.reality_public_key}
+                onChange={(event) => {
+                  const publicKey = event.target.value
+                  setForm((prev) => ({
+                    ...prev,
+                    reality_public_key: publicKey,
+                    client_fingerprint: publicKey.trim() && !prev.client_fingerprint
+                      ? 'chrome'
+                      : prev.client_fingerprint,
+                  }))
+                }}
+                placeholder="可选"
+              />
+            </label>
+            <label className="field">
+              <span>Reality short ID</span>
+              <input
+                value={form.reality_short_id}
+                onChange={(event) => setForm((prev) => ({ ...prev, reality_short_id: event.target.value }))}
+                placeholder="可选"
+              />
+            </label>
+          </div>
+        )}
+
+        {supportsTransport && (
+          <>
+            <div className="form-grid single">
+              <label className="field">
+                <span>传输层</span>
+                <select
+                  value={form.transport_type}
+                  onChange={(event) => setForm((prev) => ({ ...prev, transport_type: event.target.value }))}
+                >
+                  {TRANSPORT_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            {pathTransport && (
+              <div className="form-grid two">
+                <label className="field">
+                  <span>路径</span>
+                  <input
+                    value={form.transport_path}
+                    onChange={(event) => setForm((prev) => ({ ...prev, transport_path: event.target.value }))}
+                    placeholder="/ws"
+                  />
+                </label>
+                <label className="field">
+                  <span>Host</span>
+                  <input
+                    value={form.transport_host}
+                    onChange={(event) => setForm((prev) => ({ ...prev, transport_host: event.target.value }))}
+                    placeholder="可选"
+                  />
+                </label>
+              </div>
+            )}
+            {form.transport_type === 'grpc' && (
+              <div className="form-grid single">
+                <label className="field">
+                  <span>gRPC service name</span>
+                  <input
+                    value={form.grpc_service_name}
+                    onChange={(event) => setForm((prev) => ({ ...prev, grpc_service_name: event.target.value }))}
+                    placeholder="可选"
+                  />
+                </label>
+              </div>
+            )}
+          </>
         )}
 
         {nodeType === 'hysteria2' && (
@@ -158,29 +376,58 @@ export function NodeModal({ open, nodeType, setNodeType, form, setForm, loading,
           </>
         )}
 
-        {nodeType !== 'ss' && (
-          <div className="form-grid single">
-            <label className="field checkbox-field">
-              <input
-                type="checkbox"
-                checked={form.skip_cert_verify}
-                onChange={(event) => setForm((prev) => ({ ...prev, skip_cert_verify: event.target.checked }))}
-              />
-              <span>跳过证书验证（不推荐）</span>
+        {nodeType === 'tuic' && (
+          <div className="form-grid two">
+            <label className="field">
+              <span>拥塞控制</span>
+              <select
+                value={form.tuic_congestion_control}
+                onChange={(event) => setForm((prev) => ({ ...prev, tuic_congestion_control: event.target.value }))}
+              >
+                {TUIC_CONGESTION_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+            </label>
+            <label className="field">
+              <span>UDP relay mode</span>
+              <select
+                value={form.tuic_udp_relay_mode}
+                onChange={(event) => setForm((prev) => ({ ...prev, tuic_udp_relay_mode: event.target.value }))}
+              >
+                {TUIC_UDP_RELAY_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
             </label>
           </div>
         )}
 
-        <div className="form-grid single">
-          <label className="field">
-            <span>密码</span>
-            <input 
-              value={form.password} 
-              onChange={(event) => setForm((prev) => ({ ...prev, password: event.target.value }))} 
-              placeholder="密码" 
-            />
-          </label>
-        </div>
+        {nodeType === 'tuic' && (
+          <div className="form-grid single">
+            <label className="field checkbox-field">
+              <input
+                type="checkbox"
+                checked={form.tuic_zero_rtt}
+                onChange={(event) => setForm((prev) => ({ ...prev, tuic_zero_rtt: event.target.checked }))}
+              />
+              <span>启用 0-RTT</span>
+            </label>
+          </div>
+        )}
+
+        {requiresPassword && (
+          <div className="form-grid single">
+            <label className="field">
+              <span>密码</span>
+              <input
+                value={form.password}
+                onChange={(event) => setForm((prev) => ({ ...prev, password: event.target.value }))}
+                placeholder="密码"
+              />
+            </label>
+          </div>
+        )}
 
         <Button 
           tone="primary" 
@@ -189,7 +436,7 @@ export function NodeModal({ open, nodeType, setNodeType, form, setForm, loading,
           disabled={!canSubmit || loading} 
           onClick={onSubmit}
         >
-          添加 {nodeType === 'ss' ? 'Shadowsocks' : nodeType === 'anytls' ? 'AnyTLS' : 'Hysteria2'} 节点
+          添加 {activeLabel} 节点
         </Button>
       </div>
     </div>

@@ -12,6 +12,9 @@ import {
   validatePort,
   validateServer,
   validateSubscriptionUrl,
+  validateTransport,
+  validateUuid,
+  validateVlessFlow,
 } from './utils.js'
 
 describe('formatters', () => {
@@ -25,6 +28,10 @@ describe('formatters', () => {
 
   it('normalizes protocol labels and subscription display text', () => {
     expect(protocolLabel('ss')).toBe('shadowsocks')
+    expect(protocolLabel('vmess')).toBe('vmess')
+    expect(protocolLabel('vless')).toBe('vless')
+    expect(protocolLabel('trojan')).toBe('trojan')
+    expect(protocolLabel('tuic')).toBe('tuic')
     expect(protocolLabel('hysteria2')).toBe('hysteria2')
     expect(maskSubscription('https://example.com/path/to/token123456')).toBe('example.com...en123456')
   })
@@ -37,6 +44,9 @@ describe('validation', () => {
     expect(validateServer('node.example.com')).toBeNull()
     expect(validatePort(443)).toBeNull()
     expect(validatePassword('password123')).toBeNull()
+    expect(validateUuid('123e4567-e89b-12d3-a456-426614174000')).toBeNull()
+    expect(validateTransport('ws', '/path', 'example.com', '')).toBeNull()
+    expect(validateVlessFlow('xtls-rprx-vision')).toBeNull()
     expect(validateHysteria2Obfs('salamander', 'obfs-secret')).toBeNull()
   })
 
@@ -46,6 +56,10 @@ describe('validation', () => {
     expect(validateServer('localhost')).toMatch(/点号/)
     expect(validatePort(70000)).toMatch(/范围/)
     expect(validatePassword('short')).toMatch(/太短/)
+    expect(validateUuid('not-a-uuid')).toMatch(/UUID/)
+    expect(validateTransport('xhttp', '', '', '')).toMatch(/传输层/)
+    expect(validateTransport('ws', 'path', '', '')).toMatch(/\//)
+    expect(validateVlessFlow('bad-flow')).toMatch(/VLESS/)
     expect(validateHysteria2Obfs('', 'secret')).toMatch(/请先选择/)
   })
 })

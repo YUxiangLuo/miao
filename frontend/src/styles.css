@@ -667,6 +667,11 @@ button {
     box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
     padding: 18px;
 }
+.node-modal {
+    width: min(100%, 640px);
+    max-height: min(92vh, 780px);
+    overflow-y: auto;
+}
 .modal-confirm {
     width: min(100%, 420px);
 }
@@ -1047,6 +1052,9 @@ button {
     border-radius: 10px;
     margin-bottom: 16px;
 }
+.node-modal .tab-row {
+    flex-wrap: wrap;
+}
 .tab-button {
     flex: 1;
     min-height: 34px;
@@ -1054,6 +1062,9 @@ button {
     border: none;
     background: transparent;
     color: var(--text-muted);
+}
+.node-modal .tab-button {
+    flex: 1 1 120px;
 }
 .tab-button.active {
     background: var(--success);
