@@ -181,8 +181,9 @@ export default function App() {
     }
   }, [status.running, apiCall, clearDelays, clearConnectivity, fetchStatus, showToast])
 
-  const handleToggleRouteMode = useCallback(async () => {
-    const nextMode = status.route_mode === 'global' ? 'rule' : 'global'
+  const handleSetRouteMode = useCallback(async (nextMode) => {
+    if (nextMode === status.route_mode) return
+
     try {
       await apiCall(
         'route-mode',
@@ -538,7 +539,7 @@ export default function App() {
           traffic={traffic} 
           loadingAction={loadingAction} 
           onToggleService={handleToggleService} 
-          onToggleRouteMode={handleToggleRouteMode}
+          onSetRouteMode={handleSetRouteMode}
           onOpenConnections={handleOpenConnections}
         />
 

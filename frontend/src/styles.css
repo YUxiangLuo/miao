@@ -253,8 +253,45 @@ button {
 .traffic-icon.down {
     color: var(--text-muted);
 }
-.route-mode-btn {
-    min-width: 104px;
+.route-mode-segment {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    padding: 3px;
+    border: 1px solid var(--border-soft);
+    border-radius: 8px;
+    background: var(--surface-soft);
+    flex: 0 0 auto;
+}
+.route-mode-option {
+    min-height: 30px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 6px 10px;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--text-muted);
+    font-size: 12px;
+    font-weight: 500;
+    white-space: nowrap;
+    transition: 0.18s ease;
+}
+.route-mode-option:hover:not(:disabled):not(.active) {
+    color: var(--text);
+    background: rgba(255, 255, 255, 0.04);
+}
+.route-mode-option.active {
+    background: #3a4d66;
+    color: var(--accent-strong);
+}
+.route-mode-option:disabled {
+    cursor: not-allowed;
+    opacity: 0.72;
+}
+.route-mode-option svg {
     flex: 0 0 auto;
 }
 .content-grid {
@@ -1168,8 +1205,8 @@ button {
         width: 100%;
         justify-content: center;
     }
-    .route-mode-btn {
-        min-width: 112px;
+    .route-mode-segment {
+        order: 4;
     }
     .status-card-spacer {
         display: none;

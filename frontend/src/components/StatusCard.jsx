@@ -2,21 +2,23 @@ import {
   ArrowUp, 
   ArrowDown, 
   Globe2,
-  Power
+  Power,
+  Route
 } from 'lucide-react'
 import { Button, SectionCard } from './ui.jsx'
-import { formatUptime, formatSpeed } from '../utils.js'
+import { classNames, formatUptime, formatSpeed } from '../utils.js'
 
 export function StatusCard({
   status,
   traffic,
   loadingAction,
   onToggleService,
-  onToggleRouteMode,
+  onSetRouteMode,
   onOpenConnections
 }) {
   const isGlobalMode = status.route_mode === 'global'
   const modeSwitching = loadingAction === 'routeMode'
+  const modeControlDisabled = modeSwitching || status.initializing
 
   return (
     <SectionCard className="status-card" bodyClassName="status-card-body" header={null}>
@@ -48,17 +50,32 @@ export function StatusCard({
       </button>
 
       <div className="status-card-spacer" />
-      <Button
-        tone={isGlobalMode ? 'primary' : 'secondary'}
-        icon={<Globe2 size={14} />}
-        loading={modeSwitching}
-        disabled={modeSwitching || status.initializing}
-        onClick={onToggleRouteMode}
-        className="route-mode-btn"
-        title={isGlobalMode ? '切换为分流模式' : '切换为全局代理模式'}
-      >
-        {isGlobalMode ? '全局代理' : '分流模式'}
-      </Button>
+      <div className="route-mode-segment" role="group" aria-label="代理模式">
+        <button
+          type="button"
+          className={classNames('route-mode-option', !isGlobalMode && 'active')}
+          disabled={modeControlDisabled}
+          aria-pressed={!isGlobalMode}
+          onClick={() => {
+            if (isGlobalMode) onSetRouteMode('rule')
+          }}
+        >
+          <Route size={13} />
+          <span>分流模式</span>
+        </button>
+        <button
+          type="button"
+          className={classNames('route-mode-option', isGlobalMode && 'active')}
+          disabled={modeControlDisabled}
+          aria-pressed={isGlobalMode}
+          onClick={() => {
+            if (!isGlobalMode) onSetRouteMode('global')
+          }}
+        >
+          <Globe2 size={13} />
+          <span>{modeSwitching ? '切换中' : '全局代理'}</span>
+        </button>
+      </div>
       <Button 
         tone={status.running ? 'danger' : 'success'} 
         icon={<Power size={14} />} 
