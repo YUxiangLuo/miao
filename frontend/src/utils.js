@@ -271,12 +271,27 @@ export function validateUuid(uuid) {
 
 export function validateTransport(type, path, host, serviceName) {
   if (!['tcp', 'ws', 'http', 'h2', 'grpc'].includes(type)) return '不支持的传输层类型'
-  if (['ws', 'http', 'h2'].includes(type) && path?.trim() && !path.trim().startsWith('/')) {
-    return '传输层路径必须以 / 开头'
+  if (['ws', 'http', 'h2'].includes(type)) {
+    if (path?.trim() && !path.trim().startsWith('/')) return '传输层路径必须以 / 开头'
+    if (host?.trim() && /\s/.test(host.trim())) return 'Host 不能包含空白字符'
   }
-  if (host?.trim() && /\s/.test(host.trim())) return 'Host 不能包含空白字符'
-  if (serviceName?.length > 256) return 'gRPC service name 过长'
+  if (type === 'grpc' && serviceName?.length > 256) return 'gRPC service name 过长'
   return null
+}
+
+export function buildTransportPayload(form) {
+  const payload = { transport_type: form.transport_type }
+
+  if (['ws', 'http', 'h2'].includes(form.transport_type)) {
+    if (form.transport_path?.trim()) payload.transport_path = form.transport_path.trim()
+    if (form.transport_host?.trim()) payload.transport_host = form.transport_host.trim()
+  }
+
+  if (form.transport_type === 'grpc' && form.grpc_service_name?.trim()) {
+    payload.grpc_service_name = form.grpc_service_name.trim()
+  }
+
+  return payload
 }
 
 export function validateVlessFlow(flow) {

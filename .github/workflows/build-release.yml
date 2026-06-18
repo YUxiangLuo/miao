@@ -97,7 +97,7 @@ jobs:
             -v \
             -trimpath \
             -ldflags "-s -w -buildid=" \
-            -tags "with_quic,with_clash_api" \
+            -tags "with_quic,with_clash_api,with_utls" \
             ./cmd/sing-box
           mv sing-box ../embedded/sing-box-${{ matrix.target }}
 

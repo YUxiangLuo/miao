@@ -15,6 +15,7 @@ import {
   validateTransport,
   validateUuid,
   validateVlessFlow,
+  buildTransportPayload,
 } from './utils.js'
 
 describe('formatters', () => {
@@ -59,7 +60,44 @@ describe('validation', () => {
     expect(validateUuid('not-a-uuid')).toMatch(/UUID/)
     expect(validateTransport('xhttp', '', '', '')).toMatch(/传输层/)
     expect(validateTransport('ws', 'path', '', '')).toMatch(/\//)
+    expect(validateTransport('grpc', 'path', 'bad host', 'service')).toBeNull()
     expect(validateVlessFlow('bad-flow')).toMatch(/VLESS/)
     expect(validateHysteria2Obfs('', 'secret')).toMatch(/请先选择/)
+  })
+})
+
+describe('payload helpers', () => {
+  it('drops stale transport fields for the selected transport type', () => {
+    expect(buildTransportPayload({
+      transport_type: 'grpc',
+      transport_path: 'path',
+      transport_host: 'bad host',
+      grpc_service_name: ' service ',
+    })).toEqual({
+      transport_type: 'grpc',
+      grpc_service_name: 'service',
+    })
+
+    expect(buildTransportPayload({
+      transport_type: 'tcp',
+      transport_path: '/ws',
+      transport_host: 'example.com',
+      grpc_service_name: 'service',
+    })).toEqual({
+      transport_type: 'tcp',
+    })
+  })
+
+  it('keeps path transport fields and drops gRPC service name', () => {
+    expect(buildTransportPayload({
+      transport_type: 'ws',
+      transport_path: ' /ws ',
+      transport_host: ' cdn.example.com ',
+      grpc_service_name: 'service',
+    })).toEqual({
+      transport_type: 'ws',
+      transport_path: '/ws',
+      transport_host: 'cdn.example.com',
+    })
   })
 })

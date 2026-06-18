@@ -36,6 +36,7 @@ import {
   validatePassword,
   validateHysteria2Obfs,
   validateTransport,
+  buildTransportPayload,
   validateUuid,
   validateVlessFlow,
   CONNECTIVITY_SITES
@@ -354,10 +355,7 @@ export default function App() {
       if (nodeForm.reality_short_id?.trim()) payload.reality_short_id = nodeForm.reality_short_id.trim()
     }
     if (supportsTransport) {
-      payload.transport_type = nodeForm.transport_type
-      if (nodeForm.transport_path?.trim()) payload.transport_path = nodeForm.transport_path.trim()
-      if (nodeForm.transport_host?.trim()) payload.transport_host = nodeForm.transport_host.trim()
-      if (nodeForm.grpc_service_name?.trim()) payload.grpc_service_name = nodeForm.grpc_service_name.trim()
+      Object.assign(payload, buildTransportPayload(nodeForm))
     }
     if (nodeType === 'tuic') {
       payload.tuic_congestion_control = nodeForm.tuic_congestion_control
