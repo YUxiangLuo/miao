@@ -1,12 +1,23 @@
 import { 
   ArrowUp, 
   ArrowDown, 
+  Globe2,
   Power
 } from 'lucide-react'
 import { Button, SectionCard } from './ui.jsx'
 import { formatUptime, formatSpeed } from '../utils.js'
 
-export function StatusCard({ status, traffic, loadingAction, onToggleService, onOpenConnections }) {
+export function StatusCard({
+  status,
+  traffic,
+  loadingAction,
+  onToggleService,
+  onToggleRouteMode,
+  onOpenConnections
+}) {
+  const isGlobalMode = status.route_mode === 'global'
+  const modeSwitching = loadingAction === 'routeMode'
+
   return (
     <SectionCard className="status-card" bodyClassName="status-card-body" header={null}>
       <div className="status-left-wrap">
@@ -37,6 +48,17 @@ export function StatusCard({ status, traffic, loadingAction, onToggleService, on
       </button>
 
       <div className="status-card-spacer" />
+      <Button
+        tone={isGlobalMode ? 'primary' : 'secondary'}
+        icon={<Globe2 size={14} />}
+        loading={modeSwitching}
+        disabled={modeSwitching || status.initializing}
+        onClick={onToggleRouteMode}
+        className="route-mode-btn"
+        title={isGlobalMode ? '切换为分流模式' : '切换为全局代理模式'}
+      >
+        {isGlobalMode ? '全局代理' : '分流模式'}
+      </Button>
       <Button 
         tone={status.running ? 'danger' : 'success'} 
         icon={<Power size={14} />} 

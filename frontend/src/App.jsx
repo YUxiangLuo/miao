@@ -181,6 +181,32 @@ export default function App() {
     }
   }, [status.running, apiCall, clearDelays, clearConnectivity, fetchStatus, showToast])
 
+  const handleToggleRouteMode = useCallback(async () => {
+    const nextMode = status.route_mode === 'global' ? 'rule' : 'global'
+    try {
+      await apiCall(
+        'route-mode',
+        { method: 'POST', body: JSON.stringify({ route_mode: nextMode }) },
+        'routeMode'
+      )
+      clearDelays()
+      clearConnectivity()
+      await fetchStatus()
+      await fetchProxies()
+      showToast(nextMode === 'global' ? '已切换为全局代理' : '已切换为分流模式', 'success')
+    } catch (error) {
+      showToast(error.message, 'error')
+    }
+  }, [
+    status.route_mode,
+    apiCall,
+    clearDelays,
+    clearConnectivity,
+    fetchStatus,
+    fetchProxies,
+    showToast
+  ])
+
   const handleSwitchProxy = useCallback(async (groupName, nodeName) => {
     try {
       const response = await fetch(`${clashApiBase}/proxies/${encodeURIComponent(groupName)}`, {
@@ -512,6 +538,7 @@ export default function App() {
           traffic={traffic} 
           loadingAction={loadingAction} 
           onToggleService={handleToggleService} 
+          onToggleRouteMode={handleToggleRouteMode}
           onOpenConnections={handleOpenConnections}
         />
 

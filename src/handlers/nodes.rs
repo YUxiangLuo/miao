@@ -377,6 +377,7 @@ mod tests {
                 "not-json".to_string(),
             ],
             custom_rules: vec![],
+            route_mode: Default::default(),
             vps_ip: None,
         });
 
@@ -456,6 +457,7 @@ mod tests {
                 r#"{"type":"hysteria2","tag":"no-bw-node","server":"example.com","server_port":443,"password":"secret","tls":{"enabled":true}}"#.to_string(),
             ],
             custom_rules: vec![],
+            route_mode: Default::default(),
             vps_ip: None,
         });
 
@@ -485,6 +487,7 @@ mod tests {
                 r#"{"type":"hysteria2","tag":"invalid-server","server_port":443,"password":"secret"}"#.to_string(),
             ],
             custom_rules: vec![],
+            route_mode: Default::default(),
             vps_ip: None,
         });
 
@@ -503,6 +506,7 @@ mod tests {
             subs: vec![],
             nodes: vec![],
             custom_rules: vec![],
+            route_mode: Default::default(),
             vps_ip: None,
         });
 
@@ -525,6 +529,7 @@ mod tests {
                 r#"{"type":"hysteria2"}"#.to_string(),
             ],
             custom_rules: vec![],
+            route_mode: Default::default(),
             vps_ip: None,
         });
 
@@ -546,6 +551,7 @@ mod tests {
                 r#"{"type":"anytls","tag":"anytls-node","server":"any.example.com","server_port":8443,"password":"secret"}"#.to_string(),
             ],
             custom_rules: vec![],
+            route_mode: Default::default(),
             vps_ip: None,
         });
 
@@ -572,6 +578,7 @@ mod tests {
                 r#"{"type":"hysteria2","tag":"third","server":"third.example.com","server_port":443,"password":"secret"}"#.to_string(),
             ],
             custom_rules: vec![],
+            route_mode: Default::default(),
             vps_ip: None,
         });
 
@@ -595,6 +602,7 @@ mod tests {
                 r#"{"type":"hysteria2","tag":"localhost-ipv6","server":"::1","server_port":443,"password":"secret"}"#.to_string(),
             ],
             custom_rules: vec![],
+            route_mode: Default::default(),
             vps_ip: None,
         });
 
@@ -617,6 +625,7 @@ mod tests {
                 r#"{"type":"hysteria2","tag":"日本サーバー","server":"jp.example.com","server_port":443,"password":"secret"}"#.to_string(),
             ],
             custom_rules: vec![],
+            route_mode: Default::default(),
             vps_ip: None,
         });
 

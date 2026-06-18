@@ -4,9 +4,10 @@ use std::{sync::Arc, time::Instant};
 use tokio::time::Duration;
 
 use crate::error::AppError;
-use crate::models::{ApiResponse, ConnectivityResult, StatusData};
+use crate::models::{ApiResponse, ConnectivityResult, RouteModeRequest, StatusData};
 use crate::responses::{status_error, success, success_no_data, HandlerResult};
 use crate::services::{
+    config::{apply_config_change, apply_config_change_without_restart},
     proxy::restore_last_proxy,
     singbox::{start_sing_internal, stop_sing_internal},
 };
@@ -38,12 +39,14 @@ pub async fn get_status(State(state): State<Arc<AppState>>) -> Json<ApiResponse<
         .initializing
         .load(std::sync::atomic::Ordering::Relaxed);
     let warning = state.config_warning.lock().await.clone();
+    let route_mode = state.config.read().await.route_mode;
 
     success(
         if running { "running" } else { "stopped" },
         StatusData {
             running,
             initializing,
+            route_mode,
             pid,
             uptime_secs,
             warning,
@@ -74,6 +77,50 @@ pub async fn start_service(State(state): State<Arc<AppState>>) -> HandlerResult 
 pub async fn stop_service(State(state): State<Arc<AppState>>) -> Json<ApiResponse<()>> {
     stop_sing_internal(&state).await;
     success_no_data("sing-box stopped")
+}
+
+async fn sing_box_is_running(state: &Arc<AppState>) -> bool {
+    let mut lock = state.sing_process.lock().await;
+
+    match &mut *lock {
+        Some(proc) => match proc.child.try_wait() {
+            Ok(Some(_)) => {
+                *lock = None;
+                false
+            }
+            Ok(None) => true,
+            Err(_) => false,
+        },
+        None => false,
+    }
+}
+
+pub async fn set_route_mode(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<RouteModeRequest>,
+) -> HandlerResult {
+    let _config_update = state.config_update.lock().await;
+    let was_running = sing_box_is_running(&state).await;
+    let old_config = state.config.read().await.clone();
+
+    if old_config.route_mode == req.route_mode {
+        return Ok(success_no_data("Route mode unchanged"));
+    }
+
+    let mut new_config = old_config.clone();
+    new_config.route_mode = req.route_mode;
+
+    let result = if was_running {
+        apply_config_change(&state, &old_config, &new_config).await
+    } else {
+        apply_config_change_without_restart(&state, &old_config, &new_config).await
+    };
+
+    match result {
+        Ok(_) if was_running => Ok(success_no_data("Route mode updated and sing-box restarted")),
+        Ok(_) => Ok(success_no_data("Route mode updated")),
+        Err(e) => Err(status_error(StatusCode::INTERNAL_SERVER_ERROR, e)),
+    }
 }
 
 #[derive(Deserialize)]
@@ -125,6 +172,7 @@ mod tests {
             subs: vec![],
             nodes: vec![],
             custom_rules: vec![],
+            route_mode: Default::default(),
             vps_ip: None,
         });
 

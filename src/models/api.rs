@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use crate::models::config::RouteMode;
+
 #[derive(Serialize)]
 pub struct ApiResponse<T: Serialize> {
     pub success: bool,
@@ -38,6 +40,7 @@ impl<T: Serialize> ApiResponse<T> {
 pub struct StatusData {
     pub running: bool,
     pub initializing: bool,
+    pub route_mode: RouteMode,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pid: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -57,6 +60,11 @@ pub struct ConnectivityResult {
 #[derive(Deserialize)]
 pub struct SubRequest {
     pub url: String,
+}
+
+#[derive(Deserialize)]
+pub struct RouteModeRequest {
+    pub route_mode: RouteMode,
 }
 
 #[derive(Clone, Serialize)]

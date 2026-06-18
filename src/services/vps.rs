@@ -533,6 +533,7 @@ mod tests {
                 r#"{"type":"hysteria2","tag":"manual","server":"203.0.113.10","server_port":543,"password":"secret","tls":{"enabled":true,"insecure":true}}"#.to_string(),
             ],
             custom_rules: vec![],
+            route_mode: Default::default(),
             vps_ip: Some("203.0.113.10".to_string()),
         };
 
@@ -546,6 +547,7 @@ mod tests {
             subs: vec![],
             nodes: vec!["not-json".to_string()],
             custom_rules: vec![],
+            route_mode: Default::default(),
             vps_ip: Some("203.0.113.10".to_string()),
         };
 

@@ -121,6 +121,7 @@ mod tests {
             subs: vec!["https://example.com/sub".to_string()],
             nodes: vec![],
             custom_rules: vec![],
+            route_mode: Default::default(),
             vps_ip: None,
         });
 

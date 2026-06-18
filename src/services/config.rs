@@ -4,7 +4,7 @@ use tokio::time::Duration;
 use tracing::{error, info, warn};
 
 use crate::error::{AppError, AppResult};
-use crate::models::{Config, SubStatus};
+use crate::models::{Config, RouteMode, SubStatus};
 use crate::services::{
     proxy::restore_last_proxy,
     singbox::{
@@ -78,6 +78,17 @@ pub async fn regenerate_and_restart(config: &Config, state: &Arc<AppState>) -> A
         .map_err(|e| AppError::context("Failed to restart sing-box", e))?;
     info!("sing-box restarted successfully");
 
+    update_config_warning(config, state, has_sub_nodes).await;
+
+    let state_for_proxy = state.clone();
+    tokio::spawn(async move {
+        restore_last_proxy(&state_for_proxy).await;
+    });
+
+    Ok(())
+}
+
+async fn update_config_warning(config: &Config, state: &Arc<AppState>, has_sub_nodes: bool) {
     if has_sub_nodes {
         save_config_cache().await;
         *state.config_warning.lock().await = None;
@@ -86,12 +97,19 @@ pub async fn regenerate_and_restart(config: &Config, state: &Arc<AppState>) -> A
     } else {
         *state.config_warning.lock().await = None;
     }
+}
 
-    let state_for_proxy = state.clone();
-    tokio::spawn(async move {
-        restore_last_proxy(&state_for_proxy).await;
-    });
+pub async fn regenerate_without_restart(config: &Config, state: &Arc<AppState>) -> AppResult<()> {
+    let has_sub_nodes = gen_config(config, state)
+        .await
+        .map_err(|e| AppError::context("Failed to regenerate config", e))?;
+    info!("Config regenerated successfully");
 
+    validate_sing_box_config()
+        .await
+        .map_err(|e| AppError::context("Config validation failed", e))?;
+
+    update_config_warning(config, state, has_sub_nodes).await;
     Ok(())
 }
 
@@ -171,6 +189,62 @@ pub async fn apply_config_change(
                     }
                 }
                 Ok::<(), AppError>(())
+            }
+            .await;
+
+            let _ = tokio::fs::remove_file(backup_path).await;
+
+            match rollback_result {
+                Ok(()) => Err(AppError::context(
+                    "Failed to apply config change; rolled back to previous config",
+                    apply_err,
+                )),
+                Err(rollback_err) => Err(AppError::message(format!(
+                    "Failed to apply config change: {}. Rollback failed: {}",
+                    apply_err, rollback_err
+                ))),
+            }
+        }
+    }
+}
+
+pub async fn apply_config_change_without_restart(
+    state: &Arc<AppState>,
+    old_config: &Config,
+    new_config: &Config,
+) -> AppResult<()> {
+    let config_path = std::path::Path::new("config.yaml");
+    let backup_path = std::path::Path::new("config.yaml.bak");
+
+    if config_path.exists() {
+        tokio::fs::copy(config_path, backup_path)
+            .await
+            .map_err(|e| AppError::context("Failed to backup config before applying change", e))?;
+    }
+
+    save_config(new_config).await?;
+
+    match regenerate_without_restart(new_config, state).await {
+        Ok(()) => {
+            *state.config.write().await = new_config.clone();
+            let _ = tokio::fs::remove_file(backup_path).await;
+            Ok(())
+        }
+        Err(apply_err) => {
+            error!(error = %apply_err, "Failed to apply config change, attempting stopped-state rollback");
+
+            let rollback_result = async {
+                if backup_path.exists() {
+                    tokio::fs::copy(backup_path, config_path)
+                        .await
+                        .map_err(|e| {
+                            AppError::context("Failed to restore config from backup", e)
+                        })?;
+                } else {
+                    save_config(old_config).await?;
+                }
+
+                regenerate_without_restart(old_config, state).await
             }
             .await;
 
@@ -446,23 +520,52 @@ fn build_sing_box_config(
         arr.extend(outbounds);
     }
 
-    if let Some(rules) = sing_box_config["route"]["rules"].as_array_mut() {
-        let mut custom_rules = Vec::new();
-        for rule_str in &config.custom_rules {
-            if let Ok(rule_json) = serde_json::from_str::<serde_json::Value>(rule_str) {
-                custom_rules.push(rule_json);
-            } else {
-                warn!("Failed to parse custom rule: {}", rule_str);
-            }
-        }
-
-        // Preserve the mandatory pre-routing actions, then let user rules take
-        // precedence over the built-in direct/proxy split rules.
-        let insertion_index = rules.len().min(2);
-        rules.splice(insertion_index..insertion_index, custom_rules);
-    }
+    apply_route_mode(
+        &mut sing_box_config,
+        config.route_mode,
+        &config.custom_rules,
+    );
 
     Ok(sing_box_config)
+}
+
+fn parse_custom_rules(custom_rules: &[String]) -> Vec<serde_json::Value> {
+    let mut parsed = Vec::new();
+    for rule_str in custom_rules {
+        if let Ok(rule_json) = serde_json::from_str::<serde_json::Value>(rule_str) {
+            parsed.push(rule_json);
+        } else {
+            warn!("Failed to parse custom rule: {}", rule_str);
+        }
+    }
+    parsed
+}
+
+fn apply_route_mode(
+    sing_box_config: &mut serde_json::Value,
+    route_mode: RouteMode,
+    custom_rules: &[String],
+) {
+    if let Some(rules) = sing_box_config["route"]["rules"].as_array_mut() {
+        match route_mode {
+            RouteMode::Rule => {
+                let custom_rules = parse_custom_rules(custom_rules);
+                // Preserve the mandatory pre-routing actions, then let user rules take
+                // precedence over the built-in direct/proxy split rules.
+                let insertion_index = rules.len().min(2);
+                rules.splice(insertion_index..insertion_index, custom_rules);
+            }
+            RouteMode::Global => {
+                rules.truncate(2);
+            }
+        }
+    }
+
+    if route_mode == RouteMode::Global {
+        if let Some(dns_rules) = sing_box_config["dns"]["rules"].as_array_mut() {
+            dns_rules.clear();
+        }
+    }
 }
 
 fn get_config_template() -> serde_json::Value {
@@ -512,7 +615,7 @@ fn get_config_template() -> serde_json::Value {
 #[cfg(test)]
 mod tests {
     use super::{build_sing_box_config, collect_manual_outbounds};
-    use crate::models::Config;
+    use crate::models::{Config, RouteMode};
     use serde_json::json;
 
     #[test]
@@ -525,6 +628,7 @@ mod tests {
                 "{invalid-json".to_string(),
             ],
             custom_rules: vec![],
+            route_mode: Default::default(),
             vps_ip: None,
         };
 
@@ -546,6 +650,7 @@ mod tests {
                 r#"{"type":"hysteria2","tag":"no-bandwidth","server":"example.com","server_port":443,"password":"secret","tls":{"enabled":true}}"#.to_string(),
             ],
             custom_rules: vec![],
+            route_mode: Default::default(),
             vps_ip: None,
         };
 
@@ -569,6 +674,7 @@ mod tests {
                     .to_string(),
                 "not-json".to_string(),
             ],
+            route_mode: Default::default(),
             vps_ip: None,
         };
 
@@ -616,12 +722,55 @@ mod tests {
     }
 
     #[test]
+    fn build_sing_box_config_global_mode_removes_split_rules() {
+        let config = Config {
+            port: None,
+            subs: vec![],
+            nodes: vec![],
+            custom_rules: vec![
+                r#"{"domain_suffix":["example.com"],"action":"route","outbound":"direct"}"#
+                    .to_string(),
+            ],
+            route_mode: RouteMode::Global,
+            vps_ip: None,
+        };
+
+        let my_outbounds = vec![json!({
+            "type": "hysteria2",
+            "tag": "manual-a",
+            "server": "manual.example.com",
+            "server_port": 443,
+            "password": "secret"
+        })];
+
+        let built = build_sing_box_config(
+            &config,
+            vec!["manual-a".to_string()],
+            my_outbounds,
+            vec![],
+            vec![],
+        )
+        .unwrap();
+
+        let rules = built["route"]["rules"].as_array().unwrap();
+        assert_eq!(rules.len(), 2);
+        assert_eq!(rules[0]["action"], "sniff");
+        assert_eq!(rules[1]["action"], "hijack-dns");
+        assert!(rules.iter().all(|rule| rule.get("outbound").is_none()));
+
+        let dns_rules = built["dns"]["rules"].as_array().unwrap();
+        assert!(dns_rules.is_empty());
+        assert_eq!(built["route"]["final"], "proxy");
+    }
+
+    #[test]
     fn build_sing_box_config_renames_duplicate_outbound_tags() {
         let config = Config {
             port: None,
             subs: vec![],
             nodes: vec![],
             custom_rules: vec![],
+            route_mode: Default::default(),
             vps_ip: None,
         };
 
@@ -679,6 +828,7 @@ mod tests {
             subs: vec![],
             nodes: vec![],
             custom_rules: vec![],
+            route_mode: Default::default(),
             vps_ip: None,
         };
 
@@ -729,6 +879,7 @@ mod tests {
             subs: vec![],
             nodes: vec![],
             custom_rules: vec![],
+            route_mode: Default::default(),
             vps_ip: None,
         };
 
@@ -746,6 +897,7 @@ mod tests {
             subs: vec![],
             nodes: vec![],
             custom_rules: vec![],
+            route_mode: Default::default(),
             vps_ip: None,
         };
 
@@ -766,6 +918,7 @@ mod tests {
                 r#"{"type":"hysteria2"}"#.to_string(), // Valid JSON but no tag
             ],
             custom_rules: vec![],
+            route_mode: Default::default(),
             vps_ip: None,
         };
 
@@ -783,6 +936,7 @@ mod tests {
             subs: vec![],
             nodes: vec![],
             custom_rules: vec![],
+            route_mode: Default::default(),
             vps_ip: None,
         };
 
@@ -819,6 +973,7 @@ mod tests {
             subs: vec![],
             nodes: vec![],
             custom_rules: vec![],
+            route_mode: Default::default(),
             vps_ip: None,
         };
 
@@ -851,6 +1006,7 @@ mod tests {
             subs: vec![],
             nodes: vec![],
             custom_rules: vec![],
+            route_mode: Default::default(),
             vps_ip: None,
         };
 
@@ -928,6 +1084,7 @@ mod tests {
                 "{invalid".to_string(),
                 "".to_string(),
             ],
+            route_mode: Default::default(),
             vps_ip: None,
         };
 
@@ -963,6 +1120,7 @@ mod tests {
             subs: vec!["https://example.com/sub".to_string()],
             nodes: vec![],
             custom_rules: vec![],
+            route_mode: Default::default(),
             vps_ip: None,
         };
 
@@ -1008,6 +1166,7 @@ mod tests {
             subs: vec![],
             nodes: vec![],
             custom_rules: vec![],
+            route_mode: Default::default(),
             vps_ip: None,
         };
         let yaml = serde_yaml::to_string(&config).unwrap();

@@ -253,6 +253,10 @@ button {
 .traffic-icon.down {
     color: var(--text-muted);
 }
+.route-mode-btn {
+    min-width: 104px;
+    flex: 0 0 auto;
+}
 .content-grid {
     flex: 1;
     min-height: 0;
@@ -1190,6 +1194,9 @@ button {
         order: 3;
         width: 100%;
         justify-content: center;
+    }
+    .route-mode-btn {
+        min-width: 112px;
     }
     .status-card-spacer {
         display: none;
