@@ -1,6 +1,6 @@
 [package]
 name = "miao-rust"
-version = "0.25.2"
+version = "0.25.3"
 edition = "2021"
 
 [dependencies]
