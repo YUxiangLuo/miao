@@ -14,17 +14,11 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
 
       - name: Build frontend
-        run: |
-          npm --prefix frontend ci
-          npm --prefix frontend run build
+        run: ./scripts/build-frontend.sh
 
       - name: Upload frontend artifact
         uses: actions/upload-artifact@v4
@@ -40,10 +34,8 @@ jobs:
         include:
           - target: amd64
             rust_target: x86_64-unknown-linux-musl
-            goarch: amd64
           - target: arm64
             rust_target: aarch64-unknown-linux-musl
-            goarch: arm64
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -59,21 +51,13 @@ jobs:
         with:
           targets: ${{ matrix.rust_target }}
 
-      - name: Clone sing-box source
-        run: git clone --depth=1 https://github.com/SagerNet/sing-box.git sing-box-src
-
-      - name: Determine required Go version
-        id: go-version
-        run: |
-          GO_VERSION=$(grep '^go ' sing-box-src/go.mod | awk '{print $2}')
-          echo "Required Go version: ${GO_VERSION}"
-          echo "version=${GO_VERSION}" >> $GITHUB_OUTPUT
-
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: ${{ steps.go-version.outputs.version }}
-          cache-dependency-path: sing-box-src/go.sum
+          go-version: stable
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
 
       - name: Install Zig for cross-compilation
         uses: mlugg/setup-zig@v2
@@ -81,68 +65,8 @@ jobs:
       - name: Install cargo-zigbuild
         uses: taiki-e/install-action@cargo-zigbuild
 
-      - name: Build sing-box binary
-        run: |
-          mkdir -p embedded
-          cd sing-box-src
-
-          # Build host binary first for rule-set compile (SRS is architecture-independent)
-          go build -ldflags "-s -w -buildid=" ./cmd/sing-box
-          mv sing-box ../embedded/sing-box-host
-
-          SING_BOX_VERSION=$(git describe --tags --always)
-          echo "Building sing-box version: ${SING_BOX_VERSION}"
-
-          GOARCH=${{ matrix.goarch }} GOOS=linux CGO_ENABLED=0 go build \
-            -v \
-            -trimpath \
-            -ldflags "-s -w -buildid=" \
-            -tags "with_quic,with_clash_api,with_utls" \
-            ./cmd/sing-box
-          mv sing-box ../embedded/sing-box-${{ matrix.target }}
-
-          cd ..
-          rm -rf sing-box-src
-
-          echo "Built sing-box ${SING_BOX_VERSION}"
-          ls -lh embedded/
-
-      - name: Download and compile geo rule files
-        run: |
-          # Download geoip
-          curl -L -o embedded/geoip-cn.srs https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/geoip-cn.srs
-
-          # Fetch direct-list.txt, parse and compile to SRS (referencing index.ts)
-          curl -L -o /tmp/direct-list.txt https://raw.githubusercontent.com/Loyalsoldier/v2ray-rules-dat/release/direct-list.txt
-
-          node -e '
-            const fs = require("fs");
-            const text = fs.readFileSync("/tmp/direct-list.txt", "utf-8");
-            const domainList = [], suffixList = [], regexList = [];
-            for (const raw of text.split("\n")) {
-              const line = raw.trim();
-              if (!line || line.startsWith("#")) continue;
-              if (line.startsWith("full:")) domainList.push(line.slice(5));
-              else if (line.startsWith("regexp:")) regexList.push(line.slice(7));
-              else if (line.startsWith("domain:")) suffixList.push(line.slice(7));
-              else suffixList.push(line);
-            }
-            const rules = {};
-            if (domainList.length) rules.domain = domainList;
-            if (suffixList.length) rules.domain_suffix = suffixList;
-            if (regexList.length) rules.domain_regex = regexList;
-            const ruleset = { version: 4, rules: [rules] };
-            fs.writeFileSync("/tmp/direct-list.json", JSON.stringify(ruleset, null, 2));
-            const total = domainList.length + suffixList.length + regexList.length;
-            console.log("Parsed " + total + " rules: domain=" + domainList.length + ", domain_suffix=" + suffixList.length + ", domain_regex=" + regexList.length);
-          '
-
-          ./embedded/sing-box-host rule-set compile /tmp/direct-list.json -o embedded/geosite-geolocation-cn.srs
-
-          rm -f /tmp/direct-list.txt /tmp/direct-list.json
-
-          echo "Downloaded/Compiled geo rule files:"
-          ls -lh embedded/*.srs
+      - name: Build sing-box and geo rule files
+        run: MIAO_TARGET=${{ matrix.target }} ./scripts/build-embedded.sh
 
       - name: Build release for ${{ matrix.target }}
         run: cargo zigbuild --release --target ${{ matrix.rust_target }}

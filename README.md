@@ -75,9 +75,13 @@ sudo ssh -o BatchMode=yes root@203.0.113.10 true
 
 ## 从源码构建
 
+需要安装 Bun、Go、Rust 和 curl。构建当前机器架构：
+
 ```bash
 ./build.sh
 ```
+
+`build.sh` 只构建当前机器架构。跨架构构建由 GitHub Actions 负责。构建脚本会使用同一套流程准备前端、sing-box 和 geo 规则集；可以通过 `SING_BOX_REF` 指定 sing-box 的分支或 tag。
 
 构建产物：
 

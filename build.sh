@@ -1,35 +1,26 @@
-#!/bin/bash
-set -e
+#!/usr/bin/env bash
+set -euo pipefail
 
-cd "$(dirname "$0")"
+ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+cd "$ROOT_DIR"
 
-SING_BOX_BIN="embedded/sing-box-amd64"
-
-# 检查 sing-box 是否需要编译
-if [ ! -s "$SING_BOX_BIN" ]; then
-  echo "==> 编译 sing-box..."
-
-  TMPDIR=$(mktemp -d)
-  trap "rm -rf $TMPDIR" EXIT
-
-  git clone --depth=1 https://github.com/SagerNet/sing-box.git "$TMPDIR/sing-box"
-  cd "$TMPDIR/sing-box"
-
-  CGO_ENABLED=0 go build -tags "with_quic,with_clash_api" ./cmd/sing-box
-
-  cd - >/dev/null
-  cp "$TMPDIR/sing-box/sing-box" "$SING_BOX_BIN"
-
-  echo "==> sing-box 编译完成"
-else
-  echo "==> sing-box 已存在，跳过"
+if (( $# > 0 )); then
+  echo "Usage: $0 (builds the current host architecture only)" >&2
+  exit 1
 fi
 
-echo "==> 构建 Vite + React 前端..."
-npm --prefix frontend install
-npm --prefix frontend run build
+case "$(uname -m)" in
+  x86_64|amd64) target=amd64 ;;
+  aarch64|arm64) target=arm64 ;;
+  *)
+    echo "Unsupported host architecture: $(uname -m)" >&2
+    exit 1
+    ;;
+esac
 
-echo "==> 编译 miao-rust (release)..."
+./scripts/build-frontend.sh
+MIAO_TARGET="$target" ./scripts/build-embedded.sh
+
+echo "==> Building miao-rust ($target native release)..."
 cargo build --release
-
-echo "==> 完成: target/release/miao-rust"
+echo "==> Complete: target/release/miao-rust"
