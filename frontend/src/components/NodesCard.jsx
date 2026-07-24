@@ -6,7 +6,7 @@ import { protocolLabel } from '../utils.js'
 const NodeRow = memo(function NodeRow({ node, onDelete }) {
   return (
     <div className="list-row">
-      <Shield size={13} className="list-leading-icon" />
+      <Shield size={13} className="list-leading-icon" aria-hidden="true" />
       <div className="list-row-content">
         <div className="list-row-title">{node.tag}</div>
         <div className="list-row-meta">{node.server}:{node.server_port} · {protocolLabel(node.node_type)}</div>
@@ -14,8 +14,9 @@ const NodeRow = memo(function NodeRow({ node, onDelete }) {
       <button 
         className="icon-button subtle" 
         onClick={() => onDelete(node.tag)}
+        aria-label={`删除节点 ${node.tag}`}
       >
-        <Trash2 size={13} />
+        <Trash2 size={13} aria-hidden="true" />
       </button>
     </div>
   )
@@ -34,13 +35,13 @@ export function NodesCard({ nodes, onDeleteNode, onOpenAddNode }) {
               <line x1="6" x2="6.01" y1="6" y2="6"/>
               <line x1="6" x2="6.01" y1="18" y2="18"/>
             </svg>
-            <span>手动节点</span>
+            <h2 className="section-heading">手动节点</h2>
             <span className="counter-pill">{nodes.length}</span>
           </div>
           <Button
             tone="secondary"
             size="sm"
-            icon={<Plus size={12} />}
+            icon={<Plus size={12} aria-hidden="true" />}
             onClick={onOpenAddNode}
           >
             添加

@@ -10,23 +10,36 @@ import {
 
 const ProxyTile = memo(function ProxyTile({ nodeName, delay, isActive, isTesting, onSwitchProxy, onTestDelay, group }) {
   return (
-    <div 
-      className={classNames('proxy-tile', isActive && 'active')} 
-      onClick={() => !isTesting && onSwitchProxy(group, nodeName)}
-    >
-      <div className="proxy-tile-top">
-        {isActive
-          ? <div className="proxy-tag"><span className="proxy-tag-dot" /><span>{nodeName}</span></div>
-          : <span className="proxy-node-name">{nodeName}</span>}
-      </div>
-      <button 
-        className={classNames('proxy-test-chip', getDelayTone(delay))} 
-        onClick={(event) => { event.stopPropagation(); onTestDelay(nodeName); }} 
+    <div className={classNames('proxy-tile', isActive && 'active')}>
+      <button
+        type="button"
+        className="proxy-select-button"
+        onClick={() => onSwitchProxy(group, nodeName)}
         disabled={isTesting}
+        aria-pressed={isActive}
+        aria-label={isActive ? `当前节点 ${nodeName}` : `切换到节点 ${nodeName}`}
+      >
+        <span className="proxy-tile-top">
+          {isActive
+            ? (
+              <span className="proxy-tag">
+                <span className="proxy-tag-dot" aria-hidden="true" />
+                <span>{nodeName}</span>
+              </span>
+            )
+            : <span className="proxy-node-name">{nodeName}</span>}
+        </span>
+      </button>
+      <button 
+        type="button"
+        className={classNames('proxy-test-chip', getDelayTone(delay))} 
+        onClick={() => onTestDelay(nodeName)}
+        disabled={isTesting}
+        aria-label={isTesting ? `正在测试节点 ${nodeName} 的延迟` : `测试节点 ${nodeName} 的延迟`}
       >
         {isTesting 
-          ? <LoaderCircle size={10} className="spin" /> 
-          : <Zap size={10} />}
+          ? <LoaderCircle size={10} className="spin" aria-hidden="true" />
+          : <Zap size={10} aria-hidden="true" />}
         <span>{isTesting ? '测试中…' : formatDelay(delay)}</span>
       </button>
     </div>
@@ -56,13 +69,13 @@ export function ProxyCard({
       header={
         <div className="section-header">
           <div className="section-title-wrap">
-            <Radio size={14} className="section-icon" />
-            <span>代理节点选择</span>
+            <Radio size={14} className="section-icon" aria-hidden="true" />
+            <h2 className="section-heading">代理节点选择</h2>
           </div>
           <Button 
             tone="secondary" 
             size="sm" 
-            icon={<Zap size={12} />} 
+            icon={<Zap size={12} aria-hidden="true" />}
             loading={testingGroup === primaryGroupName} 
             disabled={!primaryGroup || !status.running} 
             onClick={() => primaryGroup && onTestGroupDelays(primaryGroupName, primaryGroup.all)}
@@ -77,7 +90,7 @@ export function ProxyCard({
         onClick={() => primaryGroup?.now && onTestDelay(primaryGroup.now)} 
         disabled={!primaryGroup?.now || Boolean(testingNodes[primaryGroup?.now])}
       >
-        <div className="banner-icon-wrap"><span className="banner-dot" /></div>
+        <div className="banner-icon-wrap"><span className="banner-dot" aria-hidden="true" /></div>
         <div className="banner-copy">
           <span className="banner-label">当前节点</span>
           <strong>{primaryGroup?.now || '未选择'}</strong>
@@ -91,7 +104,7 @@ export function ProxyCard({
         </div>
         <div className={classNames('banner-delay', getDelayTone(currentNodeDelay))}>
           {isTestingCurrent 
-            ? <LoaderCircle size={20} className="spin" /> 
+            ? <LoaderCircle size={20} className="spin" aria-hidden="true" />
             : <strong>{currentNodeDelay !== undefined && currentNodeDelay >= 0 ? currentNodeDelay : '--'}</strong>}
           <span>ms</span>
         </div>
@@ -113,7 +126,7 @@ export function ProxyCard({
               />
             ))}
             <button className="proxy-tile add-tile" onClick={onOpenAddNode}>
-              <Plus size={13} />
+              <Plus size={13} aria-hidden="true" />
               <span>添加节点</span>
             </button>
           </div>

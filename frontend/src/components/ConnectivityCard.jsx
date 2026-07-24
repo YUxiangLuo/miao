@@ -17,14 +17,15 @@ export function ConnectivityCard({
       header={
         <div className="section-header">
           <div className="section-title-wrap">
-            <Globe size={14} className="section-icon" />
-            <span>连通性测试</span>
+            <Globe size={14} className="section-icon" aria-hidden="true" />
+            <h2 className="section-heading">连通性测试</h2>
           </div>
           <Button 
             tone="secondary" 
             size="sm" 
-            icon={testingConnectivity ? <LoaderCircle size={11} className="spin" /> : <Play size={11} />} 
-            loading={testingConnectivity} 
+            icon={testingConnectivity
+              ? <LoaderCircle size={11} className="spin" aria-hidden="true" />
+              : <Play size={11} aria-hidden="true" />}
             disabled={status.initializing} 
             onClick={testingConnectivity ? onStopTest : onTestAll}
           >

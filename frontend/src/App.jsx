@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useCallback } from 'react'
+import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import {
   TopBar,
   StatusCard,
@@ -10,7 +10,8 @@ import {
   ConnectionsModal,
   NodeModal,
   ToastStack,
-  OnboardingScreen
+  OnboardingScreen,
+  Button
 } from './components/index.js'
 import {
   useToast,
@@ -42,8 +43,6 @@ import {
   CONNECTIVITY_SITES
 } from './utils.js'
 
-const CONNECTIONS_MODAL_MIN_WIDTH = 841
-
 export default function App() {
   const [firstLoadDone, setFirstLoadDone] = useState(false)
   const [loadingAction, setLoadingAction] = useState('')
@@ -54,15 +53,19 @@ export default function App() {
   const [showNodeModal, setShowNodeModal] = useState(false)
   const [showConnectionsModal, setShowConnectionsModal] = useState(false)
   const [confirmState, setConfirmState] = useState({ open: false, title: '', message: '', onConfirm: null })
+  const firstLoadStartedRef = useRef(false)
+  const versionStatusRef = useRef(null)
+  const proxiesStatusRef = useRef(false)
+  const wasInitializingRef = useRef(false)
 
   const clashApiBase = useMemo(() => '/api/clash', [])
 
   const { toasts, showToast } = useToast()
   const { apiCall } = useApi({ loadingAction, setLoadingAction })
-  const { status, fetchStatus } = useStatus()
-  const { subs, fetchSubs } = useSubs()
-  const { nodes, fetchNodes } = useNodes()
-  const { primaryGroupName, primaryGroup, fetchProxies } = useProxies(status)
+  const { status, fetchStatus, statusError, statusLoaded } = useStatus()
+  const { subs, fetchSubs, subsError, subsLoaded } = useSubs()
+  const { nodes, fetchNodes, nodesError, nodesLoaded } = useNodes()
+  const { primaryGroupName, primaryGroup, fetchProxies, proxiesError } = useProxies(status)
   const { traffic, closeSockets } = useTraffic(status)
   const {
     connectionsInfo,
@@ -100,13 +103,28 @@ export default function App() {
     setConfirmState({ open: false, title: '', message: '', onConfirm: null })
   }, [])
 
+  const loadInitialData = useCallback(async () => {
+    setFirstLoadDone(false)
+    try {
+      await fetchStatus()
+      await Promise.all([fetchSubs(), fetchNodes()])
+    } finally {
+      setFirstLoadDone(true)
+    }
+  }, [fetchStatus, fetchSubs, fetchNodes])
+
   // 首次加载：获取初始状态后再决定显示 onboarding 还是 dashboard
   useEffect(() => {
-    Promise.all([fetchStatus(), fetchSubs(), fetchNodes()])
-      .finally(() => setFirstLoadDone(true))
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+    if (firstLoadStartedRef.current) return
+    firstLoadStartedRef.current = true
 
+    loadInitialData()
+  }, [loadInitialData])
+
+  const initialDataReady = statusLoaded && subsLoaded && nodesLoaded
+  const syncError = statusError || subsError || nodesError || proxiesError
   const needsOnboarding = firstLoadDone
+    && initialDataReady
     && !status.initializing
     && !status.running
     && subs.length === 0
@@ -114,24 +132,52 @@ export default function App() {
 
   // 统一轮询管理：合并所有定时任务到单个定时器
   const pollingTasks = useMemo(() => {
-    const tasks = [fetchStatus, fetchSubs, fetchNodes]
+    const tasks = [fetchStatus]
     // 服务运行时才轮询 proxies
     if (status.running) {
       tasks.push(fetchProxies)
     }
     return tasks
-  }, [fetchStatus, fetchSubs, fetchNodes, fetchProxies, status.running])
+  }, [fetchStatus, fetchProxies, status.running])
 
   const connectionPollingTasks = useMemo(() => [fetchConnections], [fetchConnections])
+  const configRecoveryTasks = useMemo(() => {
+    const tasks = []
+    if (subsError) tasks.push(fetchSubs)
+    if (nodesError) tasks.push(fetchNodes)
+    return tasks
+  }, [subsError, nodesError, fetchSubs, fetchNodes])
 
   // 使用统一的轮询管理（始终启用，由 tasks 数组内部决定是否执行）
-  usePolling(pollingTasks, true)
-  usePolling(connectionPollingTasks, showConnectionsModal && status.running)
+  usePolling(pollingTasks, firstLoadDone, false)
+  usePolling(connectionPollingTasks, showConnectionsModal && status.running, false)
+  usePolling(configRecoveryTasks, firstLoadDone && configRecoveryTasks.length > 0)
 
   // 始终获取版本信息；后端会在服务停止时仅返回当前版本而不检测更新
   useEffect(() => {
+    if (!firstLoadDone || versionStatusRef.current === status.running) return
+    versionStatusRef.current = status.running
     fetchVersion()
-  }, [status.running, fetchVersion])
+  }, [firstLoadDone, status.running, fetchVersion])
+
+  // 服务首次进入运行状态时立即加载代理组，后续由轮询保持同步。
+  useEffect(() => {
+    if (!firstLoadDone) return
+    if (status.running && !proxiesStatusRef.current) {
+      fetchProxies()
+    }
+    proxiesStatusRef.current = status.running
+  }, [firstLoadDone, status.running, fetchProxies])
+
+  // 后台初始化结束时刷新配置类数据；其余变化由对应的增删操作主动刷新。
+  useEffect(() => {
+    if (!firstLoadDone) return
+    if (wasInitializingRef.current && !status.initializing) {
+      fetchSubs()
+      fetchNodes()
+    }
+    wasInitializingRef.current = status.initializing
+  }, [firstLoadDone, status.initializing, fetchSubs, fetchNodes])
 
   // 清理 WebSocket 连接
   useEffect(() => {
@@ -152,17 +198,6 @@ export default function App() {
       clearConnectivity()
     }
   }, [status.running, clearDelays, clearConnectivity])
-
-  useEffect(() => {
-    const mediaQuery = window.matchMedia(`(max-width: ${CONNECTIONS_MODAL_MIN_WIDTH - 1}px)`)
-    const handleChange = () => {
-      if (mediaQuery.matches) setShowConnectionsModal(false)
-    }
-
-    handleChange()
-    mediaQuery.addEventListener('change', handleChange)
-    return () => mediaQuery.removeEventListener('change', handleChange)
-  }, [])
 
   const handleToggleService = useCallback(async () => {
     try {
@@ -430,14 +465,9 @@ export default function App() {
   }, [testAllConnectivity])
 
   const handleOpenConnections = useCallback(() => {
-    if (window.matchMedia(`(max-width: ${CONNECTIONS_MODAL_MIN_WIDTH - 1}px)`).matches) {
-      showToast('移动端暂不支持连接统计面板', 'info')
-      return
-    }
-
     setShowConnectionsModal(true)
     fetchConnections()
-  }, [fetchConnections, showToast])
+  }, [fetchConnections])
 
   const handleUpgradeClick = useCallback(async () => {
     if (!status.running) {
@@ -497,7 +527,24 @@ export default function App() {
   }, [openConfirm, handleDeleteSubscription])
 
   if (!firstLoadDone) {
-    return <div className="shell"><div className="onboarding-loading">加载中…</div></div>
+    return (
+      <div className="shell">
+        <main className="onboarding-loading" aria-live="polite">加载中…</main>
+      </div>
+    )
+  }
+
+  if (!initialDataReady) {
+    return (
+      <div className="shell">
+        <main className="initial-load-error">
+          <h1>Miao</h1>
+          <p role="alert">无法读取控制面板数据。</p>
+          <small>{statusError || subsError || nodesError || '请确认后端服务正在运行。'}</small>
+          <Button tone="primary" onClick={loadInitialData}>重新连接</Button>
+        </main>
+      </div>
+    )
   }
 
   if (needsOnboarding) {
@@ -509,6 +556,11 @@ export default function App() {
           onOpenAddNode={() => setShowNodeModal(true)}
           showToast={showToast}
         />
+        {syncError && (
+          <div className="sync-banner onboarding-sync-banner" role="status">
+            数据同步暂时中断，正在自动重试。
+          </div>
+        )}
         <ToastStack toasts={toasts} />
         <NodeModal
           open={showNodeModal}
@@ -534,6 +586,12 @@ export default function App() {
       />
 
       <main className="workspace">
+        <h1 className="sr-only">Miao 控制面板</h1>
+        {syncError && (
+          <div className="sync-banner" role="status">
+            数据同步暂时中断，正在自动重试。
+          </div>
+        )}
         <StatusCard 
           status={status} 
           traffic={traffic} 

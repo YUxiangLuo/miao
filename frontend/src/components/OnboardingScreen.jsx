@@ -19,7 +19,7 @@ export function OnboardingScreen({ onAddSub, loadingAction, onOpenAddNode, showT
   }
 
   return (
-    <div className="onboarding">
+    <main className="onboarding">
       <div className="onboarding-card">
         <div className="onboarding-header">
           <LogoIcon size={40} />
@@ -29,7 +29,9 @@ export function OnboardingScreen({ onAddSub, loadingAction, onOpenAddNode, showT
 
         <div className="onboarding-section">
           <div className="onboarding-input-row">
+            <label className="sr-only" htmlFor="onboarding-subscription-url">订阅链接</label>
             <input
+              id="onboarding-subscription-url"
               value={subUrl}
               onChange={(e) => setSubUrl(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleAddSub()}
@@ -38,7 +40,7 @@ export function OnboardingScreen({ onAddSub, loadingAction, onOpenAddNode, showT
             <Button
               tone="primary"
               size="sm"
-              icon={<Plus size={12} />}
+              icon={<Plus size={12} aria-hidden="true" />}
               loading={isLoading}
               onClick={handleAddSub}
             >
@@ -54,7 +56,7 @@ export function OnboardingScreen({ onAddSub, loadingAction, onOpenAddNode, showT
         <div className="onboarding-section">
           <Button
             tone="secondary"
-            icon={<Settings size={14} />}
+            icon={<Settings size={14} aria-hidden="true" />}
             onClick={onOpenAddNode}
             className="onboarding-node-btn"
           >
@@ -62,6 +64,6 @@ export function OnboardingScreen({ onAddSub, loadingAction, onOpenAddNode, showT
           </Button>
         </div>
       </div>
-    </div>
+    </main>
   )
 }

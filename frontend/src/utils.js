@@ -2,6 +2,7 @@
 
 export const API_HEADERS = { 'Content-Type': 'application/json' }
 export const POLL_INTERVAL = 3000
+export const POLL_TASK_TIMEOUT = 10000
 
 export const CONNECTIVITY_SITES = [
   { name: 'Google', url: 'https://www.google.com' },

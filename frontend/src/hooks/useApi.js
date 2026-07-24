@@ -2,6 +2,10 @@ import { useState, useCallback, useEffect, useRef, useMemo } from 'react'
 import { API_HEADERS } from '../utils.js'
 import { useWebSocket } from './useWebSocket.js'
 
+function fetchWithSignal(url, signal) {
+  return signal ? fetch(url, { signal }) : fetch(url)
+}
+
 export function useToast() {
   const [toasts, setToasts] = useState([])
   const toastIdRef = useRef(0)
@@ -19,8 +23,12 @@ export function useToast() {
 
 export function useApi(loadingState) {
   const { loadingAction, setLoadingAction } = loadingState
+  const requestIdRef = useRef(0)
+  const activeRequestsRef = useRef([])
 
   const apiCall = useCallback(async (endpoint, options = {}, action = '') => {
+    const requestId = ++requestIdRef.current
+    activeRequestsRef.current = [...activeRequestsRef.current, { requestId, action }]
     setLoadingAction(action)
     try {
       const response = await fetch(`/api/${endpoint}`, { headers: API_HEADERS, ...options })
@@ -28,7 +36,10 @@ export function useApi(loadingState) {
       if (!response.ok || !payload.success) throw new Error(payload.message || '请求失败')
       return payload
     } finally {
-      setLoadingAction('')
+      activeRequestsRef.current = activeRequestsRef.current.filter(
+        (request) => request.requestId !== requestId
+      )
+      setLoadingAction(activeRequestsRef.current.at(-1)?.action || '')
     }
   }, [setLoadingAction])
 
@@ -43,66 +54,123 @@ export function useStatus() {
     initializing: false,
     route_mode: 'rule'
   })
+  const requestIdRef = useRef(0)
+  const [error, setError] = useState('')
+  const [hasLoaded, setHasLoaded] = useState(false)
 
-  const fetchStatus = useCallback(async () => {
+  const fetchStatus = useCallback(async (signal) => {
+    const requestId = ++requestIdRef.current
     try {
-      const response = await fetch('/api/status')
+      const response = await fetchWithSignal('/api/status', signal)
+      if (!response.ok) throw new Error(`状态获取失败 (${response.status})`)
       const payload = await response.json()
-      if (payload.success && payload.data) {
-        setStatus(payload.data)
+      if (!payload.success || !payload.data) {
+        throw new Error(payload.message || '状态数据无效')
       }
-    } catch {
-      // ignore
+      if (requestId === requestIdRef.current) {
+        setStatus(payload.data)
+        setError('')
+        setHasLoaded(true)
+      }
+      return payload.data
+    } catch (fetchError) {
+      if (requestId === requestIdRef.current) {
+        setError(fetchError.message || '状态获取失败')
+      }
+      return null
     }
   }, [])
 
-  return { status, setStatus, fetchStatus }
+  return { status, setStatus, fetchStatus, statusError: error, statusLoaded: hasLoaded }
 }
 
 export function useSubs() {
   const [subs, setSubs] = useState([])
+  const requestIdRef = useRef(0)
+  const [error, setError] = useState('')
+  const [hasLoaded, setHasLoaded] = useState(false)
 
-  const fetchSubs = useCallback(async () => {
+  const fetchSubs = useCallback(async (signal) => {
+    const requestId = ++requestIdRef.current
     try {
-      const response = await fetch('/api/subs')
+      const response = await fetchWithSignal('/api/subs', signal)
+      if (!response.ok) throw new Error(`订阅获取失败 (${response.status})`)
       const payload = await response.json()
-      if (payload.success && payload.data) setSubs(payload.data)
-    } catch {
-      // ignore
+      if (!payload.success || !Array.isArray(payload.data)) {
+        throw new Error(payload.message || '订阅数据无效')
+      }
+      if (requestId === requestIdRef.current) {
+        setSubs(payload.data)
+        setError('')
+        setHasLoaded(true)
+      }
+      return payload.data
+    } catch (fetchError) {
+      if (requestId === requestIdRef.current) {
+        setError(fetchError.message || '订阅获取失败')
+      }
+      return null
     }
   }, [])
 
-  return { subs, setSubs, fetchSubs }
+  return { subs, setSubs, fetchSubs, subsError: error, subsLoaded: hasLoaded }
 }
 
 export function useNodes() {
   const [nodes, setNodes] = useState([])
+  const requestIdRef = useRef(0)
+  const [error, setError] = useState('')
+  const [hasLoaded, setHasLoaded] = useState(false)
 
-  const fetchNodes = useCallback(async () => {
+  const fetchNodes = useCallback(async (signal) => {
+    const requestId = ++requestIdRef.current
     try {
-      const response = await fetch('/api/nodes')
+      const response = await fetchWithSignal('/api/nodes', signal)
+      if (!response.ok) throw new Error(`节点获取失败 (${response.status})`)
       const payload = await response.json()
-      if (payload.success && payload.data) setNodes(payload.data)
-    } catch {
-      // ignore
+      if (!payload.success || !Array.isArray(payload.data)) {
+        throw new Error(payload.message || '节点数据无效')
+      }
+      if (requestId === requestIdRef.current) {
+        setNodes(payload.data)
+        setError('')
+        setHasLoaded(true)
+      }
+      return payload.data
+    } catch (fetchError) {
+      if (requestId === requestIdRef.current) {
+        setError(fetchError.message || '节点获取失败')
+      }
+      return null
     }
   }, [])
 
-  return { nodes, setNodes, fetchNodes }
+  return { nodes, setNodes, fetchNodes, nodesError: error, nodesLoaded: hasLoaded }
 }
 
 export function useProxies(status) {
   const [proxies, setProxies] = useState({})
+  const requestIdRef = useRef(0)
+  const [error, setError] = useState('')
 
   const clashApiBase = useMemo(() => '/api/clash', [])
 
-  const fetchProxies = useCallback(async () => {
+  const fetchProxies = useCallback(async (signal) => {
+    const requestId = ++requestIdRef.current
     try {
-      const response = await fetch(`${clashApiBase}/proxies`)
+      const response = await fetchWithSignal(`${clashApiBase}/proxies`, signal)
+      if (!response.ok) throw new Error(`代理组获取失败 (${response.status})`)
       const payload = await response.json()
-      setProxies(payload.proxies || {})
-    } catch {
-      setProxies({})
+      if (requestId === requestIdRef.current) {
+        setProxies(payload.proxies || {})
+        setError('')
+      }
+      return payload.proxies || {}
+    } catch (fetchError) {
+      if (requestId === requestIdRef.current) {
+        setError(fetchError.message || '代理组获取失败')
+      }
+      return null
     }
   }, [clashApiBase])
 
@@ -120,11 +188,21 @@ export function useProxies(status) {
   // 服务停止时清空 proxies
   useEffect(() => {
     if (!status.running) {
+      requestIdRef.current += 1
       setProxies({})
+      setError('')
     }
   }, [status.running])
 
-  return { proxies, setProxies, fetchProxies, selectorGroups, primaryGroupName, primaryGroup }
+  return {
+    proxies,
+    setProxies,
+    fetchProxies,
+    proxiesError: error,
+    selectorGroups,
+    primaryGroupName,
+    primaryGroup,
+  }
 }
 
 export function useTraffic(status) {
@@ -158,22 +236,25 @@ export function useConnections(status, clashApiBase) {
   const [connectionsLoading, setConnectionsLoading] = useState(false)
   const [connectionsError, setConnectionsError] = useState('')
   const lastConnectionsRef = useRef({ at: 0, connections: new Map() })
+  const requestIdRef = useRef(0)
 
-  const fetchConnections = useCallback(async () => {
+  const fetchConnections = useCallback(async (signal) => {
     if (!status.running) {
       setConnectionsInfo({ uploadTotal: 0, downloadTotal: 0, connections: [] })
       setConnectionsError('')
       return null
     }
 
+    const requestId = ++requestIdRef.current
     setConnectionsLoading(true)
     try {
-      const response = await fetch(`${clashApiBase}/connections`)
+      const response = await fetchWithSignal(`${clashApiBase}/connections`, signal)
       if (!response.ok) {
         const details = (await response.text()).trim()
         throw new Error(details || `连接统计获取失败 (${response.status})`)
       }
       const payload = await response.json()
+      if (requestId !== requestIdRef.current) return payload
       const connections = Array.isArray(payload.connections) ? payload.connections : []
       const now = Date.now()
       const previous = lastConnectionsRef.current
@@ -200,15 +281,20 @@ export function useConnections(status, clashApiBase) {
       setConnectionsError('')
       return payload
     } catch (error) {
-      setConnectionsError(error.message || '连接统计获取失败')
+      if (requestId === requestIdRef.current) {
+        setConnectionsError(error.message || '连接统计获取失败')
+      }
       return null
     } finally {
-      setConnectionsLoading(false)
+      if (requestId === requestIdRef.current) {
+        setConnectionsLoading(false)
+      }
     }
   }, [clashApiBase, status.running])
 
   useEffect(() => {
     if (!status.running) {
+      requestIdRef.current += 1
       setConnectionsInfo({ uploadTotal: 0, downloadTotal: 0, connections: [] })
       setConnectionsError('')
       setConnectionsLoading(false)
@@ -246,12 +332,15 @@ export function useConnections(status, clashApiBase) {
 
 export function useVersion() {
   const [versionInfo, setVersionInfo] = useState({ current: '', latest: null, has_update: false })
+  const requestIdRef = useRef(0)
 
   const fetchVersion = useCallback(async () => {
+    const requestId = ++requestIdRef.current
     try {
       const response = await fetch('/api/version')
+      if (!response.ok) throw new Error(`版本获取失败 (${response.status})`)
       const payload = await response.json()
-      if (payload.success && payload.data) {
+      if (requestId === requestIdRef.current && payload.success && payload.data) {
         setVersionInfo(payload.data)
         return payload.data
       }
@@ -292,8 +381,23 @@ export function useDelays() {
 
   const testGroupDelays = useCallback(async (clashApiBase, groupName, nodeNames) => {
     setTestingGroup(groupName)
-    await Promise.all([...new Set(nodeNames)].map((name) => testDelay(clashApiBase, name)))
-    setTestingGroup('')
+    const pendingNames = [...new Set(nodeNames)]
+    let nextIndex = 0
+
+    const worker = async () => {
+      while (nextIndex < pendingNames.length) {
+        const nodeName = pendingNames[nextIndex]
+        nextIndex += 1
+        await testDelay(clashApiBase, nodeName)
+      }
+    }
+
+    try {
+      const workerCount = Math.min(8, pendingNames.length)
+      await Promise.all(Array.from({ length: workerCount }, worker))
+    } finally {
+      setTestingGroup('')
+    }
   }, [testDelay])
 
   const clearDelays = useCallback(() => {
@@ -308,21 +412,30 @@ export function useConnectivity() {
   const [testingConnectivity, setTestingConnectivity] = useState(false)
   const [currentTestingSite, setCurrentTestingSite] = useState(null)
   const stopConnectivityRef = useRef(false)
+  const connectivityAbortRef = useRef(null)
 
   const testSingleSite = useCallback(async (site) => {
+    connectivityAbortRef.current?.abort()
+    const controller = new AbortController()
+    connectivityAbortRef.current = controller
     setCurrentTestingSite(site.name)
     try {
       const response = await fetch('/api/connectivity', {
         method: 'POST',
         headers: API_HEADERS,
         body: JSON.stringify({ url: site.url }),
+        signal: controller.signal,
       })
       const payload = await response.json()
       setConnectivityResults((prev) => ({ ...prev, [site.name]: payload.success ? payload.data : { success: false } }))
-    } catch {
+    } catch (error) {
+      if (error.name === 'AbortError') return
       setConnectivityResults((prev) => ({ ...prev, [site.name]: { success: false } }))
     } finally {
-      setCurrentTestingSite(null)
+      if (connectivityAbortRef.current === controller) {
+        connectivityAbortRef.current = null
+        setCurrentTestingSite(null)
+      }
     }
   }, [])
 
@@ -340,12 +453,23 @@ export function useConnectivity() {
 
   const stopConnectivity = useCallback(() => {
     stopConnectivityRef.current = true
+    connectivityAbortRef.current?.abort()
+    connectivityAbortRef.current = null
     setTestingConnectivity(false)
     setCurrentTestingSite(null)
   }, [])
 
   const clearConnectivity = useCallback(() => {
+    stopConnectivityRef.current = true
+    connectivityAbortRef.current?.abort()
+    connectivityAbortRef.current = null
+    setTestingConnectivity(false)
+    setCurrentTestingSite(null)
     setConnectivityResults({})
+  }, [])
+
+  useEffect(() => {
+    return () => connectivityAbortRef.current?.abort()
   }, [])
 
   return { 
