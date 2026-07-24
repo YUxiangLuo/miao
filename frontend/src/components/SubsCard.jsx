@@ -8,8 +8,8 @@ const SubRow = memo(function SubRow({ sub, onDelete }) {
     <div className="list-row">
       <div className={classNames('status-icon-badge', sub.success ? 'success' : 'error')}>
         {sub.success 
-          ? <Check size={12} /> 
-          : <CircleX size={12} />}
+          ? <Check size={12} aria-hidden="true" />
+          : <CircleX size={12} aria-hidden="true" />}
       </div>
       <div className="list-row-content">
         <div className="list-row-title">{maskSubscription(sub.url)}</div>
@@ -22,8 +22,9 @@ const SubRow = memo(function SubRow({ sub, onDelete }) {
       <button 
         className="icon-button subtle" 
         onClick={() => onDelete(sub.url)}
+        aria-label={`删除订阅 ${maskSubscription(sub.url)}`}
       >
-        <X size={13} />
+        <X size={13} aria-hidden="true" />
       </button>
     </div>
   )
@@ -36,13 +37,13 @@ export function SubsCard({ subs, newSubUrl, setNewSubUrl, loadingAction, onAddSu
       header={
         <div className="section-header">
           <div className="section-title-wrap">
-            <Rss size={14} className="section-icon" />
-            <span>订阅管理</span>
+            <Rss size={14} className="section-icon" aria-hidden="true" />
+            <h2 className="section-heading">订阅管理</h2>
           </div>
           <Button 
             tone="secondary" 
             size="sm" 
-            icon={<RefreshCw size={12} />} 
+            icon={<RefreshCw size={12} aria-hidden="true" />}
             loading={loadingAction === 'refreshSubs'} 
             disabled={subs.length === 0 || loadingAction === 'refreshSubs' || isInitializing} 
             onClick={onRefreshSubs}
@@ -59,7 +60,9 @@ export function SubsCard({ subs, newSubUrl, setNewSubUrl, loadingAction, onAddSu
             <SubRow key={sub.url} sub={sub} onDelete={onDeleteSub} />
           ))}
         <div className="subscription-add-row">
+          <label className="sr-only" htmlFor="subscription-url">订阅链接</label>
           <input 
+            id="subscription-url"
             value={newSubUrl} 
             onChange={(event) => setNewSubUrl(event.target.value)} 
             onKeyDown={(event) => event.key === 'Enter' && onAddSub()} 
@@ -68,7 +71,7 @@ export function SubsCard({ subs, newSubUrl, setNewSubUrl, loadingAction, onAddSu
           <Button 
             tone="secondary" 
             size="sm" 
-            icon={<Plus size={12} />} 
+            icon={<Plus size={12} aria-hidden="true" />}
             loading={loadingAction === 'addSub'} 
             disabled={isInitializing}
             onClick={onAddSub}

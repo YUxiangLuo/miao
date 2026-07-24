@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { X, CircleAlert, Plus, Activity, ArrowDown, ArrowUp, Network, RefreshCw, Route, Search, Trash2 } from 'lucide-react'
 import { Button } from './ui.jsx'
 import { 
@@ -16,32 +16,137 @@ import {
   nodeTypeDefaults,
 } from '../utils.js'
 
-export function ConfirmModal({ open, title, message, onCancel, onConfirm }) {
+const FOCUSABLE_SELECTOR = [
+  'a[href]',
+  'button:not([disabled])',
+  'input:not([disabled])',
+  'select:not([disabled])',
+  'textarea:not([disabled])',
+  '[tabindex]:not([tabindex="-1"])',
+].join(',')
+
+function ModalShell({
+  open,
+  onClose,
+  className,
+  labelledBy,
+  describedBy,
+  children,
+}) {
+  const dialogRef = useRef(null)
+  const onCloseRef = useRef(onClose)
+
+  useEffect(() => {
+    onCloseRef.current = onClose
+  }, [onClose])
+
+  useEffect(() => {
+    if (!open) return undefined
+
+    const dialog = dialogRef.current
+    const previouslyFocused = document.activeElement
+    const previousBodyOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+
+    const focusable = dialog?.querySelectorAll(FOCUSABLE_SELECTOR)
+    const initialFocus = dialog?.querySelector('[data-autofocus]') || focusable?.[0] || dialog
+    initialFocus?.focus()
+
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        onCloseRef.current?.()
+        return
+      }
+
+      if (event.key !== 'Tab' || !dialog) return
+
+      const elements = [...dialog.querySelectorAll(FOCUSABLE_SELECTOR)]
+      if (elements.length === 0) {
+        event.preventDefault()
+        dialog.focus()
+        return
+      }
+
+      const first = elements[0]
+      const last = elements[elements.length - 1]
+      const activeElement = document.activeElement
+
+      if (event.shiftKey && (activeElement === first || !dialog.contains(activeElement))) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && (activeElement === last || !dialog.contains(activeElement))) {
+        event.preventDefault()
+        first.focus()
+      }
+    }
+
+    document.addEventListener('keydown', handleKeyDown)
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown)
+      document.body.style.overflow = previousBodyOverflow
+      if (previouslyFocused instanceof HTMLElement && previouslyFocused.isConnected) {
+        previouslyFocused.focus()
+      }
+    }
+  }, [open])
+
   if (!open) return null
+
   return (
-    <div className="modal-overlay" onClick={onCancel}>
-      <div className="modal-card modal-confirm" onClick={(event) => event.stopPropagation()}>
-        <div className="modal-title-row">
-          <div className="modal-title-wrap">
-            <CircleAlert size={18} className="icon-warning" />
-            <h3>{title}</h3>
-          </div>
-          <button className="icon-button" onClick={onCancel}>
-            <X size={16} />
-          </button>
-        </div>
-        <p className="modal-message">{message}</p>
-        <div className="modal-actions">
-          <Button tone="ghost" size="sm" onClick={onCancel}>取消</Button>
-          <Button tone="danger" size="sm" onClick={onConfirm}>确认</Button>
-        </div>
+    <div
+      className="modal-overlay"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onCloseRef.current?.()
+      }}
+    >
+      <div
+        ref={dialogRef}
+        className={classNames('modal-card', className)}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={labelledBy}
+        aria-describedby={describedBy}
+        tabIndex={-1}
+      >
+        {children}
       </div>
     </div>
   )
 }
 
+export function ConfirmModal({ open, title, message, onCancel, onConfirm }) {
+  const titleId = useId()
+  const messageId = useId()
+
+  return (
+    <ModalShell
+      open={open}
+      onClose={onCancel}
+      className="modal-confirm"
+      labelledBy={titleId}
+      describedBy={messageId}
+    >
+      <div className="modal-title-row">
+        <div className="modal-title-wrap">
+          <CircleAlert size={18} className="icon-warning" aria-hidden="true" />
+          <h2 id={titleId}>{title}</h2>
+        </div>
+        <button className="icon-button" onClick={onCancel} aria-label="关闭确认对话框">
+          <X size={16} aria-hidden="true" />
+        </button>
+      </div>
+      <p id={messageId} className="modal-message">{message}</p>
+      <div className="modal-actions">
+        <Button tone="ghost" size="sm" onClick={onCancel} data-autofocus>取消</Button>
+        <Button tone="danger" size="sm" onClick={onConfirm}>确认</Button>
+      </div>
+    </ModalShell>
+  )
+}
+
 export function NodeModal({ open, nodeType, setNodeType, form, setForm, loading, onClose, onSubmit }) {
-  if (!open) return null
+  const titleId = useId()
 
   const activeLabel = NODE_TYPE_OPTIONS.find((option) => option.value === nodeType)?.label || nodeType
   const requiresPassword = ['hysteria2', 'anytls', 'ss', 'trojan', 'tuic'].includes(nodeType)
@@ -64,22 +169,21 @@ export function NodeModal({ open, nodeType, setNodeType, form, setForm, loading,
     && (nodeType !== 'hysteria2' || !form.obfs_type || form.obfs_password.trim())
 
   return (
-    <div className="modal-overlay">
-      <div className="modal-card node-modal" onClick={(event) => event.stopPropagation()}>
+    <ModalShell open={open} onClose={onClose} className="node-modal" labelledBy={titleId}>
         <div className="modal-title-row">
           <div className="modal-title-wrap">
-            <Plus size={18} className="icon-accent" />
-            <h3>添加节点</h3>
+            <Plus size={18} className="icon-accent" aria-hidden="true" />
+            <h2 id={titleId}>添加节点</h2>
           </div>
-          <button className="icon-button" onClick={onClose}>
-            <X size={16} />
+          <button className="icon-button" onClick={onClose} aria-label="关闭添加节点对话框">
+            <X size={16} aria-hidden="true" />
           </button>
         </div>
 
         <div className="form-grid single">
           <label className="field">
             <span>协议</span>
-            <select value={nodeType} onChange={handleNodeTypeChange}>
+            <select value={nodeType} onChange={handleNodeTypeChange} data-autofocus>
               {NODE_TYPE_OPTIONS.map(({ value, label }) => (
                 <option key={value} value={value}>{label}</option>
               ))}
@@ -367,6 +471,8 @@ export function NodeModal({ open, nodeType, setNodeType, form, setForm, loading,
               <label className="field">
                 <span>混淆密码</span>
                 <input
+                  type="password"
+                  autoComplete="new-password"
                   value={form.obfs_password}
                   disabled={!form.obfs_type}
                   onChange={(event) => setForm((prev) => ({ ...prev, obfs_password: event.target.value }))}
@@ -422,6 +528,8 @@ export function NodeModal({ open, nodeType, setNodeType, form, setForm, loading,
             <label className="field">
               <span>密码</span>
               <input
+                type="password"
+                autoComplete="new-password"
                 value={form.password}
                 onChange={(event) => setForm((prev) => ({ ...prev, password: event.target.value }))}
                 placeholder="密码"
@@ -439,8 +547,7 @@ export function NodeModal({ open, nodeType, setNodeType, form, setForm, loading,
         >
           添加 {activeLabel} 节点
         </Button>
-      </div>
-    </div>
+    </ModalShell>
   )
 }
 
@@ -576,6 +683,8 @@ export function ConnectionsModal({
   onCloseAllConnections,
   showToast,
 }) {
+  const titleId = useId()
+  const detailPanelId = useId()
   const [query, setQuery] = useState('')
   const [sourceFilter, setSourceFilter] = useState('')
   const [sortKey, setSortKey] = useState('downloadSpeed')
@@ -652,19 +761,24 @@ export function ConnectionsModal({
   if (!open) return null
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-card connections-modal" onClick={(event) => event.stopPropagation()}>
+    <ModalShell open={open} onClose={onClose} className="connections-modal" labelledBy={titleId}>
         <div className="modal-title-row">
           <div className="modal-title-wrap">
-            <Activity size={18} className="icon-accent" />
-            <h3>连接统计</h3>
+            <Activity size={18} className="icon-accent" aria-hidden="true" />
+            <h2 id={titleId}>连接统计</h2>
           </div>
           <div className="modal-title-actions">
-            <button className="icon-button" onClick={onRefresh} disabled={loading || !status.running} title="刷新">
-              <RefreshCw size={16} className={loading ? 'spin' : undefined} />
+            <button
+              className="icon-button"
+              onClick={onRefresh}
+              disabled={loading || !status.running}
+              title="刷新"
+              aria-label="刷新连接统计"
+            >
+              <RefreshCw size={16} className={loading ? 'spin' : undefined} aria-hidden="true" />
             </button>
-            <button className="icon-button" onClick={onClose} title="关闭">
-              <X size={16} />
+            <button className="icon-button" onClick={onClose} title="关闭" aria-label="关闭连接统计">
+              <X size={16} aria-hidden="true" />
             </button>
           </div>
         </div>
@@ -701,21 +815,31 @@ export function ConnectionsModal({
 
             <div className="connections-toolbar">
               <label className="connections-search">
-                <Search size={14} />
+                <Search size={14} aria-hidden="true" />
                 <input
                   type="search"
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}
                   placeholder="搜索目标、来源、规则、出口、进程"
+                  aria-label="搜索连接"
+                  data-autofocus
                 />
               </label>
-              <select value={sourceFilter} onChange={(event) => setSourceFilter(event.target.value)}>
+              <select
+                value={sourceFilter}
+                onChange={(event) => setSourceFilter(event.target.value)}
+                aria-label="按来源筛选"
+              >
                 <option value="">全部来源</option>
                 {sourceOptions.map((source) => (
                   <option key={source} value={source}>{source}</option>
                 ))}
               </select>
-              <select value={sortKey} onChange={(event) => setSortKey(event.target.value)}>
+              <select
+                value={sortKey}
+                onChange={(event) => setSortKey(event.target.value)}
+                aria-label="连接排序方式"
+              >
                 {SORT_OPTIONS.map((option) => (
                   <option key={option.value} value={option.value}>{option.label}</option>
                 ))}
@@ -728,8 +852,11 @@ export function ConnectionsModal({
                 onClick={handleCloseAll}
                 disabled={closingAll || loading || connections.length === 0}
                 title="关闭全部连接"
+                aria-label="关闭全部连接"
               >
-                {closingAll ? <RefreshCw size={14} className="spin" /> : <Trash2 size={14} />}
+                {closingAll
+                  ? <RefreshCw size={14} className="spin" aria-hidden="true" />
+                  : <Trash2 size={14} aria-hidden="true" />}
               </button>
             </div>
 
@@ -774,23 +901,32 @@ export function ConnectionsModal({
                 <div
                   className={classNames('connections-table-row', selectedId === connection.id && 'active')}
                   key={connection.id || `${connectionTarget(connection)}-${index}`}
-                  onClick={() => setSelectedId(connection.id)}
                 >
                   <button
                     className="connection-row-close"
-                    onClick={(event) => {
-                      event.stopPropagation()
+                    onClick={() => {
                       handleCloseSingle(connection.id)
                     }}
                     disabled={closingId === connection.id}
                     title="关闭连接"
+                    aria-label={`关闭连接 ${connectionTarget(connection)}`}
                   >
-                    {closingId === connection.id ? <RefreshCw size={13} className="spin" /> : <X size={13} />}
+                    {closingId === connection.id
+                      ? <RefreshCw size={13} className="spin" aria-hidden="true" />
+                      : <X size={13} aria-hidden="true" />}
                   </button>
-                  <span className="connection-host" title={connectionTarget(connection)}>
+                  <button
+                    type="button"
+                    className="connection-host connection-detail-trigger"
+                    title={connectionTarget(connection)}
+                    aria-label={`查看连接 ${connectionTarget(connection)} 的详情`}
+                    aria-expanded={selectedId === connection.id}
+                    aria-controls={detailPanelId}
+                    onClick={() => setSelectedId(connection.id)}
+                  >
                     <strong>{connectionTarget(connection)}</strong>
                     <small>{processName(connection)} · {formatStartTime(connection.start)}</small>
-                  </span>
+                  </button>
                   <span className="connection-rule" title={`${connectionRule(connection)} → ${(connection.chains || []).join(' → ')}`}>
                     <strong>{connectionRule(connection)}</strong>
                     <small>{(connection.chains || []).length ? [...connection.chains].reverse().join(' → ') : connectionOutbound(connection)}</small>
@@ -821,11 +957,16 @@ export function ConnectionsModal({
             </div>
 
             {selectedConnection && (
-              <div className="connection-detail-panel">
+              <div className="connection-detail-panel" id={detailPanelId}>
                 <div className="connection-detail-title">
                   <strong>连接详情</strong>
-                  <button className="icon-button subtle" onClick={() => setSelectedId('')} title="关闭详情">
-                    <X size={14} />
+                  <button
+                    className="icon-button subtle"
+                    onClick={() => setSelectedId('')}
+                    title="关闭详情"
+                    aria-label="关闭连接详情"
+                  >
+                    <X size={14} aria-hidden="true" />
                   </button>
                 </div>
                 <dl>
@@ -845,7 +986,6 @@ export function ConnectionsModal({
             )}
           </>
         )}
-      </div>
-    </div>
+    </ModalShell>
   )
 }

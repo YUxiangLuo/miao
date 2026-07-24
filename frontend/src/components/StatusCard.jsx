@@ -23,11 +23,11 @@ export function StatusCard({
   return (
     <SectionCard className="status-card" bodyClassName="status-card-body" header={null}>
       <div className="status-left-wrap">
-        <div className="status-pill-icon"><span className="status-pill-dot" /></div>
-        <div className="status-copy">
-          <div className="status-title">
+          <div className="status-pill-icon"><span className="status-pill-dot" aria-hidden="true" /></div>
+          <div className="status-copy">
+          <h2 className="status-title">
             Sing-box {status.initializing ? '初始化中' : status.running ? '运行中' : '已停止'}
-          </div>
+          </h2>
           <div className="status-subtitle">
             {status.running 
               ? `PID: ${status.pid ?? '--'} · 运行时长: ${formatUptime(status.uptime_secs)}` 
@@ -38,13 +38,19 @@ export function StatusCard({
         </div>
       </div>
 
-      <button type="button" className="traffic-chip" onClick={onOpenConnections} title="查看连接统计">
+      <button
+        type="button"
+        className="traffic-chip"
+        onClick={onOpenConnections}
+        title="查看连接统计"
+        aria-label="查看连接统计"
+      >
         <div className="traffic-item">
-          <ArrowUp size={14} className="traffic-icon up" />
+          <ArrowUp size={14} className="traffic-icon up" aria-hidden="true" />
           <span>{formatSpeed(traffic.up)}</span>
         </div>
         <div className="traffic-item">
-          <ArrowDown size={14} className="traffic-icon down" />
+          <ArrowDown size={14} className="traffic-icon down" aria-hidden="true" />
           <span>{formatSpeed(traffic.down)}</span>
         </div>
       </button>
@@ -60,7 +66,7 @@ export function StatusCard({
             if (isGlobalMode) onSetRouteMode('rule')
           }}
         >
-          <Route size={13} />
+          <Route size={13} aria-hidden="true" />
           <span>分流模式</span>
         </button>
         <button
@@ -72,13 +78,13 @@ export function StatusCard({
             if (!isGlobalMode) onSetRouteMode('global')
           }}
         >
-          <Globe2 size={13} />
+          <Globe2 size={13} aria-hidden="true" />
           <span>{modeSwitching ? '切换中' : '全局代理'}</span>
         </button>
       </div>
       <Button 
         tone={status.running ? 'danger' : 'success'} 
-        icon={<Power size={14} />} 
+        icon={<Power size={14} aria-hidden="true" />}
         loading={loadingAction === 'start' || loadingAction === 'stop' || status.initializing} 
         disabled={loadingAction === 'start' || loadingAction === 'stop' || status.initializing} 
         onClick={onToggleService}
