@@ -555,12 +555,67 @@ function formatStartTime(value) {
   return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
 }
 
-function DetailRow({ label, value }) {
+const SPEED_HISTORY_LIMIT = 40
+
+function SpeedSparkline({ points, tone }) {
+  const width = 140
+  const height = 34
+  if (!points || points.length < 2) {
+    return <div className="connection-sparkline placeholder" aria-hidden="true" />
+  }
+  const max = Math.max(...points, 1)
+  const step = width / Math.max(points.length - 1, 1)
+  const coords = points.map((value, index) => {
+    const x = (index * step).toFixed(1)
+    const y = (height - 3 - (value / max) * (height - 8)).toFixed(1)
+    return `${x},${y}`
+  })
   return (
-    <>
-      <dt>{label}</dt>
-      <dd title={String(value || '-')}>{value || '-'}</dd>
-    </>
+    <svg
+      className={classNames('connection-sparkline', tone)}
+      viewBox={`0 0 ${width} ${height}`}
+      preserveAspectRatio="none"
+      aria-hidden="true"
+    >
+      <polygon className="spark-fill" points={`0,${height} ${coords.join(' ')} ${width},${height}`} />
+      <polyline className="spark-line" points={coords.join(' ')} />
+    </svg>
+  )
+}
+
+function DistributionPanel({ icon, title, counts, total }) {
+  return (
+    <div className="connections-panel">
+      <div className="connections-panel-title">
+        {icon}
+        <span>{title}</span>
+      </div>
+      <div className="connections-panel-body">
+        {counts.length > 0 ? counts.map(([name, count]) => {
+          const percent = total > 0 ? Math.max((count / total) * 100, 3) : 0
+          return (
+            <div className="dist-row" key={name}>
+              <div className="dist-row-info">
+                <span title={name}>{name}</span>
+                <strong>{count}</strong>
+              </div>
+              <div className="dist-bar">
+                <i style={{ width: `${percent}%` }} />
+              </div>
+            </div>
+          )
+        }) : <div className="connections-muted">暂无数据</div>}
+      </div>
+    </div>
+  )
+}
+
+function DetailItem({ label, value }) {
+  return (
+    <div className="connection-detail-item">
+      <span>{label}</span>
+      <strong title={String(value || '-')}>{value || '-'}</strong>
+    </div>
   )
 }
 
@@ -584,10 +639,27 @@ export function ConnectionsModal({
   const [selectedId, setSelectedId] = useState('')
   const [closingId, setClosingId] = useState('')
   const [closingAll, setClosingAll] = useState(false)
+  const [speedHistory, setSpeedHistory] = useState({ down: [], up: [] })
 
   useEffect(() => {
-    if (open) setPage(0)
-  }, [open, query, sourceFilter, sortKey, sortDesc])
+    if (open) {
+      setPage(0)
+      setSpeedHistory({ down: [], up: [] })
+    }
+  }, [open])
+
+  useEffect(() => {
+    setPage(0)
+  }, [query, sourceFilter, sortKey, sortDesc])
+
+  useEffect(() => {
+    if (!open) return undefined
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [open, onClose])
 
   const connections = useMemo(() => {
     return Array.isArray(data?.connections) ? data.connections : []
@@ -596,8 +668,18 @@ export function ConnectionsModal({
   const downloadTotal = Number(data?.downloadTotal || connections.reduce((sum, item) => sum + Number(item.download || 0), 0))
   const uploadSpeed = connections.reduce((sum, item) => sum + Number(item.uploadSpeed || 0), 0)
   const downloadSpeed = connections.reduce((sum, item) => sum + Number(item.downloadSpeed || 0), 0)
-  const networkCounts = topEntries(countBy(connections, (item) => item.metadata?.network), 4)
-  const outboundCounts = topEntries(countBy(connections, connectionOutbound), 5)
+
+  // 每轮连接数据采样一次整体速度，用于统计卡片中的趋势图
+  useEffect(() => {
+    if (!open || !status.running) return
+    setSpeedHistory((prev) => ({
+      down: [...prev.down, downloadSpeed].slice(-SPEED_HISTORY_LIMIT),
+      up: [...prev.up, uploadSpeed].slice(-SPEED_HISTORY_LIMIT),
+    }))
+  }, [data]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const networkCounts = topEntries(countBy(connections, (item) => item.metadata?.network), 6)
+  const outboundCounts = topEntries(countBy(connections, connectionOutbound), 8)
   const sourceOptions = useMemo(() => {
     return [...new Set(connections.map(connectionSourceIP))].sort()
   }, [connections])
@@ -654,196 +736,217 @@ export function ConnectionsModal({
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal-card connections-modal" onClick={(event) => event.stopPropagation()}>
-        <div className="modal-title-row">
-          <div className="modal-title-wrap">
+        <header className="connections-header">
+          <div className="connections-header-title">
             <Activity size={18} className="icon-accent" />
             <h3>连接统计</h3>
+            {status.running && (
+              <span className="connections-live-badge">
+                <i />
+                {connections.length} 个活跃连接
+              </span>
+            )}
           </div>
-          <div className="modal-title-actions">
-            <button className="icon-button" onClick={onRefresh} disabled={loading || !status.running} title="刷新">
-              <RefreshCw size={16} className={loading ? 'spin' : undefined} />
+          <div className="connections-header-actions">
+            <button className="connections-tool-button" onClick={onRefresh} disabled={loading || !status.running}>
+              <RefreshCw size={14} className={loading ? 'spin' : undefined} />
+              刷新
             </button>
-            <button className="icon-button" onClick={onClose} title="关闭">
+            <button
+              className="connections-tool-button danger"
+              onClick={handleCloseAll}
+              disabled={closingAll || loading || connections.length === 0}
+            >
+              {closingAll ? <RefreshCw size={14} className="spin" /> : <Trash2 size={14} />}
+              清空连接
+            </button>
+            <button className="icon-button" onClick={onClose} title="关闭 (Esc)">
               <X size={16} />
             </button>
           </div>
-        </div>
+        </header>
 
         {!status.running ? (
           <div className="connections-empty">服务未运行，暂无连接统计。</div>
         ) : (
-          <>
+          <div className="connections-body">
             <div className="connection-stat-grid">
               <div className="connection-stat">
-                <span>活跃连接</span>
-                <strong>{connections.length}</strong>
+                <span className="connection-stat-label">
+                  <Network size={12} />
+                  活跃连接
+                </span>
+                <strong className="connection-stat-value">{connections.length}</strong>
               </div>
               <div className="connection-stat">
-                <span>当前速度</span>
-                <strong>↓ {formatBytes(downloadSpeed)}/s</strong>
-                <small>↑ {formatBytes(uploadSpeed)}/s</small>
+                <span className="connection-stat-label">
+                  <ArrowDown size={12} />
+                  下载速度
+                </span>
+                <div className="connection-stat-main">
+                  <strong className="connection-stat-value tone-download">{formatBytes(downloadSpeed)}/s</strong>
+                  <SpeedSparkline points={speedHistory.down} tone="down" />
+                </div>
               </div>
               <div className="connection-stat">
-                <span>累计上传</span>
-                <strong>{formatBytes(uploadTotal)}</strong>
+                <span className="connection-stat-label">
+                  <ArrowUp size={12} />
+                  上传速度
+                </span>
+                <div className="connection-stat-main">
+                  <strong className="connection-stat-value tone-upload">{formatBytes(uploadSpeed)}/s</strong>
+                  <SpeedSparkline points={speedHistory.up} tone="up" />
+                </div>
               </div>
               <div className="connection-stat">
-                <span>累计下载</span>
-                <strong>{formatBytes(downloadTotal)}</strong>
+                <span className="connection-stat-label">
+                  <ArrowDown size={12} />
+                  累计下载
+                </span>
+                <strong className="connection-stat-value">{formatBytes(downloadTotal)}</strong>
               </div>
               <div className="connection-stat">
-                <span>总流量</span>
-                <strong>{formatBytes(uploadTotal + downloadTotal)}</strong>
+                <span className="connection-stat-label">
+                  <ArrowUp size={12} />
+                  累计上传
+                </span>
+                <strong className="connection-stat-value">{formatBytes(uploadTotal)}</strong>
               </div>
             </div>
 
             {error && <div className="connections-error">{error}</div>}
 
-            <div className="connections-toolbar">
-              <label className="connections-search">
-                <Search size={14} />
-                <input
-                  type="search"
-                  value={query}
-                  onChange={(event) => setQuery(event.target.value)}
-                  placeholder="搜索目标、来源、规则、出口、进程"
-                />
-              </label>
-              <select value={sourceFilter} onChange={(event) => setSourceFilter(event.target.value)}>
-                <option value="">全部来源</option>
-                {sourceOptions.map((source) => (
-                  <option key={source} value={source}>{source}</option>
-                ))}
-              </select>
-              <select value={sortKey} onChange={(event) => setSortKey(event.target.value)}>
-                {SORT_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value}>{option.label}</option>
-                ))}
-              </select>
-              <button className="connections-tool-button" onClick={() => setSortDesc((value) => !value)}>
-                {sortDesc ? '降序' : '升序'}
-              </button>
-              <button
-                className="connections-tool-button danger"
-                onClick={handleCloseAll}
-                disabled={closingAll || loading || connections.length === 0}
-                title="关闭全部连接"
-              >
-                {closingAll ? <RefreshCw size={14} className="spin" /> : <Trash2 size={14} />}
-              </button>
-            </div>
+            <div className="connections-content">
+              <aside className="connections-sidebar">
+                <DistributionPanel icon={<Network size={13} />} title="协议分布" counts={networkCounts} total={connections.length} />
+                <DistributionPanel icon={<Route size={13} />} title="出口分布" counts={outboundCounts} total={connections.length} />
+              </aside>
 
-            <div className="connections-split">
-              <div className="connections-panel">
-                <div className="connections-panel-title">
-                  <Network size={14} />
-                  <span>协议分布</span>
-                </div>
-                {networkCounts.length > 0 ? networkCounts.map(([name, count]) => (
-                  <div className="connection-count-row" key={name}>
-                    <span>{name}</span>
-                    <strong>{count}</strong>
-                  </div>
-                )) : <div className="connections-muted">暂无数据</div>}
-              </div>
-
-              <div className="connections-panel">
-                <div className="connections-panel-title">
-                  <Route size={14} />
-                  <span>出口分布</span>
-                </div>
-                {outboundCounts.length > 0 ? outboundCounts.map(([name, count]) => (
-                  <div className="connection-count-row" key={name}>
-                    <span title={name}>{name}</span>
-                    <strong>{count}</strong>
-                  </div>
-                )) : <div className="connections-muted">暂无数据</div>}
-              </div>
-            </div>
-
-            <div className="connections-table">
-              <div className="connections-table-header">
-                <span />
-                <span>目标</span>
-                <span>规则 / 出口</span>
-                <span>来源</span>
-                <span>速度</span>
-                <span>总量</span>
-              </div>
-              {visibleConnections.length > 0 ? visibleConnections.map((connection, index) => (
-                <div
-                  className={classNames('connections-table-row', selectedId === connection.id && 'active')}
-                  key={connection.id || `${connectionTarget(connection)}-${index}`}
-                  onClick={() => setSelectedId(connection.id)}
-                >
-                  <button
-                    className="connection-row-close"
-                    onClick={(event) => {
-                      event.stopPropagation()
-                      handleCloseSingle(connection.id)
-                    }}
-                    disabled={closingId === connection.id}
-                    title="关闭连接"
-                  >
-                    {closingId === connection.id ? <RefreshCw size={13} className="spin" /> : <X size={13} />}
-                  </button>
-                  <span className="connection-host" title={connectionTarget(connection)}>
-                    <strong>{connectionTarget(connection)}</strong>
-                    <small>{processName(connection)} · {formatStartTime(connection.start)}</small>
-                  </span>
-                  <span className="connection-rule" title={`${connectionRule(connection)} → ${(connection.chains || []).join(' → ')}`}>
-                    <strong>{connectionRule(connection)}</strong>
-                    <small>{(connection.chains || []).length ? [...connection.chains].reverse().join(' → ') : connectionOutbound(connection)}</small>
-                  </span>
-                  <span title={connectionSource(connection)}>{connectionSource(connection)}</span>
-                  <span>
-                    <small><ArrowDown size={12} />{formatBytes(Number(connection.downloadSpeed || 0))}/s</small>
-                    <small><ArrowUp size={12} />{formatBytes(Number(connection.uploadSpeed || 0))}/s</small>
-                  </span>
-                  <span>
-                    <small><ArrowDown size={12} />{formatBytes(Number(connection.download || 0))}</small>
-                    <small><ArrowUp size={12} />{formatBytes(Number(connection.upload || 0))}</small>
-                  </span>
-                </div>
-              )) : <div className="connections-empty inline">暂无匹配连接</div>}
-            </div>
-
-            <div className="connections-pagination">
-              <span>
-                {filteredConnections.length === 0
-                  ? '0 / 0'
-                  : `${pageStart + 1}-${Math.min(pageStart + visibleConnections.length, filteredConnections.length)} / ${filteredConnections.length}`}
-              </span>
-              <div>
-                <button className="connections-tool-button" disabled={safePage === 0} onClick={() => setPage((value) => Math.max(0, value - 1))}>上一页</button>
-                <button className="connections-tool-button" disabled={safePage >= pageCount - 1} onClick={() => setPage((value) => Math.min(pageCount - 1, value + 1))}>下一页</button>
-              </div>
-            </div>
-
-            {selectedConnection && (
-              <div className="connection-detail-panel">
-                <div className="connection-detail-title">
-                  <strong>连接详情</strong>
-                  <button className="icon-button subtle" onClick={() => setSelectedId('')} title="关闭详情">
-                    <X size={14} />
+              <div className="connections-main">
+                <div className="connections-toolbar">
+                  <label className="connections-search">
+                    <Search size={14} />
+                    <input
+                      type="search"
+                      value={query}
+                      onChange={(event) => setQuery(event.target.value)}
+                      placeholder="搜索目标、来源、规则、出口、进程"
+                    />
+                  </label>
+                  <select value={sourceFilter} onChange={(event) => setSourceFilter(event.target.value)}>
+                    <option value="">全部来源</option>
+                    {sourceOptions.map((source) => (
+                      <option key={source} value={source}>{source}</option>
+                    ))}
+                  </select>
+                  <select value={sortKey} onChange={(event) => setSortKey(event.target.value)}>
+                    {SORT_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                    ))}
+                  </select>
+                  <button className="connections-tool-button" onClick={() => setSortDesc((value) => !value)} title="切换排序方向">
+                    {sortDesc ? '降序' : '升序'}
                   </button>
                 </div>
-                <dl>
-                  <DetailRow label="ID" value={selectedConnection.id} />
-                  <DetailRow label="开始时间" value={formatStartTime(selectedConnection.start)} />
-                  <DetailRow label="网络" value={`${selectedConnection.metadata?.type || '-'} / ${selectedConnection.metadata?.network || '-'}`} />
-                  <DetailRow label="目标" value={connectionTarget(selectedConnection)} />
-                  <DetailRow label="远端目标" value={connectionDestination(selectedConnection)} />
-                  <DetailRow label="来源" value={connectionSource(selectedConnection)} />
-                  <DetailRow label="规则" value={connectionRule(selectedConnection)} />
-                  <DetailRow label="链路" value={(selectedConnection.chains || []).join(' → ')} />
-                  <DetailRow label="进程" value={processName(selectedConnection)} />
-                  <DetailRow label="进程路径" value={selectedConnection.metadata?.processPath} />
-                  <DetailRow label="入站" value={selectedConnection.metadata?.inboundName || selectedConnection.metadata?.inboundUser || selectedConnection.metadata?.inboundIP} />
-                </dl>
+
+                <div className="connections-table">
+                  <div className="connections-table-header">
+                    <span />
+                    <span>目标</span>
+                    <span>规则 / 出口</span>
+                    <span>来源</span>
+                    <span>速度</span>
+                    <span>总量</span>
+                  </div>
+                  {visibleConnections.length > 0 ? visibleConnections.map((connection, index) => (
+                    <div
+                      className={classNames('connections-table-row', selectedId === connection.id && 'active')}
+                      key={connection.id || `${connectionTarget(connection)}-${index}`}
+                      onClick={() => setSelectedId(connection.id)}
+                    >
+                      <button
+                        className="connection-row-close"
+                        onClick={(event) => {
+                          event.stopPropagation()
+                          handleCloseSingle(connection.id)
+                        }}
+                        disabled={closingId === connection.id}
+                        title="关闭连接"
+                      >
+                        {closingId === connection.id ? <RefreshCw size={13} className="spin" /> : <X size={13} />}
+                      </button>
+                      <span className="connection-host" title={connectionTarget(connection)}>
+                        <strong>{connectionTarget(connection)}</strong>
+                        <small>
+                          <em className="connection-network-badge">{connection.metadata?.network || '-'}</em>
+                          {processName(connection)} · {formatStartTime(connection.start)}
+                        </small>
+                      </span>
+                      <span className="connection-rule" title={`${connectionRule(connection)} → ${(connection.chains || []).join(' → ')}`}>
+                        <strong>{connectionRule(connection)}</strong>
+                        <small>{(connection.chains || []).length ? [...connection.chains].reverse().join(' → ') : connectionOutbound(connection)}</small>
+                      </span>
+                      <span title={connectionSource(connection)}>{connectionSource(connection)}</span>
+                      <span className="connection-speed">
+                        <small className="tone-download"><ArrowDown size={12} />{formatBytes(Number(connection.downloadSpeed || 0))}/s</small>
+                        <small className="tone-upload"><ArrowUp size={12} />{formatBytes(Number(connection.uploadSpeed || 0))}/s</small>
+                      </span>
+                      <span>
+                        <small><ArrowDown size={12} />{formatBytes(Number(connection.download || 0))}</small>
+                        <small><ArrowUp size={12} />{formatBytes(Number(connection.upload || 0))}</small>
+                      </span>
+                    </div>
+                  )) : <div className="connections-empty inline">暂无匹配连接</div>}
+                </div>
+
+                <div className="connections-pagination">
+                  <span>
+                    {filteredConnections.length === 0
+                      ? '0 / 0'
+                      : `${pageStart + 1}-${Math.min(pageStart + visibleConnections.length, filteredConnections.length)} / ${filteredConnections.length}`}
+                  </span>
+                  <div>
+                    <button className="connections-tool-button" disabled={safePage === 0} onClick={() => setPage((value) => Math.max(0, value - 1))}>上一页</button>
+                    <button className="connections-tool-button" disabled={safePage >= pageCount - 1} onClick={() => setPage((value) => Math.min(pageCount - 1, value + 1))}>下一页</button>
+                  </div>
+                </div>
               </div>
-            )}
-          </>
+
+              {selectedConnection && (
+                <aside className="connection-detail-side">
+                  <div className="connection-detail-title">
+                    <strong>连接详情</strong>
+                    <button className="icon-button subtle" onClick={() => setSelectedId('')} title="关闭详情">
+                      <X size={14} />
+                    </button>
+                  </div>
+                  <div className="connection-detail-items">
+                    <DetailItem label="目标" value={connectionTarget(selectedConnection)} />
+                    <DetailItem label="远端目标" value={connectionDestination(selectedConnection)} />
+                    <DetailItem label="来源" value={connectionSource(selectedConnection)} />
+                    <DetailItem label="规则" value={connectionRule(selectedConnection)} />
+                    <DetailItem label="链路" value={(selectedConnection.chains || []).join(' → ')} />
+                    <DetailItem label="网络" value={`${selectedConnection.metadata?.type || '-'} / ${selectedConnection.metadata?.network || '-'}`} />
+                    <DetailItem label="进程" value={processName(selectedConnection)} />
+                    <DetailItem label="进程路径" value={selectedConnection.metadata?.processPath} />
+                    <DetailItem label="开始时间" value={formatStartTime(selectedConnection.start)} />
+                    <DetailItem label="入站" value={selectedConnection.metadata?.inboundName || selectedConnection.metadata?.inboundUser || selectedConnection.metadata?.inboundIP} />
+                    <DetailItem label="ID" value={selectedConnection.id} />
+                  </div>
+                  <div className="connection-detail-actions">
+                    <button
+                      className="connections-tool-button danger block"
+                      onClick={() => handleCloseSingle(selectedConnection.id)}
+                      disabled={closingId === selectedConnection.id}
+                    >
+                      {closingId === selectedConnection.id ? <RefreshCw size={14} className="spin" /> : <X size={14} />}
+                      关闭此连接
+                    </button>
+                  </div>
+                </aside>
+              )}
+            </div>
+          </div>
         )}
       </div>
     </div>
