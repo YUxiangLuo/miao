@@ -28,6 +28,7 @@ import {
 } from './hooks/index.js'
 import {
   EMPTY_NODE_FORM,
+  nodeCapabilities,
   nodeTypeDefaults,
   validateSubscriptionUrl,
   validateNodeTag,
@@ -283,9 +284,10 @@ export default function App() {
   }, [apiCall, clearConnectivity, clearDelays, fetchSubs, showToast])
 
   const handleAddNode = useCallback(async () => {
-    const requiresPassword = ['hysteria2', 'anytls', 'ss', 'trojan', 'tuic'].includes(nodeType)
-    const requiresUuid = ['vmess', 'vless', 'tuic'].includes(nodeType)
-    const supportsTransport = ['vmess', 'vless', 'trojan'].includes(nodeType)
+    const caps = nodeCapabilities(nodeType)
+    const requiresPassword = caps.password
+    const requiresUuid = caps.uuid
+    const supportsTransport = caps.transport
 
     const tagError = validateNodeTag(nodeForm.tag)
     if (tagError) {

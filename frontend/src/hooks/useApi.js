@@ -56,7 +56,7 @@ export function useStatus() {
     }
   }, [])
 
-  return { status, setStatus, fetchStatus }
+  return { status, fetchStatus }
 }
 
 export function useSubs() {
@@ -72,7 +72,7 @@ export function useSubs() {
     }
   }, [])
 
-  return { subs, setSubs, fetchSubs }
+  return { subs, fetchSubs }
 }
 
 export function useNodes() {
@@ -88,7 +88,7 @@ export function useNodes() {
     }
   }, [])
 
-  return { nodes, setNodes, fetchNodes }
+  return { nodes, fetchNodes }
 }
 
 export function useProxies(status) {
@@ -124,7 +124,7 @@ export function useProxies(status) {
     }
   }, [status.running])
 
-  return { proxies, setProxies, fetchProxies, selectorGroups, primaryGroupName, primaryGroup }
+  return { proxies, fetchProxies, selectorGroups, primaryGroupName, primaryGroup }
 }
 
 export function useTraffic(status) {
@@ -261,7 +261,7 @@ export function useVersion() {
     return null
   }, [])
 
-  return { versionInfo, setVersionInfo, fetchVersion }
+  return { versionInfo, fetchVersion }
 }
 
 export function useDelays() {

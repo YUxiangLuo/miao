@@ -48,6 +48,20 @@ export const NODE_TYPE_OPTIONS = [
   { value: 'tuic', label: 'TUIC' },
 ]
 
+export const NODE_CAPABILITIES = {
+  hysteria2: { password: true, uuid: false, transport: false, tlsToggle: false },
+  anytls:    { password: true, uuid: false, transport: false, tlsToggle: false },
+  ss:        { password: true, uuid: false, transport: false, tlsToggle: false },
+  vmess:     { password: false, uuid: true, transport: true, tlsToggle: true },
+  vless:     { password: false, uuid: true, transport: true, tlsToggle: true },
+  trojan:    { password: true, uuid: false, transport: true, tlsToggle: false },
+  tuic:      { password: true, uuid: true, transport: false, tlsToggle: false },
+}
+
+export function nodeCapabilities(type) {
+  return NODE_CAPABILITIES[type] || { password: false, uuid: false, transport: false, tlsToggle: false }
+}
+
 export const HYSTERIA2_OBFS_OPTIONS = [
   { value: '', label: '禁用混淆' },
   { value: 'salamander', label: 'Salamander' },

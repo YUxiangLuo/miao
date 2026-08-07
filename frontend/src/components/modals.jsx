@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import { X, CircleAlert, Plus, Activity, ArrowDown, ArrowUp, Network, RefreshCw, Route, Search, Trash2 } from 'lucide-react'
 import { Button } from './ui.jsx'
-import { 
-  classNames, 
-  CIPHER_OPTIONS, 
+import {
+  classNames,
+  CIPHER_OPTIONS,
   CLIENT_FINGERPRINT_OPTIONS,
   HYSTERIA2_OBFS_OPTIONS,
   NODE_TYPE_OPTIONS,
@@ -13,6 +13,8 @@ import {
   TUIC_UDP_RELAY_OPTIONS,
   VMESS_CIPHER_OPTIONS,
   formatBytes,
+  formatSpeed,
+  nodeCapabilities,
   nodeTypeDefaults,
 } from '../utils.js'
 
@@ -44,10 +46,11 @@ export function NodeModal({ open, nodeType, setNodeType, form, setForm, loading,
   if (!open) return null
 
   const activeLabel = NODE_TYPE_OPTIONS.find((option) => option.value === nodeType)?.label || nodeType
-  const requiresPassword = ['hysteria2', 'anytls', 'ss', 'trojan', 'tuic'].includes(nodeType)
-  const requiresUuid = ['vmess', 'vless', 'tuic'].includes(nodeType)
-  const supportsTransport = ['vmess', 'vless', 'trojan'].includes(nodeType)
-  const showsTlsToggle = ['vmess', 'vless'].includes(nodeType)
+  const caps = nodeCapabilities(nodeType)
+  const requiresPassword = caps.password
+  const requiresUuid = caps.uuid
+  const supportsTransport = caps.transport
+  const showsTlsToggle = caps.tlsToggle
   const showsTlsFields = nodeType !== 'ss' && (!showsTlsToggle || form.tls_enabled || form.reality_public_key.trim())
   const pathTransport = ['ws', 'http', 'h2'].includes(form.transport_type)
   const handleNodeTypeChange = (event) => {
@@ -784,7 +787,7 @@ export function ConnectionsModal({
                   下载速度
                 </span>
                 <div className="connection-stat-main">
-                  <strong className="connection-stat-value tone-download">{formatBytes(downloadSpeed)}/s</strong>
+                  <strong className="connection-stat-value tone-download">{formatSpeed(downloadSpeed)}</strong>
                   <SpeedSparkline points={speedHistory.down} tone="down" />
                 </div>
               </div>
@@ -794,7 +797,7 @@ export function ConnectionsModal({
                   上传速度
                 </span>
                 <div className="connection-stat-main">
-                  <strong className="connection-stat-value tone-upload">{formatBytes(uploadSpeed)}/s</strong>
+                  <strong className="connection-stat-value tone-upload">{formatSpeed(uploadSpeed)}</strong>
                   <SpeedSparkline points={speedHistory.up} tone="up" />
                 </div>
               </div>
@@ -888,8 +891,8 @@ export function ConnectionsModal({
                       </span>
                       <span title={connectionSource(connection)}>{connectionSource(connection)}</span>
                       <span className="connection-speed">
-                        <small className="tone-download"><ArrowDown size={12} />{formatBytes(Number(connection.downloadSpeed || 0))}/s</small>
-                        <small className="tone-upload"><ArrowUp size={12} />{formatBytes(Number(connection.uploadSpeed || 0))}/s</small>
+                        <small className="tone-download"><ArrowDown size={12} />{formatSpeed(Number(connection.downloadSpeed || 0))}</small>
+                        <small className="tone-upload"><ArrowUp size={12} />{formatSpeed(Number(connection.uploadSpeed || 0))}</small>
                       </span>
                       <span>
                         <small><ArrowDown size={12} />{formatBytes(Number(connection.download || 0))}</small>
