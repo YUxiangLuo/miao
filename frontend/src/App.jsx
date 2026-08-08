@@ -71,7 +71,6 @@ export default function App() {
     connectionsError,
     fetchConnections,
     closeConnection,
-    closeAllConnections,
   } = useConnections(status, clashApiBase)
   const { versionInfo, fetchVersion } = useVersion()
   const { delays, testingNodes, testingGroup, testDelay, testGroupDelays, clearDelays } = useDelays()
@@ -615,7 +614,6 @@ export default function App() {
         onClose={() => setShowConnectionsModal(false)}
         onRefresh={fetchConnections}
         onCloseConnection={closeConnection}
-        onCloseAllConnections={closeAllConnections}
         showToast={showToast}
       />
 

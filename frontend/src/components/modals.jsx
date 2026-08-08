@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { X, CircleAlert, Plus, Activity, ArrowDown, ArrowUp, Network, RefreshCw, Route, Search, Trash2 } from 'lucide-react'
+import { X, CircleAlert, Plus, Activity, ArrowDown, ArrowUp, Network, RefreshCw, Route, Search } from 'lucide-react'
 import { Button } from './ui.jsx'
 import {
   classNames,
@@ -631,7 +631,6 @@ export function ConnectionsModal({
   onClose,
   onRefresh,
   onCloseConnection,
-  onCloseAllConnections,
   showToast,
 }) {
   const [query, setQuery] = useState('')
@@ -641,7 +640,6 @@ export function ConnectionsModal({
   const [page, setPage] = useState(0)
   const [selectedId, setSelectedId] = useState('')
   const [closingId, setClosingId] = useState('')
-  const [closingAll, setClosingAll] = useState(false)
   const [speedHistory, setSpeedHistory] = useState({ down: [], up: [] })
 
   useEffect(() => {
@@ -722,18 +720,6 @@ export function ConnectionsModal({
     }
   }
 
-  const handleCloseAll = async () => {
-    setClosingAll(true)
-    try {
-      await onCloseAllConnections()
-      setSelectedId('')
-    } catch (closeError) {
-      showToast?.(closeError.message || '关闭全部连接失败', 'error')
-    } finally {
-      setClosingAll(false)
-    }
-  }
-
   if (!open) return null
 
   return (
@@ -754,14 +740,6 @@ export function ConnectionsModal({
             <button className="connections-tool-button" onClick={onRefresh} disabled={loading || !status.running}>
               <RefreshCw size={14} className={loading ? 'spin' : undefined} />
               刷新
-            </button>
-            <button
-              className="connections-tool-button danger"
-              onClick={handleCloseAll}
-              disabled={closingAll || loading || connections.length === 0}
-            >
-              {closingAll ? <RefreshCw size={14} className="spin" /> : <Trash2 size={14} />}
-              清空连接
             </button>
             <button className="icon-button" onClick={onClose} title="关闭 (Esc)">
               <X size={16} />

@@ -225,22 +225,12 @@ export function useConnections(status, clashApiBase) {
     await fetchConnections()
   }, [clashApiBase, fetchConnections])
 
-  const closeAllConnections = useCallback(async () => {
-    const response = await fetch(`${clashApiBase}/connections`, { method: 'DELETE' })
-    if (!response.ok) {
-      const details = (await response.text()).trim()
-      throw new Error(details || `关闭全部连接失败 (${response.status})`)
-    }
-    await fetchConnections()
-  }, [clashApiBase, fetchConnections])
-
   return {
     connectionsInfo,
     connectionsLoading,
     connectionsError,
     fetchConnections,
     closeConnection,
-    closeAllConnections,
   }
 }
 
