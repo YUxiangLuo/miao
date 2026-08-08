@@ -26,6 +26,10 @@
 * {
     box-sizing: border-box;
 }
+/* 全局字号基准：所有字体使用 rem，调整此值即可整体缩放字体 */
+html {
+    font-size: 16px;
+}
 html,
 body,
 #root {
@@ -89,7 +93,7 @@ button {
 }
 .brand-name {
     color: var(--text);
-    font-size: 17px;
+    font-size: 1.1875rem;
     font-weight: 600;
     letter-spacing: 0.5px;
 }
@@ -102,7 +106,7 @@ button {
     gap: 6px;
     padding: 5px 10px;
     border-radius: 4px;
-    font-size: 12px;
+    font-size: 0.875rem;
     font-weight: 500;
 }
 .run-badge.running {
@@ -128,7 +132,7 @@ button {
     border: none;
     background: none;
     color: var(--text-muted);
-    font-size: 12px;
+    font-size: 0.875rem;
     cursor: pointer;
 }
 .version-chip:hover {
@@ -209,12 +213,12 @@ button {
 }
 .status-title {
     color: var(--text);
-    font-size: 14px;
+    font-size: 1.0625rem;
     font-weight: 600;
 }
 .status-subtitle {
     color: var(--text-muted);
-    font-size: 12px;
+    font-size: 0.875rem;
 }
 .status-card-spacer {
     flex: 1;
@@ -244,7 +248,7 @@ button {
     align-items: center;
     gap: 6px;
     color: var(--text);
-    font-size: 13px;
+    font-size: 0.9375rem;
     font-weight: 500;
 }
 .traffic-icon.up {
@@ -274,7 +278,7 @@ button {
     border-radius: 6px;
     background: transparent;
     color: var(--text-muted);
-    font-size: 12px;
+    font-size: 0.875rem;
     font-weight: 500;
     white-space: nowrap;
     transition: 0.18s ease;
@@ -322,7 +326,7 @@ button {
     gap: 8px;
     min-width: 0;
     color: var(--text);
-    font-size: 13px;
+    font-size: 0.9375rem;
     font-weight: 600;
 }
 .section-icon {
@@ -338,7 +342,7 @@ button {
     border-radius: 10px;
     background: var(--border-soft);
     color: var(--accent-strong);
-    font-size: 11px;
+    font-size: 0.8125rem;
     font-weight: 600;
 }
 .btn {
@@ -358,12 +362,12 @@ button {
 .btn-md {
     min-height: 36px;
     padding: 9px 18px;
-    font-size: 13px;
+    font-size: 0.9375rem;
 }
 .btn-sm {
     min-height: 28px;
     padding: 5px 10px;
-    font-size: 11px;
+    font-size: 0.8125rem;
 }
 .btn-primary {
     background: #3a4d66;
@@ -439,19 +443,19 @@ button {
 }
 .banner-label {
     color: var(--accent-strong);
-    font-size: 10px;
+    font-size: 0.75rem;
     font-weight: 500;
     letter-spacing: 0.5px;
     text-transform: uppercase;
 }
 .banner-copy strong {
     color: var(--text-strong);
-    font-size: 16px;
+    font-size: 1.1875rem;
     line-height: 1.2;
 }
 .banner-meta {
     color: var(--text-muted);
-    font-size: 11px;
+    font-size: 0.8125rem;
 }
 .banner-delay {
     display: flex;
@@ -460,11 +464,11 @@ button {
     gap: 2px;
 }
 .banner-delay strong {
-    font-size: 24px;
+    font-size: 1.75rem;
     line-height: 1;
 }
 .banner-delay span {
-    font-size: 10px;
+    font-size: 0.75rem;
     font-weight: 500;
 }
 .banner-delay.fast,
@@ -521,7 +525,7 @@ button {
 }
 .proxy-node-name {
     color: var(--text);
-    font-size: 12px;
+    font-size: 0.875rem;
     font-weight: 600;
 }
 .proxy-tag {
@@ -529,7 +533,7 @@ button {
     align-items: center;
     gap: 5px;
     color: var(--text-strong);
-    font-size: 12px;
+    font-size: 0.875rem;
     font-weight: 700;
 }
 .proxy-tag-dot {
@@ -546,7 +550,7 @@ button {
     border-radius: 4px;
     background: var(--surface-soft);
     border: none;
-    font-size: 11px;
+    font-size: 0.8125rem;
     cursor: pointer;
     color: var(--text-muted);
 }
@@ -593,7 +597,7 @@ button {
 }
 .list-row-title {
     color: var(--text);
-    font-size: 12px;
+    font-size: 0.875rem;
     font-weight: 500;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -601,7 +605,7 @@ button {
 }
 .list-row-meta {
     color: var(--text-muted);
-    font-size: 11px;
+    font-size: 0.8125rem;
     margin-top: 2px;
 }
 .list-row-meta.error {
@@ -677,17 +681,17 @@ button {
 }
 .connectivity-copy span:first-child {
     color: var(--text);
-    font-size: 11px;
+    font-size: 0.8125rem;
     font-weight: 500;
 }
 .connectivity-copy span:last-child {
     color: var(--text-muted);
-    font-size: 10px;
+    font-size: 0.75rem;
 }
 .empty-block {
     padding: 18px 16px;
     color: var(--text-muted);
-    font-size: 12px;
+    font-size: 0.875rem;
 }
 .modal-overlay {
     position: fixed;
@@ -742,7 +746,7 @@ button {
 .modal-title-wrap h3 {
     margin: 0;
     color: var(--text-strong);
-    font-size: 16px;
+    font-size: 1.1875rem;
 }
 .icon-accent {
     color: var(--accent-strong);
@@ -793,7 +797,7 @@ button {
 .connections-header-title h3 {
     margin: 0;
     color: var(--text-strong);
-    font-size: 16px;
+    font-size: 1.1875rem;
     white-space: nowrap;
 }
 .connections-live-badge {
@@ -805,7 +809,7 @@ button {
     border: 1px solid rgba(74, 158, 117, 0.35);
     background: var(--surface-green-soft);
     color: var(--success);
-    font-size: 11px;
+    font-size: 0.8125rem;
     font-weight: 600;
     white-space: nowrap;
 }
@@ -859,7 +863,7 @@ button {
     align-items: center;
     gap: 6px;
     color: var(--text-muted);
-    font-size: 11px;
+    font-size: 0.8125rem;
 }
 .connection-stat-label svg {
     color: var(--text-subtle);
@@ -867,7 +871,7 @@ button {
 .connection-stat-value {
     flex: 0 0 auto;
     color: var(--text-strong);
-    font-size: 18px;
+    font-size: 1.375rem;
     font-weight: 650;
     line-height: 1.2;
     white-space: nowrap;
@@ -922,7 +926,7 @@ button {
     border-radius: 6px;
     background: var(--surface-red);
     color: var(--danger);
-    font-size: 12px;
+    font-size: 0.875rem;
 }
 .connections-content {
     flex: 1;
@@ -952,7 +956,7 @@ button {
     padding: 10px 12px;
     border-bottom: 1px solid var(--border-soft);
     color: var(--text);
-    font-size: 12px;
+    font-size: 0.875rem;
     font-weight: 600;
 }
 .connections-panel-title svg {
@@ -970,7 +974,7 @@ button {
     justify-content: space-between;
     gap: 10px;
     margin-bottom: 5px;
-    font-size: 12px;
+    font-size: 0.875rem;
 }
 .dist-row-info span {
     min-width: 0;
@@ -981,7 +985,7 @@ button {
 }
 .dist-row-info strong {
     color: var(--accent-strong);
-    font-size: 12px;
+    font-size: 0.875rem;
 }
 .dist-bar {
     height: 4px;
@@ -1029,7 +1033,7 @@ button {
     outline: none;
     background: transparent;
     color: var(--text);
-    font-size: 12px;
+    font-size: 0.875rem;
 }
 .connections-search:focus-within {
     border-color: var(--accent);
@@ -1043,7 +1047,7 @@ button {
     background: var(--surface-soft);
     color: var(--text);
     outline: none;
-    font-size: 12px;
+    font-size: 0.875rem;
 }
 .connections-tool-button {
     min-height: 34px;
@@ -1056,7 +1060,7 @@ button {
     border-radius: 7px;
     background: var(--surface-soft);
     color: var(--text-muted);
-    font-size: 12px;
+    font-size: 0.875rem;
     white-space: nowrap;
 }
 .connections-tool-button:hover:not(:disabled) {
@@ -1099,14 +1103,14 @@ button {
     background: #20252d;
     border-bottom: 1px solid var(--border-soft);
     color: var(--text-muted);
-    font-size: 11px;
+    font-size: 0.8125rem;
     font-weight: 600;
 }
 .connections-table-row {
     padding: 9px 14px;
     border-bottom: 1px solid var(--border-soft);
     color: var(--text);
-    font-size: 12px;
+    font-size: 0.875rem;
     cursor: pointer;
     transition: 0.15s ease;
 }
@@ -1131,7 +1135,7 @@ button {
 .connections-table-row strong {
     display: block;
     color: var(--text);
-    font-size: 12px;
+    font-size: 0.875rem;
     font-weight: 600;
 }
 .connections-table-row small {
@@ -1140,7 +1144,7 @@ button {
     gap: 4px;
     margin-top: 2px;
     color: var(--text-muted);
-    font-size: 10px;
+    font-size: 0.75rem;
 }
 .connection-network-badge {
     flex: 0 0 auto;
@@ -1148,7 +1152,7 @@ button {
     border-radius: 4px;
     background: var(--surface-blue);
     color: var(--accent-strong);
-    font-size: 9px;
+    font-size: 0.75rem;
     font-style: normal;
     font-weight: 700;
     letter-spacing: 0.4px;
@@ -1199,7 +1203,7 @@ button {
     justify-content: space-between;
     gap: 10px;
     color: var(--text-muted);
-    font-size: 12px;
+    font-size: 0.875rem;
 }
 .connections-pagination div {
     display: flex;
@@ -1223,7 +1227,7 @@ button {
     padding: 10px 14px;
     border-bottom: 1px solid var(--border-soft);
     color: var(--text);
-    font-size: 12px;
+    font-size: 0.875rem;
 }
 .connection-detail-items {
     flex: 1;
@@ -1242,12 +1246,12 @@ button {
     display: block;
     margin-bottom: 3px;
     color: var(--text-muted);
-    font-size: 11px;
+    font-size: 0.8125rem;
 }
 .connection-detail-item strong {
     display: block;
     color: var(--text);
-    font-size: 12px;
+    font-size: 0.875rem;
     font-weight: 500;
     line-height: 1.45;
     overflow-wrap: anywhere;
@@ -1264,7 +1268,7 @@ button {
     justify-content: center;
     padding: 22px 16px;
     color: var(--text-muted);
-    font-size: 13px;
+    font-size: 0.9375rem;
     text-align: center;
 }
 .connections-empty.inline {
@@ -1273,7 +1277,7 @@ button {
 .connections-muted {
     padding: 12px 0;
     color: var(--text-muted);
-    font-size: 12px;
+    font-size: 0.875rem;
 }
 .form-grid {
     display: grid;
@@ -1290,7 +1294,7 @@ button {
 }
 .field span {
     color: var(--text-muted);
-    font-size: 12px;
+    font-size: 0.875rem;
 }
 .field.checkbox-field {
     flex-direction: row;
@@ -1305,13 +1309,13 @@ button {
 }
 .field.checkbox-field span {
     color: var(--text-secondary);
-    font-size: 13px;
+    font-size: 0.9375rem;
 }
 .modal-message {
     margin: 0 0 18px;
     white-space: pre-line;
     color: var(--text-muted);
-    font-size: 13px;
+    font-size: 0.9375rem;
     line-height: 1.6;
 }
 .modal-actions {
@@ -1339,7 +1343,7 @@ button {
     background: rgba(24, 28, 34, 0.96);
     box-shadow: var(--shadow);
     color: var(--text);
-    font-size: 13px;
+    font-size: 0.9375rem;
 }
 .toast.success {
     border-left: 3px solid var(--success);
@@ -1483,13 +1487,13 @@ button {
     margin-bottom: 12px;
 }
 .onboarding-title {
-    font-size: 24px;
+    font-size: 1.75rem;
     font-weight: 600;
     color: var(--text-strong);
     margin: 8px 0 0;
 }
 .onboarding-subtitle {
-    font-size: 14px;
+    font-size: 1.0625rem;
     color: var(--text-muted);
     margin: 8px 0 0;
 }
@@ -1510,7 +1514,7 @@ button {
     border: 1px solid var(--border);
     background: var(--surface-soft);
     color: var(--text);
-    font-size: 13px;
+    font-size: 0.9375rem;
     outline: none;
 }
 .onboarding-input-row input:focus {
@@ -1522,7 +1526,7 @@ button {
     gap: 16px;
     margin: 20px 0;
     color: var(--text-subtle);
-    font-size: 12px;
+    font-size: 0.875rem;
 }
 .onboarding-divider::before,
 .onboarding-divider::after {
@@ -1541,5 +1545,5 @@ button {
     justify-content: center;
     min-height: 100vh;
     color: var(--text-muted);
-    font-size: 14px;
+    font-size: 1.0625rem;
 }
