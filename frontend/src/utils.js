@@ -48,7 +48,7 @@ export const NODE_TYPE_OPTIONS = [
   { value: 'tuic', label: 'TUIC' },
 ]
 
-export const NODE_CAPABILITIES = {
+const NODE_CAPABILITIES = {
   hysteria2: { password: true, uuid: false, transport: false, tlsToggle: false },
   anytls:    { password: true, uuid: false, transport: false, tlsToggle: false },
   ss:        { password: true, uuid: false, transport: false, tlsToggle: false },

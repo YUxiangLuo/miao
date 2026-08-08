@@ -13,4 +13,3 @@ export {
 } from './useApi.js'
 
 export { usePolling } from './usePolling.js'
-export { useWebSocket } from './useWebSocket.js'

@@ -1,4 +1,4 @@
-export { Button, SectionCard, ToastStack } from './ui.jsx'
+export { ToastStack } from './ui.jsx'
 export { ConfirmModal, NodeModal, ConnectionsModal } from './modals.jsx'
 export { TopBar } from './TopBar.jsx'
 export { StatusCard } from './StatusCard.jsx'
