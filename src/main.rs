@@ -205,6 +205,9 @@ async fn main() -> AppResult<()> {
 
     // Background: generate config, check dependencies, and start sing-box
     tokio::spawn(async move {
+        // Serialize startup provisioning/config generation with every API-driven
+        // configuration mutation so an early request cannot overwrite startup state.
+        let _config_update = state_for_init.config_update.lock().await;
         let mut config = config;
 
         match ensure_vps_hysteria_node(&mut config, &state_for_init.config_path).await {

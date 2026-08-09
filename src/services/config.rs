@@ -1,5 +1,9 @@
 use futures::{stream, StreamExt};
-use std::{collections::HashSet, path::Path, sync::Arc};
+use std::{
+    collections::HashSet,
+    path::Path,
+    sync::{atomic::Ordering, Arc},
+};
 use tokio::time::Duration;
 use tracing::{error, info, warn};
 
@@ -100,14 +104,29 @@ pub async fn regenerate_and_restart_runtime(
     Ok(has_sub_nodes)
 }
 
-pub async fn regenerate_and_restart(config: &Config, state: &Arc<AppState>) -> AppResult<()> {
+pub async fn regenerate_preserving_service_state(
+    config: &Config,
+    state: &Arc<AppState>,
+) -> AppResult<bool> {
     let route_override = *state.route_mode_override.read().await;
     let runtime_config = config_with_route_override(config, route_override);
-    let has_sub_nodes = regenerate_and_restart_runtime(&runtime_config, state).await?;
+    let should_run = state.service_should_run.load(Ordering::Relaxed);
 
-    finalize_started_config(&runtime_config, state, has_sub_nodes).await;
+    if config_apply_mode(&runtime_config, should_run) == ConfigApplyMode::Clear {
+        stop_sing_internal(state).await;
+        clear_runtime_config(state).await;
+        return Ok(false);
+    }
 
-    Ok(())
+    if should_run {
+        let has_sub_nodes = regenerate_and_restart_runtime(&runtime_config, state).await?;
+        finalize_started_config(&runtime_config, state, has_sub_nodes).await;
+    } else {
+        let has_sub_nodes = regenerate_without_restart_runtime(&runtime_config, state).await?;
+        update_config_warning(&runtime_config, state, has_sub_nodes).await;
+    }
+
+    Ok(should_run)
 }
 
 pub async fn finalize_started_config(config: &Config, state: &Arc<AppState>, has_sub_nodes: bool) {
@@ -153,6 +172,102 @@ fn config_with_route_override(config: &Config, route_mode: Option<RouteMode>) ->
     config
 }
 
+fn has_configured_sources(config: &Config) -> bool {
+    !config.subs.is_empty() || !config.nodes.is_empty()
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ConfigApplyMode {
+    Clear,
+    Restart,
+    RegenerateOnly,
+}
+
+fn config_apply_mode(config: &Config, should_run: bool) -> ConfigApplyMode {
+    if !has_configured_sources(config) {
+        ConfigApplyMode::Clear
+    } else if should_run {
+        ConfigApplyMode::Restart
+    } else {
+        ConfigApplyMode::RegenerateOnly
+    }
+}
+
+async fn remove_runtime_config_files_at(runtime_config_path: &Path, cache_path: &Path) {
+    for path in [runtime_config_path, cache_path] {
+        if let Err(err) = tokio::fs::remove_file(path).await {
+            if err.kind() != std::io::ErrorKind::NotFound {
+                warn!(path = ?path, error = %err, "Failed to remove stale runtime config");
+            }
+        }
+    }
+}
+
+async fn remove_runtime_config_files() {
+    let runtime_config_path = get_sing_box_home().join("config.json");
+    remove_runtime_config_files_at(&runtime_config_path, Path::new(CONFIG_CACHE_PATH)).await;
+}
+
+async fn clear_runtime_config(state: &Arc<AppState>) {
+    remove_runtime_config_files().await;
+    state.sub_status.lock().await.clear();
+    *state.config_warning.lock().await = None;
+}
+
+fn no_usable_nodes_warning(config: &Config) -> String {
+    if config.subs.is_empty() {
+        "没有可用的手动节点，请检查配置或添加节点".to_string()
+    } else {
+        "所有订阅获取失败且没有可用手动节点，请检查订阅或添加节点".to_string()
+    }
+}
+
+async fn persist_config_without_usable_nodes_at(
+    state: &Arc<AppState>,
+    persisted_config: Config,
+    runtime_config_path: &Path,
+    cache_path: &Path,
+) -> AppResult<()> {
+    save_config_to(&state.config_path, &persisted_config).await?;
+    stop_sing_internal(state).await;
+    remove_runtime_config_files_at(runtime_config_path, cache_path).await;
+    *state.config.write().await = persisted_config.clone();
+    *state.config_warning.lock().await = Some(no_usable_nodes_warning(&persisted_config));
+    Ok(())
+}
+
+async fn persist_config_without_usable_nodes(
+    state: &Arc<AppState>,
+    persisted_config: Config,
+) -> AppResult<()> {
+    let runtime_config_path = get_sing_box_home().join("config.json");
+    persist_config_without_usable_nodes_at(
+        state,
+        persisted_config,
+        &runtime_config_path,
+        Path::new(CONFIG_CACHE_PATH),
+    )
+    .await
+}
+
+async fn restore_previous_config(
+    old_config: &Config,
+    state: &Arc<AppState>,
+    should_run: bool,
+) -> AppResult<()> {
+    if !has_configured_sources(old_config) {
+        stop_sing_internal(state).await;
+        clear_runtime_config(state).await;
+        return Ok(());
+    }
+
+    if should_run {
+        restore_previous_running_config(old_config, state).await
+    } else {
+        restore_previous_stopped_config(old_config, state).await
+    }
+}
+
 pub async fn apply_config_change(
     state: &Arc<AppState>,
     old_config: &Config,
@@ -162,18 +277,42 @@ pub async fn apply_config_change(
     let runtime_old_config = config_with_route_override(old_config, route_override);
     let runtime_new_config = config_with_route_override(new_config, route_override);
     let persisted_new_config = config_with_route_override(new_config, None);
+    let should_run = state.service_should_run.load(Ordering::Relaxed);
+    let apply_mode = config_apply_mode(&runtime_new_config, should_run);
 
-    match regenerate_and_restart_runtime(&runtime_new_config, state).await {
+    if apply_mode == ConfigApplyMode::Clear {
+        save_config_to(&state.config_path, &persisted_new_config).await?;
+        stop_sing_internal(state).await;
+        clear_runtime_config(state).await;
+        *state.config.write().await = persisted_new_config;
+        return Ok(());
+    }
+
+    let apply_result = match apply_mode {
+        ConfigApplyMode::Restart => {
+            regenerate_and_restart_runtime(&runtime_new_config, state).await
+        }
+        ConfigApplyMode::RegenerateOnly => {
+            regenerate_without_restart_runtime(&runtime_new_config, state).await
+        }
+        ConfigApplyMode::Clear => unreachable!("clear mode handled above"),
+    };
+
+    match apply_result {
         Ok(has_sub_nodes) => {
             match save_config_to(&state.config_path, &persisted_new_config).await {
                 Ok(()) => {
                     *state.config.write().await = persisted_new_config;
-                    finalize_started_config(&runtime_new_config, state, has_sub_nodes).await;
+                    if should_run {
+                        finalize_started_config(&runtime_new_config, state, has_sub_nodes).await;
+                    } else {
+                        update_config_warning(&runtime_new_config, state, has_sub_nodes).await;
+                    }
                     Ok(())
                 }
                 Err(save_err) => {
                     error!(error = %save_err, "Runtime config applied but persistent config write failed, attempting runtime rollback");
-                    match restart_with_previous_config(&runtime_old_config, state).await {
+                    match restore_previous_config(&runtime_old_config, state, should_run).await {
                         Ok(()) => Err(AppError::context(
                             "Failed to persist config change; restored previous runtime config",
                             save_err,
@@ -186,9 +325,13 @@ pub async fn apply_config_change(
                 }
             }
         }
+        Err(apply_err) if apply_err.is_no_usable_nodes() => {
+            warn!(error = %apply_err, "Config change left no usable nodes; persisting it and stopping sing-box");
+            persist_config_without_usable_nodes(state, persisted_new_config).await
+        }
         Err(apply_err) => {
             error!(error = %apply_err, "Failed to apply runtime config change, attempting runtime rollback");
-            match restore_previous_running_config(&runtime_old_config, state).await {
+            match restore_previous_config(&runtime_old_config, state, should_run).await {
                 Ok(()) => Err(AppError::context(
                     "Failed to apply config change; restored previous runtime config",
                     apply_err,
@@ -310,6 +453,11 @@ async fn restore_previous_stopped_config(
     old_config: &Config,
     state: &Arc<AppState>,
 ) -> AppResult<()> {
+    if !has_configured_sources(old_config) {
+        clear_runtime_config(state).await;
+        return Ok(());
+    }
+
     let has_sub_nodes = regenerate_without_restart_runtime(old_config, state).await?;
     update_config_warning(old_config, state, has_sub_nodes).await;
     Ok(())
@@ -551,9 +699,7 @@ fn build_sing_box_config(
 ) -> AppResult<serde_json::Value> {
     let total_nodes = my_outbounds.len() + final_outbounds.len();
     if total_nodes == 0 {
-        return Err(AppError::message(
-            "No nodes available: all subscriptions failed and no manual nodes configured",
-        ));
+        return Err(AppError::NoUsableNodes);
     }
 
     let (node_names, outbounds) = normalize_outbound_tags(
@@ -666,9 +812,14 @@ fn get_config_template() -> serde_json::Value {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_sing_box_config, collect_manual_outbounds, config_with_route_override, save_config_to,
+        build_sing_box_config, collect_manual_outbounds, config_apply_mode,
+        config_with_route_override, no_usable_nodes_warning,
+        persist_config_without_usable_nodes_at, save_config_to, ConfigApplyMode,
     };
-    use crate::models::{Config, RouteMode};
+    use crate::{
+        models::{Config, RouteMode, SubStatus},
+        test_support::app_state,
+    };
     use serde_json::json;
 
     #[test]
@@ -817,6 +968,101 @@ mod tests {
     }
 
     #[test]
+    fn config_change_clears_runtime_when_last_source_is_removed() {
+        let config = Config::default();
+
+        assert_eq!(config_apply_mode(&config, true), ConfigApplyMode::Clear);
+        assert_eq!(config_apply_mode(&config, false), ConfigApplyMode::Clear);
+    }
+
+    #[test]
+    fn unusable_node_warning_distinguishes_manual_and_subscription_configs() {
+        let manual = Config {
+            nodes: vec!["invalid-node".to_string()],
+            ..Config::default()
+        };
+        let subscription = Config {
+            subs: vec!["https://example.com/sub".to_string()],
+            ..Config::default()
+        };
+
+        assert!(no_usable_nodes_warning(&manual).contains("手动节点"));
+        assert!(no_usable_nodes_warning(&subscription).contains("订阅"));
+    }
+
+    #[tokio::test]
+    async fn unusable_config_is_persisted_and_stale_runtime_files_are_removed() {
+        let state = app_state(Config::default());
+        let temp_dir =
+            std::env::temp_dir().join(format!("miao-unusable-config-{}", std::process::id()));
+        let runtime_path = temp_dir.join("config.json");
+        let cache_path = temp_dir.join("config.json.cache");
+        tokio::fs::create_dir_all(&temp_dir).await.unwrap();
+        tokio::fs::write(&runtime_path, "stale").await.unwrap();
+        tokio::fs::write(&cache_path, "stale").await.unwrap();
+
+        let subscription_url = "https://example.com/broken".to_string();
+        state.sub_status.lock().await.insert(
+            subscription_url.clone(),
+            SubStatus {
+                url: subscription_url.clone(),
+                success: false,
+                node_count: 0,
+                error: Some("fetch failed".to_string()),
+            },
+        );
+        let config = Config {
+            subs: vec![subscription_url.clone()],
+            ..Config::default()
+        };
+
+        persist_config_without_usable_nodes_at(&state, config, &runtime_path, &cache_path)
+            .await
+            .unwrap();
+
+        assert!(!runtime_path.exists());
+        assert!(!cache_path.exists());
+        assert_eq!(
+            state.config.read().await.subs,
+            vec![subscription_url.clone()]
+        );
+        assert!(state.config_warning.lock().await.is_some());
+        assert!(state
+            .sub_status
+            .lock()
+            .await
+            .contains_key(&subscription_url));
+        let persisted = tokio::fs::read_to_string(&state.config_path).await.unwrap();
+        assert!(persisted.contains(&subscription_url));
+
+        let _ = tokio::fs::remove_file(&state.config_path).await;
+        let _ = tokio::fs::remove_dir_all(temp_dir).await;
+    }
+
+    #[test]
+    fn config_change_preserves_explicitly_stopped_service() {
+        let config = Config {
+            nodes: vec![r#"{"type":"hysteria2"}"#.to_string()],
+            ..Config::default()
+        };
+
+        assert_eq!(
+            config_apply_mode(&config, false),
+            ConfigApplyMode::RegenerateOnly
+        );
+    }
+
+    #[test]
+    fn config_change_restarts_service_when_it_is_desired() {
+        let config = Config {
+            subs: vec!["https://example.com/sub".to_string()],
+            ..Config::default()
+        };
+
+        assert_eq!(config_apply_mode(&config, true), ConfigApplyMode::Restart);
+    }
+
+    #[test]
     fn config_with_route_override_defaults_to_rule_mode() {
         let config = Config {
             port: None,
@@ -954,8 +1200,9 @@ mod tests {
 
         let err = build_sing_box_config(&config, vec![], vec![], vec![], vec![]).unwrap_err();
 
+        assert!(err.is_no_usable_nodes());
         assert!(err.to_string().contains(
-            "No nodes available: all subscriptions failed and no manual nodes configured"
+            "No usable nodes available: subscriptions failed or manual nodes were invalid"
         ));
     }
 

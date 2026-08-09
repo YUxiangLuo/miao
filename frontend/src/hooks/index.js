@@ -1,15 +1,5 @@
-export {
-  useToast,
-  useApi,
-  useStatus,
-  useSubs,
-  useNodes,
-  useProxies,
-  useTraffic,
-  useConnections,
-  useVersion,
-  useDelays,
-  useConnectivity
-} from './useApi.js'
-
+export { useToast, useApi } from './useApi.js'
+export { useStatus, useSubs, useNodes, useVersion } from './useResources.js'
+export { useProxies, useTraffic, useConnections, useDelays } from './useClash.js'
+export { useConnectivity } from './useConnectivity.js'
 export { usePolling } from './usePolling.js'

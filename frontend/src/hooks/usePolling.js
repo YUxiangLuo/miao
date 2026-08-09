@@ -8,6 +8,7 @@ import { POLL_INTERVAL } from '../utils.js'
 export function usePolling(tasks, enabled = true) {
   const tasksRef = useRef(tasks)
   const timerRef = useRef(null)
+  const runningTaskIndexesRef = useRef(new Set())
 
   // 保持 tasksRef 最新，避免定时器重建
   useEffect(() => {
@@ -16,15 +17,22 @@ export function usePolling(tasks, enabled = true) {
 
   const runTasks = useCallback(() => {
     const currentTasks = tasksRef.current
-    if (Array.isArray(currentTasks)) {
-      currentTasks.forEach(task => {
-        try {
-          task()
-        } catch {
-          // ignore individual task errors
-        }
-      })
+    if (!Array.isArray(currentTasks) || currentTasks.length === 0) {
+      return Promise.resolve([])
     }
+
+    const startedTasks = currentTasks.flatMap((task, index) => {
+      if (runningTaskIndexesRef.current.has(index)) return []
+
+      runningTaskIndexesRef.current.add(index)
+      const promise = Promise.resolve()
+        .then(() => task())
+        .catch(() => undefined)
+        .finally(() => runningTaskIndexesRef.current.delete(index))
+      return [promise]
+    })
+
+    return Promise.allSettled(startedTasks)
   }, [])
 
   useEffect(() => {

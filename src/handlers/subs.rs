@@ -1,9 +1,9 @@
 use axum::{extract::State, http::StatusCode, response::Json};
-use std::sync::Arc;
+use std::sync::{atomic::Ordering, Arc};
 
 use crate::models::{ApiResponse, SubRequest, SubStatus};
 use crate::responses::{status_error, success, success_no_data, HandlerResult};
-use crate::services::config::{apply_config_change, regenerate_and_restart};
+use crate::services::config::{apply_config_change, regenerate_preserving_service_state};
 use crate::state::AppState;
 use crate::validation::Validator;
 
@@ -31,6 +31,13 @@ pub async fn add_sub(
     State(state): State<Arc<AppState>>,
     Json(req): Json<SubRequest>,
 ) -> HandlerResult {
+    if state.initializing.load(Ordering::Relaxed) {
+        return Err(status_error(
+            StatusCode::CONFLICT,
+            "Initialization is still in progress",
+        ));
+    }
+
     if let Err(e) = Validator::subscription_url(&req.url) {
         return Err(status_error(StatusCode::BAD_REQUEST, e));
     }
@@ -49,7 +56,7 @@ pub async fn add_sub(
     new_config.subs.push(req.url);
 
     match apply_config_change(&state, &old_config, &new_config).await {
-        Ok(_) => Ok(success_no_data("Subscription added and sing-box restarted")),
+        Ok(_) => Ok(success_no_data("Subscription added")),
         Err(e) => Err(status_error(StatusCode::INTERNAL_SERVER_ERROR, e)),
     }
 }
@@ -58,6 +65,13 @@ pub async fn delete_sub(
     State(state): State<Arc<AppState>>,
     Json(req): Json<SubRequest>,
 ) -> HandlerResult {
+    if state.initializing.load(Ordering::Relaxed) {
+        return Err(status_error(
+            StatusCode::CONFLICT,
+            "Initialization is still in progress",
+        ));
+    }
+
     let _config_update = state.config_update.lock().await;
     let old_config = state.config.read().await.clone();
     let mut new_config = old_config.clone();
@@ -73,23 +87,29 @@ pub async fn delete_sub(
     }
 
     match apply_config_change(&state, &old_config, &new_config).await {
-        Ok(_) => Ok(success_no_data(
-            "Subscription deleted and sing-box restarted",
-        )),
+        Ok(_) => Ok(success_no_data("Subscription deleted")),
         Err(e) => Err(status_error(StatusCode::INTERNAL_SERVER_ERROR, e)),
     }
 }
 
 pub async fn refresh_subs(State(state): State<Arc<AppState>>) -> HandlerResult {
+    if state.initializing.load(Ordering::Relaxed) {
+        return Err(status_error(
+            StatusCode::CONFLICT,
+            "Initialization is still in progress",
+        ));
+    }
+
     let _config_update = state.config_update.lock().await;
     let config = state.config.read().await;
     let config_clone = config.clone();
     drop(config);
 
-    match regenerate_and_restart(&config_clone, &state).await {
-        Ok(_) => Ok(success_no_data(
+    match regenerate_preserving_service_state(&config_clone, &state).await {
+        Ok(true) => Ok(success_no_data(
             "Subscriptions refreshed and sing-box restarted",
         )),
+        Ok(false) => Ok(success_no_data("Subscriptions refreshed")),
         Err(e) => Err(status_error(StatusCode::INTERNAL_SERVER_ERROR, e)),
     }
 }

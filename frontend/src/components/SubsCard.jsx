@@ -3,7 +3,7 @@ import { X, Check, CircleX, RefreshCw, Rss, Plus } from 'lucide-react'
 import { Button, SectionCard } from './ui.jsx'
 import { classNames, maskSubscription } from '../utils.js'
 
-const SubRow = memo(function SubRow({ sub, onDelete }) {
+const SubRow = memo(function SubRow({ sub, onDelete, disabled }) {
   return (
     <div className="list-row">
       <div className={classNames('status-icon-badge', sub.success ? 'success' : 'error')}>
@@ -19,9 +19,11 @@ const SubRow = memo(function SubRow({ sub, onDelete }) {
             : sub.error || '获取失败'}
         </div>
       </div>
-      <button 
-        className="icon-button subtle" 
+      <button
+        className="icon-button subtle"
         onClick={() => onDelete(sub.url)}
+        disabled={disabled}
+        aria-label={`删除订阅 ${maskSubscription(sub.url)}`}
       >
         <X size={13} />
       </button>
@@ -56,7 +58,12 @@ export function SubsCard({ subs, newSubUrl, setNewSubUrl, loadingAction, onAddSu
         {subs.length === 0 
           ? <div className="empty-block">暂无订阅</div> 
           : subs.map((sub) => (
-            <SubRow key={sub.url} sub={sub} onDelete={onDeleteSub} />
+            <SubRow
+              key={sub.url}
+              sub={sub}
+              onDelete={onDeleteSub}
+              disabled={isInitializing}
+            />
           ))}
         <div className="subscription-add-row">
           <input 

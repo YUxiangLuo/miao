@@ -7,6 +7,7 @@ use std::{
 pub enum AppError {
     Message(String),
     AlreadyRunning,
+    NoUsableNodes,
     Io(std::io::Error),
     Json(serde_json::Error),
     Yaml(serde_yaml::Error),
@@ -28,6 +29,14 @@ impl AppError {
             source: Box::new(source.into()),
         }
     }
+
+    pub fn is_no_usable_nodes(&self) -> bool {
+        match self {
+            Self::NoUsableNodes => true,
+            Self::Context { source, .. } => source.is_no_usable_nodes(),
+            _ => false,
+        }
+    }
 }
 
 impl Display for AppError {
@@ -35,6 +44,10 @@ impl Display for AppError {
         match self {
             Self::Message(message) => write!(f, "{message}"),
             Self::AlreadyRunning => write!(f, "sing-box is already running"),
+            Self::NoUsableNodes => write!(
+                f,
+                "No usable nodes available: subscriptions failed or manual nodes were invalid"
+            ),
             Self::Io(err) => write!(f, "{err}"),
             Self::Json(err) => write!(f, "{err}"),
             Self::Yaml(err) => write!(f, "{err}"),
@@ -49,6 +62,7 @@ impl Error for AppError {
         match self {
             Self::Message(_) => None,
             Self::AlreadyRunning => None,
+            Self::NoUsableNodes => None,
             Self::Io(err) => Some(err),
             Self::Json(err) => Some(err),
             Self::Yaml(err) => Some(err),
@@ -126,6 +140,14 @@ mod tests {
         assert_eq!(source.to_string(), "while writing file: disk full");
         let nested = source.source().unwrap();
         assert_eq!(nested.to_string(), "disk full");
+    }
+
+    #[test]
+    fn no_usable_nodes_survives_context_wrapping() {
+        let err = AppError::context("Failed to regenerate config", AppError::NoUsableNodes);
+
+        assert!(err.is_no_usable_nodes());
+        assert!(err.to_string().contains("No usable nodes available"));
     }
 
     #[test]

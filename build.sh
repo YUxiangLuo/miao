@@ -22,5 +22,5 @@ esac
 MIAO_TARGET="$target" ./scripts/build-embedded.sh
 
 echo "==> Building miao-rust ($target native release)..."
-cargo build --release
+cargo build --locked --release
 echo "==> Complete: target/release/miao-rust"

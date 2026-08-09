@@ -19,6 +19,10 @@ pub struct AppState {
     pub sub_status: Mutex<HashMap<String, SubStatus>>,
     pub config_warning: Mutex<Option<String>>,
     pub initializing: AtomicBool,
+    /// Desired service state. It remains true during onboarding so the first
+    /// valid configuration starts sing-box, and becomes false after an
+    /// explicit stop request so later config edits do not restart it.
+    pub service_should_run: AtomicBool,
     pub http_client: reqwest::Client,
     pub version_cache: ArcSwap<VersionCache>, // 使用 ArcSwap 实现无锁读取
     pub upgrading: AtomicBool,                // 防止并发升级
@@ -45,6 +49,7 @@ impl AppState {
             sub_status: Mutex::new(HashMap::new()),
             config_warning: Mutex::new(None),
             initializing: AtomicBool::new(true),
+            service_should_run: AtomicBool::new(true),
             http_client,
             version_cache: ArcSwap::new(Arc::new(VersionCache {
                 release: None,
@@ -87,6 +92,9 @@ mod tests {
         // 验证状态正确初始化
         assert!(state
             .initializing
+            .load(std::sync::atomic::Ordering::Relaxed));
+        assert!(state
+            .service_should_run
             .load(std::sync::atomic::Ordering::Relaxed));
 
         // 验证配置被正确存储

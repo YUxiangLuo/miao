@@ -8,8 +8,12 @@ permissions:
   contents: write
 
 jobs:
+  quality:
+    uses: ./.github/workflows/quality.yml
+
   frontend:
     runs-on: ubuntu-latest
+    needs: quality
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -69,7 +73,7 @@ jobs:
         run: MIAO_TARGET=${{ matrix.target }} ./scripts/build-embedded.sh
 
       - name: Build release for ${{ matrix.target }}
-        run: cargo zigbuild --release --target ${{ matrix.rust_target }}
+        run: cargo zigbuild --locked --release --target ${{ matrix.rust_target }}
 
       - name: Prepare release asset
         run: |
@@ -77,8 +81,8 @@ jobs:
           ASSET="miao-rust-linux-${{ matrix.target }}"
           # GNU sha256sum 标准一行：`<hex>  <filename>`，供本机校验与程序解析
           sha256sum "$ASSET" | tee "${ASSET}.sha256"
-          echo "RELEASE_ASSET=$ASSET" >> $GITHUB_ENV
-          echo "RELEASE_SHA256=${ASSET}.sha256" >> $GITHUB_ENV
+          printf 'RELEASE_ASSET=%s\n' "$ASSET" >> "$GITHUB_ENV"
+          printf 'RELEASE_SHA256=%s.sha256\n' "$ASSET" >> "$GITHUB_ENV"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

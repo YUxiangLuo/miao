@@ -3,7 +3,7 @@ import { Plus, Shield, Trash2 } from 'lucide-react'
 import { Button, SectionCard } from './ui.jsx'
 import { protocolLabel } from '../utils.js'
 
-const NodeRow = memo(function NodeRow({ node, onDelete }) {
+const NodeRow = memo(function NodeRow({ node, onDelete, disabled }) {
   return (
     <div className="list-row">
       <Shield size={13} className="list-leading-icon" />
@@ -11,9 +11,11 @@ const NodeRow = memo(function NodeRow({ node, onDelete }) {
         <div className="list-row-title">{node.tag}</div>
         <div className="list-row-meta">{node.server}:{node.server_port} · {protocolLabel(node.node_type)}</div>
       </div>
-      <button 
-        className="icon-button subtle" 
+      <button
+        className="icon-button subtle"
         onClick={() => onDelete(node.tag)}
+        disabled={disabled}
+        aria-label={`删除节点 ${node.tag}`}
       >
         <Trash2 size={13} />
       </button>
@@ -21,7 +23,7 @@ const NodeRow = memo(function NodeRow({ node, onDelete }) {
   )
 })
 
-export function NodesCard({ nodes, onDeleteNode, onOpenAddNode }) {
+export function NodesCard({ nodes, isInitializing, onDeleteNode, onOpenAddNode }) {
   return (
     <SectionCard
       bodyClassName="panel-body-tight"
@@ -41,6 +43,7 @@ export function NodesCard({ nodes, onDeleteNode, onOpenAddNode }) {
             tone="secondary"
             size="sm"
             icon={<Plus size={12} />}
+            disabled={isInitializing}
             onClick={onOpenAddNode}
           >
             添加
@@ -52,7 +55,12 @@ export function NodesCard({ nodes, onDeleteNode, onOpenAddNode }) {
         {nodes.length === 0 
           ? <div className="empty-block">暂无手动节点</div> 
           : nodes.map((node) => (
-            <NodeRow key={node.tag} node={node} onDelete={onDeleteNode} />
+            <NodeRow
+              key={node.tag}
+              node={node}
+              onDelete={onDeleteNode}
+              disabled={isInitializing}
+            />
           ))}
       </div>
     </SectionCard>

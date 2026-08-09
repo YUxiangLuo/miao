@@ -517,8 +517,27 @@ button {
     background: var(--surface-blue-strong);
     border-color: var(--accent);
 }
-.proxy-tile:hover:not(:disabled) {
+.proxy-tile:hover {
     border-color: #485365;
+}
+.proxy-switch-button {
+    width: 100%;
+    flex: 1;
+    align-self: stretch;
+    padding: 0;
+    border: none;
+    background: transparent;
+    color: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+.proxy-switch-button:disabled {
+    cursor: default;
+}
+.proxy-switch-button:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 3px;
+    border-radius: 3px;
 }
 .proxy-tile-top {
     width: 100%;
@@ -1111,8 +1130,27 @@ button {
     border-bottom: 1px solid var(--border-soft);
     color: var(--text);
     font-size: 0.875rem;
-    cursor: pointer;
     transition: 0.15s ease;
+}
+.connection-row-summary {
+    grid-column: 2 / -1;
+    min-width: 0;
+    display: grid;
+    grid-template-columns: minmax(200px, 1.5fr) minmax(160px, 1.2fr) minmax(130px, 0.9fr) minmax(100px, 0.7fr) minmax(100px, 0.7fr);
+    align-items: center;
+    gap: 12px;
+    padding: 0;
+    border: none;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+.connection-row-summary:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 4px;
+    border-radius: 3px;
 }
 .connections-table-row:hover,
 .connections-table-row.active {

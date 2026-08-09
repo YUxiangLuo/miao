@@ -46,9 +46,12 @@ mod tests {
     use serde_json::json;
     use tower::ServiceExt;
 
+    use super::build_router;
     use crate::{
         models::Config,
-        test_support::{empty_request, json_request, response_json, response_text, test_app},
+        test_support::{
+            app_state, empty_request, json_request, response_json, response_text, test_app,
+        },
     };
 
     #[tokio::test]
@@ -171,6 +174,26 @@ mod tests {
         assert_eq!(json["message"], "Subscriptions loaded");
         assert_eq!(json["data"][0]["url"], "https://example.com/subscription");
         assert_eq!(json["data"][0]["node_count"], 0);
+    }
+
+    #[tokio::test]
+    async fn router_rejects_config_mutation_during_initialization() {
+        let state = app_state(Config::default());
+        let app = build_router(state);
+
+        let response = app
+            .oneshot(json_request(
+                "POST",
+                "/api/subs",
+                json!({ "url": "https://example.com/subscription" }),
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+        let json = response_json(response).await;
+        assert_eq!(json["success"], false);
+        assert_eq!(json["message"], "Initialization is still in progress");
     }
 
     #[tokio::test]

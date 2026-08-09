@@ -31,6 +31,9 @@ pub async fn reset_version_cache(state: &Arc<AppState>) {
 
 pub async fn test_app(config: Config) -> Router {
     let state = app_state(config);
+    state
+        .initializing
+        .store(false, std::sync::atomic::Ordering::Relaxed);
     reset_version_cache(&state).await;
     build_router(state)
 }

@@ -1,6 +1,9 @@
 use axum::{extract::State, http::StatusCode, response::Json};
 use serde::Deserialize;
-use std::{sync::Arc, time::Instant};
+use std::{
+    sync::{atomic::Ordering, Arc},
+    time::Instant,
+};
 use tokio::time::Duration;
 
 use crate::error::AppError;
@@ -59,6 +62,28 @@ pub async fn get_status(State(state): State<Arc<AppState>>) -> Json<ApiResponse<
 }
 
 pub async fn start_service(State(state): State<Arc<AppState>>) -> HandlerResult {
+    if state.initializing.load(Ordering::Relaxed) {
+        return Err(status_error(
+            StatusCode::CONFLICT,
+            "Initialization is still in progress",
+        ));
+    }
+
+    let _config_update = state.config_update.lock().await;
+    let config = state.config.read().await;
+    if config.subs.is_empty() && config.nodes.is_empty() {
+        return Err(status_error(
+            StatusCode::BAD_REQUEST,
+            "Add a subscription or node before starting sing-box",
+        ));
+    }
+    drop(config);
+
+    // Record the user's desired state before launching. If startup fails, a
+    // subsequent config fix should retry starting instead of silently keeping
+    // the explicitly stopped state.
+    state.service_should_run.store(true, Ordering::Relaxed);
+
     match start_sing_internal(&state).await {
         Ok(_) => {
             let state_for_proxy = state.clone();
@@ -78,9 +103,18 @@ pub async fn start_service(State(state): State<Arc<AppState>>) -> HandlerResult 
     }
 }
 
-pub async fn stop_service(State(state): State<Arc<AppState>>) -> Json<ApiResponse<()>> {
+pub async fn stop_service(State(state): State<Arc<AppState>>) -> HandlerResult {
+    if state.initializing.load(Ordering::Relaxed) {
+        return Err(status_error(
+            StatusCode::CONFLICT,
+            "Initialization is still in progress",
+        ));
+    }
+
+    let _config_update = state.config_update.lock().await;
+    state.service_should_run.store(false, Ordering::Relaxed);
     stop_sing_internal(&state).await;
-    success_no_data("sing-box stopped")
+    Ok(success_no_data("sing-box stopped"))
 }
 
 async fn sing_box_is_running(state: &Arc<AppState>) -> bool {
@@ -103,6 +137,13 @@ pub async fn set_route_mode(
     State(state): State<Arc<AppState>>,
     Json(req): Json<RouteModeRequest>,
 ) -> HandlerResult {
+    if state.initializing.load(Ordering::Relaxed) {
+        return Err(status_error(
+            StatusCode::CONFLICT,
+            "Initialization is still in progress",
+        ));
+    }
+
     let _config_update = state.config_update.lock().await;
     let was_running = sing_box_is_running(&state).await;
     let old_config = state.config.read().await.clone();
@@ -174,11 +215,38 @@ pub async fn test_connectivity(
 
 #[cfg(test)]
 mod tests {
-    use axum::extract::State;
+    use std::sync::atomic::Ordering;
 
-    use super::get_status;
+    use axum::{extract::State, http::StatusCode};
+
+    use super::{get_status, start_service, stop_service};
     use crate::models::{Config, RouteMode};
     use crate::test_support::app_state;
+
+    #[tokio::test]
+    async fn explicit_stop_updates_desired_service_state() {
+        let state = app_state(Config::default());
+        state.initializing.store(false, Ordering::Relaxed);
+
+        assert!(stop_service(State(state.clone())).await.is_ok());
+
+        assert!(!state.service_should_run.load(Ordering::Relaxed));
+    }
+
+    #[tokio::test]
+    async fn start_rejects_an_empty_configuration() {
+        let state = app_state(Config::default());
+        state.initializing.store(false, Ordering::Relaxed);
+        state.service_should_run.store(false, Ordering::Relaxed);
+
+        let status = match start_service(State(state.clone())).await {
+            Ok(_) => panic!("empty configuration unexpectedly started"),
+            Err((status, _)) => status,
+        };
+
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert!(!state.service_should_run.load(Ordering::Relaxed));
+    }
 
     #[tokio::test]
     async fn get_status_reports_stopped_when_no_process_exists() {

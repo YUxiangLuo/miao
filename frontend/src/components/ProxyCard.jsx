@@ -10,19 +10,27 @@ import {
 
 const ProxyTile = memo(function ProxyTile({ nodeName, delay, isActive, isTesting, onSwitchProxy, onTestDelay, group }) {
   return (
-    <div 
-      className={classNames('proxy-tile', isActive && 'active')} 
-      onClick={() => !isTesting && onSwitchProxy(group, nodeName)}
-    >
-      <div className="proxy-tile-top">
-        {isActive
-          ? <div className="proxy-tag"><span className="proxy-tag-dot" /><span>{nodeName}</span></div>
-          : <span className="proxy-node-name">{nodeName}</span>}
-      </div>
-      <button 
-        className={classNames('proxy-test-chip', getDelayTone(delay))} 
-        onClick={(event) => { event.stopPropagation(); onTestDelay(nodeName); }} 
+    <div className={classNames('proxy-tile', isActive && 'active')}>
+      <button
+        type="button"
+        className="proxy-switch-button"
+        aria-label={`切换到 ${nodeName}`}
+        aria-pressed={isActive}
         disabled={isTesting}
+        onClick={() => onSwitchProxy(group, nodeName)}
+      >
+        <div className="proxy-tile-top">
+          {isActive
+            ? <div className="proxy-tag"><span className="proxy-tag-dot" /><span>{nodeName}</span></div>
+            : <span className="proxy-node-name">{nodeName}</span>}
+        </div>
+      </button>
+      <button
+        type="button"
+        className={classNames('proxy-test-chip', getDelayTone(delay))}
+        onClick={() => onTestDelay(nodeName)}
+        disabled={isTesting}
+        aria-label={`测试 ${nodeName} 延迟`}
       >
         {isTesting 
           ? <LoaderCircle size={10} className="spin" /> 
@@ -112,7 +120,11 @@ export function ProxyCard({
                 onTestDelay={onTestDelay}
               />
             ))}
-            <button className="proxy-tile add-tile" onClick={onOpenAddNode}>
+            <button
+              className="proxy-tile add-tile"
+              onClick={onOpenAddNode}
+              disabled={status.initializing}
+            >
               <Plus size={13} />
               <span>添加节点</span>
             </button>

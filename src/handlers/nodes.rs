@@ -1,6 +1,6 @@
 use axum::{extract::State, http::StatusCode, response::Json};
 use serde_json::{json, Map, Value as JsonValue};
-use std::sync::Arc;
+use std::sync::{atomic::Ordering, Arc};
 use tracing::warn;
 
 use crate::models::{ApiResponse, DeleteNodeRequest, NodeInfo, NodeRequest};
@@ -276,6 +276,13 @@ pub async fn add_node(
     State(state): State<Arc<AppState>>,
     Json(req): Json<NodeRequest>,
 ) -> HandlerResult {
+    if state.initializing.load(Ordering::Relaxed) {
+        return Err(status_error(
+            StatusCode::CONFLICT,
+            "Initialization is still in progress",
+        ));
+    }
+
     Validator::validate_node_request(&req).map_err(|e| status_error(StatusCode::BAD_REQUEST, e))?;
 
     let node_type = req.node_type.as_deref().unwrap_or("hysteria2");
@@ -325,7 +332,7 @@ pub async fn add_node(
     new_config.nodes.push(node_json);
 
     match apply_config_change(&state, &old_config, &new_config).await {
-        Ok(_) => Ok(success_no_data("Node added and sing-box restarted")),
+        Ok(_) => Ok(success_no_data("Node added")),
         Err(e) => Err(status_error(StatusCode::INTERNAL_SERVER_ERROR, e)),
     }
 }
@@ -334,6 +341,13 @@ pub async fn delete_node(
     State(state): State<Arc<AppState>>,
     Json(req): Json<DeleteNodeRequest>,
 ) -> HandlerResult {
+    if state.initializing.load(Ordering::Relaxed) {
+        return Err(status_error(
+            StatusCode::CONFLICT,
+            "Initialization is still in progress",
+        ));
+    }
+
     let _config_update = state.config_update.lock().await;
     let old_config = state.config.read().await.clone();
     let mut new_config = old_config.clone();
@@ -352,7 +366,7 @@ pub async fn delete_node(
     }
 
     match apply_config_change(&state, &old_config, &new_config).await {
-        Ok(_) => Ok(success_no_data("Node deleted and sing-box restarted")),
+        Ok(_) => Ok(success_no_data("Node deleted")),
         Err(e) => Err(status_error(StatusCode::INTERNAL_SERVER_ERROR, e)),
     }
 }
