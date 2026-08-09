@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use std::time::Instant;
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::{watch, Mutex, RwLock};
 
 use crate::models::{Config, GitHubRelease, RouteMode, SubStatus};
 
@@ -26,6 +26,9 @@ pub struct AppState {
     pub http_client: reqwest::Client,
     pub version_cache: ArcSwap<VersionCache>, // 使用 ArcSwap 实现无锁读取
     pub upgrading: AtomicBool,                // 防止并发升级
+    pub agent_install: Mutex<()>,
+    pub agent_session_active: AtomicBool,
+    pub agent_shutdown: watch::Sender<bool>,
 }
 
 impl AppState {
@@ -39,6 +42,7 @@ impl AppState {
         let http_client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(30))
             .build()?;
+        let (agent_shutdown, _) = watch::channel(false);
 
         Ok(Self {
             config: RwLock::new(config),
@@ -56,6 +60,9 @@ impl AppState {
                 fetched_at: None,
             })),
             upgrading: AtomicBool::new(false),
+            agent_install: Mutex::new(()),
+            agent_session_active: AtomicBool::new(false),
+            agent_shutdown,
         })
     }
 }

@@ -284,9 +284,12 @@ async fn main() -> AppResult<()> {
     });
 
     let state_for_shutdown = app_state.clone();
-    axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal(state_for_shutdown))
-        .await?;
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+    )
+    .with_graceful_shutdown(shutdown_signal(state_for_shutdown))
+    .await?;
     Ok(())
 }
 
@@ -301,7 +304,8 @@ async fn shutdown_signal(state: Arc<AppState>) {
         _ = sigterm.recv() => {}
     }
 
-    info!("Shutting down, stopping sing-box...");
+    info!("Shutting down services...");
+    let _ = state.agent_shutdown.send(true);
     stop_sing_internal(&state).await;
 }
 

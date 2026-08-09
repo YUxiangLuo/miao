@@ -1,4 +1,5 @@
 export { useToast, useApi } from './useApi.js'
+export { useAgent } from './useAgent.js'
 export { useStatus, useSubs, useNodes, useVersion } from './useResources.js'
 export { useProxies, useTraffic, useConnections, useDelays } from './useClash.js'
 export { useConnectivity } from './useConnectivity.js'

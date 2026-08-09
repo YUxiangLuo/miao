@@ -1,9 +1,11 @@
+pub mod agent;
 pub mod api;
 pub mod config;
 pub mod node;
 pub mod proxy;
 pub mod version;
 
+pub use agent::{AgentConfigRequest, AgentProviderInfo, AgentStatusData};
 pub use api::{
     ApiResponse, ConnectivityResult, RouteModeRequest, StatusData, SubRequest, SubStatus,
 };

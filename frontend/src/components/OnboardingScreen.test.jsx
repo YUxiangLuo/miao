@@ -9,6 +9,7 @@ function renderOnboarding(props = {}) {
       onAddSub={vi.fn()}
       loadingAction=""
       onOpenAddNode={vi.fn()}
+      onOpenAgent={vi.fn()}
       showToast={vi.fn()}
       {...props}
     />
@@ -40,6 +41,16 @@ describe('OnboardingScreen', () => {
 
     expect(onAddSub).not.toHaveBeenCalled()
     expect(showToast).toHaveBeenCalledWith('无效的订阅链接格式', 'error')
+  })
+
+  it('opens the smart assistant from the logo row', async () => {
+    const user = userEvent.setup()
+    const onOpenAgent = vi.fn()
+
+    renderOnboarding({ onOpenAgent })
+    await user.click(screen.getByRole('button', { name: '打开 Miao 智能助手' }))
+
+    expect(onOpenAgent).toHaveBeenCalledTimes(1)
   })
 
   it('opens the manual node modal', async () => {

@@ -6,6 +6,7 @@ import {
   NodesCard,
   SubsCard,
   ConnectivityCard,
+  AgentModal,
   ConfirmModal,
   ConnectionsModal,
   NodeModal,
@@ -45,6 +46,7 @@ export default function App() {
   const [nodeType, setNodeType] = useState('hysteria2')
   const [showNodeModal, setShowNodeModal] = useState(false)
   const [showConnectionsModal, setShowConnectionsModal] = useState(false)
+  const [showAgentModal, setShowAgentModal] = useState(false)
   const [confirmState, setConfirmState] = useState({ open: false, title: '', message: '', onConfirm: null })
 
   const clashApiBase = useMemo(() => '/api/clash', [])
@@ -407,9 +409,14 @@ export default function App() {
           onAddSub={handleOnboardingAddSub}
           loadingAction={loadingAction}
           onOpenAddNode={openNodeModal}
+          onOpenAgent={() => setShowAgentModal(true)}
           showToast={showToast}
         />
         <ToastStack toasts={toasts} />
+        <AgentModal
+          open={showAgentModal}
+          onClose={() => setShowAgentModal(false)}
+        />
         <NodeModal
           open={showNodeModal}
           nodeType={nodeType}
@@ -431,6 +438,7 @@ export default function App() {
         versionInfo={versionInfo}
         upgrading={upgrading}
         onUpgradeClick={handleUpgradeClick}
+        onOpenAgent={() => setShowAgentModal(true)}
       />
 
       <main className="workspace">
@@ -493,6 +501,11 @@ export default function App() {
       </main>
 
       <ToastStack toasts={toasts} />
+
+      <AgentModal
+        open={showAgentModal}
+        onClose={() => setShowAgentModal(false)}
+      />
 
       <NodeModal 
         open={showNodeModal} 

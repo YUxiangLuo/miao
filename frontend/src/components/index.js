@@ -1,5 +1,5 @@
 export { ToastStack } from './ui.jsx'
-export { ConfirmModal, NodeModal, ConnectionsModal } from './modals.jsx'
+export { AgentModal, ConfirmModal, NodeModal, ConnectionsModal } from './modals.jsx'
 export { TopBar } from './TopBar.jsx'
 export { StatusCard } from './StatusCard.jsx'
 export { ProxyCard } from './ProxyCard.jsx'

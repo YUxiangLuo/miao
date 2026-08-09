@@ -6,6 +6,7 @@ use axum::{
 };
 
 use crate::handlers::{
+    agent::{agent_websocket, configure_agent, get_agent_status},
     clash::{proxy_clash_http, proxy_clash_traffic},
     nodes::{add_node, delete_node, get_nodes},
     proxy::set_last_proxy,
@@ -21,6 +22,9 @@ pub fn build_router(app_state: Arc<AppState>) -> Router {
         .route("/", get(serve_index))
         .route("/favicon.svg", get(serve_favicon))
         .route("/api/status", get(get_status))
+        .route("/api/agent/status", get(get_agent_status))
+        .route("/api/agent/config", post(configure_agent))
+        .route("/api/agent/ws", get(agent_websocket))
         .route("/api/service/start", post(start_service))
         .route("/api/service/stop", post(stop_service))
         .route("/api/route-mode", post(set_route_mode))
