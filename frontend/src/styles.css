@@ -206,6 +206,21 @@ button {
     background: var(--success);
     box-shadow: 0 0 20px rgba(74, 158, 117, 0.5);
 }
+.status-pill-icon.stopped {
+    background: var(--surface-red);
+}
+.status-pill-icon.stopped .status-pill-dot {
+    background: var(--danger);
+    box-shadow: 0 0 20px rgba(176, 82, 82, 0.4);
+}
+.status-pill-icon.initializing {
+    background: rgba(160, 120, 64, 0.16);
+}
+.status-pill-icon.initializing .status-pill-dot {
+    background: var(--warning);
+    box-shadow: 0 0 20px rgba(160, 120, 64, 0.5);
+    animation: livePulse 1.4s ease-in-out infinite;
+}
 .status-copy {
     display: flex;
     flex-direction: column;
@@ -235,9 +250,13 @@ button {
     cursor: pointer;
     transition: 0.18s ease;
 }
-.traffic-chip:hover {
+.traffic-chip:hover:not(:disabled) {
     border-color: var(--border);
     background: #252b35;
+}
+.traffic-chip:disabled {
+    cursor: default;
+    opacity: 0.6;
 }
 .traffic-chip:focus-visible {
     outline: 2px solid var(--accent);
@@ -434,6 +453,13 @@ button {
     background: var(--success);
     box-shadow: 0 0 16px rgba(74, 158, 117, 0.45);
 }
+.banner-dot.idle {
+    background: var(--text-subtle);
+    box-shadow: none;
+}
+.banner-delay .banner-delay-timeout {
+    font-size: 1.0625rem;
+}
 .banner-copy {
     display: flex;
     flex-direction: column;
@@ -541,6 +567,17 @@ button {
 }
 .proxy-tile-top {
     width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+.proxy-node-switching {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+.proxy-tile.switching {
+    border-color: var(--accent);
 }
 .proxy-node-name {
     color: var(--text);
@@ -1346,7 +1383,7 @@ button {
     cursor: pointer;
 }
 .field.checkbox-field span {
-    color: var(--text-secondary);
+    color: var(--text);
     font-size: 0.9375rem;
 }
 .modal-message {
@@ -1391,6 +1428,23 @@ button {
 }
 .toast.info {
     border-left: 3px solid var(--accent);
+}
+.toast-close {
+    flex: 0 0 auto;
+    width: 20px;
+    height: 20px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    border-radius: 999px;
+    background: transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+}
+.toast-close:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--text);
 }
 .spin {
     animation: spin 1s linear infinite;

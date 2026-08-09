@@ -165,7 +165,18 @@ export function useDelays() {
 
   const testGroupDelays = useCallback(async (clashApiBase, groupName, nodeNames) => {
     setTestingGroup(groupName)
-    await Promise.all([...new Set(nodeNames)].map((name) => testDelay(clashApiBase, name)))
+    // 限制并发，避免大订阅一次性发出数百个延迟测试请求
+    const queue = [...new Set(nodeNames)]
+    const workers = Array.from(
+      { length: Math.min(6, queue.length) },
+      async () => {
+        while (queue.length > 0) {
+          const name = queue.shift()
+          await testDelay(clashApiBase, name)
+        }
+      }
+    )
+    await Promise.all(workers)
     setTestingGroup('')
   }, [testDelay])
 

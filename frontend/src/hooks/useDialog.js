@@ -23,8 +23,11 @@ export function useDialog(open, onClose) {
     const previousFocus = document.activeElement
     const dialog = dialogRef.current
     const focusable = () => [...(dialog?.querySelectorAll(FOCUSABLE_SELECTOR) || [])]
+    // 优先聚焦对话框内显式声明 data-autofocus 的控件，
+    // 避免焦点默认落在标题栏的关闭按钮上（危险确认场景 Enter 会变成“取消”）
+    const preferred = dialog?.querySelector('[data-autofocus]:not([disabled])')
     const firstControl = focusable()[0]
-    ;(firstControl || dialog)?.focus()
+    ;(preferred || firstControl || dialog)?.focus()
 
     const handleKeyDown = (event) => {
       if (event.key === 'Escape') {

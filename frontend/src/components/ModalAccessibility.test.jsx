@@ -23,7 +23,8 @@ describe('modal accessibility', () => {
 
     const dialog = screen.getByRole('dialog', { name: '删除节点' })
     expect(dialog).toHaveAttribute('aria-modal', 'true')
-    expect(screen.getByRole('button', { name: '关闭确认对话框' })).toHaveFocus()
+    // 初始焦点应在确认按钮上，Enter 即确认，不会误触关闭
+    expect(screen.getByRole('button', { name: '确认' })).toHaveFocus()
 
     await user.keyboard('{Escape}')
     expect(onCancel).toHaveBeenCalledTimes(1)

@@ -79,6 +79,7 @@ export function NodeModal({ open, nodeType, setNodeType, form, setForm, loading,
           <label className="field">
             <span>节点名称</span>
             <input
+              data-autofocus
               value={form.tag}
               onChange={(event) => setForm((prev) => ({ ...prev, tag: event.target.value }))}
               placeholder="例如：我的节点"
@@ -99,8 +100,13 @@ export function NodeModal({ open, nodeType, setNodeType, form, setForm, loading,
             <span>端口</span>
             <input
               type="number"
+              min="1"
+              max="65535"
               value={form.server_port}
-              onChange={(event) => setForm((prev) => ({ ...prev, server_port: Number(event.target.value || 0) }))}
+              onChange={(event) => setForm((prev) => ({
+                ...prev,
+                server_port: event.target.value === '' ? '' : Number(event.target.value),
+              }))}
               placeholder="443"
             />
           </label>

@@ -44,17 +44,33 @@ export function usePolling(tasks, enabled = true) {
       return
     }
 
-    // 立即执行一次
-    runTasks()
-
-    // 设置定时器
-    timerRef.current = window.setInterval(runTasks, POLL_INTERVAL)
-
-    return () => {
+    const stopTimer = () => {
       if (timerRef.current) {
         window.clearInterval(timerRef.current)
         timerRef.current = null
       }
+    }
+    const startTimer = () => {
+      stopTimer()
+      runTasks()
+      timerRef.current = window.setInterval(runTasks, POLL_INTERVAL)
+    }
+
+    startTimer()
+
+    // 页面隐藏时暂停轮询，恢复可见时立即补一次
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        stopTimer()
+      } else {
+        startTimer()
+      }
+    }
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+
+    return () => {
+      stopTimer()
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
     }
   }, [enabled, runTasks])
 

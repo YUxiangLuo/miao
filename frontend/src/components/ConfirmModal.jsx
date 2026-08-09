@@ -31,7 +31,7 @@ export function ConfirmModal({ open, title, message, onCancel, onConfirm }) {
         <p className="modal-message">{message}</p>
         <div className="modal-actions">
           <Button tone="ghost" size="sm" onClick={onCancel}>取消</Button>
-          <Button tone="danger" size="sm" onClick={onConfirm}>确认</Button>
+          <Button tone="danger" size="sm" data-autofocus onClick={onConfirm}>确认</Button>
         </div>
       </div>
     </div>

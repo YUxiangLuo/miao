@@ -8,14 +8,16 @@ export function OnboardingScreen({ onAddSub, loadingAction, onOpenAddNode, showT
 
   const isLoading = loadingAction === 'addSub'
 
-  const handleAddSub = () => {
+  const handleAddSub = async () => {
     if (isLoading) return
-    const error = validateSubscriptionUrl(subUrl)
+    const url = subUrl.trim()
+    const error = validateSubscriptionUrl(url)
     if (error) {
       showToast(error, 'error')
       return
     }
-    onAddSub(subUrl.trim())
+    const ok = await onAddSub(url)
+    if (ok !== false) setSubUrl('')
   }
 
   return (

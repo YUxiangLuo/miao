@@ -365,6 +365,7 @@ export function ConnectionsModal({
                   <label className="connections-search">
                     <Search size={14} />
                     <input
+                      data-autofocus
                       type="search"
                       value={query}
                       onChange={(event) => setQuery(event.target.value)}
@@ -440,7 +441,11 @@ export function ConnectionsModal({
                         </span>
                       </button>
                     </div>
-                  )) : <div className="connections-empty inline">暂无匹配连接</div>}
+                  )) : (
+                    <div className="connections-empty inline">
+                      {loading && connections.length === 0 ? '加载中…' : '暂无匹配连接'}
+                    </div>
+                  )}
                 </div>
 
                 <div className="connections-pagination">

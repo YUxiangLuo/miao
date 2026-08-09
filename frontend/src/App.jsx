@@ -46,10 +46,11 @@ export default function App() {
   const [showNodeModal, setShowNodeModal] = useState(false)
   const [showConnectionsModal, setShowConnectionsModal] = useState(false)
   const [confirmState, setConfirmState] = useState({ open: false, title: '', message: '', onConfirm: null })
+  const [switchingNode, setSwitchingNode] = useState('')
 
   const clashApiBase = useMemo(() => '/api/clash', [])
 
-  const { toasts, showToast } = useToast()
+  const { toasts, showToast, dismissToast } = useToast()
   const { apiCall } = useApi({ setLoadingAction })
   const { status, fetchStatus } = useStatus()
   const { subs, fetchSubs } = useSubs()
@@ -91,6 +92,11 @@ export default function App() {
     setConfirmState({ open: false, title: '', message: '', onConfirm: null })
   }, [])
 
+  const resetNodeForm = useCallback(() => {
+    setNodeType('hysteria2')
+    setNodeForm({ ...EMPTY_NODE_FORM, ...nodeTypeDefaults('hysteria2') })
+  }, [])
+
   const openNodeModal = useCallback(() => {
     if (status.initializing) {
       showToast('初始化完成后才能修改节点', 'info')
@@ -99,9 +105,15 @@ export default function App() {
     setShowNodeModal(true)
   }, [status.initializing, showToast])
 
+  const closeNodeModal = useCallback(() => {
+    setShowNodeModal(false)
+    resetNodeForm()
+  }, [resetNodeForm])
+
   // 首次加载：获取初始状态后再决定显示 onboarding 还是 dashboard
+  // 同时拉取代理组，避免服务运行时首屏短暂显示“等待服务启动”
   useEffect(() => {
-    Promise.all([fetchStatus(), fetchSubs(), fetchNodes()])
+    Promise.all([fetchStatus(), fetchSubs(), fetchNodes(), fetchProxies()])
       .finally(() => setFirstLoadDone(true))
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -208,6 +220,8 @@ export default function App() {
   ])
 
   const handleSwitchProxy = useCallback(async (groupName, nodeName) => {
+    if (switchingNode) return
+    setSwitchingNode(nodeName)
     try {
       const response = await fetch(`${clashApiBase}/proxies/${encodeURIComponent(groupName)}`, {
         method: 'PUT',
@@ -225,10 +239,12 @@ export default function App() {
         body: JSON.stringify({ group: groupName, name: nodeName }),
       }).catch((err) => console.warn('Failed to save last proxy:', err))
       showToast(`已切换到 ${nodeName}`, 'success')
-    } catch {
-      showToast('切换节点失败', 'error')
+    } catch (error) {
+      showToast(error.message || '切换节点失败', 'error')
+    } finally {
+      setSwitchingNode('')
     }
-  }, [clashApiBase, fetchProxies, showToast])
+  }, [clashApiBase, fetchProxies, showToast, switchingNode])
 
   const handleAddSubscription = useCallback(async () => {
     const error = validateSubscriptionUrl(newSubUrl.trim())
@@ -253,8 +269,10 @@ export default function App() {
       clearDelays()
       await fetchSubs()
       showToast('订阅已添加', 'success')
+      return true
     } catch (error) {
       showToast(error.message, 'error')
+      return false
     }
   }, [apiCall, clearDelays, fetchSubs, showToast])
 
@@ -292,15 +310,14 @@ export default function App() {
 
     try {
       await apiCall('nodes', { method: 'POST', body: JSON.stringify(payload) }, 'addNode')
-      setShowNodeModal(false)
-      setNodeForm({ ...EMPTY_NODE_FORM, ...nodeTypeDefaults(nodeType) })
+      closeNodeModal()
       await fetchNodes()
       clearDelays()
       showToast('节点已添加', 'success')
     } catch (error) {
       showToast(error.message, 'error')
     }
-  }, [nodeForm, nodeType, apiCall, clearDelays, fetchNodes, showToast])
+  }, [nodeForm, nodeType, apiCall, clearDelays, closeNodeModal, fetchNodes, showToast])
 
   const handleDeleteNode = useCallback(async (tag) => {
     try {
@@ -409,7 +426,7 @@ export default function App() {
           onOpenAddNode={openNodeModal}
           showToast={showToast}
         />
-        <ToastStack toasts={toasts} />
+        <ToastStack toasts={toasts} onDismiss={dismissToast} />
         <NodeModal
           open={showNodeModal}
           nodeType={nodeType}
@@ -417,7 +434,7 @@ export default function App() {
           form={nodeForm}
           setForm={setNodeForm}
           loading={loadingAction === 'addNode'}
-          onClose={() => setShowNodeModal(false)}
+          onClose={closeNodeModal}
           onSubmit={handleAddNode}
         />
       </div>
@@ -453,6 +470,7 @@ export default function App() {
               delays={delays}
               testingNodes={testingNodes}
               testingGroup={testingGroup}
+              switchingNode={switchingNode}
               onTestDelay={handleTestDelay}
               onTestGroupDelays={handleTestGroupDelays}
               onSwitchProxy={handleSwitchProxy}
@@ -492,7 +510,7 @@ export default function App() {
         </div>
       </main>
 
-      <ToastStack toasts={toasts} />
+      <ToastStack toasts={toasts} onDismiss={dismissToast} />
 
       <NodeModal 
         open={showNodeModal} 
@@ -501,7 +519,7 @@ export default function App() {
         form={nodeForm} 
         setForm={setNodeForm} 
         loading={loadingAction === 'addNode'} 
-        onClose={() => setShowNodeModal(false)} 
+        onClose={closeNodeModal} 
         onSubmit={handleAddNode} 
       />
 

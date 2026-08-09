@@ -19,11 +19,12 @@ export function StatusCard({
   const isGlobalMode = status.route_mode === 'global'
   const modeSwitching = loadingAction === 'routeMode'
   const modeControlDisabled = modeSwitching || status.initializing
+  const serviceTone = status.initializing ? 'initializing' : status.running ? 'running' : 'stopped'
 
   return (
     <SectionCard className="status-card" bodyClassName="status-card-body" header={null}>
       <div className="status-left-wrap">
-        <div className="status-pill-icon"><span className="status-pill-dot" /></div>
+        <div className={classNames('status-pill-icon', serviceTone)}><span className="status-pill-dot" /></div>
         <div className="status-copy">
           <div className="status-title">
             Sing-box {status.initializing ? '初始化中' : status.running ? '运行中' : '已停止'}
@@ -38,7 +39,13 @@ export function StatusCard({
         </div>
       </div>
 
-      <button type="button" className="traffic-chip" onClick={onOpenConnections} title="查看连接统计">
+      <button
+        type="button"
+        className="traffic-chip"
+        onClick={onOpenConnections}
+        disabled={!status.running}
+        title={status.running ? '查看连接统计' : '启动服务后可查看连接统计'}
+      >
         <div className="traffic-item">
           <ArrowUp size={14} className="traffic-icon up" />
           <span>{formatSpeed(traffic.up)}</span>

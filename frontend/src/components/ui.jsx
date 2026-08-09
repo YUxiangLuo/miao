@@ -54,7 +54,7 @@ export function SectionCard({ header, children, className, bodyClassName }) {
   )
 }
 
-export function ToastStack({ toasts }) {
+export function ToastStack({ toasts, onDismiss }) {
   if (toasts.length === 0) return null
   
   return (
@@ -79,6 +79,19 @@ export function ToastStack({ toasts }) {
             </svg>
           )}
           <span>{toast.message}</span>
+          {onDismiss && (
+            <button
+              type="button"
+              className="toast-close"
+              onClick={() => onDismiss(toast.id)}
+              aria-label="关闭提示"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="18" y1="6" x2="6" y2="18"/>
+                <line x1="6" y1="6" x2="18" y2="18"/>
+              </svg>
+            </button>
+          )}
         </div>
       ))}
     </div>

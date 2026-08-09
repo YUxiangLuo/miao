@@ -4,6 +4,15 @@ import { viteSingleFile } from 'vite-plugin-singlefile'
 
 export default defineConfig({
   plugins: [react(), viteSingleFile()],
+  server: {
+    proxy: {
+      '/api': {
+        target: 'http://localhost:6161',
+        changeOrigin: true,
+        ws: true,
+      },
+    },
+  },
   build: {
     outDir: '../public',
     emptyOutDir: false,
