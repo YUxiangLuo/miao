@@ -18,7 +18,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.39.5",
-    "@testing-library/jest-dom": "^6.10.0",
+    "@testing-library/jest-dom": "^7.0.0",
     "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^14.6.3",
     "@vitejs/plugin-react": "^4.7.0",
