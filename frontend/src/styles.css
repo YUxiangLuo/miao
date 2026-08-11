@@ -550,7 +550,7 @@ button {
 }
 /* ===== 悬停:整格可点反馈(背景/边框/名称同时提亮)===== */
 .proxy-tile:hover {
-    --tile-bg: #2d3440;
+    --tile-bg: #323b49;
     --tile-border: #5b6b80;
     --tile-name-color: var(--accent-strong);
 }
@@ -563,10 +563,11 @@ button {
     --tile-chip-bg: #1e3345;
     --tile-chip-color: var(--success);
 }
-/* ===== 选中 + 悬停:保持蓝底,背景与边框再提亮一档 ===== */
+/* ===== 选中 + 悬停:蓝底再提亮,名称同步高亮,保证两种状态 hover 都有明确反馈 ===== */
 .proxy-tile.active:hover {
-    --tile-bg: #31507a;
+    --tile-bg: #37608f;
     --tile-border: var(--accent-strong);
+    --tile-name-color: var(--accent-strong);
 }
 /* ===== 切换中:强调操作目标,同时覆盖悬停反馈 ===== */
 .proxy-tile.switching {
@@ -579,10 +580,16 @@ button {
     align-self: stretch;
     padding: 0;
     border: none;
+    border-radius: 4px;
     background: transparent;
     color: inherit;
     text-align: left;
     cursor: pointer;
+    transition: background-color 0.12s ease;
+}
+/* 名称所在区域:悬停时直接显出独立色块,反馈不依赖整格微调 */
+.proxy-switch-button:hover:not(:disabled) {
+    background: rgba(97, 127, 166, 0.16);
 }
 .proxy-switch-button:disabled {
     cursor: default;
@@ -655,7 +662,7 @@ button {
 .add-tile {
     align-items: center;
     justify-content: center;
-    background: var(--surface-soft);
+    background: var(--tile-bg);
     color: var(--text-subtle);
 }
 .list-stack {
