@@ -10,6 +10,15 @@ export default [
   },
   js.configs.recommended,
   {
+    // vite 配置在 Node 环境加载,需要 process 等全局变量
+    files: ['vite.config.js'],
+    languageOptions: {
+      globals: {
+        ...globals.node,
+      },
+    },
+  },
+  {
     files: ['**/*.{js,jsx}'],
     languageOptions: {
       ecmaVersion: 2023,
