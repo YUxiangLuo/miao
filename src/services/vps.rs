@@ -24,6 +24,16 @@ struct HysteriaCredentials {
     obfs_password: String,
 }
 
+/// 远程 Hysteria2 部署的状态,由 SSH 探针脚本的退出码区分:
+/// - 0:   miao 部署的,凭据可复用
+/// - 10:  无 hysteria 配置,可直接全新部署
+/// - 30:  存在 hysteria 服务但不是 miao 部署的,需先清理再重新部署
+enum RemoteHysteriaState {
+    Reusable(HysteriaCredentials),
+    NotFound,
+    NeedsCleanup,
+}
+
 pub fn has_manual_node_for_vps(config: &Config) -> bool {
     let Some(vps_ip) = config
         .vps_ip
@@ -68,16 +78,25 @@ pub async fn ensure_vps_hysteria_node(config: &mut Config, config_path: &Path) -
     let credentials = match probe_remote_hysteria_credentials(&vps_ip, &fallback_obfs_password)
         .await
     {
-        Ok(Some(credentials)) => {
+        Ok(RemoteHysteriaState::Reusable(credentials)) => {
             info!(vps_ip = %vps_ip, port = HYSTERIA_PORT, obfs = HYSTERIA_OBFS_TYPE, "Recovered existing VPS Hysteria2 node from remote config");
             credentials
         }
-        Ok(None) => {
+        Ok(RemoteHysteriaState::NotFound) => {
             let credentials = HysteriaCredentials {
                 password: random_password()?,
                 obfs_password: fallback_obfs_password,
             };
             info!(vps_ip = %vps_ip, port = HYSTERIA_PORT, obfs = HYSTERIA_OBFS_TYPE, "Provisioning Hysteria2 server over SSH");
+            provision_remote_hysteria(&vps_ip, &credentials).await?;
+            credentials
+        }
+        Ok(RemoteHysteriaState::NeedsCleanup) => {
+            let credentials = HysteriaCredentials {
+                password: random_password()?,
+                obfs_password: fallback_obfs_password,
+            };
+            warn!(vps_ip = %vps_ip, port = HYSTERIA_PORT, obfs = HYSTERIA_OBFS_TYPE, "Existing Hysteria2 service is not deployed by Miao; cleaning up and re-provisioning");
             provision_remote_hysteria(&vps_ip, &credentials).await?;
             credentials
         }
@@ -170,7 +189,7 @@ fn random_password() -> AppResult<String> {
 async fn probe_remote_hysteria_credentials(
     vps_ip: &str,
     fallback_obfs_password: &str,
-) -> AppResult<Option<HysteriaCredentials>> {
+) -> AppResult<RemoteHysteriaState> {
     let target = format!("root@{}", vps_ip);
     let mut child = tokio::process::Command::new("ssh")
         .args([
@@ -233,26 +252,37 @@ async fn probe_remote_hysteria_credentials(
         .map_err(|e| AppError::context("Failed to read ssh probe stderr", e))?;
 
     if status.success() {
-        return parse_probe_credentials(&stdout_buf).map(Some);
-    }
-
-    if status.code() == Some(10) {
-        info!(vps_ip = %vps_ip, "No reusable remote Hysteria2 config found");
-        return Ok(None);
+        return parse_probe_credentials(&stdout_buf).map(RemoteHysteriaState::Reusable);
     }
 
     let stderr_text = String::from_utf8_lossy(&stderr_buf);
-    let message = stderr_text.trim();
-    if message.is_empty() {
-        Err(AppError::message(format!(
-            "VPS Hysteria2 config probe failed with status {}",
-            status
-        )))
-    } else {
-        Err(AppError::message(format!(
-            "VPS Hysteria2 config probe failed with status {}: {}",
-            status, message
-        )))
+    match status.code() {
+        Some(10) => {
+            info!(vps_ip = %vps_ip, "No reusable remote Hysteria2 config found");
+            Ok(RemoteHysteriaState::NotFound)
+        }
+        Some(30) => {
+            info!(
+                vps_ip = %vps_ip,
+                reason = %stderr_text.trim(),
+                "Remote Hysteria2 service is not deployed by Miao; it will be cleaned up and re-provisioned"
+            );
+            Ok(RemoteHysteriaState::NeedsCleanup)
+        }
+        _ => {
+            let message = stderr_text.trim();
+            if message.is_empty() {
+                Err(AppError::message(format!(
+                    "VPS Hysteria2 config probe failed with status {}",
+                    status
+                )))
+            } else {
+                Err(AppError::message(format!(
+                    "VPS Hysteria2 config probe failed with status {}: {}",
+                    status, message
+                )))
+            }
+        }
     }
 }
 
@@ -358,12 +388,25 @@ if [ ! -f "$CONFIG" ]; then
   exit 10
 fi
 
-for cmd in awk systemctl; do
+for cmd in awk grep openssl systemctl; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
     echo "Missing required command: $cmd" >&2
     exit 11
   fi
 done
+
+# 仅当证书是 miao 部署时生成的(CN=miao-hysteria)才复用配置,否则视为
+# 第三方部署,需要清理后重新部署。
+if [ ! -f /etc/hysteria/server.crt ]; then
+  echo "Existing Hysteria2 service has no /etc/hysteria/server.crt; it is not deployed by Miao and will be cleaned up" >&2
+  exit 30
+fi
+
+if ! openssl x509 -in /etc/hysteria/server.crt -noout -subject 2>/dev/null | grep -Eq 'CN[[:space:]]*=[[:space:]]*miao-hysteria'; then
+  SUBJECT="$(openssl x509 -in /etc/hysteria/server.crt -noout -subject 2>/dev/null || true)"
+  echo "Existing Hysteria2 service cert ($SUBJECT) is not signed for miao-hysteria; it is not deployed by Miao and will be cleaned up" >&2
+  exit 30
+fi
 
 if ! awk '
   /^[[:space:]]*listen:[[:space:]]*:543([[:space:]]|$)/ { found = 1 }
@@ -468,6 +511,7 @@ fn remote_hysteria_script() -> &'static str {
     r#"set -euo pipefail
 PASSWORD="$1"
 OBFS_PASSWORD="$2"
+SERVICE="hysteria-server.service"
 
 if [ "$(id -u)" -ne 0 ]; then
   echo "Miao VPS provisioning requires root SSH access" >&2
@@ -480,6 +524,14 @@ for cmd in bash curl systemctl openssl; do
     exit 1
   fi
 done
+
+# 重新部署前先清理远程可能存在的非 Miao 部署的 hysteria 残留,
+# 保证从干净状态开始(探针复用失败时也会经过这里)。
+systemctl stop "$SERVICE" >/dev/null 2>&1 || true
+systemctl disable "$SERVICE" >/dev/null 2>&1 || true
+pkill -x hysteria >/dev/null 2>&1 || true
+rm -rf /etc/hysteria
+rm -f /usr/local/bin/hysteria
 
 HYSTERIA_USER=root bash <(curl -fsSL https://get.hy2.sh/)
 
@@ -511,9 +563,9 @@ masquerade:
 EOF
 chmod 600 /etc/hysteria/config.yaml
 
-systemctl enable hysteria-server.service
-systemctl restart hysteria-server.service
-systemctl is-active --quiet hysteria-server.service
+systemctl enable "$SERVICE"
+systemctl restart "$SERVICE"
+systemctl is-active --quiet "$SERVICE"
 "#
 }
 
@@ -521,7 +573,7 @@ systemctl is-active --quiet hysteria-server.service
 mod tests {
     use super::{
         build_hysteria_node_json, has_manual_node_for_vps, parse_probe_credentials,
-        remote_hysteria_probe_script, vps_node_tag, HYSTERIA_PORT,
+        remote_hysteria_probe_script, remote_hysteria_script, vps_node_tag, HYSTERIA_PORT,
     };
     use crate::models::Config;
 
@@ -612,5 +664,27 @@ mod tests {
         assert!(script.contains("systemctl restart"));
         assert!(script.contains("printf '%s\\n' \"$PASSWORD\""));
         assert!(script.contains("printf '%s\\n' \"$GECKO_PASSWORD\""));
+    }
+
+    #[test]
+    fn probe_script_marks_non_miao_deployments_for_cleanup() {
+        let script = remote_hysteria_probe_script();
+
+        assert!(script.contains("CN[[:space:]]*=[[:space:]]*miao-hysteria"));
+        assert!(script.contains("exit 30"));
+        assert!(script.contains("not deployed by Miao"));
+        assert!(script.contains("has no /etc/hysteria/server.crt"));
+    }
+
+    #[test]
+    fn provision_script_cleans_up_before_reprovisioning() {
+        let script = remote_hysteria_script();
+
+        assert!(script.contains("systemctl stop \"$SERVICE\""));
+        assert!(script.contains("systemctl disable \"$SERVICE\""));
+        assert!(script.contains("pkill -x hysteria"));
+        assert!(script.contains("rm -rf /etc/hysteria"));
+        assert!(script.contains("rm -f /usr/local/bin/hysteria"));
+        assert!(script.contains("-subj \"/CN=miao-hysteria\""));
     }
 }
