@@ -59,8 +59,9 @@ describe('modal accessibility', () => {
     expect(onClose).toHaveBeenCalledTimes(1)
   })
 
-  it('keeps connection details and close actions as sibling buttons', async () => {
+  it('exposes a labelled connections dialog without a details action', async () => {
     const user = userEvent.setup()
+    const onClose = vi.fn()
 
     render(
       <ConnectionsModal
@@ -85,22 +86,19 @@ describe('modal accessibility', () => {
         }}
         loading={false}
         error=""
-        onClose={vi.fn()}
+        onClose={onClose}
         onRefresh={vi.fn()}
         onCloseConnection={vi.fn()}
         showToast={vi.fn()}
       />,
     )
 
-    const detailsButton = screen.getByRole('button', {
-      name: '查看连接 example.com:443 的详情',
-    })
-    const closeButton = screen.getByRole('button', {
-      name: '关闭连接 example.com:443',
-    })
-    expect(detailsButton.contains(closeButton)).toBe(false)
+    expect(screen.getByRole('dialog', { name: '连接统计' })).toBeInTheDocument()
+    expect(screen.queryByText('连接详情')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /查看连接/ })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '关闭 example.com 的连接' })).toBeInTheDocument()
 
-    await user.click(detailsButton)
-    expect(screen.getByText('连接详情')).toBeInTheDocument()
+    await user.keyboard('{Escape}')
+    expect(onClose).toHaveBeenCalledTimes(1)
   })
 })
