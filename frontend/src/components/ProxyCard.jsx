@@ -10,13 +10,14 @@ import {
 
 const ProxyTile = memo(function ProxyTile({ nodeName, delay, isActive, isTesting, isSwitching, switchDisabled, onSwitchProxy, onTestDelay, group }) {
   return (
-    <div className={classNames('proxy-tile', isActive && 'active', isSwitching && 'switching')}>
+    <div className={classNames('proxy-tile', isActive && 'active')}>
       <button
         type="button"
         className="proxy-switch-button"
-        aria-label={`切换到 ${nodeName}`}
+        aria-label={isActive ? `当前节点 ${nodeName}` : `切换到 ${nodeName}`}
         aria-pressed={isActive}
-        disabled={isTesting || isSwitching || switchDisabled}
+        disabled={isActive || isSwitching || switchDisabled}
+        title={nodeName}
         onClick={() => onSwitchProxy(group, nodeName)}
       >
         <div className="proxy-tile-top">
@@ -62,7 +63,6 @@ export function ProxyCard({
 
   return (
     <SectionCard
-      className="proxy-card"
       bodyClassName="panel-body-tight"
       header={
         <div className="section-header">
@@ -83,17 +83,18 @@ export function ProxyCard({
         </div>
       }
     >
-      <button 
-        className="current-node-banner" 
-        onClick={() => primaryGroup?.now && onTestDelay(primaryGroup.now)} 
-        disabled={!primaryGroup?.now || Boolean(testingNodes[primaryGroup?.now])}
+      <button
+        type="button"
+        className="current-node-banner"
+        onClick={() => primaryGroup?.now && onTestDelay(primaryGroup.now)}
+        disabled={!primaryGroup?.now || isTestingCurrent}
         title={primaryGroup?.now ? '点击测试当前节点延迟' : undefined}
         aria-label={primaryGroup?.now ? `测试当前节点 ${primaryGroup.now} 延迟` : '当前节点'}
       >
         <div className="banner-icon-wrap"><span className={classNames('banner-dot', !primaryGroup?.now && 'idle')} /></div>
         <div className="banner-copy">
           <span className="banner-label">当前节点</span>
-          <strong>{primaryGroup?.now || '未选择'}</strong>
+          <strong title={primaryGroup?.now || undefined}>{primaryGroup?.now || '未选择'}</strong>
           <span className="banner-meta">
             {currentNodeMeta
               ? `${currentNodeMeta.server}:${currentNodeMeta.server_port} · ${protocolLabel(currentNodeMeta.node_type)}`

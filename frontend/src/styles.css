@@ -432,7 +432,7 @@ button {
     cursor: pointer;
 }
 .current-node-banner:hover:not(:disabled) {
-    filter: brightness(1.08);
+    background: #243447;
 }
 .current-node-banner:disabled {
     cursor: default;
@@ -478,10 +478,16 @@ button {
     color: var(--text-strong);
     font-size: 1.1875rem;
     line-height: 1.2;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 .banner-meta {
     color: var(--text-muted);
     font-size: 0.8125rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 .banner-delay {
     display: flex;
@@ -526,81 +532,47 @@ button {
     gap: 8px;
 }
 .proxy-tile {
-    /* ===== 基础状态 ===== */
-    --tile-bg: #252b35;
-    --tile-border: var(--border);
-    --tile-name-color: var(--text);
-    --tile-name-weight: 600;
-    --tile-chip-bg: var(--surface-soft);
-    --tile-chip-color: var(--text-muted);
-
+    position: relative;
     min-height: 88px;
     display: flex;
     flex-direction: column;
     align-items: flex-start;
-    justify-content: space-between;
+    justify-content: flex-end;
     gap: 6px;
     padding: 10px 12px;
     border-radius: 6px;
-    border: 1px solid var(--tile-border);
-    background: var(--tile-bg);
+    border: 1px solid var(--border);
+    background: #252b35;
     color: var(--text);
     text-align: left;
-    transition: border-color 0.12s ease, background-color 0.12s ease;
 }
-/* ===== 悬停:整格可点反馈(背景/边框/名称同时提亮)===== */
-.proxy-tile:hover {
-    --tile-bg: #323b49;
-    --tile-border: #5b6b80;
-    --tile-name-color: var(--accent-strong);
+.proxy-tile:hover:not(.active) {
+    border-color: #485365;
 }
-/* ===== 选中:当前节点 ===== */
 .proxy-tile.active {
-    --tile-bg: var(--surface-blue-strong);
-    --tile-border: var(--accent);
-    --tile-name-color: var(--text-strong);
-    --tile-name-weight: 700;
-    --tile-chip-bg: #1e3345;
-    --tile-chip-color: var(--success);
-}
-/* ===== 选中 + 悬停:蓝底再提亮,名称同步高亮,保证两种状态 hover 都有明确反馈 ===== */
-.proxy-tile.active:hover {
-    --tile-bg: #37608f;
-    --tile-border: var(--accent-strong);
-    --tile-name-color: var(--accent-strong);
-}
-/* ===== 切换中:强调操作目标,同时覆盖悬停反馈 ===== */
-.proxy-tile.switching {
-    --tile-border: var(--accent);
-    --tile-name-color: var(--accent);
+    background: var(--surface-blue-strong);
+    border-color: var(--accent);
 }
 .proxy-switch-button {
-    width: 100%;
-    flex: 1;
-    align-self: stretch;
-    padding: 0;
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    display: flex;
+    align-items: flex-start;
+    padding: 10px 12px;
     border: none;
-    border-radius: 4px;
     background: transparent;
     color: inherit;
     text-align: left;
-    cursor: pointer;
-    transition: background-color 0.12s ease;
-}
-/* 名称所在区域:悬停时直接显出独立色块,反馈不依赖整格微调 */
-.proxy-switch-button:hover:not(:disabled) {
-    background: rgba(97, 127, 166, 0.16);
-}
-.proxy-switch-button:disabled {
     cursor: default;
 }
 .proxy-switch-button:focus-visible {
     outline: 2px solid var(--accent);
-    outline-offset: 3px;
-    border-radius: 3px;
+    outline-offset: -3px;
 }
 .proxy-tile-top {
     width: 100%;
+    min-width: 0;
     display: flex;
     align-items: center;
     gap: 6px;
@@ -608,61 +580,78 @@ button {
 .proxy-node-switching {
     display: inline-flex;
     align-items: center;
+    min-width: 0;
+    max-width: 100%;
     gap: 6px;
+}
+.proxy-node-switching .spin {
+    flex: 0 0 auto;
+}
+.proxy-node-switching span:last-child {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 .proxy-node-name,
 .proxy-tag {
-    color: var(--tile-name-color);
-    font-weight: var(--tile-name-weight);
-    transition: color 0.12s ease;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 .proxy-node-name {
+    color: var(--text);
     font-size: 0.875rem;
+    font-weight: 600;
 }
 .proxy-tag {
     display: inline-flex;
     align-items: center;
     gap: 5px;
+    color: var(--text-strong);
     font-size: 0.875rem;
+    font-weight: 700;
+}
+.proxy-tag span:last-child {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 .proxy-tag-dot {
+    flex: 0 0 auto;
     width: 6px;
     height: 6px;
     border-radius: 999px;
     background: var(--success);
 }
 .proxy-test-chip {
+    position: relative;
+    z-index: 1;
     display: inline-flex;
     align-items: center;
     gap: 4px;
     padding: 3px 6px;
     border-radius: 4px;
     border: none;
+    background: var(--surface-soft);
     font-size: 0.8125rem;
     cursor: pointer;
-    background: var(--tile-chip-bg);
-    color: var(--tile-chip-color);
+    color: var(--text-muted);
 }
-/* 测速 chip 悬停:背景与图标提亮;延迟文字色调(fast/slow 等)保持语义色不变 */
-.proxy-test-chip:hover:not(:disabled) {
-    --tile-chip-bg: #323a46;
-    --tile-chip-color: var(--text-strong);
-}
-/* 选中格子的测速 chip:悬停同样基于选中态提亮 */
-.proxy-tile.active .proxy-test-chip:hover:not(:disabled) {
-    --tile-chip-bg: #27405a;
-    --tile-chip-color: var(--accent-strong);
+.proxy-tile.active .proxy-test-chip {
+    background: #1e3345;
 }
 .proxy-test-chip:disabled {
     cursor: default;
 }
 .proxy-test-chip.neutral {
-    --tile-chip-color: var(--text-subtle);
+    color: var(--text-subtle);
 }
 .add-tile {
     align-items: center;
     justify-content: center;
-    background: var(--tile-bg);
     color: var(--text-subtle);
 }
 .list-stack {
