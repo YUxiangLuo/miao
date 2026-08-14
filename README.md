@@ -26,6 +26,31 @@ chmod +x miao && sudo ./miao
 
 浏览器打开 <http://localhost:6161>，按引导页添加订阅或节点即可。需要 root(TUN 透明代理所需）；找不到配置时会先进入引导页，不落盘任何文件。
 
+### 用脚本安装为 systemd 服务
+
+如果手头已有下载好的二进制，可以用仓库里的脚本一键安装为开机自启的 systemd 服务（全程离线）:
+
+```bash
+sudo bash install.sh ./miao
+```
+
+脚本会安装到 `/usr/local/bin/miao`，配置与状态文件位于 `/etc/miao`，注册并启动 `miao.service`。重复运行即升级。
+
+管理服务：
+
+```bash
+systemctl status miao    # 查看状态
+journalctl -u miao -f    # 查看日志
+```
+
+### 卸载清理
+
+```bash
+sudo bash remove.sh        # 交互确认;-y 跳过确认
+```
+
+会停止并删除 systemd 服务、二进制、`/etc/miao` 配置目录与 `/tmp/miao-sing-box` 运行时文件，并清理可能残留的 sing-box 进程与 `sing-tun` 网卡。
+
 ## 面板里有什么
 
 | 模块 | 能做什么 |
