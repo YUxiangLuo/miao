@@ -1,8 +1,11 @@
 import { 
   ArrowUp, 
-  ArrowDown, 
+  ArrowDown,
+  Activity,
   Globe2,
+  LoaderCircle,
   Power,
+  PowerOff,
   Route
 } from 'lucide-react'
 import { Button, SectionCard } from './ui.jsx'
@@ -20,11 +23,14 @@ export function StatusCard({
   const modeSwitching = loadingAction === 'routeMode'
   const modeControlDisabled = modeSwitching || status.initializing
   const serviceTone = status.initializing ? 'initializing' : status.running ? 'running' : 'stopped'
+  const StatusIcon = status.initializing ? LoaderCircle : status.running ? Activity : PowerOff
 
   return (
     <SectionCard className="status-card" bodyClassName="status-card-body" header={null}>
       <div className="status-left-wrap">
-        <div className={classNames('status-pill-icon', serviceTone)}><span className="status-pill-dot" /></div>
+        <div className={classNames('status-pill-icon', serviceTone)}>
+          <StatusIcon size={18} className={classNames('status-pill-glyph', status.initializing && 'spin')} />
+        </div>
         <div className="status-copy">
           <div className="status-title">
             Sing-box {status.initializing ? '初始化中' : status.running ? '运行中' : '已停止'}

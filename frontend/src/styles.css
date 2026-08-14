@@ -199,27 +199,20 @@ button {
     border-radius: 18px;
     background: var(--surface-green-soft);
 }
-.status-pill-dot {
-    width: 10px;
-    height: 10px;
-    border-radius: 999px;
-    background: var(--success);
-    box-shadow: 0 0 20px rgba(74, 158, 117, 0.5);
+.status-pill-glyph {
+    color: var(--success);
 }
 .status-pill-icon.stopped {
     background: var(--surface-red);
 }
-.status-pill-icon.stopped .status-pill-dot {
-    background: var(--danger);
-    box-shadow: 0 0 20px rgba(176, 82, 82, 0.4);
+.status-pill-icon.stopped .status-pill-glyph {
+    color: var(--danger);
 }
 .status-pill-icon.initializing {
     background: rgba(160, 120, 64, 0.16);
 }
-.status-pill-icon.initializing .status-pill-dot {
-    background: var(--warning);
-    box-shadow: 0 0 20px rgba(160, 120, 64, 0.5);
-    animation: livePulse 1.4s ease-in-out infinite;
+.status-pill-icon.initializing .status-pill-glyph {
+    color: var(--warning);
 }
 .status-copy {
     display: flex;
@@ -450,16 +443,11 @@ button {
     background: var(--surface-blue-strong);
     border-radius: 18px;
 }
-.banner-dot {
-    width: 10px;
-    height: 10px;
-    border-radius: 999px;
-    background: var(--success);
-    box-shadow: 0 0 16px rgba(74, 158, 117, 0.45);
+.banner-glyph {
+    color: var(--accent-strong);
 }
-.banner-dot.idle {
-    background: var(--text-subtle);
-    box-shadow: none;
+.banner-glyph.idle {
+    color: var(--text-subtle);
 }
 .banner-delay .banner-delay-timeout {
     font-size: 1.0625rem;

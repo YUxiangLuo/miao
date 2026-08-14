@@ -1,5 +1,5 @@
 import { memo } from 'react'
-import { Radio, Zap, LoaderCircle, Plus } from 'lucide-react'
+import { Radio, Server, Zap, LoaderCircle, Plus } from 'lucide-react'
 import { Button, SectionCard } from './ui.jsx'
 import { 
   classNames, 
@@ -91,7 +91,7 @@ export function ProxyCard({
         title={primaryGroup?.now ? '点击测试当前节点延迟' : undefined}
         aria-label={primaryGroup?.now ? `测试当前节点 ${primaryGroup.now} 延迟` : '当前节点'}
       >
-        <div className="banner-icon-wrap"><span className={classNames('banner-dot', !primaryGroup?.now && 'idle')} /></div>
+        <div className="banner-icon-wrap"><Server size={18} className={classNames('banner-glyph', !primaryGroup?.now && 'idle')} /></div>
         <div className="banner-copy">
           <span className="banner-label">当前节点</span>
           <strong title={primaryGroup?.now || undefined}>{primaryGroup?.now || '未选择'}</strong>
