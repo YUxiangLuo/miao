@@ -9,6 +9,7 @@ use crate::handlers::{
     clash::{proxy_clash_http, proxy_clash_traffic},
     nodes::{add_node, delete_node, get_nodes},
     proxy::set_last_proxy,
+    rules::{add_rule, delete_rule, get_rules},
     service::{get_status, set_route_mode, start_service, stop_service, test_connectivity},
     static_assets::{serve_favicon, serve_index},
     subs::{add_sub, delete_sub, get_subs, refresh_subs},
@@ -36,6 +37,9 @@ pub fn build_router(app_state: Arc<AppState>) -> Router {
         .route("/api/nodes", get(get_nodes))
         .route("/api/nodes", post(add_node))
         .route("/api/nodes", delete(delete_node))
+        .route("/api/rules", get(get_rules))
+        .route("/api/rules", post(add_rule))
+        .route("/api/rules", delete(delete_rule))
         .route("/api/last-proxy", post(set_last_proxy))
         .with_state(app_state)
 }
@@ -311,5 +315,122 @@ mod tests {
         let json = response_json(response).await;
         assert_eq!(json["success"], false);
         assert_eq!(json["message"], "Node not found");
+    }
+
+    #[tokio::test]
+    async fn router_rejects_invalid_rule_field_with_bad_request() {
+        let app = test_app(Config {
+            port: None,
+            subs: vec![],
+            nodes: vec![],
+            custom_rules: vec![],
+            route_mode: Default::default(),
+            vps_ip: None,
+        })
+        .await;
+
+        let response = app
+            .oneshot(json_request(
+                "POST",
+                "/api/rules",
+                json!({ "field": "rule_set", "value": "x", "target": "proxy" }),
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let json = response_json(response).await;
+        assert_eq!(json["success"], false);
+        assert!(json["message"].as_str().unwrap().contains("不支持的规则字段"));
+    }
+
+    #[tokio::test]
+    async fn router_returns_not_found_when_deleting_missing_rule() {
+        let app = test_app(Config {
+            port: None,
+            subs: vec![],
+            nodes: vec![],
+            custom_rules: vec![],
+            route_mode: Default::default(),
+            vps_ip: None,
+        })
+        .await;
+
+        let response = app
+            .oneshot(json_request(
+                "DELETE",
+                "/api/rules",
+                json!({ "index": 3, "raw": "anything" }),
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        let json = response_json(response).await;
+        assert_eq!(json["success"], false);
+        assert_eq!(json["message"], "Rule not found");
+    }
+
+    #[tokio::test]
+    async fn router_rejects_rule_delete_when_entry_moved() {
+        let app = test_app(Config {
+            port: None,
+            subs: vec![],
+            nodes: vec![],
+            custom_rules: vec![
+                r#"{"process_name":"curl","action":"route","outbound":"direct"}"#.to_string(),
+            ],
+            route_mode: Default::default(),
+            vps_ip: None,
+        })
+        .await;
+
+        let response = app
+            .oneshot(json_request(
+                "DELETE",
+                "/api/rules",
+                json!({ "index": 0, "raw": r#"{"domain_suffix":"example.com"}"# }),
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+        let json = response_json(response).await;
+        assert_eq!(json["success"], false);
+        assert!(json["message"].as_str().unwrap().contains("规则列表已变化"));
+    }
+
+    #[tokio::test]
+    async fn router_returns_rule_list_payload() {
+        let app = test_app(Config {
+            port: None,
+            subs: vec![],
+            nodes: vec![],
+            custom_rules: vec![
+                r#"{"process_name":"curl","action":"route","outbound":"direct"}"#.to_string(),
+                r#"{"rule_set":["custom"],"action":"route","outbound":"proxy"}"#.to_string(),
+            ],
+            route_mode: Default::default(),
+            vps_ip: None,
+        })
+        .await;
+
+        let response = app
+            .oneshot(empty_request("GET", "/api/rules"))
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let json = response_json(response).await;
+        assert_eq!(json["success"], true);
+        assert_eq!(json["data"][0]["field"], "process_name");
+        assert_eq!(json["data"][0]["value"], "curl");
+        assert_eq!(json["data"][0]["target"], "direct");
+        // 无法结构化识别的手写规则保留 raw
+        assert!(json["data"][1]["field"].is_null());
+        assert_eq!(
+            json["data"][1]["raw"],
+            r#"{"rule_set":["custom"],"action":"route","outbound":"proxy"}"#
+        );
     }
 }

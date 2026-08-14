@@ -54,6 +54,22 @@ export function useNodes() {
   return { nodes, fetchNodes }
 }
 
+export function useRules() {
+  const [rules, setRules] = useState([])
+
+  const fetchRules = useCallback(async () => {
+    try {
+      const response = await fetch('/api/rules')
+      const payload = await response.json()
+      if (payload.success && payload.data) setRules(payload.data)
+    } catch {
+      // Keep the last known state during transient failures.
+    }
+  }, [])
+
+  return { rules, fetchRules }
+}
+
 export function useVersion() {
   const [versionInfo, setVersionInfo] = useState({ current: '', latest: null, has_update: false })
 

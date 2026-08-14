@@ -1862,3 +1862,77 @@ button {
 .advanced-details-body {
     padding: 4px 12px 12px;
 }
+
+/* 自定义规则卡片 */
+.rule-add-form {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 10px 16px;
+}
+.rule-add-row {
+    display: flex;
+    gap: 8px;
+    min-width: 0;
+}
+.rule-add-row select,
+.rule-add-row input {
+    flex: 1;
+    min-width: 0;
+    min-height: 34px;
+    padding: 7px 10px;
+    border-radius: 5px;
+    border: 1px solid var(--border);
+    background: var(--surface-soft);
+    color: var(--text);
+    outline: none;
+}
+.rule-add-row select:focus,
+.rule-add-row input:focus {
+    border-color: var(--accent);
+}
+.rule-add-row .btn {
+    flex: 0 0 auto;
+}
+.rule-add-hint {
+    color: var(--text-subtle);
+    font-size: 0.75rem;
+}
+.rule-field-chip {
+    flex: 0 0 auto;
+    padding: 1px 7px;
+    border-radius: 4px;
+    background: var(--surface-blue);
+    color: var(--accent-strong);
+    font-size: 0.75rem;
+    font-weight: 650;
+}
+.rule-value {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.rule-target-badge {
+    flex: 0 0 auto;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    font-weight: 650;
+    white-space: nowrap;
+}
+.rule-target-badge.proxy {
+    background: var(--surface-blue);
+    color: var(--accent-strong);
+}
+.rule-target-badge.direct {
+    background: var(--surface-green-soft);
+    color: var(--success);
+}
+.rule-target-badge.reject {
+    background: var(--surface-red);
+    color: var(--danger);
+}
+.list-row-title .rule-field-chip {
+    margin-right: 6px;
+}

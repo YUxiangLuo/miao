@@ -5,7 +5,8 @@ pub mod proxy;
 pub mod version;
 
 pub use api::{
-    ApiResponse, ConnectivityResult, RouteModeRequest, StatusData, SubRequest, SubStatus,
+    ApiResponse, ConnectivityResult, DeleteRuleRequest, RouteModeRequest, RuleInfo, RuleRequest,
+    StatusData, SubRequest, SubStatus,
 };
 pub use config::{Config, RouteMode, DEFAULT_PORT};
 pub use node::{DeleteNodeRequest, Hysteria2, Hysteria2Obfs, NodeInfo, NodeRequest, Tls};

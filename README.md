@@ -74,7 +74,7 @@ nodes:                     # 手动节点(sing-box outbound JSON)
   - '{"type":"hysteria2","tag":"HY2","server":"example.com","server_port":443,"password":"xxx","tls":{"enabled":true}}'
 
 custom_rules:              # 可选:sing-box 路由规则,优先于内置分流
-  - '{"domain_suffix":"example.com","outbound":"direct"}'
+  - '{"domain_suffix":"example.com","action":"route","outbound":"direct"}'
 
 # vps_ip: "203.0.113.10"   # 可选:自动部署 Hysteria2,见上
 ```

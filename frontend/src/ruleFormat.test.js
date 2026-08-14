@@ -1,0 +1,53 @@
+import { describe, expect, it } from 'vitest'
+import {
+  describeRule,
+  RULE_FIELD_OPTIONS,
+  RULE_TARGET_OPTIONS,
+  ruleFieldLabel,
+  ruleTargetLabel,
+} from './ruleFormat.js'
+
+describe('ruleFormat', () => {
+  it('covers the backend whitelist fields and targets', () => {
+    expect(RULE_FIELD_OPTIONS.map((option) => option.value)).toEqual([
+      'domain_suffix',
+      'domain',
+      'domain_keyword',
+      'ip_cidr',
+      'port',
+      'process_name',
+      'process_path',
+    ])
+    expect(RULE_TARGET_OPTIONS.map((option) => option.value)).toEqual(['proxy', 'direct', 'reject'])
+  })
+
+  it('labels known fields and falls back to the raw field name', () => {
+    expect(ruleFieldLabel('process_name')).toBe('进程名')
+    expect(ruleFieldLabel('geosite')).toBe('geosite')
+    expect(ruleTargetLabel('reject')).toBe('拦截')
+    expect(ruleTargetLabel('proxy')).toBe('代理')
+    expect(ruleTargetLabel(undefined)).toBe('未知')
+  })
+
+  it('describes structured rules from the API', () => {
+    expect(describeRule({ index: 0, field: 'port', value: '25', target: 'reject', raw: '' }))
+      .toEqual({
+        structured: true,
+        field: 'port',
+        fieldLabel: '目标端口',
+        value: '25',
+        target: 'reject',
+      })
+  })
+
+  it('keeps a missing target as null instead of guessing proxy', () => {
+    const display = describeRule({ index: 0, field: 'process_name', value: 'curl', raw: '{}' })
+    expect(display.structured).toBe(true)
+    expect(display.target).toBeNull()
+  })
+
+  it('falls back to raw for hand-written rules', () => {
+    const raw = '{"rule_set":["custom"],"action":"route","outbound":"direct"}'
+    expect(describeRule({ index: 1, raw })).toEqual({ structured: false, raw })
+  })
+})

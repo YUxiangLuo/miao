@@ -63,6 +63,32 @@ pub struct SubRequest {
 }
 
 #[derive(Deserialize)]
+pub struct RuleRequest {
+    pub field: String,
+    pub value: String,
+    pub target: String,
+}
+
+#[derive(Deserialize)]
+pub struct DeleteRuleRequest {
+    pub index: usize,
+    pub raw: String,
+}
+
+/// 自定义规则展示项;手写的任意 JSON 规则可能不是结构化单条件,以 raw 兜底
+#[derive(Serialize)]
+pub struct RuleInfo {
+    pub index: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub field: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub value: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target: Option<String>,
+    pub raw: String,
+}
+
+#[derive(Deserialize)]
 pub struct RouteModeRequest {
     pub route_mode: RouteMode,
 }

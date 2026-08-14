@@ -47,7 +47,7 @@ static VALID_TUIC_CONGESTION_CONTROLS: &[&str] = &["cubic", "new_reno", "bbr"];
 static VALID_TUIC_UDP_RELAY_MODES: &[&str] = &["native", "quic"];
 static VALID_HYSTERIA2_OBFS_TYPES: &[&str] = &["salamander", "gecko"];
 
-use crate::models::NodeRequest;
+use crate::models::{NodeRequest, RuleRequest};
 
 pub struct Validator;
 
@@ -202,6 +202,76 @@ impl Validator {
 
         if !VALID_TAG_REGEX.is_match(tag) {
             return Err("节点名称只能包含字母、数字、空格、下划线和连字符".to_string());
+        }
+
+        Ok(())
+    }
+
+    /// 校验自定义规则的字段、目标与取值格式
+    pub fn custom_rule(req: &RuleRequest) -> Result<(), String> {
+        static VALID_RULE_FIELDS: &[&str] = &[
+            "domain_suffix",
+            "domain",
+            "domain_keyword",
+            "ip_cidr",
+            "port",
+            "process_name",
+            "process_path",
+        ];
+        static VALID_RULE_TARGETS: &[&str] = &["proxy", "direct", "reject"];
+
+        if !VALID_RULE_FIELDS.contains(&req.field.as_str()) {
+            return Err(format!(
+                "不支持的规则字段: {},支持的字段: {}",
+                req.field,
+                VALID_RULE_FIELDS.join(", ")
+            ));
+        }
+        if !VALID_RULE_TARGETS.contains(&req.target.as_str()) {
+            return Err(format!(
+                "不支持的规则目标: {},支持的目标: {}",
+                req.target,
+                VALID_RULE_TARGETS.join(", ")
+            ));
+        }
+
+        let value = req.value.trim();
+        if value.is_empty() {
+            return Err("规则值不能为空".to_string());
+        }
+        if value.chars().count() > 256 {
+            return Err("规则值不能超过 256 个字符".to_string());
+        }
+
+        match req.field.as_str() {
+            "port" => {
+                if !value
+                    .parse::<u16>()
+                    .map(|port| port > 0)
+                    .unwrap_or(false)
+                {
+                    return Err("端口必须是 1-65535 的整数".to_string());
+                }
+            }
+            "ip_cidr" => {
+                let Some((addr, prefix)) = value.split_once('/') else {
+                    return Err("IP/CIDR 必须形如 192.168.0.0/16".to_string());
+                };
+                let Ok(ip) = addr.parse::<std::net::IpAddr>() else {
+                    return Err("无效的 IP/CIDR".to_string());
+                };
+                let max_prefix = if ip.is_ipv4() { 32 } else { 128 };
+                if !prefix.parse::<u8>().map(|p| p <= max_prefix).unwrap_or(false) {
+                    return Err(format!("前缀长度必须在 0-{} 之间", max_prefix));
+                }
+            }
+            "domain" | "domain_suffix" | "domain_keyword" => {
+                if value.contains('/') || value.contains(':') || value.contains(char::is_whitespace)
+                {
+                    return Err("域名规则值不能包含 / : 或空白字符".to_string());
+                }
+            }
+            _ => {}
         }
 
         Ok(())
@@ -426,6 +496,45 @@ impl Validator {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn custom_rule_accepts_valid_entries() {
+        let ok = |field: &str, value: &str| {
+            Validator::custom_rule(&RuleRequest {
+                field: field.to_string(),
+                value: value.to_string(),
+                target: "direct".to_string(),
+            })
+        };
+        assert!(ok("domain_suffix", "example.com").is_ok());
+        assert!(ok("domain_keyword", "google").is_ok());
+        assert!(ok("process_name", "curl").is_ok());
+        assert!(ok("process_path", "/usr/bin/curl").is_ok());
+        assert!(ok("port", "443").is_ok());
+        assert!(ok("ip_cidr", "192.168.0.0/16").is_ok());
+        assert!(ok("ip_cidr", "2001:db8::/32").is_ok());
+    }
+
+    #[test]
+    fn custom_rule_rejects_invalid_entries() {
+        let err = |field: &str, value: &str, target: &str| {
+            Validator::custom_rule(&RuleRequest {
+                field: field.to_string(),
+                value: value.to_string(),
+                target: target.to_string(),
+            })
+        };
+        assert!(err("rule_set", "x", "proxy").is_err());
+        assert!(err("domain", "example.com", "block").is_err());
+        assert!(err("port", "0", "proxy").is_err());
+        assert!(err("port", "70000", "proxy").is_err());
+        assert!(err("port", "abc", "proxy").is_err());
+        assert!(err("ip_cidr", "192.168.0.0", "proxy").is_err());
+        assert!(err("ip_cidr", "192.168.0.0/33", "proxy").is_err());
+        assert!(err("ip_cidr", "2001:db8::/129", "proxy").is_err());
+        assert!(err("domain_suffix", "exa mple.com", "proxy").is_err());
+        assert!(err("domain_suffix", "", "proxy").is_err());
+    }
 
     #[test]
     fn test_valid_subscription_urls() {

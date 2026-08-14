@@ -5,6 +5,7 @@ import {
   ProxyCard,
   NodesCard,
   SubsCard,
+  RulesCard,
   ConnectivityCard,
   ConfirmModal,
   ConnectionsModal,
@@ -18,6 +19,7 @@ import {
   useStatus,
   useSubs,
   useNodes,
+  useRules,
   useProxies,
   useTraffic,
   useConnections,
@@ -55,6 +57,7 @@ export default function App() {
   const { status, fetchStatus } = useStatus()
   const { subs, fetchSubs } = useSubs()
   const { nodes, fetchNodes } = useNodes()
+  const { rules, fetchRules } = useRules()
   const { primaryGroupName, primaryGroup, fetchProxies } = useProxies(status)
   const { traffic, closeSockets } = useTraffic(status)
   const {
@@ -112,7 +115,7 @@ export default function App() {
   // 首次加载：获取初始状态后再决定显示 onboarding 还是 dashboard
   // 同时拉取代理组，避免服务运行时首屏短暂显示“等待服务启动”
   useEffect(() => {
-    Promise.all([fetchStatus(), fetchSubs(), fetchNodes(), fetchProxies()])
+    Promise.all([fetchStatus(), fetchSubs(), fetchNodes(), fetchRules(), fetchProxies()])
       .finally(() => setFirstLoadDone(true))
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -124,13 +127,13 @@ export default function App() {
 
   // 统一轮询管理：合并所有定时任务到单个定时器
   const pollingTasks = useMemo(() => {
-    const tasks = [fetchStatus, fetchSubs, fetchNodes]
+    const tasks = [fetchStatus, fetchSubs, fetchNodes, fetchRules]
     // 服务运行时才轮询 proxies
     if (status.running) {
       tasks.push(fetchProxies)
     }
     return tasks
-  }, [fetchStatus, fetchSubs, fetchNodes, fetchProxies, status.running])
+  }, [fetchStatus, fetchSubs, fetchNodes, fetchRules, fetchProxies, status.running])
 
   const connectionPollingTasks = useMemo(() => [fetchConnections], [fetchConnections])
 
@@ -441,6 +444,34 @@ export default function App() {
     openConfirm('删除订阅', `确定要删除此订阅吗？\n${url}`, () => handleDeleteSubscription(url))
   }, [openConfirm, handleDeleteSubscription])
 
+  const handleAddRule = useCallback(async ({ field, value, target }) => {
+    try {
+      await apiCall('rules', { method: 'POST', body: JSON.stringify({ field, value, target }) }, 'addRule')
+      await fetchRules()
+      showToast('规则已添加', 'success')
+      return true
+    } catch (error) {
+      showToast(error.message, 'error')
+      return false
+    }
+  }, [apiCall, fetchRules, showToast])
+
+  const handleDeleteRule = useCallback(async (rule) => {
+    try {
+      // 携带 raw 以便后端校验条目未被并发变更挪动
+      await apiCall('rules', { method: 'DELETE', body: JSON.stringify({ index: rule.index, raw: rule.raw }) }, 'deleteRule')
+      await fetchRules()
+      showToast('规则已删除', 'success')
+    } catch (error) {
+      showToast(error.message, 'error')
+    }
+  }, [apiCall, fetchRules, showToast])
+
+  const handleOpenDeleteRuleConfirm = useCallback((rule) => {
+    const label = rule?.field && rule?.value ? `${rule.field}: ${rule.value}` : (rule?.raw || '')
+    openConfirm('删除规则', `确定要删除此规则吗？\n${label}`, () => handleDeleteRule(rule))
+  }, [openConfirm, handleDeleteRule])
+
   if (!firstLoadDone) {
     return <div className="shell"><div className="onboarding-loading">加载中…</div></div>
   }
@@ -524,6 +555,14 @@ export default function App() {
               onDeleteSub={handleOpenDeleteSubConfirm}
               onRefreshSubs={handleRefreshSubscriptions}
               isInitializing={status.initializing}
+            />
+
+            <RulesCard
+              rules={rules}
+              isInitializing={status.initializing}
+              loadingAction={loadingAction}
+              onAddRule={handleAddRule}
+              onDeleteRule={handleOpenDeleteRuleConfirm}
             />
 
             <ConnectivityCard
