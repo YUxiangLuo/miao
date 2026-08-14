@@ -1,12 +1,12 @@
 import { memo } from 'react'
-import { Plus, Shield, Trash2 } from 'lucide-react'
+import { ListTree, Plus, Server, Trash2 } from 'lucide-react'
 import { Button, SectionCard } from './ui.jsx'
 import { protocolLabel } from '../utils.js'
 
 const NodeRow = memo(function NodeRow({ node, onDelete, disabled }) {
   return (
     <div className="list-row">
-      <Shield size={13} className="list-leading-icon" />
+      <Server size={13} className="list-leading-icon" />
       <div className="list-row-content">
         <div className="list-row-title">{node.tag}</div>
         <div className="list-row-meta">{node.server}:{node.server_port} · {protocolLabel(node.node_type)}</div>
@@ -30,12 +30,7 @@ export function NodesCard({ nodes, isInitializing, onDeleteNode, onOpenAddNode }
       header={
         <div className="section-header">
           <div className="section-title-wrap">
-            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="section-icon">
-              <rect width="20" height="8" x="2" y="2" rx="2" ry="2"/>
-              <rect width="20" height="8" x="2" y="14" rx="2" ry="2"/>
-              <line x1="6" x2="6.01" y1="6" y2="6"/>
-              <line x1="6" x2="6.01" y1="18" y2="18"/>
-            </svg>
+            <ListTree size={14} className="section-icon" />
             <span>手动节点</span>
             <span className="counter-pill">{nodes.length}</span>
           </div>

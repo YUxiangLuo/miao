@@ -1,5 +1,5 @@
 import { memo } from 'react'
-import { X, Check, CircleX, RefreshCw, Rss, Plus } from 'lucide-react'
+import { Check, CircleX, RefreshCw, Rss, Plus, Trash2 } from 'lucide-react'
 import { Button, SectionCard } from './ui.jsx'
 import { classNames, maskSubscription } from '../utils.js'
 
@@ -25,7 +25,7 @@ const SubRow = memo(function SubRow({ sub, onDelete, disabled }) {
         disabled={disabled}
         aria-label={`删除订阅 ${maskSubscription(sub.url)}`}
       >
-        <X size={13} />
+        <Trash2 size={13} />
       </button>
     </div>
   )

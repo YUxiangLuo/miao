@@ -1,5 +1,5 @@
 import { memo } from 'react'
-import { Radio, Server, Zap, LoaderCircle, Plus } from 'lucide-react'
+import { Server, Waypoints, Zap, LoaderCircle, Plus } from 'lucide-react'
 import { Button, SectionCard } from './ui.jsx'
 import { 
   classNames, 
@@ -67,7 +67,7 @@ export function ProxyCard({
       header={
         <div className="section-header">
           <div className="section-title-wrap">
-            <Radio size={14} className="section-icon" />
+            <Waypoints size={14} className="section-icon" />
             <span>代理节点选择</span>
           </div>
           <Button 

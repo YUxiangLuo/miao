@@ -1,4 +1,4 @@
-import { Play, Globe, LoaderCircle } from 'lucide-react'
+import { Play, Square, Wifi } from 'lucide-react'
 import { Button, SectionCard } from './ui.jsx'
 import { classNames, CONNECTIVITY_SITES, getDelayTone } from '../utils.js'
 
@@ -17,14 +17,13 @@ export function ConnectivityCard({
       header={
         <div className="section-header">
           <div className="section-title-wrap">
-            <Globe size={14} className="section-icon" />
+            <Wifi size={14} className="section-icon" />
             <span>连通性测试</span>
           </div>
           <Button 
             tone="secondary" 
             size="sm" 
-            icon={testingConnectivity ? <LoaderCircle size={11} className="spin" /> : <Play size={11} />} 
-            loading={testingConnectivity} 
+            icon={testingConnectivity ? <Square size={11} /> : <Play size={11} />} 
             disabled={status.initializing} 
             onClick={testingConnectivity ? onStopTest : onTestAll}
           >
