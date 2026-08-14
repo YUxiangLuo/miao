@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="public/icon.svg" width="72" alt="Miao logo" />
+  <img src="frontend/public/icon.svg" width="72" alt="Miao logo" />
   <h1>Miao</h1>
   <p><strong>一个文件，让整台设备开箱即用透明代理。</strong></p>
   <p>
