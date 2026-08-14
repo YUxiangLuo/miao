@@ -44,7 +44,7 @@ export function StatusCard({
         className="traffic-chip"
         onClick={onOpenConnections}
         disabled={!status.running}
-        title={status.running ? '查看连接统计' : '启动服务后可查看连接统计'}
+        title={status.running ? '查看链接统计' : '启动服务后可查看链接统计'}
       >
         <div className="traffic-item">
           <ArrowUp size={14} className="traffic-icon up" />

@@ -7,7 +7,7 @@ export const PATH_FILTERS = [
 export const SORT_OPTIONS = [
   { value: 'activity', label: '活跃度' },
   { value: 'domain', label: '域名' },
-  { value: 'count', label: '连接数' },
+  { value: 'count', label: '链接数' },
 ]
 
 export function isDirectOutbound(outbound) {

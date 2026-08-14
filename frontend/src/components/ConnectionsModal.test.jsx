@@ -33,8 +33,6 @@ function renderModal(connections, props = {}) {
       error=""
       onClose={vi.fn()}
       onRefresh={vi.fn()}
-      onCloseConnection={vi.fn()}
-      showToast={vi.fn()}
       {...props}
     />,
   )
@@ -56,7 +54,9 @@ describe('ConnectionsModal cards', () => {
 
     expect(screen.getByText('api.github.com')).toBeInTheDocument()
     expect(screen.getByText('www.bilibili.com')).toBeInTheDocument()
-    expect(screen.getByText('2 条')).toBeInTheDocument()
+    expect(screen.getByText('2 条链接')).toBeInTheDocument()
+    expect(screen.getByText('2 个站点 · 3 条链接')).toBeInTheDocument()
+    expect(screen.getByText('共 3 条链接')).toBeInTheDocument()
     expect(screen.getByText('Match')).toBeInTheDocument()
     expect(screen.getByText('RuleSet : chinasite')).toBeInTheDocument()
     expect(screen.getAllByText('api.github.com')).toHaveLength(1)
@@ -79,28 +79,12 @@ describe('ConnectionsModal cards', () => {
     const user = userEvent.setup()
     renderModal([connection()])
 
-    expect(screen.queryByRole('button', { name: /查看连接/ })).not.toBeInTheDocument()
-    expect(screen.queryByText('连接详情')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /查看链接/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /关闭 .* 的链接/ })).not.toBeInTheDocument()
+    expect(screen.queryByText('链接详情')).not.toBeInTheDocument()
 
     await user.click(screen.getByText('api.github.com'))
-    expect(screen.queryByText('连接详情')).not.toBeInTheDocument()
-  })
-
-  it('closes every connection for a host from the card action', async () => {
-    const user = userEvent.setup()
-    const onCloseConnection = vi.fn().mockResolvedValue()
-    renderModal(
-      [
-        connection({ id: 'a' }),
-        connection({ id: 'b' }),
-      ],
-      { onCloseConnection },
-    )
-
-    await user.click(screen.getByRole('button', { name: '关闭 api.github.com 的连接' }))
-    expect(onCloseConnection).toHaveBeenCalledTimes(2)
-    expect(onCloseConnection).toHaveBeenNthCalledWith(1, 'a')
-    expect(onCloseConnection).toHaveBeenNthCalledWith(2, 'b')
+    expect(screen.queryByText('链接详情')).not.toBeInTheDocument()
   })
 
   it('filters cards by domain or rule', async () => {
@@ -115,7 +99,7 @@ describe('ConnectionsModal cards', () => {
       }),
     ])
 
-    await user.type(screen.getByRole('searchbox', { name: '搜索连接' }), 'bilibili')
+    await user.type(screen.getByRole('searchbox', { name: '搜索链接' }), 'bilibili')
     expect(screen.getByText('www.bilibili.com')).toBeInTheDocument()
     expect(screen.queryByText('api.github.com')).not.toBeInTheDocument()
     expect(screen.getByText('1 / 2')).toBeInTheDocument()

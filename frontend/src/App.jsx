@@ -62,7 +62,6 @@ export default function App() {
     connectionsLoading,
     connectionsError,
     fetchConnections,
-    closeConnection,
   } = useConnections(status, clashApiBase)
   const { versionInfo, fetchVersion } = useVersion()
   const { delays, testingNodes, testingGroup, testDelay, testGroupDelays, clearDelays } = useDelays()
@@ -348,7 +347,7 @@ export default function App() {
 
   const handleOpenConnections = useCallback(() => {
     if (window.matchMedia(`(max-width: ${CONNECTIONS_MODAL_MIN_WIDTH - 1}px)`).matches) {
-      showToast('移动端暂不支持连接统计面板', 'info')
+      showToast('移动端暂不支持链接统计面板', 'info')
       return
     }
 
@@ -531,8 +530,6 @@ export default function App() {
         error={connectionsError}
         onClose={() => setShowConnectionsModal(false)}
         onRefresh={fetchConnections}
-        onCloseConnection={closeConnection}
-        showToast={showToast}
       />
 
       <ConfirmModal

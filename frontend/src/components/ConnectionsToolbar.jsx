@@ -48,7 +48,7 @@ export function ConnectionsToolbar({
           value={query}
           onChange={(event) => onQueryChange(event.target.value)}
           placeholder="搜索域名、规则或出口"
-          aria-label="搜索连接"
+          aria-label="搜索链接"
         />
         {hasQuery && (
           <button

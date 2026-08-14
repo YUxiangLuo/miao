@@ -1,5 +1,5 @@
 import { useId, useMemo, useState } from 'react'
-import { Activity, ArrowDown, ArrowUp, Network, RefreshCw, X } from 'lucide-react'
+import { Activity, ArrowDown, ArrowUp, Globe, RefreshCw, X } from 'lucide-react'
 import { useDialog } from '../hooks/useDialog.js'
 import { classNames, formatBytes, formatSpeed } from '../utils.js'
 import { connectionDomain, iconForDomain } from './siteIcons.js'
@@ -94,19 +94,9 @@ function SiteMark({ domain }) {
   )
 }
 
-function ConnectionCard({ group, closing, onClose }) {
+function ConnectionCard({ group }) {
   return (
     <article className="connection-card">
-      <button
-        type="button"
-        className="connection-card-close"
-        onClick={() => onClose(group)}
-        disabled={closing}
-        title="关闭连接"
-        aria-label={`关闭 ${group.domain} 的连接`}
-      >
-        {closing ? <RefreshCw size={13} className="spin" /> : <X size={13} />}
-      </button>
       <div className="connection-card-top">
         <SiteMark domain={group.domain} />
         <div className="connection-card-identity">
@@ -121,7 +111,7 @@ function ConnectionCard({ group, closing, onClose }) {
         <span className={classNames('connection-outbound-chip', group.outbound === 'direct' && 'direct')}>
           {group.outbound}
         </span>
-        {group.count > 1 && <span className="connection-count-chip">{group.count} 条</span>}
+        {group.count > 1 && <span className="connection-count-chip">{group.count} 条链接</span>}
         <span className="connection-card-speed">
           <small className="tone-download"><ArrowDown size={11} />{formatSpeed(group.downloadSpeed)}</small>
           <small className="tone-upload"><ArrowUp size={11} />{formatSpeed(group.uploadSpeed)}</small>
@@ -139,15 +129,12 @@ export function ConnectionsModal({
   error,
   onClose,
   onRefresh,
-  onCloseConnection,
-  showToast,
 }) {
   const titleId = useId()
   const dialogRef = useDialog(open, onClose)
   const [query, setQuery] = useState('')
   const [path, setPath] = useState('all')
   const [sortKey, setSortKey] = useState('activity')
-  const [closingDomain, setClosingDomain] = useState('')
 
   const connections = useMemo(() => {
     return Array.isArray(data?.connections) ? data.connections : []
@@ -168,19 +155,6 @@ export function ConnectionsModal({
   )
   const pathCounts = useMemo(() => pathCountsFor(searchedGroups), [searchedGroups])
 
-  const handleCloseGroup = async (group) => {
-    setClosingDomain(group.domain)
-    try {
-      for (const connection of group.connections) {
-        if (connection.id) await onCloseConnection(connection.id)
-      }
-    } catch (closeError) {
-      showToast?.(closeError.message || '关闭连接失败', 'error')
-    } finally {
-      setClosingDomain('')
-    }
-  }
-
   if (!open) return null
 
   return (
@@ -197,11 +171,11 @@ export function ConnectionsModal({
         <header className="connections-header">
           <div className="connections-header-title">
             <Activity size={18} className="icon-accent" />
-            <h3 id={titleId}>连接统计</h3>
+            <h3 id={titleId}>链接统计</h3>
             {status.running && (
               <span className="connections-live-badge">
                 <i />
-                {connections.length} 个活跃连接
+                {groups.length} 个站点 · {connections.length} 条链接
               </span>
             )}
           </div>
@@ -210,23 +184,24 @@ export function ConnectionsModal({
               <RefreshCw size={14} className={loading ? 'spin' : undefined} />
               刷新
             </button>
-            <button className="icon-button" onClick={onClose} title="关闭 (Esc)" aria-label="关闭连接统计">
+            <button className="icon-button" onClick={onClose} title="关闭 (Esc)" aria-label="关闭链接统计">
               <X size={16} />
             </button>
           </div>
         </header>
 
         {!status.running ? (
-          <div className="connections-empty">服务未运行，暂无连接统计。</div>
+          <div className="connections-empty">服务未运行，暂无链接统计。</div>
         ) : (
           <div className="connections-body">
             <div className="connection-stat-grid">
               <div className="connection-stat">
                 <span className="connection-stat-label">
-                  <Network size={12} />
-                  活跃连接
+                  <Globe size={12} />
+                  站点
                 </span>
-                <strong className="connection-stat-value">{connections.length}</strong>
+                <strong className="connection-stat-value">{groups.length}</strong>
+                <span className="connection-stat-hint">共 {connections.length} 条链接</span>
               </div>
               <div className="connection-stat">
                 <span className="connection-stat-label">
@@ -279,14 +254,12 @@ export function ConnectionsModal({
                     <ConnectionCard
                       key={group.domain}
                       group={group}
-                      closing={closingDomain === group.domain}
-                      onClose={handleCloseGroup}
                     />
                   ))}
                 </div>
               ) : (
                 <div className="connections-empty inline">
-                  {loading && connections.length === 0 ? '加载中…' : '暂无匹配连接'}
+                  {loading && connections.length === 0 ? '加载中…' : '暂无匹配站点'}
                 </div>
               )}
             </div>

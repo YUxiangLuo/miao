@@ -88,15 +88,13 @@ describe('modal accessibility', () => {
         error=""
         onClose={onClose}
         onRefresh={vi.fn()}
-        onCloseConnection={vi.fn()}
-        showToast={vi.fn()}
       />,
     )
 
-    expect(screen.getByRole('dialog', { name: '连接统计' })).toBeInTheDocument()
-    expect(screen.queryByText('连接详情')).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /查看连接/ })).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '关闭 example.com 的连接' })).toBeInTheDocument()
+    expect(screen.getByRole('dialog', { name: '链接统计' })).toBeInTheDocument()
+    expect(screen.queryByText('链接详情')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /查看链接/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /关闭 .* 的链接/ })).not.toBeInTheDocument()
 
     await user.keyboard('{Escape}')
     expect(onClose).toHaveBeenCalledTimes(1)

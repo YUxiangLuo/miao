@@ -74,7 +74,7 @@ export function useConnections(status, clashApiBase) {
       const response = await fetch(`${clashApiBase}/connections`)
       if (!response.ok) {
         const details = (await response.text()).trim()
-        throw new Error(details || `连接统计获取失败 (${response.status})`)
+        throw new Error(details || `链接统计获取失败 (${response.status})`)
       }
       const payload = await response.json()
       const connections = Array.isArray(payload.connections) ? payload.connections : []
@@ -103,7 +103,7 @@ export function useConnections(status, clashApiBase) {
       setConnectionsError('')
       return payload
     } catch (error) {
-      setConnectionsError(error.message || '连接统计获取失败')
+      setConnectionsError(error.message || '链接统计获取失败')
       return null
     } finally {
       setConnectionsLoading(false)
@@ -119,21 +119,11 @@ export function useConnections(status, clashApiBase) {
     }
   }, [status.running])
 
-  const closeConnection = useCallback(async (id) => {
-    const response = await fetch(`${clashApiBase}/connections/${encodeURIComponent(id)}`, { method: 'DELETE' })
-    if (!response.ok) {
-      const details = (await response.text()).trim()
-      throw new Error(details || `关闭连接失败 (${response.status})`)
-    }
-    await fetchConnections()
-  }, [clashApiBase, fetchConnections])
-
   return {
     connectionsInfo,
     connectionsLoading,
     connectionsError,
     fetchConnections,
-    closeConnection,
   }
 }
 
