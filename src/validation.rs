@@ -245,11 +245,7 @@ impl Validator {
 
         match req.field.as_str() {
             "port" => {
-                if !value
-                    .parse::<u16>()
-                    .map(|port| port > 0)
-                    .unwrap_or(false)
-                {
+                if !value.parse::<u16>().map(|port| port > 0).unwrap_or(false) {
                     return Err("端口必须是 1-65535 的整数".to_string());
                 }
             }
@@ -261,15 +257,20 @@ impl Validator {
                     return Err("无效的 IP/CIDR".to_string());
                 };
                 let max_prefix = if ip.is_ipv4() { 32 } else { 128 };
-                if !prefix.parse::<u8>().map(|p| p <= max_prefix).unwrap_or(false) {
+                if !prefix
+                    .parse::<u8>()
+                    .map(|p| p <= max_prefix)
+                    .unwrap_or(false)
+                {
                     return Err(format!("前缀长度必须在 0-{} 之间", max_prefix));
                 }
             }
-            "domain" | "domain_suffix" | "domain_keyword" => {
-                if value.contains('/') || value.contains(':') || value.contains(char::is_whitespace)
-                {
-                    return Err("域名规则值不能包含 / : 或空白字符".to_string());
-                }
+            "domain" | "domain_suffix" | "domain_keyword"
+                if value.contains('/')
+                    || value.contains(':')
+                    || value.contains(char::is_whitespace) =>
+            {
+                return Err("域名规则值不能包含 / : 或空白字符".to_string());
             }
             _ => {}
         }

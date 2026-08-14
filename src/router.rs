@@ -341,7 +341,10 @@ mod tests {
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
         let json = response_json(response).await;
         assert_eq!(json["success"], false);
-        assert!(json["message"].as_str().unwrap().contains("不支持的规则字段"));
+        assert!(json["message"]
+            .as_str()
+            .unwrap()
+            .contains("不支持的规则字段"));
     }
 
     #[tokio::test]
