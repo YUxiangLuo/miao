@@ -60,9 +60,11 @@ export function ConnectionsToolbar({
             <X size={13} />
           </button>
         )}
-        <span className="connections-search-count">
-          {filtered ? `${resultCount} / ${totalCount}` : `${totalCount} 个站点`}
-        </span>
+        {filtered && (
+          <span className="connections-search-count">
+            {resultCount} / {totalCount}
+          </span>
+        )}
       </label>
 
       <div className="connections-toolbar-row">

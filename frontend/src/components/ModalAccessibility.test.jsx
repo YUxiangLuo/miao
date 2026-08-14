@@ -59,7 +59,7 @@ describe('modal accessibility', () => {
     expect(onClose).toHaveBeenCalledTimes(1)
   })
 
-  it('exposes a labelled connections dialog without a details action', async () => {
+  it('exposes a labelled connections dialog with an expandable card', async () => {
     const user = userEvent.setup()
     const onClose = vi.fn()
 
@@ -92,9 +92,8 @@ describe('modal accessibility', () => {
     )
 
     expect(screen.getByRole('dialog', { name: '链接统计' })).toBeInTheDocument()
-    expect(screen.queryByText('链接详情')).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /查看链接/ })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /关闭 .* 的链接/ })).not.toBeInTheDocument()
+    const toggle = screen.getByRole('button', { name: 'example.com 链接详情' })
+    expect(toggle).toHaveAttribute('aria-expanded', 'false')
 
     await user.keyboard('{Escape}')
     expect(onClose).toHaveBeenCalledTimes(1)

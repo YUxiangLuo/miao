@@ -5,7 +5,8 @@ export const PATH_FILTERS = [
 ]
 
 export const SORT_OPTIONS = [
-  { value: 'activity', label: '活跃度' },
+  { value: 'speed', label: '速度' },
+  { value: 'traffic', label: '流量' },
   { value: 'domain', label: '域名' },
   { value: 'count', label: '链接数' },
 ]
@@ -14,12 +15,27 @@ export function isDirectOutbound(outbound) {
   return String(outbound || '').toLowerCase() === 'direct'
 }
 
+// sing-box 的兜底规则叫 final,对普通用户不直观,展示时翻译为「兜底规则」
+export function displayRuleText(rule) {
+  if (!rule || rule === '-') return '-'
+  return rule === 'final' ? '兜底规则' : rule
+}
+
+export function groupSpeed(group) {
+  return Number(group.downloadSpeed || 0) + Number(group.uploadSpeed || 0)
+}
+
+export function groupTraffic(group) {
+  return Number(group.download || 0) + Number(group.upload || 0)
+}
+
 export function groupMatchesQuery(group, query) {
   const needle = query.trim().toLowerCase()
   if (!needle) return true
   return [
     group.domain,
     group.rule,
+    group.ruleLabel,
     group.outbound,
     ...(Array.isArray(group.connections) ? group.connections.flatMap((connection) => [
       connection.id,
@@ -47,10 +63,11 @@ export function filterConnectionGroups(groups, { query = '', path = 'all' } = {}
   })
 }
 
-export function sortConnectionGroups(groups, sortKey = 'activity') {
+export function sortConnectionGroups(groups, sortKey = 'speed') {
   return [...groups].sort((a, b) => {
     if (sortKey === 'domain') return a.domain.localeCompare(b.domain)
     if (sortKey === 'count') return b.count - a.count || a.domain.localeCompare(b.domain)
-    return b.downloadSpeed - a.downloadSpeed || a.domain.localeCompare(b.domain)
+    if (sortKey === 'speed') return groupSpeed(b) - groupSpeed(a) || a.domain.localeCompare(b.domain)
+    return groupTraffic(b) - groupTraffic(a) || a.domain.localeCompare(b.domain)
   })
 }
