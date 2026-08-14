@@ -34,16 +34,18 @@ for arg in "$@"; do
 done
 if [[ "$skip_confirm" != "yes" ]]; then
   echo "将删除 miao 服务、二进制、配置($CONFIG_DIR)与运行时文件。"
-  answer=""
-  if ! read -r -p "确认卸载?[y/N] " answer < /dev/tty 2>/dev/null; then
+  # 先静默探测控制终端是否可用(仅探测时屏蔽 stderr,避免吞掉下面的提示语)
+  if : 2>/dev/null < /dev/tty; then
+    read -r -p "确认卸载?[y/N] " answer < /dev/tty
+    case "$answer" in
+      y|Y|yes|YES) ;;
+      *) echo "已取消"; exit 0 ;;
+    esac
+  else
     echo "非交互环境,请显式加 -y 确认:" >&2
     echo "  curl -fsSL https://raw.githubusercontent.com/YUxiangLuo/miao/master/remove.sh | sudo bash -s -- -y" >&2
     exit 1
   fi
-  case "$answer" in
-    y|Y|yes|YES) ;;
-    *) echo "已取消"; exit 0 ;;
-  esac
 fi
 
 if command -v systemctl >/dev/null 2>&1; then
