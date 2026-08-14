@@ -49,10 +49,14 @@ describe('modal accessibility', () => {
         loading={false}
         onClose={onClose}
         onSubmit={vi.fn()}
+        onImport={vi.fn()}
       />,
     )
 
     expect(screen.getByRole('dialog', { name: '添加节点' })).toBeInTheDocument()
+    // 默认是链接导入模式,手动表单需切换
+    expect(screen.getByRole('textbox', { name: '节点分享链接' })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '手动填写' }))
     expect(screen.getByLabelText('密码')).toHaveAttribute('type', 'password')
 
     await user.keyboard('{Escape}')

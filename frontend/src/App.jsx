@@ -318,6 +318,35 @@ export default function App() {
     }
   }, [nodeForm, nodeType, apiCall, clearDelays, closeNodeModal, fetchNodes, showToast])
 
+  // 链接导入:逐个提交解析好的节点,全部成功才关闭弹窗,失败项保留供用户修正
+  const handleImportNodes = useCallback(async (payloads) => {
+    if (!payloads?.length) return
+
+    const failures = []
+    let added = 0
+    for (const payload of payloads) {
+      try {
+        await apiCall('nodes', { method: 'POST', body: JSON.stringify(payload) })
+        added += 1
+      } catch (error) {
+        failures.push(`${payload.tag}: ${error.message}`)
+      }
+    }
+
+    if (added > 0) {
+      await fetchNodes()
+      clearDelays()
+      showToast(`已添加 ${added} 个节点`, 'success')
+    }
+    if (failures.length > 0) {
+      const shown = failures.slice(0, 2).join('; ')
+      const more = failures.length > 2 ? ` 等 ${failures.length} 项` : ''
+      showToast(`导入失败: ${shown}${more}`, 'error')
+    } else {
+      closeNodeModal()
+    }
+  }, [apiCall, clearDelays, closeNodeModal, fetchNodes, showToast])
+
   const handleDeleteNode = useCallback(async (tag) => {
     try {
       await apiCall('nodes', { method: 'DELETE', body: JSON.stringify({ tag }) }, 'deleteNode')
@@ -435,6 +464,7 @@ export default function App() {
           loading={loadingAction === 'addNode'}
           onClose={closeNodeModal}
           onSubmit={handleAddNode}
+          onImport={handleImportNodes}
         />
       </div>
     )
@@ -519,7 +549,8 @@ export default function App() {
         setForm={setNodeForm} 
         loading={loadingAction === 'addNode'} 
         onClose={closeNodeModal} 
-        onSubmit={handleAddNode} 
+        onSubmit={handleAddNode}
+        onImport={handleImportNodes}
       />
 
       <ConnectionsModal
