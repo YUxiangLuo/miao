@@ -332,6 +332,10 @@ button {
     overflow-y: auto;
     min-height: 0;
 }
+.left-column > *,
+.right-column > * {
+    flex-shrink: 0;
+}
 .section-header {
     display: flex;
     align-items: center;
