@@ -1936,3 +1936,11 @@ button {
 .list-row-title .rule-field-chip {
     margin-right: 6px;
 }
+
+/* VPS 部署 tab */
+.vps-deploy-hint {
+    padding: 0 2px;
+    color: var(--text-subtle);
+    font-size: 0.8125rem;
+    line-height: 1.5;
+}

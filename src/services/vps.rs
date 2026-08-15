@@ -18,6 +18,81 @@ const SSH_CONNECT_TIMEOUT_SECS: &str = "10";
 const SSH_PROBE_TIMEOUT: Duration = Duration::from_secs(30);
 const SSH_PROVISION_TIMEOUT: Duration = Duration::from_secs(300);
 
+/// SSH_ASKPASS 临时文件:密码写 600 权限文件,askpass 脚本(700)cat 它。
+/// 密码不出现在进程 argv;文件随作用域删除,不落配置。
+/// (OpenSSH >= 8.4 的 SSH_ASKPASS_REQUIRE=force,无需 sshpass 依赖)
+struct AskpassFiles {
+    script_path: std::path::PathBuf,
+    password_path: std::path::PathBuf,
+}
+
+impl AskpassFiles {
+    fn new(password: &str) -> AppResult<Self> {
+        use std::os::unix::fs::PermissionsExt;
+
+        let id = random_password()?;
+        let temp_dir = std::env::temp_dir();
+        let script_path = temp_dir.join(format!("miao-askpass-{id}.sh"));
+        let password_path = temp_dir.join(format!("miao-askpass-{id}.pw"));
+        let cleanup_script = script_path.clone();
+        let cleanup_password = password_path.clone();
+
+        let result = (|| -> AppResult<Self> {
+            std::fs::write(&password_path, password)
+                .map_err(|e| AppError::context("Failed to write askpass password file", e))?;
+            std::fs::set_permissions(&password_path, std::fs::Permissions::from_mode(0o600))
+                .map_err(|e| AppError::context("Failed to secure askpass password file", e))?;
+            std::fs::write(
+                &script_path,
+                format!("#!/bin/sh\ncat \"{}\"\n", password_path.display()),
+            )
+            .map_err(|e| AppError::context("Failed to write askpass script", e))?;
+            std::fs::set_permissions(&script_path, std::fs::Permissions::from_mode(0o700))
+                .map_err(|e| AppError::context("Failed to secure askpass script", e))?;
+            Ok(Self {
+                script_path,
+                password_path,
+            })
+        })();
+
+        if result.is_err() {
+            let _ = std::fs::remove_file(&cleanup_script);
+            let _ = std::fs::remove_file(&cleanup_password);
+        }
+        result
+    }
+}
+
+impl Drop for AskpassFiles {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.script_path);
+        let _ = std::fs::remove_file(&self.password_path);
+    }
+}
+
+/// 构建 ssh 命令;密码认证通过 env 注入 askpass,密码不进 argv
+fn build_ssh_command(
+    vps_ip: &str,
+    askpass: &AskpassFiles,
+    script_args: &[&str],
+) -> tokio::process::Command {
+    let mut command = tokio::process::Command::new("ssh");
+    command
+        .env("SSH_ASKPASS", &askpass.script_path)
+        .env("SSH_ASKPASS_REQUIRE", "force")
+        // ssh 只在认定无 tty 且设置了 DISPLAY 时才走 askpass
+        .env("DISPLAY", "localhost:0")
+        .args([
+            "-o",
+            "StrictHostKeyChecking=accept-new",
+            "-o",
+            &format!("ConnectTimeout={SSH_CONNECT_TIMEOUT_SECS}"),
+        ])
+        .arg(format!("root@{vps_ip}"))
+        .args(script_args);
+    command
+}
+
 #[derive(Debug)]
 struct HysteriaCredentials {
     password: String,
@@ -34,49 +109,44 @@ enum RemoteHysteriaState {
     NeedsCleanup,
 }
 
-pub fn has_manual_node_for_vps(config: &Config) -> bool {
-    let Some(vps_ip) = config
-        .vps_ip
-        .as_deref()
-        .map(str::trim)
-        .filter(|v| !v.is_empty())
-    else {
-        return false;
-    };
-
-    config.nodes.iter().any(|node| {
-        parse_node_json(node)
-            .map(|(info, _)| info.server == vps_ip)
-            .unwrap_or(false)
+/// 找到 server 与给定 VPS IP 匹配的手动节点 tag
+pub fn node_tag_for_vps(config: &Config, vps_ip: &str) -> Option<String> {
+    config.nodes.iter().find_map(|node| {
+        parse_node_json(node).ok().and_then(|(info, _)| {
+            if info.server == vps_ip {
+                Some(info.tag)
+            } else {
+                None
+            }
+        })
     })
 }
 
-pub async fn ensure_vps_hysteria_node(config: &mut Config, config_path: &Path) -> AppResult<bool> {
-    let Some(vps_ip) = config
-        .vps_ip
-        .as_deref()
-        .map(str::trim)
-        .filter(|v| !v.is_empty())
-    else {
-        return Ok(false);
-    };
-    let vps_ip = vps_ip.to_string();
+/// 通过 root 密码 SSH 在 VPS 上部署(或取回已有)Hysteria2 节点并写回配置。
+/// 密码只用于本次部署,不会被持久化。
+pub async fn deploy_vps_node(
+    config: &mut Config,
+    config_path: &Path,
+    vps_ip: &str,
+    root_password: &str,
+) -> AppResult<bool> {
+    let vps_ip = vps_ip.trim().to_string();
 
     Validator::server_address(&vps_ip)
-        .map_err(|e| AppError::message(format!("Invalid vps_ip '{}': {}", vps_ip, e)))?;
+        .map_err(|e| AppError::message(format!("Invalid VPS address '{}': {}", vps_ip, e)))?;
 
-    if config.vps_ip.as_deref() != Some(vps_ip.as_str()) {
-        config.vps_ip = Some(vps_ip.clone());
-    }
-
-    if has_manual_node_for_vps(config) {
-        info!(vps_ip = %vps_ip, "Manual node for vps_ip already exists, skipping VPS provisioning");
+    if node_tag_for_vps(config, &vps_ip).is_some() {
+        info!(vps_ip = %vps_ip, "Manual node for VPS already exists, skipping provisioning");
         return Ok(false);
     }
 
     let fallback_obfs_password = random_password()?;
-    let credentials = match probe_remote_hysteria_credentials(&vps_ip, &fallback_obfs_password)
-        .await
+    let credentials = match probe_remote_hysteria_credentials(
+        &vps_ip,
+        &fallback_obfs_password,
+        root_password,
+    )
+    .await
     {
         Ok(RemoteHysteriaState::Reusable(credentials)) => {
             info!(vps_ip = %vps_ip, port = HYSTERIA_PORT, obfs = HYSTERIA_OBFS_TYPE, "Recovered existing VPS Hysteria2 node from remote config");
@@ -88,7 +158,7 @@ pub async fn ensure_vps_hysteria_node(config: &mut Config, config_path: &Path) -
                 obfs_password: fallback_obfs_password,
             };
             info!(vps_ip = %vps_ip, port = HYSTERIA_PORT, obfs = HYSTERIA_OBFS_TYPE, "Provisioning Hysteria2 server over SSH");
-            provision_remote_hysteria(&vps_ip, &credentials).await?;
+            provision_remote_hysteria(&vps_ip, &credentials, root_password).await?;
             credentials
         }
         Ok(RemoteHysteriaState::NeedsCleanup) => {
@@ -97,19 +167,11 @@ pub async fn ensure_vps_hysteria_node(config: &mut Config, config_path: &Path) -
                 obfs_password: fallback_obfs_password,
             };
             warn!(vps_ip = %vps_ip, port = HYSTERIA_PORT, obfs = HYSTERIA_OBFS_TYPE, "Existing Hysteria2 service is not deployed by Miao; cleaning up and re-provisioning");
-            provision_remote_hysteria(&vps_ip, &credentials).await?;
+            provision_remote_hysteria(&vps_ip, &credentials, root_password).await?;
             credentials
         }
-        Err(e) => {
-            warn!(vps_ip = %vps_ip, error = %e, "Failed to probe existing Hysteria2 config, falling back to provisioning");
-            let credentials = HysteriaCredentials {
-                password: random_password()?,
-                obfs_password: fallback_obfs_password,
-            };
-            info!(vps_ip = %vps_ip, port = HYSTERIA_PORT, obfs = HYSTERIA_OBFS_TYPE, "Provisioning Hysteria2 server over SSH");
-            provision_remote_hysteria(&vps_ip, &credentials).await?;
-            credentials
-        }
+        // 探针失败(认证失败/不可达)直接报错,不盲目重装
+        Err(e) => return Err(e),
     };
 
     config.nodes.push(build_hysteria_node_json(
@@ -189,27 +251,19 @@ fn random_password() -> AppResult<String> {
 async fn probe_remote_hysteria_credentials(
     vps_ip: &str,
     fallback_obfs_password: &str,
+    root_password: &str,
 ) -> AppResult<RemoteHysteriaState> {
-    let target = format!("root@{}", vps_ip);
-    let mut child = tokio::process::Command::new("ssh")
-        .args([
-            "-o",
-            "BatchMode=yes",
-            "-o",
-            "StrictHostKeyChecking=accept-new",
-            "-o",
-            &format!("ConnectTimeout={SSH_CONNECT_TIMEOUT_SECS}"),
-            &target,
-            "bash",
-            "-s",
-            "--",
-            fallback_obfs_password,
-        ])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| AppError::context("Failed to start ssh for VPS config probe", e))?;
+    let askpass = AskpassFiles::new(root_password)?;
+    let mut child = build_ssh_command(
+        vps_ip,
+        &askpass,
+        &["bash", "-s", "--", fallback_obfs_password],
+    )
+    .stdin(Stdio::piped())
+    .stdout(Stdio::piped())
+    .stderr(Stdio::piped())
+    .spawn()
+    .map_err(|e| AppError::context("Failed to start ssh for VPS config probe", e))?;
 
     if let Some(mut stdin) = child.stdin.take() {
         stdin
@@ -320,28 +374,25 @@ fn parse_probe_credentials(stdout: &[u8]) -> AppResult<HysteriaCredentials> {
 async fn provision_remote_hysteria(
     vps_ip: &str,
     credentials: &HysteriaCredentials,
+    root_password: &str,
 ) -> AppResult<()> {
-    let target = format!("root@{}", vps_ip);
-    let mut child = tokio::process::Command::new("ssh")
-        .args([
-            "-o",
-            "BatchMode=yes",
-            "-o",
-            "StrictHostKeyChecking=accept-new",
-            "-o",
-            &format!("ConnectTimeout={SSH_CONNECT_TIMEOUT_SECS}"),
-            &target,
+    let askpass = AskpassFiles::new(root_password)?;
+    let mut child = build_ssh_command(
+        vps_ip,
+        &askpass,
+        &[
             "bash",
             "-s",
             "--",
             &credentials.password,
             &credentials.obfs_password,
-        ])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit())
-        .spawn()
-        .map_err(|e| AppError::context("Failed to start ssh for VPS provisioning", e))?;
+        ],
+    )
+    .stdin(Stdio::piped())
+    .stdout(Stdio::inherit())
+    .stderr(Stdio::inherit())
+    .spawn()
+    .map_err(|e| AppError::context("Failed to start ssh for VPS provisioning", e))?;
 
     if let Some(mut stdin) = child.stdin.take() {
         stdin
@@ -572,13 +623,41 @@ systemctl is-active --quiet "$SERVICE"
 #[cfg(test)]
 mod tests {
     use super::{
-        build_hysteria_node_json, has_manual_node_for_vps, parse_probe_credentials,
-        remote_hysteria_probe_script, remote_hysteria_script, vps_node_tag, HYSTERIA_PORT,
+        build_hysteria_node_json, build_ssh_command, node_tag_for_vps, parse_probe_credentials,
+        remote_hysteria_probe_script, remote_hysteria_script, vps_node_tag, AskpassFiles,
+        HYSTERIA_PORT,
     };
     use crate::models::Config;
+    use std::ffi::OsStr;
+
+    fn command_has_env(cmd: &std::process::Command, key: &str, expected: &str) -> bool {
+        cmd.get_envs()
+            .any(|(k, v)| k == OsStr::new(key) && v == Some(OsStr::new(expected)))
+    }
 
     #[test]
-    fn detects_existing_manual_node_for_vps_ip() {
+    fn password_auth_uses_askpass_and_keeps_password_out_of_argv() {
+        let password = "s3cret-root-password";
+        let askpass = AskpassFiles::new(password).unwrap();
+        let cmd = build_ssh_command("203.0.113.10", &askpass, &["bash", "-s"]);
+        let std_cmd = cmd.as_std();
+
+        assert!(command_has_env(std_cmd, "SSH_ASKPASS_REQUIRE", "force"));
+        assert!(command_has_env(std_cmd, "DISPLAY", "localhost:0"));
+        assert!(std_cmd
+            .get_envs()
+            .any(|(k, v)| k == "SSH_ASKPASS" && v.is_some()));
+        // 密码不出现在进程参数里
+        assert!(!std_cmd.get_args().any(|a| a == password));
+
+        // askpass 脚本内容是读取密码文件,而不是内嵌密码
+        let script = std::fs::read_to_string(&askpass.script_path).unwrap();
+        assert!(script.contains("cat"));
+        assert!(!script.contains(password));
+    }
+
+    #[test]
+    fn node_tag_lookup_matches_by_server_ip() {
         let config = Config {
             port: None,
             subs: vec![],
@@ -587,24 +666,13 @@ mod tests {
             ],
             custom_rules: vec![],
             route_mode: Default::default(),
-            vps_ip: Some("203.0.113.10".to_string()),
         };
 
-        assert!(has_manual_node_for_vps(&config));
-    }
-
-    #[test]
-    fn ignores_invalid_manual_nodes_when_checking_vps_ip() {
-        let config = Config {
-            port: None,
-            subs: vec![],
-            nodes: vec!["not-json".to_string()],
-            custom_rules: vec![],
-            route_mode: Default::default(),
-            vps_ip: Some("203.0.113.10".to_string()),
-        };
-
-        assert!(!has_manual_node_for_vps(&config));
+        assert_eq!(
+            node_tag_for_vps(&config, "203.0.113.10"),
+            Some("manual".to_string())
+        );
+        assert_eq!(node_tag_for_vps(&config, "198.51.100.1"), None);
     }
 
     #[test]

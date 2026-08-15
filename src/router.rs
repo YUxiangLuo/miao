@@ -14,6 +14,7 @@ use crate::handlers::{
     static_assets::{serve_favicon, serve_index},
     subs::{add_sub, delete_sub, get_subs, refresh_subs},
     version::{get_version, upgrade},
+    vps::deploy_vps,
 };
 use crate::state::AppState;
 
@@ -40,6 +41,7 @@ pub fn build_router(app_state: Arc<AppState>) -> Router {
         .route("/api/rules", get(get_rules))
         .route("/api/rules", post(add_rule))
         .route("/api/rules", delete(delete_rule))
+        .route("/api/vps/deploy", post(deploy_vps))
         .route("/api/last-proxy", post(set_last_proxy))
         .with_state(app_state)
 }
@@ -66,7 +68,6 @@ mod tests {
             nodes: vec![],
             custom_rules: vec![],
             route_mode: Default::default(),
-            vps_ip: None,
         })
         .await;
 
@@ -85,7 +86,6 @@ mod tests {
             nodes: vec![],
             custom_rules: vec![],
             route_mode: Default::default(),
-            vps_ip: None,
         })
         .await;
 
@@ -111,7 +111,6 @@ mod tests {
             nodes: vec![],
             custom_rules: vec![],
             route_mode: Default::default(),
-            vps_ip: None,
         })
         .await;
 
@@ -137,7 +136,6 @@ mod tests {
             ],
             custom_rules: vec![],
             route_mode: Default::default(),
-            vps_ip: None,
         })
         .await;
 
@@ -163,7 +161,6 @@ mod tests {
             nodes: vec![],
             custom_rules: vec![],
             route_mode: Default::default(),
-            vps_ip: None,
         })
         .await;
 
@@ -208,7 +205,6 @@ mod tests {
             nodes: vec![],
             custom_rules: vec![],
             route_mode: Default::default(),
-            vps_ip: None,
         })
         .await;
 
@@ -235,7 +231,6 @@ mod tests {
             nodes: vec![],
             custom_rules: vec![],
             route_mode: Default::default(),
-            vps_ip: None,
         })
         .await;
 
@@ -264,7 +259,6 @@ mod tests {
             ],
             custom_rules: vec![],
             route_mode: Default::default(),
-            vps_ip: None,
         })
         .await;
 
@@ -298,7 +292,6 @@ mod tests {
             ],
             custom_rules: vec![],
             route_mode: Default::default(),
-            vps_ip: None,
         })
         .await;
 
@@ -325,7 +318,6 @@ mod tests {
             nodes: vec![],
             custom_rules: vec![],
             route_mode: Default::default(),
-            vps_ip: None,
         })
         .await;
 
@@ -355,7 +347,6 @@ mod tests {
             nodes: vec![],
             custom_rules: vec![],
             route_mode: Default::default(),
-            vps_ip: None,
         })
         .await;
 
@@ -384,7 +375,6 @@ mod tests {
                 r#"{"process_name":"curl","action":"route","outbound":"direct"}"#.to_string(),
             ],
             route_mode: Default::default(),
-            vps_ip: None,
         })
         .await;
 
@@ -414,7 +404,6 @@ mod tests {
                 r#"{"rule_set":["custom"],"action":"route","outbound":"proxy"}"#.to_string(),
             ],
             route_mode: Default::default(),
-            vps_ip: None,
         })
         .await;
 
@@ -435,5 +424,85 @@ mod tests {
             json["data"][1]["raw"],
             r#"{"rule_set":["custom"],"action":"route","outbound":"proxy"}"#
         );
+    }
+
+    #[tokio::test]
+    async fn router_rejects_vps_deploy_with_invalid_ip() {
+        let app = test_app(Config {
+            port: None,
+            subs: vec![],
+            nodes: vec![],
+            custom_rules: vec![],
+            route_mode: Default::default(),
+        })
+        .await;
+
+        let response = app
+            .oneshot(json_request(
+                "POST",
+                "/api/vps/deploy",
+                json!({ "ip": "bad ip", "password": "secret" }),
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let json = response_json(response).await;
+        assert_eq!(json["success"], false);
+    }
+
+    #[tokio::test]
+    async fn router_rejects_vps_deploy_with_empty_password() {
+        let app = test_app(Config {
+            port: None,
+            subs: vec![],
+            nodes: vec![],
+            custom_rules: vec![],
+            route_mode: Default::default(),
+        })
+        .await;
+
+        let response = app
+            .oneshot(json_request(
+                "POST",
+                "/api/vps/deploy",
+                json!({ "ip": "203.0.113.10", "password": "" }),
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let json = response_json(response).await;
+        assert_eq!(json["success"], false);
+        assert_eq!(json["message"], "root 密码不能为空");
+    }
+
+    #[tokio::test]
+    async fn router_vps_deploy_returns_existing_node_without_ssh() {
+        let app = test_app(Config {
+            port: None,
+            subs: vec![],
+            nodes: vec![
+                r#"{"type":"hysteria2","tag":"vps-node","server":"203.0.113.10","server_port":543,"password":"secret","tls":{"enabled":true,"insecure":true}}"#.to_string(),
+            ],
+            custom_rules: vec![],
+            route_mode: Default::default(),
+        })
+        .await;
+
+        let response = app
+            .oneshot(json_request(
+                "POST",
+                "/api/vps/deploy",
+                json!({ "ip": "203.0.113.10", "password": "any" }),
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let json = response_json(response).await;
+        assert_eq!(json["success"], true);
+        assert_eq!(json["data"]["tag"], "vps-node");
+        assert!(json["message"].as_str().unwrap().contains("已存在"));
     }
 }

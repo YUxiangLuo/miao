@@ -833,7 +833,6 @@ mod tests {
             ],
             custom_rules: vec![],
             route_mode: Default::default(),
-            vps_ip: None,
         };
 
         let (outbounds, names) = collect_manual_outbounds(&config);
@@ -855,7 +854,6 @@ mod tests {
             ],
             custom_rules: vec![],
             route_mode: Default::default(),
-            vps_ip: None,
         };
 
         let (outbounds, names) = collect_manual_outbounds(&config);
@@ -879,7 +877,6 @@ mod tests {
                 "not-json".to_string(),
             ],
             route_mode: Default::default(),
-            vps_ip: None,
         };
 
         let my_outbounds = vec![json!({
@@ -936,7 +933,6 @@ mod tests {
                     .to_string(),
             ],
             route_mode: RouteMode::Global,
-            vps_ip: None,
         };
 
         let my_outbounds = vec![json!({
@@ -1070,7 +1066,6 @@ mod tests {
             nodes: vec![],
             custom_rules: vec![],
             route_mode: RouteMode::Global,
-            vps_ip: None,
         };
 
         let runtime_config = config_with_route_override(&config, None);
@@ -1086,7 +1081,6 @@ mod tests {
             nodes: vec![],
             custom_rules: vec![],
             route_mode: Default::default(),
-            vps_ip: None,
         };
 
         let my_outbounds = vec![json!({
@@ -1144,7 +1138,6 @@ mod tests {
             nodes: vec![],
             custom_rules: vec![],
             route_mode: Default::default(),
-            vps_ip: None,
         };
 
         let my_outbounds = vec![
@@ -1195,7 +1188,6 @@ mod tests {
             nodes: vec![],
             custom_rules: vec![],
             route_mode: Default::default(),
-            vps_ip: None,
         };
 
         let err = build_sing_box_config(&config, vec![], vec![], vec![], vec![]).unwrap_err();
@@ -1214,7 +1206,6 @@ mod tests {
             nodes: vec![],
             custom_rules: vec![],
             route_mode: Default::default(),
-            vps_ip: None,
         };
 
         let (outbounds, names) = collect_manual_outbounds(&config);
@@ -1235,7 +1226,6 @@ mod tests {
             ],
             custom_rules: vec![],
             route_mode: Default::default(),
-            vps_ip: None,
         };
 
         let (outbounds, names) = collect_manual_outbounds(&config);
@@ -1253,7 +1243,6 @@ mod tests {
             nodes: vec![],
             custom_rules: vec![],
             route_mode: Default::default(),
-            vps_ip: None,
         };
 
         let my_outbounds = vec![
@@ -1290,7 +1279,6 @@ mod tests {
             nodes: vec![],
             custom_rules: vec![],
             route_mode: Default::default(),
-            vps_ip: None,
         };
 
         let my_outbounds = vec![json!({
@@ -1323,7 +1311,6 @@ mod tests {
             nodes: vec![],
             custom_rules: vec![],
             route_mode: Default::default(),
-            vps_ip: None,
         };
 
         let my_outbounds = vec![json!({
@@ -1397,7 +1384,6 @@ mod tests {
             nodes: vec![],
             custom_rules: vec![],
             route_mode: Default::default(),
-            vps_ip: None,
         };
 
         let built = build_sing_box_config(
@@ -1433,7 +1419,6 @@ mod tests {
                 "".to_string(),
             ],
             route_mode: Default::default(),
-            vps_ip: None,
         };
 
         let my_outbounds = vec![json!({
@@ -1473,7 +1458,6 @@ mod tests {
             nodes: vec![],
             custom_rules: vec![],
             route_mode: Default::default(),
-            vps_ip: None,
         };
 
         save_config_to(&config_path, &config).await.unwrap();
@@ -1513,7 +1497,6 @@ mod tests {
             nodes: vec![],
             custom_rules: vec![],
             route_mode: Default::default(),
-            vps_ip: None,
         };
         save_config_to(&config_path, &config).await.unwrap();
 
@@ -1538,7 +1521,6 @@ mod tests {
             nodes: vec![],
             custom_rules: vec![],
             route_mode: Default::default(),
-            vps_ip: None,
         };
 
         save_config_to(&config_path, &config).await.unwrap();

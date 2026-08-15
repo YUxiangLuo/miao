@@ -350,6 +350,25 @@ export default function App() {
     }
   }, [apiCall, clearDelays, closeNodeModal, fetchNodes, showToast])
 
+  const handleDeployVps = useCallback(async ({ ip, password }) => {
+    try {
+      const payload = await apiCall(
+        'vps/deploy',
+        { method: 'POST', body: JSON.stringify({ ip, password }) },
+        'deployVps',
+      )
+      closeNodeModal()
+      await fetchNodes()
+      clearDelays()
+      // 后端 message 已区分「已添加」与「已存在」并附带 tag
+      showToast(payload.message, 'success')
+      return true
+    } catch (error) {
+      showToast(error.message, 'error')
+      return false
+    }
+  }, [apiCall, clearDelays, closeNodeModal, fetchNodes, showToast])
+
   const handleDeleteNode = useCallback(async (tag) => {
     try {
       await apiCall('nodes', { method: 'DELETE', body: JSON.stringify({ tag }) }, 'deleteNode')
@@ -496,6 +515,7 @@ export default function App() {
           onClose={closeNodeModal}
           onSubmit={handleAddNode}
           onImport={handleImportNodes}
+          onDeployVps={handleDeployVps}
         />
       </div>
     )
@@ -590,6 +610,7 @@ export default function App() {
         onClose={closeNodeModal} 
         onSubmit={handleAddNode}
         onImport={handleImportNodes}
+          onDeployVps={handleDeployVps}
       />
 
       <ConnectionsModal

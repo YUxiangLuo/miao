@@ -68,7 +68,7 @@ sudo bash remove.sh        # 交互确认;-y 跳过确认
 
 1. **订阅**——粘贴 Clash YAML 格式订阅链接
 2. **粘贴分享链接**——`hysteria2://` `hy2://` `ss://` `vmess://` `vless://` `trojan://` `tuic://` `anytls://`，每行一条，实时预览、批量导入
-3. **VPS 一键部署**——在配置里写一行 `vps_ip`，自动通过 SSH 在远端部署 Hysteria2 并把节点写回本地（需当前 root 环境可免密 SSH 登录目标机，可先跑 `sudo ssh -o BatchMode=yes root@<ip> true` 验证）
+3. **VPS 一键部署**——「添加节点 → VPS 部署」里填入 VPS 的 IP 和 root 密码，自动在远端部署 Hysteria2 并把节点写回本地；密码仅用于本次部署，不会被保存
 
 ## 它是怎么工作的
 
@@ -100,8 +100,6 @@ nodes:                     # 手动节点(sing-box outbound JSON)
 
 custom_rules:              # 可选:sing-box 路由规则,优先于内置分流
   - '{"domain_suffix":"example.com","action":"route","outbound":"direct"}'
-
-# vps_ip: "203.0.113.10"   # 可选:自动部署 Hysteria2,见上
 ```
 
 > 注意：面板里的分流/全局模式是会话级状态，重启后总是回到规则分流，不会写入配置文件。

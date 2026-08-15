@@ -92,4 +92,20 @@ describe('NodeModal link import', () => {
     expect(details).not.toHaveAttribute('open')
     expect(screen.getByLabelText(/SNI/)).toBeInTheDocument()
   })
+
+  it('deploys a vps with ip and root password', async () => {
+    const user = userEvent.setup()
+    const onDeployVps = vi.fn().mockResolvedValue(true)
+    renderModal({ onDeployVps })
+
+    await user.click(screen.getByRole('button', { name: 'VPS 部署' }))
+    const passwordInput = screen.getByLabelText('root 密码')
+    expect(passwordInput).toHaveAttribute('type', 'password')
+
+    await user.type(screen.getByLabelText('VPS IP 地址'), '203.0.113.10')
+    await user.type(passwordInput, 'rootpass')
+    await user.click(screen.getByRole('button', { name: '开始部署' }))
+
+    expect(onDeployVps).toHaveBeenCalledWith({ ip: '203.0.113.10', password: 'rootpass' })
+  })
 })

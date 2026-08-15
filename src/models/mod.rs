@@ -6,7 +6,7 @@ pub mod version;
 
 pub use api::{
     ApiResponse, ConnectivityResult, DeleteRuleRequest, RouteModeRequest, RuleInfo, RuleRequest,
-    StatusData, SubRequest, SubStatus,
+    StatusData, SubRequest, SubStatus, VpsDeployRequest, VpsDeployResponse,
 };
 pub use config::{Config, RouteMode, DEFAULT_PORT};
 pub use node::{DeleteNodeRequest, Hysteria2, Hysteria2Obfs, NodeInfo, NodeRequest, Tls};

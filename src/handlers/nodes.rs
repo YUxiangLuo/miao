@@ -392,7 +392,6 @@ mod tests {
             ],
             custom_rules: vec![],
             route_mode: Default::default(),
-            vps_ip: None,
         });
 
         let Json(response) = get_nodes(State(state)).await;
@@ -472,7 +471,6 @@ mod tests {
             ],
             custom_rules: vec![],
             route_mode: Default::default(),
-            vps_ip: None,
         });
 
         let Json(response) = get_nodes(State(state)).await;
@@ -502,7 +500,6 @@ mod tests {
             ],
             custom_rules: vec![],
             route_mode: Default::default(),
-            vps_ip: None,
         });
 
         let Json(response) = get_nodes(State(state)).await;
@@ -521,7 +518,6 @@ mod tests {
             nodes: vec![],
             custom_rules: vec![],
             route_mode: Default::default(),
-            vps_ip: None,
         });
 
         let Json(response) = get_nodes(State(state)).await;
@@ -544,7 +540,6 @@ mod tests {
             ],
             custom_rules: vec![],
             route_mode: Default::default(),
-            vps_ip: None,
         });
 
         let Json(response) = get_nodes(State(state)).await;
@@ -566,7 +561,6 @@ mod tests {
             ],
             custom_rules: vec![],
             route_mode: Default::default(),
-            vps_ip: None,
         });
 
         let Json(response) = get_nodes(State(state)).await;
@@ -593,7 +587,6 @@ mod tests {
             ],
             custom_rules: vec![],
             route_mode: Default::default(),
-            vps_ip: None,
         });
 
         let Json(response) = get_nodes(State(state)).await;
@@ -617,7 +610,6 @@ mod tests {
             ],
             custom_rules: vec![],
             route_mode: Default::default(),
-            vps_ip: None,
         });
 
         let Json(response) = get_nodes(State(state)).await;
@@ -640,7 +632,6 @@ mod tests {
             ],
             custom_rules: vec![],
             route_mode: Default::default(),
-            vps_ip: None,
         });
 
         let Json(response) = get_nodes(State(state)).await;

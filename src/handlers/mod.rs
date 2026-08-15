@@ -6,3 +6,4 @@ pub mod service;
 pub mod static_assets;
 pub mod subs;
 pub mod version;
+pub mod vps;

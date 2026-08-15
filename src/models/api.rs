@@ -75,6 +75,17 @@ pub struct DeleteRuleRequest {
     pub raw: String,
 }
 
+#[derive(Deserialize)]
+pub struct VpsDeployRequest {
+    pub ip: String,
+    pub password: String,
+}
+
+#[derive(Serialize)]
+pub struct VpsDeployResponse {
+    pub tag: String,
+}
+
 /// 自定义规则展示项;手写的任意 JSON 规则可能不是结构化单条件,以 raw 兜底
 #[derive(Serialize)]
 pub struct RuleInfo {

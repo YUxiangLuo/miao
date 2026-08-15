@@ -256,7 +256,6 @@ mod tests {
             nodes: vec![],
             custom_rules: vec![],
             route_mode: Default::default(),
-            vps_ip: None,
         });
 
         let axum::response::Json(response) = get_status(State(state)).await;
@@ -277,7 +276,6 @@ mod tests {
             nodes: vec![],
             custom_rules: vec![],
             route_mode: RouteMode::Rule,
-            vps_ip: None,
         });
         *state.route_mode_override.write().await = Some(RouteMode::Global);
 
@@ -296,7 +294,6 @@ mod tests {
             nodes: vec![],
             custom_rules: vec![],
             route_mode: RouteMode::Global,
-            vps_ip: None,
         });
 
         let axum::response::Json(response) = get_status(State(state)).await;

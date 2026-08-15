@@ -21,7 +21,6 @@ use services::{
     openwrt::check_and_install_openwrt_dependencies,
     proxy::restore_last_proxy,
     singbox::{extract_sing_box, start_sing_internal, stop_sing_internal},
-    vps::ensure_vps_hysteria_node,
 };
 use state::AppState;
 
@@ -208,18 +207,7 @@ async fn main() -> AppResult<()> {
         // Serialize startup provisioning/config generation with every API-driven
         // configuration mutation so an early request cannot overwrite startup state.
         let _config_update = state_for_init.config_update.lock().await;
-        let mut config = config;
-
-        match ensure_vps_hysteria_node(&mut config, &state_for_init.config_path).await {
-            Ok(_) => {
-                *state_for_init.config.write().await = config.clone();
-            }
-            Err(e) => {
-                error!(error = %e, "Failed to provision VPS from vps_ip");
-                *state_for_init.config_warning.lock().await =
-                    Some(format!("VPS 自动部署失败: {}", e));
-            }
-        }
+        let config = config;
 
         if config.subs.is_empty() && config.nodes.is_empty() {
             info!("No subscriptions or nodes configured, waiting for onboarding");
