@@ -11,7 +11,7 @@
 
 在 Linux 或路由器上搭一个分流代理，通常意味着：装内核、写配置、调防火墙、再找个面板。Miao 把这一切打包成**单个可执行文件**——内嵌 sing-box 内核、分流规则与 Web 面板，下载、`sudo` 运行、浏览器自动打开，结束。
 
-![screenshot](https://github.com/user-attachments/assets/172530bf-cb7e-4482-8dfd-ea8146c33eb0)
+![screenshot](docs/screenshot.png)
 
 ## 30 秒上手
 
@@ -57,8 +57,10 @@ sudo bash remove.sh        # 交互确认;-y 跳过确认
 | --- | --- |
 | 服务状态 | 启停 sing-box、实时上下行速率、PID 与运行时长 |
 | 代理模式 | 规则分流（国内直连 / 国外代理）⇄ 全局代理，一键切换 |
-| 节点选择 | 网格化节点列表，单个/批量延迟测试，点击即切换 |
+| 节点选择 | 网格化节点列表，单个/批量延迟测试，点击即切换，重启后自动恢复上次选择 |
 | 链接统计 | 活动连接按站点聚合：实时速度、累计流量，展开可看每条连接明细 |
+| 自定义规则 | 域名/IP/端口/进程名/进程路径等条件，目标可直连/代理/拦截/**指定节点**；节点失效自动跳过并在列表标记提醒 |
+| 去广告 | 内嵌广告规则集，连接层拦截，一键开关 |
 | 手动节点 | 粘贴分享链接批量导入，或手动填写（高级参数折叠收纳） |
 | 订阅管理 | 添加/刷新 Clash YAML 订阅，失败自动回退缓存配置 |
 | 版本升级 | 检测新版本并面板内一键自升级 |
@@ -82,7 +84,7 @@ sudo bash remove.sh        # 交互确认;-y 跳过确认
 - 透明代理由 sing-box 的 TUN inbound 完成（`auto_route` + `auto_redirect`)，不碰 iptables
 - DNS 双轨：国外域名经代理走 Cloudflare DoH（https://1.1.1.1/dns-query），国内直连（223.5.5.5）；缓存落在运行时 `cache.db`，TTL 过期后 8 小时内先返回旧值再后台刷新
 - 面板通过 Clash API 切换节点、读取连接统计；配置变更先 `sing-box check` 校验再热重启
-- 运行时文件在 `/tmp/miao-sing-box`，重启即清，不留残渣
+- 运行时文件在 `/tmp/miao-sing-box`；内核与规则集每次启动重新释放，保证与当前二进制一致
 
 ## 配置参考（进阶）
 
@@ -99,6 +101,8 @@ nodes:                     # 手动节点(sing-box outbound JSON)
 
 custom_rules:              # 可选:sing-box 路由规则,优先于内置分流,全局代理模式下仍生效
   - '{"domain_suffix":"example.com","action":"route","outbound":"direct"}'
+  # 进程级指定出口:让 qbittorrent 的流量固定走「香港节点」
+  - '{"process_name":"qbittorrent","action":"route","outbound":"香港节点"}'
   # outbound 除 proxy/direct 外也可填节点 tag(面板「添加规则」可直接选进程名/路径 + 指定节点);
   # 节点日后消失时该规则会在生成配置时被跳过,不阻塞服务,面板规则列表会有失效标记与 toast 提醒
 
