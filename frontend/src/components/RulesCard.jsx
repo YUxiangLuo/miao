@@ -72,7 +72,7 @@ export function RulesCard({ rules, isInitializing, loadingAction, onAddRule, onD
             role="switch"
             aria-checked={adblockEnabled}
             aria-label="去广告"
-            title="拦截广告域名(DNS 与连接双重拦截,规则集内嵌)"
+            title="拦截广告域名(连接层拦截,规则集内嵌)"
             className={classNames('toggle-switch', adblockEnabled && 'on')}
             disabled={isInitializing || adblockPending}
             aria-busy={adblockPending || undefined}

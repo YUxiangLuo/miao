@@ -18,7 +18,8 @@ pub struct Config {
     pub nodes: Vec<String>,
     #[serde(default)]
     pub custom_rules: Vec<String>,
-    /// 去广告开关:命中内置广告规则集的域名在 DNS 和路由层双重 reject
+    /// 去广告开关:命中内置广告规则集的域名在路由层 reject;
+    /// 不拦 DNS,自定义放行规则才能对误拦域名生效
     #[serde(default)]
     pub adblock: bool,
     #[serde(default, skip_serializing, skip_deserializing)]

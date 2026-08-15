@@ -786,16 +786,6 @@ fn apply_route_mode(
             dns_rules.clear();
         }
     }
-
-    // DNS 层同步拦截广告域名,直接拒绝解析;全局模式下清空分流规则后同样保留
-    if adblock {
-        if let Some(dns_rules) = sing_box_config["dns"]["rules"].as_array_mut() {
-            dns_rules.insert(
-                0,
-                serde_json::json!({"rule_set": ["adblock"], "action": "reject"}),
-            );
-        }
-    }
 }
 
 fn get_config_template() -> serde_json::Value {
@@ -1484,11 +1474,13 @@ mod tests {
         assert_eq!(rules[3]["action"], "reject");
         assert_eq!(rules[4]["ip_is_private"], true);
 
+        // 广告拦截只在路由层;DNS 规则保持原样,自定义放行规则才能生效
         let dns_rules = built["dns"]["rules"].as_array().unwrap();
-        assert_eq!(dns_rules.len(), 3);
-        assert_eq!(dns_rules[0]["rule_set"], json!(["adblock"]));
-        assert_eq!(dns_rules[0]["action"], "reject");
-        assert_eq!(dns_rules[1]["domain_suffix"], json!(["hdslb.com"]));
+        assert_eq!(dns_rules.len(), 2);
+        assert_eq!(dns_rules[0]["domain_suffix"], json!(["hdslb.com"]));
+        assert!(dns_rules
+            .iter()
+            .all(|rule| rule.get("rule_set") != Some(&json!(["adblock"]))));
     }
 
     #[test]
@@ -1517,7 +1509,7 @@ mod tests {
         )
         .unwrap();
 
-        // 全局模式下分流规则被裁掉,但广告拦截保留
+        // 全局模式下分流规则被裁掉,广告拦截保留(仅路由层)
         let rules = built["route"]["rules"].as_array().unwrap();
         assert_eq!(rules.len(), 3);
         assert_eq!(rules[0]["action"], "sniff");
@@ -1525,9 +1517,9 @@ mod tests {
         assert_eq!(rules[2]["rule_set"], json!(["adblock"]));
         assert_eq!(rules[2]["action"], "reject");
 
+        // DNS 层不注入广告拦截
         let dns_rules = built["dns"]["rules"].as_array().unwrap();
-        assert_eq!(dns_rules.len(), 1);
-        assert_eq!(dns_rules[0]["rule_set"], json!(["adblock"]));
+        assert!(dns_rules.is_empty());
 
         assert!(built["route"]["rule_set"]
             .as_array()
