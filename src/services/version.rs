@@ -14,7 +14,7 @@ use tracing::{error, info, warn};
 
 use crate::error::{AppError, AppResult};
 use crate::models::{GitHubAsset, GitHubRelease, VersionInfo};
-use crate::services::singbox::{get_sing_box_home, stop_sing_internal};
+use crate::services::singbox::stop_sing_internal;
 use crate::state::{AppState, VersionCache};
 use crate::VERSION;
 
@@ -489,18 +489,10 @@ pub async fn upgrade_binary(state: &Arc<AppState>) -> AppResult<String> {
     );
 
     let new_version = release.tag_name.clone();
-    let sing_box_home = get_sing_box_home();
     tokio::spawn(async move {
         sleep(Duration::from_millis(500)).await;
 
-        let files_to_remove = ["sing-box", "chinaip.srs", "chinasite.srs"];
-        for file in &files_to_remove {
-            let path = sing_box_home.join(file);
-            if path.exists() {
-                info!("Removing old file: {:?}", path);
-                let _ = fs::remove_file(&path);
-            }
-        }
+        // 内嵌文件的刷新由新进程启动时的 extract_sing_box 无条件重释放保证,此处无需清理
 
         let args: Vec<String> = std::env::args().collect();
         let err = std::process::Command::new(&current_exe)

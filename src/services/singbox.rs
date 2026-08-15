@@ -22,6 +22,7 @@ compile_error!("Unsupported architecture: only x86_64 and aarch64 are supported.
 
 const IP_RULE_BINARY: &[u8] = include_bytes!("../../embedded/geoip-cn.srs");
 const SITE_RULE_BINARY: &[u8] = include_bytes!("../../embedded/geosite-geolocation-cn.srs");
+const ADBLOCK_RULE_BINARY: &[u8] = include_bytes!("../../embedded/adblock_reject.srs");
 
 pub fn get_sing_box_home() -> PathBuf {
     PathBuf::from("/tmp/miao-sing-box")
@@ -35,28 +36,32 @@ pub fn extract_sing_box() -> AppResult<PathBuf> {
     }
 
     let sing_box_path = sing_box_home.join("sing-box");
-    let ip_rule_path = sing_box_home.join("chinaip.srs");
-    let site_rule_path = sing_box_home.join("chinasite.srs");
 
-    if !sing_box_path.exists() {
-        info!("Extracting embedded sing-box binary to {:?}", sing_box_path);
-        fs::write(&sing_box_path, SING_BOX_BINARY)
-            .map_err(|e| AppError::context("Failed to write embedded sing-box binary", e))?;
-        fs::set_permissions(&sing_box_path, fs::Permissions::from_mode(0o755))
-            .map_err(|e| AppError::context("Failed to set permissions on sing-box binary", e))?;
-        info!("sing-box binary extracted successfully");
-    }
+    // 每次启动都删除并重新释放内嵌文件,保证与当前运行的二进制一致:
+    // install.sh 升级、手动替换二进制等路径不经过面板自升级的清理逻辑。
+    // 先删再写而非覆盖写:若有上次崩溃残留的 sing-box 进程仍在运行,覆盖写会得到 ETXTBSY。
+    // 其余运行时文件(cache.db / config.json.cache / .last_proxy)有意保留。
+    let embedded_files: [(&str, &[u8]); 4] = [
+        ("sing-box", SING_BOX_BINARY),
+        ("chinaip.srs", IP_RULE_BINARY),
+        ("chinasite.srs", SITE_RULE_BINARY),
+        ("adblock_reject.srs", ADBLOCK_RULE_BINARY),
+    ];
 
-    if !ip_rule_path.exists() {
-        info!("Extracting geoip rule file to {:?}", ip_rule_path);
-        fs::write(&ip_rule_path, IP_RULE_BINARY)
-            .map_err(|e| AppError::context("Failed to write geoip rule file", e))?;
+    for (name, bytes) in embedded_files {
+        let path = sing_box_home.join(name);
+        if path.exists() {
+            fs::remove_file(&path).map_err(|e| {
+                AppError::context(format!("Failed to remove stale embedded file {name}"), e)
+            })?;
+        }
+        info!("Extracting embedded file to {:?}", path);
+        fs::write(&path, bytes)
+            .map_err(|e| AppError::context(format!("Failed to write embedded file {name}"), e))?;
     }
-    if !site_rule_path.exists() {
-        info!("Extracting geosite rule file to {:?}", site_rule_path);
-        fs::write(&site_rule_path, SITE_RULE_BINARY)
-            .map_err(|e| AppError::context("Failed to write geosite rule file", e))?;
-    }
+    fs::set_permissions(&sing_box_path, fs::Permissions::from_mode(0o755))
+        .map_err(|e| AppError::context("Failed to set permissions on sing-box binary", e))?;
+
     let dashboard_dir = sing_box_home.join("dashboard");
     if !dashboard_dir.exists() {
         fs::create_dir_all(&dashboard_dir)

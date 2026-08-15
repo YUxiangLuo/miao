@@ -37,6 +37,7 @@ sleep 2 && sudo nohup ./target/release/miao-rust > /tmp/miao-dev.log 2>&1 &
 ```
 
 - 后端跑在 root 下，**普通用户 pgrep 看不到**。找监听者用 `sudo ss -tlnp 'sport = :6161'`
+- **每次启动都会删除并重释放内嵌文件**（sing-box + 3 个 srs）到 `/tmp/miao-sing-box`，所以 rebuild 后重启一定用上新内核，目录里这些文件的时间戳每次都会变，别困惑；`cache.db`/`config.json.cache`/`.last_proxy` 有意保留
 - `api/status` 里的 `data.pid` 是 **sing-box 子进程**的 PID，不是后端本身——误杀它只会让面板显示"已停止"但 6161 仍被后端占用（后端没有 supervisor，不会自动拉起 sing-box)。要停就停后端主进程
 
 ## 网络与代理的鸡生蛋问题
@@ -80,7 +81,7 @@ setter.call(input, '新值'); input.dispatchEvent(new Event('input', { bubbles: 
 
 - 配置变更链路（增删节点/订阅/规则都走这条）:`config_update` 锁 → 克隆配置 → 改 → `apply_config_change`(原子写 config.yaml → 生成 sing-box 配置 → `sing-box check` 校验 → 热重启，失败回滚）
 - 面板不直接碰 sing-box，控制面是 Clash API(`127.0.0.1:6262`)：切节点、测延迟、连接统计都走它
-- 自定义规则(`custom_rules`）插入在 sniff/hijack-dns 之后、内置分流规则**之前**,用户规则优先
+- 自定义规则(`custom_rules`）插入在 sniff/hijack-dns 之后、内置分流规则**之前**,用户规则优先;全局模式下内置分流被裁掉,自定义规则依然生效
 - `route_mode`（分流/全局）是会话级状态，不进配置文件
 
 ## 脚本
