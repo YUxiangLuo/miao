@@ -1,7 +1,7 @@
 <div align="center">
   <img src="frontend/public/icon.svg" width="72" alt="Miao logo" />
   <h1>Miao</h1>
-  <p><strong>一个文件，让整台设备开箱即用透明代理。</strong></p>
+  <p><strong>开箱即用的透明代理</strong></p>
   <p>
     <a href="https://github.com/YUxiangLuo/miao/releases/latest"><img src="https://img.shields.io/github/v/release/YUxiangLuo/miao?style=flat-square" alt="Release" /></a>
     <a href="https://github.com/YUxiangLuo/miao/actions/workflows/ci.yml"><img src="https://github.com/YUxiangLuo/miao/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
