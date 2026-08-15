@@ -232,6 +232,23 @@ export default function App() {
     showToast
   ])
 
+  const handleOpenSetRouteModeConfirm = useCallback((nextMode) => {
+    if (nextMode === status.route_mode) return
+    if (nextMode === 'global') {
+      openConfirm(
+        '切换为全局代理',
+        '确定要切换为全局代理吗？所有流量（含国内站点）都将走代理，切换时服务会短暂中断。',
+        () => handleSetRouteMode('global')
+      )
+      return
+    }
+    openConfirm(
+      '切换为分流模式',
+      '确定要切换为分流模式吗？国内流量将直连，国外流量走代理，切换时服务会短暂中断。',
+      () => handleSetRouteMode('rule')
+    )
+  }, [status.route_mode, openConfirm, handleSetRouteMode])
+
   const handleSwitchProxy = useCallback(async (groupName, nodeName) => {
     if (switchingNode) return
     setSwitchingNode(nodeName)
@@ -547,7 +564,7 @@ export default function App() {
           traffic={traffic} 
           loadingAction={loadingAction} 
           onToggleService={handleToggleService} 
-          onSetRouteMode={handleSetRouteMode}
+          onSetRouteMode={handleOpenSetRouteModeConfirm}
           onOpenConnections={handleOpenConnections}
         />
 

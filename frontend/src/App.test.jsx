@@ -125,4 +125,85 @@ describe('App onboarding integration', () => {
     expect(delayCalls).toHaveLength(1)
     expect(delayCalls[0]).not.toContain('node-b')
   })
+
+  it('asks for confirmation before switching route mode', async () => {
+    let routeMode = 'rule'
+    const fetchMock = vi.fn(async (input, options = {}) => {
+      const url = String(input)
+      if (url === '/api/status') {
+        return jsonResponse({
+          success: true,
+          data: { running: true, initializing: false, route_mode: routeMode, pid: 1, uptime_secs: 10 },
+        })
+      }
+      if (url === '/api/nodes' || url === '/api/subs' || url === '/api/rules') {
+        return jsonResponse({ success: true, data: [] })
+      }
+      if (url === '/api/version') {
+        return jsonResponse({
+          success: true,
+          data: { current: 'v0.29.5', latest: null, has_update: false },
+        })
+      }
+      if (url === '/api/clash/proxies') {
+        return jsonResponse({
+          proxies: {
+            proxy: { type: 'Selector', name: 'proxy', now: 'node-a', all: ['node-a'] },
+          },
+        })
+      }
+      if (url.startsWith('/api/clash/proxies/') && url.includes('/delay')) {
+        return jsonResponse({ delay: 80 })
+      }
+      if (url === '/api/route-mode' && options.method === 'POST') {
+        const body = JSON.parse(options.body)
+        routeMode = body.route_mode
+        return jsonResponse({ success: true, message: 'Route mode updated' })
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    })
+
+    vi.stubGlobal('fetch', fetchMock)
+    vi.stubGlobal('matchMedia', vi.fn().mockImplementation(() => ({
+      matches: false,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    })))
+    window.matchMedia = globalThis.matchMedia
+
+    const user = userEvent.setup()
+    render(<App />)
+
+    expect(await screen.findByRole('button', { name: '全局代理' })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '全局代理' }))
+
+    expect(await screen.findByRole('dialog', { name: '切换为全局代理' })).toBeInTheDocument()
+    expect(fetchMock).not.toHaveBeenCalledWith('/api/route-mode', expect.anything())
+
+    await user.click(screen.getByRole('button', { name: '取消' }))
+    expect(screen.queryByRole('dialog', { name: '切换为全局代理' })).not.toBeInTheDocument()
+    expect(fetchMock).not.toHaveBeenCalledWith('/api/route-mode', expect.anything())
+
+    await user.click(screen.getByRole('button', { name: '全局代理' }))
+    await user.click(screen.getByRole('button', { name: '确认' }))
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith('/api/route-mode', expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ route_mode: 'global' }),
+      }))
+    })
+    expect(await screen.findByText('已切换为全局代理')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: '分流模式' }))
+    expect(await screen.findByRole('dialog', { name: '切换为分流模式' })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '确认' }))
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith('/api/route-mode', expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ route_mode: 'rule' }),
+      }))
+    })
+    expect(await screen.findByText('已切换为分流模式')).toBeInTheDocument()
+  })
 })
