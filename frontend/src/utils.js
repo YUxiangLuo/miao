@@ -3,13 +3,6 @@
 export const API_HEADERS = { 'Content-Type': 'application/json' }
 export const POLL_INTERVAL = 3000
 
-export const CONNECTIVITY_SITES = [
-  { name: 'Google', url: 'https://www.google.com' },
-  { name: 'GitHub', url: 'https://github.com' },
-  { name: 'YouTube', url: 'https://www.youtube.com' },
-  { name: 'Bilibili', url: 'https://www.bilibili.com' },
-]
-
 export const EMPTY_NODE_FORM = {
   tag: '',
   server: '',

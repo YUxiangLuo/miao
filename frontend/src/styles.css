@@ -543,21 +543,17 @@ button {
     font-weight: 500;
 }
 .banner-delay.fast,
-.proxy-test-chip.fast span,
-.connectivity-item.fast .connectivity-copy span:last-child {
+.proxy-test-chip.fast span {
     color: var(--success);
 }
 .banner-delay.medium,
-.proxy-test-chip.medium span,
-.connectivity-item.medium .connectivity-copy span:last-child {
+.proxy-test-chip.medium span {
     color: var(--warning);
 }
 .banner-delay.slow,
 .banner-delay.timeout,
 .proxy-test-chip.slow span,
-.proxy-test-chip.timeout span,
-.connectivity-item.slow .connectivity-copy span:last-child,
-.connectivity-item.timeout .connectivity-copy span:last-child {
+.proxy-test-chip.timeout span {
     color: var(--danger);
 }
 .proxy-grid-wrap {
@@ -769,44 +765,6 @@ button {
 .status-icon-badge.error {
     background: var(--surface-red);
     color: var(--danger);
-}
-.connectivity-grid {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-.connectivity-item {
-    display: flex;
-    align-items: center;
-    padding: 9px 14px;
-    border: none;
-    background: transparent;
-    color: var(--text);
-    text-align: left;
-    border-right: 1px solid var(--border-soft);
-    border-bottom: 1px solid var(--border-soft);
-}
-.connectivity-item:nth-child(2n) {
-    border-right: none;
-}
-.connectivity-item.testing {
-    opacity: 0.7;
-}
-.connectivity-item:hover:not(:disabled) {
-    background: rgba(255, 255, 255, 0.02);
-}
-.connectivity-copy {
-    display: flex;
-    flex-direction: column;
-    gap: 1px;
-}
-.connectivity-copy span:first-child {
-    color: var(--text);
-    font-size: 0.8125rem;
-    font-weight: 500;
-}
-.connectivity-copy span:last-child {
-    color: var(--text-muted);
-    font-size: 0.75rem;
 }
 .empty-block {
     padding: 18px 16px;
@@ -1648,12 +1606,8 @@ button {
         padding: 12px;
     }
     .proxy-grid,
-    .connectivity-grid,
     .form-grid.two {
         grid-template-columns: 1fr;
-    }
-    .connectivity-item {
-        border-right: none;
     }
     .subscription-add-row {
         flex-direction: column;

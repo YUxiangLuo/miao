@@ -6,7 +6,6 @@ import {
   NodesCard,
   SubsCard,
   RulesCard,
-  ConnectivityCard,
   HomeConnections,
   ConfirmModal,
   ConnectionsModal,
@@ -26,14 +25,12 @@ import {
   useConnections,
   useVersion,
   useDelays,
-  useConnectivity,
   usePolling
 } from './hooks/index.js'
 import {
   EMPTY_NODE_FORM,
   nodeTypeDefaults,
   validateSubscriptionUrl,
-  CONNECTIVITY_SITES
 } from './utils.js'
 import { buildNodeRequest } from './nodeForm.js'
 
@@ -72,15 +69,6 @@ export default function App() {
   } = useConnections(status, clashApiBase)
   const { versionInfo, fetchVersion } = useVersion()
   const { delays, testingNodes, testingGroup, testDelay, testGroupDelays, clearDelays } = useDelays()
-  const { 
-    connectivityResults, 
-    testingConnectivity, 
-    currentTestingSite,
-    testSingleSite, 
-    testAllConnectivity, 
-    stopConnectivity,
-    clearConnectivity
-  } = useConnectivity()
 
   const nodeMetaMap = useMemo(() => {
     const map = new Map()
@@ -173,13 +161,12 @@ export default function App() {
     }
   }, [status.warning, showToast])
 
-  // Clear delays and connectivity when service stops
+  // Clear delays when service stops
   useEffect(() => {
     if (!status.running) {
       clearDelays()
-      clearConnectivity()
     }
-  }, [status.running, clearDelays, clearConnectivity])
+  }, [status.running, clearDelays])
 
   useEffect(() => {
     const mediaQuery = window.matchMedia(`(max-width: ${CONNECTIONS_MODAL_MIN_WIDTH - 1}px)`)
@@ -199,7 +186,6 @@ export default function App() {
       if (status.running) {
         await apiCall('service/stop', { method: 'POST' }, 'stop')
         clearDelays()
-        clearConnectivity()
         showToast('服务已停止', 'success')
       } else {
         await apiCall('service/start', { method: 'POST' }, 'start')
@@ -209,7 +195,7 @@ export default function App() {
     } catch (error) {
       showToast(error.message, 'error')
     }
-  }, [status.running, apiCall, clearDelays, clearConnectivity, fetchStatus, showToast])
+  }, [status.running, apiCall, clearDelays, fetchStatus, showToast])
 
   const handleSetRouteMode = useCallback(async (nextMode) => {
     if (nextMode === status.route_mode) return
@@ -221,7 +207,6 @@ export default function App() {
         'routeMode'
       )
       clearDelays()
-      clearConnectivity()
       await fetchStatus()
       await fetchProxies()
       showToast(nextMode === 'global' ? '已切换为全局代理' : '已切换为分流模式', 'success')
@@ -232,7 +217,6 @@ export default function App() {
     status.route_mode,
     apiCall,
     clearDelays,
-    clearConnectivity,
     fetchStatus,
     fetchProxies,
     showToast
@@ -327,13 +311,12 @@ export default function App() {
     try {
       await apiCall('subs/refresh', { method: 'POST' }, 'refreshSubs')
       await fetchSubs()
-      clearConnectivity()
       clearDelays()
       showToast('订阅已刷新', 'success')
     } catch (error) {
       showToast(error.message, 'error')
     }
-  }, [apiCall, clearConnectivity, clearDelays, fetchSubs, showToast])
+  }, [apiCall, clearDelays, fetchSubs, showToast])
 
   const handleAddNode = useCallback(async () => {
     let payload
@@ -421,14 +404,6 @@ export default function App() {
   const handleTestGroupDelays = useCallback((groupName, nodeNames) => {
     testGroupDelays(clashApiBase, groupName, nodeNames)
   }, [clashApiBase, testGroupDelays])
-
-  const handleTestSingleSite = useCallback((site) => {
-    testSingleSite(site)
-  }, [testSingleSite])
-
-  const handleTestAllConnectivity = useCallback(() => {
-    testAllConnectivity(CONNECTIVITY_SITES)
-  }, [testAllConnectivity])
 
   const handleOpenConnections = useCallback(() => {
     if (window.matchMedia(`(max-width: ${CONNECTIONS_MODAL_MIN_WIDTH - 1}px)`).matches) {
@@ -617,16 +592,6 @@ export default function App() {
               loadingAction={loadingAction}
               onAddRule={handleAddRule}
               onDeleteRule={handleOpenDeleteRuleConfirm}
-            />
-
-            <ConnectivityCard
-              connectivityResults={connectivityResults}
-              testingConnectivity={testingConnectivity}
-              currentTestingSite={currentTestingSite}
-              status={status}
-              onTestAll={handleTestAllConnectivity}
-              onStopTest={stopConnectivity}
-              onTestSingleSite={handleTestSingleSite}
             />
           </div>
         </div>
