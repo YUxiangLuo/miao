@@ -73,4 +73,56 @@ describe('App onboarding integration', () => {
     expect(await screen.findByText('订阅已添加')).toBeInTheDocument()
     expect(await screen.findByText('订阅管理')).toBeInTheDocument()
   })
+
+  it('auto-tests the current node delay once when the dashboard loads', async () => {
+    const delayCalls = []
+    const fetchMock = vi.fn(async (input) => {
+      const url = String(input)
+      if (url === '/api/status') {
+        return jsonResponse({
+          success: true,
+          data: { running: true, initializing: false, route_mode: 'rule', pid: 1, uptime_secs: 10 },
+        })
+      }
+      if (url === '/api/nodes' || url === '/api/subs' || url === '/api/rules') {
+        return jsonResponse({ success: true, data: [] })
+      }
+      if (url === '/api/version') {
+        return jsonResponse({
+          success: true,
+          data: { current: 'v0.29.0', latest: null, has_update: false },
+        })
+      }
+      if (url === '/api/clash/proxies') {
+        return jsonResponse({
+          proxies: {
+            proxy: { type: 'Selector', name: 'proxy', now: 'node-a', all: ['node-a', 'node-b'] },
+          },
+        })
+      }
+      if (url.startsWith('/api/clash/proxies/') && url.includes('/delay')) {
+        delayCalls.push(url)
+        return jsonResponse({ delay: 123 })
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    })
+
+    vi.stubGlobal('fetch', fetchMock)
+    vi.stubGlobal('matchMedia', vi.fn().mockImplementation(() => ({
+      matches: false,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    })))
+    window.matchMedia = globalThis.matchMedia
+
+    render(<App />)
+
+    // 面板渲染出来后,应自动对当前节点发起一次测速
+    expect(await screen.findByText('代理节点选择')).toBeInTheDocument()
+    await waitFor(() => {
+      expect(delayCalls.some((url) => url.includes('node-a'))).toBe(true)
+    })
+    expect(delayCalls).toHaveLength(1)
+    expect(delayCalls[0]).not.toContain('node-b')
+  })
 })

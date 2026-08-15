@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useCallback } from 'react'
+import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import {
   TopBar,
   StatusCard,
@@ -85,6 +85,17 @@ export default function App() {
   }, [nodes])
 
   const currentNodeMeta = primaryGroup?.now ? nodeMetaMap.get(primaryGroup.now) : null
+
+  // 进入首页且当前节点就绪后,自动测一次延迟;切换节点后也会测新节点。
+  // 每个节点每次会话只自动测一次,手动点测不受影响
+  const autoTestedNodeRef = useRef('')
+  const currentNodeName = primaryGroup?.now || ''
+  useEffect(() => {
+    if (!status.running || status.initializing || !currentNodeName) return
+    if (currentNodeName === autoTestedNodeRef.current) return
+    autoTestedNodeRef.current = currentNodeName
+    testDelay(clashApiBase, currentNodeName)
+  }, [status.running, status.initializing, currentNodeName, clashApiBase, testDelay])
 
   const openConfirm = useCallback((title, message, onConfirm) => {
     setConfirmState({ open: true, title, message, onConfirm })
