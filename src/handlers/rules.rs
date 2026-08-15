@@ -46,7 +46,10 @@ fn describe_rule(index: usize, raw: &str) -> RuleInfo {
         "domain",
         "domain_keyword",
         "ip_cidr",
+        "source_ip_cidr",
         "port",
+        "port_range",
+        "protocol",
         "process_name",
         "process_path",
     ];

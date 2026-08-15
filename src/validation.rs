@@ -214,7 +214,10 @@ impl Validator {
             "domain",
             "domain_keyword",
             "ip_cidr",
+            "source_ip_cidr",
             "port",
+            "port_range",
+            "protocol",
             "process_name",
             "process_path",
         ];
@@ -249,7 +252,48 @@ impl Validator {
                     return Err("端口必须是 1-65535 的整数".to_string());
                 }
             }
-            "ip_cidr" => {
+            "port_range" => {
+                // sing-box 格式: 1000:2000 / :3000 / 4000:
+                let Some((start, end)) = value.split_once(':') else {
+                    return Err("端口范围必须形如 1000:2000（可省略一端）".to_string());
+                };
+                let valid_side = |side: &str| {
+                    side.is_empty() || side.parse::<u16>().map(|p| p > 0).unwrap_or(false)
+                };
+                if (start.is_empty() && end.is_empty()) || !valid_side(start) || !valid_side(end) {
+                    return Err(
+                        "端口范围必须形如 1000:2000（可省略一端）,端口为 1-65535".to_string()
+                    );
+                }
+                if let (Ok(s), Ok(e)) = (start.parse::<u16>(), end.parse::<u16>()) {
+                    if s > e {
+                        return Err("端口范围起点不能大于终点".to_string());
+                    }
+                }
+            }
+            "protocol" => {
+                // sing-box 嗅探支持的协议
+                static VALID_PROTOCOLS: &[&str] = &[
+                    "http",
+                    "tls",
+                    "quic",
+                    "stun",
+                    "dns",
+                    "bittorrent",
+                    "dtls",
+                    "ssh",
+                    "rdp",
+                    "ntp",
+                ];
+                if !VALID_PROTOCOLS.contains(&value) {
+                    return Err(format!(
+                        "不支持的嗅探协议: {},支持: {}",
+                        value,
+                        VALID_PROTOCOLS.join(", ")
+                    ));
+                }
+            }
+            "ip_cidr" | "source_ip_cidr" => {
                 let Some((addr, prefix)) = value.split_once('/') else {
                     return Err("IP/CIDR 必须形如 192.168.0.0/16".to_string());
                 };
@@ -512,8 +556,14 @@ mod tests {
         assert!(ok("process_name", "curl").is_ok());
         assert!(ok("process_path", "/usr/bin/curl").is_ok());
         assert!(ok("port", "443").is_ok());
+        assert!(ok("port_range", "1000:2000").is_ok());
+        assert!(ok("port_range", ":3000").is_ok());
+        assert!(ok("port_range", "4000:").is_ok());
+        assert!(ok("protocol", "quic").is_ok());
+        assert!(ok("protocol", "tls").is_ok());
         assert!(ok("ip_cidr", "192.168.0.0/16").is_ok());
         assert!(ok("ip_cidr", "2001:db8::/32").is_ok());
+        assert!(ok("source_ip_cidr", "192.168.1.0/24").is_ok());
     }
 
     #[test]
@@ -533,6 +583,13 @@ mod tests {
         assert!(err("ip_cidr", "192.168.0.0", "proxy").is_err());
         assert!(err("ip_cidr", "192.168.0.0/33", "proxy").is_err());
         assert!(err("ip_cidr", "2001:db8::/129", "proxy").is_err());
+        assert!(err("source_ip_cidr", "192.168.1.0", "proxy").is_err());
+        assert!(err("port_range", "1000", "proxy").is_err());
+        assert!(err("port_range", ":", "proxy").is_err());
+        assert!(err("port_range", "2000:1000", "proxy").is_err());
+        assert!(err("port_range", "0:100", "proxy").is_err());
+        assert!(err("protocol", "ftp", "proxy").is_err());
+        assert!(err("protocol", "QUIC", "proxy").is_err());
         assert!(err("domain_suffix", "exa mple.com", "proxy").is_err());
         assert!(err("domain_suffix", "", "proxy").is_err());
     }
