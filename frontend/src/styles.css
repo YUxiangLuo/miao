@@ -69,8 +69,6 @@ button {
     gap: 16px;
     height: 80px;
     padding: 0 24px;
-    background: var(--surface);
-    border-bottom: 1px solid var(--border);
 }
 .brand {
     display: flex;
