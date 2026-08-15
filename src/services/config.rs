@@ -774,7 +774,7 @@ fn get_config_template() -> serde_json::Value {
             "strategy": "ipv4_only",
             "disable_cache": false,
             "servers": [
-                {"type": "udp", "tag": "cfdns", "server": "1.1.1.1", "detour": "proxy"},
+                {"type": "https", "tag": "cfdns", "server": "1.1.1.1", "detour": "proxy"},
                 {"tag": "local", "type": "udp", "server": "223.5.5.5"}
             ],
             "rules": [
@@ -1365,7 +1365,7 @@ mod tests {
             .iter()
             .find(|server| server["tag"] == "cfdns")
             .unwrap();
-        assert_eq!(cfdns["type"], "udp");
+        assert_eq!(cfdns["type"], "https");
         assert_eq!(cfdns["server"], "1.1.1.1");
         assert_eq!(cfdns["detour"], "proxy");
 
