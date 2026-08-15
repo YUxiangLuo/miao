@@ -109,4 +109,18 @@ describe('NetworkMap', () => {
     await user.click(screen.getByRole('button', { name: '切换' }))
     expect(onSwitchProxy).toHaveBeenCalledWith('proxy', 'Tokyo 02')
   })
+
+  it('zooms via the control buttons and resets', async () => {
+    const user = userEvent.setup()
+    render(<NetworkMap snapshot={snapshot} />)
+
+    const canvas = screen.getByRole('img', { name: '实时网络路径世界地图' })
+    expect(canvas).toHaveAttribute('viewBox', '0 30 1000 440')
+
+    await user.click(screen.getByRole('button', { name: '放大' }))
+    expect(canvas.getAttribute('viewBox')).not.toBe('0 30 1000 440')
+
+    await user.click(screen.getByRole('button', { name: '重置缩放' }))
+    expect(canvas).toHaveAttribute('viewBox', '0 30 1000 440')
+  })
 })

@@ -2038,79 +2038,138 @@ button {
     flex: 1;
     min-height: 280px;
     position: relative;
-    background: #14181e;
+    background: #05070c;
 }
 .map-canvas {
     width: 100%;
     height: 100%;
     display: block;
+    cursor: grab;
+    touch-action: none;
+}
+.map-canvas.is-panning {
+    cursor: grabbing;
+}
+.map-zoom-controls {
+    position: absolute;
+    left: 12px;
+    top: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+.map-zoom-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: rgba(34, 38, 45, 0.85);
+    color: var(--text-muted);
+}
+.map-zoom-button:hover:not(:disabled) {
+    color: var(--text-strong);
+    border-color: var(--accent);
+}
+.map-zoom-button:disabled {
+    opacity: 0.4;
+    cursor: default;
 }
 .map-ocean {
-    fill: #14181e;
+    fill: url(#map-ocean-gradient);
+}
+.map-star {
+    fill: #dfe9ff;
+}
+.map-graticule {
+    stroke: rgba(120, 150, 200, 0.08);
+    stroke-width: 0.5;
 }
 .map-land {
-    fill: #2a3140;
-    stroke: #3a4354;
-    stroke-width: 0.4;
+    fill: url(#map-land-gradient);
+    stroke: #3d5a8a;
+    stroke-width: 0.5;
 }
 .map-flow-line {
     fill: none;
-    stroke-width: 1.6;
     stroke-linecap: round;
     pointer-events: none;
 }
 .map-flow.direct .map-flow-line {
-    stroke: #4a9e75;
-    opacity: 0.72;
+    stroke: #34d399;
+    opacity: 0.45;
 }
 .map-flow.proxy .map-flow-line {
-    stroke: #7b9dc4;
-    opacity: 0.8;
+    stroke: #22d3ee;
+    opacity: 0.5;
 }
 .map-flow.udp .map-flow-line {
     stroke-dasharray: 5 6;
 }
 .map-flow.active .map-flow-line {
     opacity: 1;
-    stroke-width: 2;
-    stroke-dasharray: 8 10;
-    animation: map-flow-dash 1.4s linear infinite;
 }
-.map-flow.active.udp .map-flow-line {
-    stroke-dasharray: 5 6;
+.map-flow-particle {
+    fill: #e8f6ff;
+    pointer-events: none;
 }
-@keyframes map-flow-dash {
-    to { stroke-dashoffset: -22; }
+.map-flow.direct .map-flow-particle {
+    fill: #bbf7d0;
+}
+.map-flow.proxy .map-flow-particle {
+    fill: #a5f3fc;
 }
 .map-marker {
     cursor: pointer;
 }
+.map-ping {
+    fill: none;
+    stroke-width: 1.5;
+    transform-box: fill-box;
+    transform-origin: center;
+    animation: map-ping 2s ease-out infinite;
+    pointer-events: none;
+}
+.client-ping { stroke: #7dd3fc; }
+.proxy-ping { stroke: #f0b35e; }
+.destination-ping { stroke: #22d3ee; }
+@keyframes map-ping {
+    0% { transform: scale(0.6); opacity: 0.9; }
+    80% { opacity: 0; }
+    100% { transform: scale(2.4); opacity: 0; }
+}
 .map-marker.client circle {
-    fill: #eef3f8;
+    fill: #d7e3f4;
 }
 .map-client-ring {
     fill: none;
-    stroke: #7b9dc4;
-    stroke-width: 2;
+    stroke: #7dd3fc;
+    stroke-width: 1.5;
+    opacity: 0.85;
+    filter: drop-shadow(0 0 2px rgba(125, 211, 252, 0.5));
 }
 .map-marker.proxy polygon {
-    fill: #a07840;
-    stroke: #1a1d22;
+    fill: #b98948;
+    stroke: #05070c;
     stroke-width: 1;
 }
 .map-marker.proxy.is-active polygon {
-    fill: #d4a05a;
+    fill: #f0b35e;
+    filter: drop-shadow(0 0 4px rgba(240, 179, 94, 0.9));
 }
 .map-marker.destination circle {
-    fill: #7b9dc4;
-    stroke: #14181e;
+    fill: #22d3ee;
+    stroke: #05070c;
     stroke-width: 1;
 }
 .map-marker.destination.is-active circle {
-    fill: #cdd3da;
+    fill: #a5f3fc;
+    filter: drop-shadow(0 0 4px rgba(34, 211, 238, 0.9));
 }
 .map-marker-count {
-    fill: #7e8b9a;
+    fill: #9db3d4;
     font-size: 8px;
 }
 .map-legend {
@@ -2136,18 +2195,24 @@ button {
     border-radius: 99px;
     display: inline-block;
 }
-.map-swatch.client { background: #eef3f8; }
-.map-swatch.proxy { background: #a07840; border-radius: 1px; transform: rotate(45deg); }
-.map-swatch.destination { background: #7b9dc4; }
+.map-swatch.client { background: #7dd3fc; }
+.map-swatch.proxy { background: #b98948; border-radius: 1px; transform: rotate(45deg); }
+.map-swatch.destination { background: #22d3ee; }
 .map-swatch-line.solid::before,
 .map-swatch-line.dashed::before {
     content: "";
     width: 16px;
-    border-top: 2px solid #7b9dc4;
+    border-top: 2px solid #22d3ee;
     display: inline-block;
 }
 .map-swatch-line.dashed::before {
     border-top-style: dashed;
+}
+@media (prefers-reduced-motion: reduce) {
+    .map-ping,
+    .map-flow-particle {
+        display: none;
+    }
 }
 .map-empty {
     position: absolute;

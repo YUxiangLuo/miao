@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react'
-import { MapPin, Radio, Search, X } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { MapPin, Maximize, Radio, Search, X, ZoomIn, ZoomOut } from 'lucide-react'
 import { classNames, formatBytes, formatSpeed, getDelayTone } from '../utils.js'
 import { WORLD_LAND } from './worldLand.js'
 import {
@@ -9,6 +9,7 @@ import {
   jitterGeo,
   project,
 } from './projection.js'
+import { initialViewBox, MAX_SCALE, panBy, scaleOf, zoomAtPoint } from './zoom.js'
 import {
   aggregateDestinationGroups,
   aggregatePaths,
@@ -16,6 +17,12 @@ import {
   filterFlows,
   routeCounts,
 } from './aggregate.js'
+import {
+  STARFIELD,
+  allocateParticles,
+  flowWidth,
+  particleDuration,
+} from './visuals.js'
 
 const ROUTE_FILTERS = [
   { value: 'all', label: '全部' },
@@ -39,6 +46,21 @@ const LAND_POLYGONS = WORLD_LAND.map((ring) => ring.map(([lng, lat]) => {
   const point = project(lng, lat)
   return `${point.x.toFixed(1)},${point.y.toFixed(1)}`
 }).join(' '))
+
+// 经纬网：等距圆柱投影下就是水平/垂直直线
+const GRATICULE_LATITUDES = [-60, -30, 0, 30, 60].map((lat) => project(0, lat).y)
+const GRATICULE_LONGITUDES = [-150, -120, -90, -60, -30, 0, 30, 60, 90, 120, 150]
+  .map((lng) => project(lng, 0).x)
+
+function viewBoxString(viewBox) {
+  return [viewBox.x, viewBox.y, viewBox.w, viewBox.h]
+    .map((value) => Number(value.toFixed(2)))
+    .join(' ')
+}
+
+function flowElementId(pathId) {
+  return `flow-${String(pathId).replace(/[^a-zA-Z0-9]/g, '-')}`
+}
 
 function markerPoint(geo) {
   if (!geo || geo.latitude == null || geo.longitude == null) return null
@@ -90,6 +112,92 @@ export function NetworkMap({
   const [query, setQuery] = useState('')
   const [hovered, setHovered] = useState(null)
   const [selected, setSelected] = useState(null)
+  const [viewBox, setViewBox] = useState(initialViewBox)
+  const [panning, setPanning] = useState(false)
+  const svgRef = useRef(null)
+  const panRef = useRef(null)
+  const didDragRef = useRef(false)
+
+  const scale = scaleOf(viewBox)
+
+  // React 的 onWheel 是 passive 的，无法 preventDefault，需要原生监听
+  useEffect(() => {
+    const svg = svgRef.current
+    if (!svg) return undefined
+    const onWheel = (event) => {
+      event.preventDefault()
+      const rect = svg.getBoundingClientRect()
+      if (!rect.width || !rect.height) return
+      const factor = Math.exp(-event.deltaY * 0.0015)
+      setViewBox((current) => {
+        const cx = current.x + ((event.clientX - rect.left) / rect.width) * current.w
+        const cy = current.y + ((event.clientY - rect.top) / rect.height) * current.h
+        return zoomAtPoint(current, cx, cy, factor)
+      })
+    }
+    svg.addEventListener('wheel', onWheel, { passive: false })
+    return () => svg.removeEventListener('wheel', onWheel)
+  }, [])
+
+  const zoomBy = (factor) => {
+    setViewBox((current) => zoomAtPoint(
+      current,
+      current.x + current.w / 2,
+      current.y + current.h / 2,
+      factor,
+    ))
+  }
+
+  const onPointerDown = (event) => {
+    // 新的按下手势开始时重置拖拽标记，避免上次中断的拖拽吞掉本次点击
+    didDragRef.current = false
+    if (scaleOf(viewBox) <= 1 || event.button !== 0) return
+    const rect = svgRef.current?.getBoundingClientRect()
+    if (!rect || !rect.width) return
+    // 注意：这里不做 setPointerCapture。一旦捕获，后续的 click 会被重定向到
+    // svg 本身，标记点的 onClick 就收不到了（卡片打不开）。等真正拖起来再捕获。
+    panRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      origin: viewBox,
+      rect,
+      captured: false,
+    }
+  }
+
+  const onPointerMove = (event) => {
+    const pan = panRef.current
+    if (!pan || event.pointerId !== pan.pointerId) return
+    const dxPixels = event.clientX - pan.startX
+    const dyPixels = event.clientY - pan.startY
+    if (!pan.captured) {
+      if (Math.abs(dxPixels) + Math.abs(dyPixels) <= 3) return
+      event.currentTarget.setPointerCapture(event.pointerId)
+      pan.captured = true
+      didDragRef.current = true
+      setPanning(true)
+    }
+    setViewBox(panBy(
+      pan.origin,
+      (-dxPixels / pan.rect.width) * pan.origin.w,
+      (-dyPixels / pan.rect.height) * pan.origin.h,
+    ))
+  }
+
+  const onPointerUp = (event) => {
+    if (panRef.current?.pointerId !== event.pointerId) return
+    panRef.current = null
+    setPanning(false)
+  }
+
+  const swallowDragClick = () => {
+    if (didDragRef.current) {
+      didDragRef.current = false
+      return true
+    }
+    return false
+  }
 
   const client = snapshot?.client
   const allFlows = useMemo(() => snapshot?.flows || [], [snapshot?.flows])
@@ -120,6 +228,31 @@ export function NetworkMap({
     }
     return positions
   }, [locatedDestinations])
+
+  const renderedPaths = useMemo(
+    () => paths
+      .map((path) => {
+        const destGeo = destPositions.get(path.destId)
+        const segments = flowPathData(client?.geo, destGeo, path.proxyGeo, path.direct)
+        const speed = path.downloadSpeed + path.uploadSpeed
+        return {
+          ...path,
+          segments,
+          speed,
+          width: flowWidth(speed),
+          elementId: flowElementId(path.id),
+        }
+      })
+      .filter((path) => path.segments.length > 0),
+    [paths, destPositions, client?.geo],
+  )
+
+  const particleBudget = useMemo(
+    () => allocateParticles(
+      renderedPaths.map((path) => ({ id: path.id, speed: path.active ? path.speed : 0 })),
+    ),
+    [renderedPaths],
+  )
 
   const selectedDest = selected?.kind === 'destination'
     ? destinations.find((item) => item.id === selected.id)
@@ -168,59 +301,139 @@ export function NetworkMap({
 
       <div className="map-stage">
         <svg
-          className="map-canvas"
-          viewBox={`0 0 ${MAP_WIDTH} ${MAP_HEIGHT}`}
+          ref={svgRef}
+          className={classNames('map-canvas', panning && 'is-panning')}
+          viewBox={viewBoxString(viewBox)}
           role="img"
           aria-label="实时网络路径世界地图"
-          onClick={() => setSelected(null)}
+          onClick={() => {
+            if (swallowDragClick()) return
+            setSelected(null)
+          }}
+          onPointerDown={onPointerDown}
+          onPointerMove={onPointerMove}
+          onPointerUp={onPointerUp}
+          onPointerCancel={onPointerUp}
         >
+          <defs>
+            <radialGradient id="map-ocean-gradient" cx="50%" cy="38%" r="80%">
+              <stop offset="0%" stopColor="#0d1526" />
+              <stop offset="100%" stopColor="#05070c" />
+            </radialGradient>
+            <linearGradient id="map-land-gradient" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#1b2640" />
+              <stop offset="100%" stopColor="#141c30" />
+            </linearGradient>
+            <filter id="map-flow-glow" x="-20%" y="-20%" width="140%" height="140%">
+              <feGaussianBlur stdDeviation="2.5" result="blur" />
+              <feMerge>
+                <feMergeNode in="blur" />
+                <feMergeNode in="SourceGraphic" />
+              </feMerge>
+            </filter>
+          </defs>
+
           <rect width={MAP_WIDTH} height={MAP_HEIGHT} className="map-ocean" />
-          {LAND_POLYGONS.map((points, index) => (
-            <polygon key={index} className="map-land" points={points} />
+
+          {STARFIELD.map((star) => (
+            <circle
+              key={star.id}
+              className="map-star"
+              cx={star.x}
+              cy={star.y}
+              r={star.r}
+              opacity={star.opacity}
+            />
           ))}
 
-          {paths.map((path) => {
-            const destGeo = destPositions.get(path.destId)
-            const segments = flowPathData(client?.geo, destGeo, path.proxyGeo, path.direct)
-            if (segments.length === 0) return null
-            return (
+          {GRATICULE_LATITUDES.map((y) => (
+            <line
+              key={`lat-${y}`}
+              className="map-graticule"
+              x1="0" y1={y} x2={MAP_WIDTH} y2={y}
+              vectorEffect="non-scaling-stroke"
+            />
+          ))}
+          {GRATICULE_LONGITUDES.map((x) => (
+            <line
+              key={`lng-${x}`}
+              className="map-graticule"
+              x1={x} y1="0" x2={x} y2={MAP_HEIGHT}
+              vectorEffect="non-scaling-stroke"
+            />
+          ))}
+
+          {LAND_POLYGONS.map((points, index) => (
+            <polygon key={index} className="map-land" points={points} vectorEffect="non-scaling-stroke" />
+          ))}
+
+          {/* 空闲连接垫底，无滤镜 */}
+          <g>
+            {renderedPaths.filter((path) => !path.active).map((path) => (
               <g
                 key={path.id}
-                className={classNames(
-                  'map-flow',
-                  path.direct ? 'direct' : 'proxy',
-                  path.network,
-                  path.active && 'active',
-                )}
+                className={classNames('map-flow', path.direct ? 'direct' : 'proxy', path.network)}
               >
-                {segments.map((d) => (
-                  <path key={d} d={d} className="map-flow-line" />
+                {path.segments.map((d, index) => (
+                  <path
+                    key={d}
+                    id={`${path.elementId}-${index}`}
+                    d={d}
+                    className="map-flow-line"
+                    style={{ strokeWidth: path.width }}
+                    vectorEffect="non-scaling-stroke"
+                  />
                 ))}
               </g>
-            )
-          })}
+            ))}
+          </g>
 
-          {locatedProxies.map((group) => {
-            const point = markerPoint(group.geo)
-            if (!point) return null
-            return (
-              <g
-                key={group.id}
-                className={classNames('map-marker proxy', group.activeNode && 'is-active')}
-                transform={`translate(${point.x} ${point.y})`}
-                role="button"
-                tabIndex={0}
-                aria-label={`${group.city} × ${group.count}`}
-                onClick={(event) => {
-                  event.stopPropagation()
-                  setHovered(null)
-                  setSelected({ kind: 'proxy', id: group.id })
-                }}
-              >
-                <polygon points="0,-9 8,0 0,9 -8,0" />
-              </g>
-            )
-          })}
+          {/* 活跃连接：发光 + 沿线流动粒子 */}
+          <g filter="url(#map-flow-glow)">
+            {renderedPaths.filter((path) => path.active).map((path) => {
+              const particleTotal = particleBudget.get(path.id) || 0
+              const duration = particleDuration(path.speed)
+              return (
+                <g
+                  key={path.id}
+                  className={classNames(
+                    'map-flow',
+                    path.direct ? 'direct' : 'proxy',
+                    path.network,
+                    'active',
+                  )}
+                >
+                  {path.segments.map((d, index) => (
+                    <path
+                      key={d}
+                      id={`${path.elementId}-${index}`}
+                      d={d}
+                      className="map-flow-line"
+                      style={{ strokeWidth: path.width }}
+                      vectorEffect="non-scaling-stroke"
+                    />
+                  ))}
+                  {particleTotal > 0 && path.segments.map((_, segmentIndex) => (
+                    Array.from({ length: particleTotal }, (__, particleIndex) => (
+                      <circle
+                        key={`${segmentIndex}-${particleIndex}`}
+                        className="map-flow-particle"
+                        r={2 / scale}
+                      >
+                        <animateMotion
+                          dur={`${duration.toFixed(2)}s`}
+                          begin={`${(-duration * particleIndex / particleTotal).toFixed(2)}s`}
+                          repeatCount="indefinite"
+                        >
+                          <mpath href={`#${path.elementId}-${segmentIndex}`} />
+                        </animateMotion>
+                      </circle>
+                    ))
+                  ))}
+                </g>
+              )
+            })}
+          </g>
 
           {locatedDestinations.map((group) => {
             const geo = destPositions.get(group.id)
@@ -230,7 +443,7 @@ export function NetworkMap({
               <g
                 key={group.id}
                 className={classNames('map-marker destination', group.active && 'is-active')}
-                transform={`translate(${point.x} ${point.y})`}
+                transform={`translate(${point.x} ${point.y}) scale(${1 / scale})`}
                 role="button"
                 tabIndex={0}
                 aria-label={`${group.service.label} · ${group.city}`}
@@ -238,11 +451,13 @@ export function NetworkMap({
                 onMouseLeave={() => setHovered(null)}
                 onClick={(event) => {
                   event.stopPropagation()
+                  if (swallowDragClick()) return
                   setHovered(null)
                   setSelected({ kind: 'destination', id: group.id })
                 }}
               >
                 <circle r={group.count > 8 ? 7 : 5.5} />
+                {group.active && <circle r="7" className="map-ping destination-ping" />}
                 {group.count > 1 && (
                   <text y="12" textAnchor="middle" className="map-marker-count">{group.count}</text>
                 )}
@@ -250,14 +465,75 @@ export function NetworkMap({
             )
           })}
 
+          {/* 代理标记最后渲染，保证拥挤区域里不被目标点盖住、总能点到 */}
+          {locatedProxies.map((group) => {
+            const point = markerPoint(group.geo)
+            if (!point) return null
+            return (
+              <g
+                key={group.id}
+                className={classNames('map-marker proxy', group.activeNode && 'is-active')}
+                transform={`translate(${point.x} ${point.y}) scale(${1 / scale})`}
+                role="button"
+                tabIndex={0}
+                aria-label={`${group.city} × ${group.count}`}
+                onClick={(event) => {
+                  event.stopPropagation()
+                  if (swallowDragClick()) return
+                  setHovered(null)
+                  setSelected({ kind: 'proxy', id: group.id })
+                }}
+              >
+                <circle r="12" fill="transparent" />
+                <polygon points="0,-9 8,0 0,9 -8,0" />
+                {group.activeNode && <circle r="9" className="map-ping proxy-ping" />}
+              </g>
+            )
+          })}
+
           {clientPoint && (
-            <g className="map-marker client" transform={`translate(${clientPoint.x} ${clientPoint.y})`}>
-              <circle r="11" className="map-client-ring" />
-              <circle r="5" />
+            <g
+              className="map-marker client"
+              transform={`translate(${clientPoint.x} ${clientPoint.y}) scale(${1 / scale})`}
+            >
+              <circle r="7" className="map-ping client-ping" />
+              <circle r="7" className="map-client-ring" />
+              <circle r="3.5" />
               <title>{client?.name || 'YOU'}</title>
             </g>
           )}
         </svg>
+
+        <div className="map-zoom-controls">
+          <button
+            type="button"
+            className="map-zoom-button"
+            aria-label="放大"
+            disabled={scale >= MAX_SCALE}
+            onClick={() => zoomBy(1.6)}
+          >
+            <ZoomIn size={14} />
+          </button>
+          <button
+            type="button"
+            className="map-zoom-button"
+            aria-label="缩小"
+            disabled={scale <= 1}
+            onClick={() => zoomBy(1 / 1.6)}
+          >
+            <ZoomOut size={14} />
+          </button>
+          {scale > 1 && (
+            <button
+              type="button"
+              className="map-zoom-button"
+              aria-label="重置缩放"
+              onClick={() => setViewBox(initialViewBox())}
+            >
+              <Maximize size={14} />
+            </button>
+          )}
+        </div>
 
         <div className="map-legend" aria-hidden="true">
           <span><i className="map-swatch client" /> {client?.name || 'YOU'}</span>
