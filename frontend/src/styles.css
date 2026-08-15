@@ -309,11 +309,16 @@ button {
     flex: 0 0 auto;
 }
 .content-grid {
-    flex: 1;
+    flex: 0 1 auto;
     min-height: 0;
+    max-height: 65%;
     display: grid;
     grid-template-columns: minmax(0, 1fr) 400px;
     gap: 16px;
+}
+.content-grid:last-child {
+    flex: 1 1 auto;
+    max-height: none;
 }
 .left-column,
 .right-column {
@@ -328,9 +333,8 @@ button {
     flex-shrink: 0;
 }
 .home-connections {
-    flex: 0 1 auto;
-    min-height: 0;
-    max-height: min(280px, 34vh);
+    flex: 1 1 0;
+    min-height: 200px;
     display: flex;
     flex-direction: column;
     gap: 10px;
@@ -1571,6 +1575,7 @@ button {
     }
     .content-grid {
         flex: none;
+        max-height: none;
         overflow: visible;
     }
     .left-column,
