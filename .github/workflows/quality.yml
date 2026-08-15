@@ -67,6 +67,7 @@ jobs:
           chmod 755 embedded/sing-box-amd64
           : > embedded/geoip-cn.srs
           : > embedded/geosite-geolocation-cn.srs
+          : > embedded/adblock_reject.srs
 
       - name: Check formatting
         run: cargo fmt --all -- --check

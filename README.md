@@ -97,8 +97,10 @@ subs:                      # Clash YAML 订阅
 nodes:                     # 手动节点(sing-box outbound JSON)
   - '{"type":"hysteria2","tag":"HY2","server":"example.com","server_port":443,"password":"xxx","tls":{"enabled":true}}'
 
-custom_rules:              # 可选:sing-box 路由规则,优先于内置分流
+custom_rules:              # 可选:sing-box 路由规则,优先于内置分流,全局代理模式下仍生效
   - '{"domain_suffix":"example.com","action":"route","outbound":"direct"}'
+
+adblock: true              # 可选:去广告(内嵌规则集,DNS 与连接双重拦截,默认关闭)
 ```
 
 > 注意：面板里的分流/全局模式是会话级状态，重启后总是回到规则分流，不会写入配置文件。

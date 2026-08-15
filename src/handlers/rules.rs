@@ -1,7 +1,7 @@
 use axum::{extract::State, http::StatusCode, response::Json};
 use std::sync::{atomic::Ordering, Arc};
 
-use crate::models::{ApiResponse, DeleteRuleRequest, RuleInfo, RuleRequest};
+use crate::models::{AdblockRequest, ApiResponse, DeleteRuleRequest, RuleInfo, RuleRequest};
 use crate::responses::{status_error, success, success_no_data, HandlerResult};
 use crate::services::config::apply_config_change;
 use crate::state::AppState;
@@ -141,6 +141,36 @@ pub async fn add_rule(
 
     match apply_config_change(&state, &old_config, &new_config).await {
         Ok(_) => Ok(success_no_data("Rule added")),
+        Err(e) => Err(status_error(StatusCode::INTERNAL_SERVER_ERROR, e)),
+    }
+}
+
+pub async fn set_adblock(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<AdblockRequest>,
+) -> HandlerResult {
+    if state.initializing.load(Ordering::Relaxed) {
+        return Err(status_error(
+            StatusCode::CONFLICT,
+            "Initialization is still in progress",
+        ));
+    }
+
+    let _config_update = state.config_update.lock().await;
+    let old_config = state.config.read().await.clone();
+    if old_config.adblock == req.enabled {
+        return Ok(success_no_data("Adblock setting unchanged"));
+    }
+
+    let mut new_config = old_config.clone();
+    new_config.adblock = req.enabled;
+
+    match apply_config_change(&state, &old_config, &new_config).await {
+        Ok(_) => Ok(success_no_data(if req.enabled {
+            "Adblock enabled"
+        } else {
+            "Adblock disabled"
+        })),
         Err(e) => Err(status_error(StatusCode::INTERNAL_SERVER_ERROR, e)),
     }
 }

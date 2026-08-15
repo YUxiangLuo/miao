@@ -74,7 +74,13 @@ bun "$ROOT_DIR/scripts/compile-direct-rules.mjs" "$direct_list" "$direct_json"
 "$EMBEDDED_DIR/sing-box-host" rule-set compile "$direct_json" \
   -o "$EMBEDDED_DIR/geosite-geolocation-cn.srs"
 
+echo "==> Downloading adblock rule set..."
+curl --fail --location --retry 3 \
+  -o "$EMBEDDED_DIR/adblock_reject.srs" \
+  https://raw.githubusercontent.com/REIJI007/AdBlock_Rule_For_Sing-box/main/adblock_reject.srs
+
 echo "==> Embedded resources ready for $target"
 ls -lh "$EMBEDDED_DIR/sing-box-$target" \
   "$EMBEDDED_DIR/geoip-cn.srs" \
-  "$EMBEDDED_DIR/geosite-geolocation-cn.srs"
+  "$EMBEDDED_DIR/geosite-geolocation-cn.srs" \
+  "$EMBEDDED_DIR/adblock_reject.srs"

@@ -412,6 +412,56 @@ button {
     font-size: 0.8125rem;
     font-weight: 600;
 }
+.toggle-switch {
+    margin-left: auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 2px 0;
+    border: none;
+    background: none;
+    color: var(--text-muted);
+    font-size: 0.8125rem;
+    cursor: pointer;
+    border-radius: 4px;
+}
+.toggle-switch:hover:not(:disabled) {
+    color: var(--text);
+}
+.toggle-switch:focus-visible {
+    outline: 2px solid var(--accent-strong);
+    outline-offset: 2px;
+}
+.toggle-switch:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+.toggle-switch-track {
+    position: relative;
+    width: 26px;
+    height: 15px;
+    border-radius: 999px;
+    background: var(--border);
+    transition: background 0.15s ease;
+    flex: 0 0 auto;
+}
+.toggle-switch-thumb {
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 11px;
+    height: 11px;
+    border-radius: 50%;
+    background: var(--text-muted);
+    transition: transform 0.15s ease, background 0.15s ease;
+}
+.toggle-switch.on .toggle-switch-track {
+    background: var(--accent);
+}
+.toggle-switch.on .toggle-switch-thumb {
+    transform: translateX(11px);
+    background: var(--text-strong);
+}
 .btn {
     border: 1px solid transparent;
     border-radius: 6px;

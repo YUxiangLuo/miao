@@ -500,6 +500,16 @@ export default function App() {
     openConfirm('删除规则', `确定要删除此规则吗？\n${label}`, () => handleDeleteRule(rule))
   }, [openConfirm, handleDeleteRule])
 
+  const handleToggleAdblock = useCallback(async (enabled) => {
+    try {
+      await apiCall('adblock', { method: 'POST', body: JSON.stringify({ enabled }) }, 'toggleAdblock')
+      await fetchStatus()
+      showToast(enabled ? '去广告已开启' : '去广告已关闭', 'success')
+    } catch (error) {
+      showToast(error.message, 'error')
+    }
+  }, [apiCall, fetchStatus, showToast])
+
   if (!firstLoadDone) {
     return <div className="shell"><div className="onboarding-loading">加载中…</div></div>
   }
@@ -592,6 +602,8 @@ export default function App() {
               loadingAction={loadingAction}
               onAddRule={handleAddRule}
               onDeleteRule={handleOpenDeleteRuleConfirm}
+              adblockEnabled={Boolean(status.adblock)}
+              onToggleAdblock={handleToggleAdblock}
             />
           </div>
         </div>

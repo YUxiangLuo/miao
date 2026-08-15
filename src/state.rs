@@ -84,6 +84,7 @@ mod tests {
             nodes: vec![],
             custom_rules: vec![],
             route_mode: Default::default(),
+            adblock: false,
         };
 
         let state = AppState::new(config.clone()).unwrap();
@@ -113,6 +114,7 @@ mod tests {
             nodes: vec![],
             custom_rules: vec![],
             route_mode: Default::default(),
+            adblock: false,
         };
 
         let state = AppState::new(config).unwrap();

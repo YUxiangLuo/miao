@@ -721,6 +721,7 @@ fn build_sing_box_config(
         &mut sing_box_config,
         config.route_mode,
         &config.custom_rules,
+        config.adblock,
     );
 
     Ok(sing_box_config)
@@ -742,18 +743,40 @@ fn apply_route_mode(
     sing_box_config: &mut serde_json::Value,
     route_mode: RouteMode,
     custom_rules: &[String],
+    adblock: bool,
 ) {
+    // 广告规则集(REIJI007/AdBlock_Rule_For_Sing-box 编译的本地 srs)仅在使用时挂载
+    if adblock {
+        if let Some(rule_sets) = sing_box_config["route"]["rule_set"].as_array_mut() {
+            rule_sets.insert(
+                0,
+                serde_json::json!({
+                    "type": "local",
+                    "tag": "adblock",
+                    "format": "binary",
+                    "path": "./adblock_reject.srs"
+                }),
+            );
+        }
+    }
+
     if let Some(rules) = sing_box_config["route"]["rules"].as_array_mut() {
+        // 两种模式下自定义规则都优先生效;广告拦截排在其后,用户可放行误拦域名
+        let mut insertions = parse_custom_rules(custom_rules);
+        if adblock {
+            insertions.push(serde_json::json!({"rule_set": ["adblock"], "action": "reject"}));
+        }
         match route_mode {
             RouteMode::Rule => {
-                let custom_rules = parse_custom_rules(custom_rules);
                 // Preserve the mandatory pre-routing actions, then let user rules take
                 // precedence over the built-in direct/proxy split rules.
                 let insertion_index = rules.len().min(2);
-                rules.splice(insertion_index..insertion_index, custom_rules);
+                rules.splice(insertion_index..insertion_index, insertions);
             }
             RouteMode::Global => {
+                // 全局模式只裁掉内置分流规则,自定义规则(如内网直连)仍然生效
                 rules.truncate(2);
+                rules.extend(insertions);
             }
         }
     }
@@ -761,6 +784,16 @@ fn apply_route_mode(
     if route_mode == RouteMode::Global {
         if let Some(dns_rules) = sing_box_config["dns"]["rules"].as_array_mut() {
             dns_rules.clear();
+        }
+    }
+
+    // DNS 层同步拦截广告域名,直接拒绝解析;全局模式下清空分流规则后同样保留
+    if adblock {
+        if let Some(dns_rules) = sing_box_config["dns"]["rules"].as_array_mut() {
+            dns_rules.insert(
+                0,
+                serde_json::json!({"rule_set": ["adblock"], "action": "reject"}),
+            );
         }
     }
 }
@@ -844,6 +877,7 @@ mod tests {
             ],
             custom_rules: vec![],
             route_mode: Default::default(),
+            adblock: false,
         };
 
         let (outbounds, names) = collect_manual_outbounds(&config);
@@ -865,6 +899,7 @@ mod tests {
             ],
             custom_rules: vec![],
             route_mode: Default::default(),
+            adblock: false,
         };
 
         let (outbounds, names) = collect_manual_outbounds(&config);
@@ -888,6 +923,7 @@ mod tests {
                 "not-json".to_string(),
             ],
             route_mode: Default::default(),
+            adblock: false,
         };
 
         let my_outbounds = vec![json!({
@@ -944,6 +980,7 @@ mod tests {
                     .to_string(),
             ],
             route_mode: RouteMode::Global,
+            adblock: false,
         };
 
         let my_outbounds = vec![json!({
@@ -964,10 +1001,13 @@ mod tests {
         .unwrap();
 
         let rules = built["route"]["rules"].as_array().unwrap();
-        assert_eq!(rules.len(), 2);
+        // 内置分流规则被裁掉,但自定义规则在全局模式下仍然生效
+        assert_eq!(rules.len(), 3);
         assert_eq!(rules[0]["action"], "sniff");
         assert_eq!(rules[1]["action"], "hijack-dns");
-        assert!(rules.iter().all(|rule| rule.get("outbound").is_none()));
+        assert_eq!(rules[2]["domain_suffix"], json!(["example.com"]));
+        assert_eq!(rules[2]["outbound"], "direct");
+        assert!(rules[..2].iter().all(|rule| rule.get("outbound").is_none()));
 
         let dns_rules = built["dns"]["rules"].as_array().unwrap();
         assert!(dns_rules.is_empty());
@@ -1077,6 +1117,7 @@ mod tests {
             nodes: vec![],
             custom_rules: vec![],
             route_mode: RouteMode::Global,
+            adblock: false,
         };
 
         let runtime_config = config_with_route_override(&config, None);
@@ -1092,6 +1133,7 @@ mod tests {
             nodes: vec![],
             custom_rules: vec![],
             route_mode: Default::default(),
+            adblock: false,
         };
 
         let my_outbounds = vec![json!({
@@ -1149,6 +1191,7 @@ mod tests {
             nodes: vec![],
             custom_rules: vec![],
             route_mode: Default::default(),
+            adblock: false,
         };
 
         let my_outbounds = vec![
@@ -1199,6 +1242,7 @@ mod tests {
             nodes: vec![],
             custom_rules: vec![],
             route_mode: Default::default(),
+            adblock: false,
         };
 
         let err = build_sing_box_config(&config, vec![], vec![], vec![], vec![]).unwrap_err();
@@ -1217,6 +1261,7 @@ mod tests {
             nodes: vec![],
             custom_rules: vec![],
             route_mode: Default::default(),
+            adblock: false,
         };
 
         let (outbounds, names) = collect_manual_outbounds(&config);
@@ -1237,6 +1282,7 @@ mod tests {
             ],
             custom_rules: vec![],
             route_mode: Default::default(),
+            adblock: false,
         };
 
         let (outbounds, names) = collect_manual_outbounds(&config);
@@ -1254,6 +1300,7 @@ mod tests {
             nodes: vec![],
             custom_rules: vec![],
             route_mode: Default::default(),
+            adblock: false,
         };
 
         let my_outbounds = vec![
@@ -1290,6 +1337,7 @@ mod tests {
             nodes: vec![],
             custom_rules: vec![],
             route_mode: Default::default(),
+            adblock: false,
         };
 
         let my_outbounds = vec![json!({
@@ -1322,6 +1370,7 @@ mod tests {
             nodes: vec![],
             custom_rules: vec![],
             route_mode: Default::default(),
+            adblock: false,
         };
 
         let my_outbounds = vec![json!({
@@ -1391,6 +1440,141 @@ mod tests {
     }
 
     #[test]
+    fn build_sing_box_config_injects_adblock_rules_when_enabled() {
+        let config = Config {
+            port: None,
+            subs: vec![],
+            nodes: vec![],
+            custom_rules: vec![
+                r#"{"domain_suffix":"ads-whitelist.example.com","action":"route","outbound":"direct"}"#
+                    .to_string(),
+            ],
+            route_mode: Default::default(),
+            adblock: true,
+        };
+
+        let built = build_sing_box_config(
+            &config,
+            vec!["manual-a".to_string()],
+            vec![json!({
+                "type": "hysteria2",
+                "tag": "manual-a",
+                "server": "manual.example.com",
+                "server_port": 443,
+                "password": "secret"
+            })],
+            vec![],
+            vec![],
+        )
+        .unwrap();
+
+        let rule_sets = built["route"]["rule_set"].as_array().unwrap();
+        assert_eq!(rule_sets[0]["tag"], "adblock");
+        assert_eq!(rule_sets[0]["type"], "local");
+        assert_eq!(rule_sets[0]["format"], "binary");
+        assert_eq!(rule_sets[0]["path"], "./adblock_reject.srs");
+
+        let rules = built["route"]["rules"].as_array().unwrap();
+        // 自定义规则在前、广告拦截在后,用户可以放行误拦域名
+        assert_eq!(
+            rules[2]["domain_suffix"],
+            json!("ads-whitelist.example.com")
+        );
+        assert_eq!(rules[3]["rule_set"], json!(["adblock"]));
+        assert_eq!(rules[3]["action"], "reject");
+        assert_eq!(rules[4]["ip_is_private"], true);
+
+        let dns_rules = built["dns"]["rules"].as_array().unwrap();
+        assert_eq!(dns_rules.len(), 3);
+        assert_eq!(dns_rules[0]["rule_set"], json!(["adblock"]));
+        assert_eq!(dns_rules[0]["action"], "reject");
+        assert_eq!(dns_rules[1]["domain_suffix"], json!(["hdslb.com"]));
+    }
+
+    #[test]
+    fn build_sing_box_config_keeps_adblock_in_global_mode() {
+        let config = Config {
+            port: None,
+            subs: vec![],
+            nodes: vec![],
+            custom_rules: vec![],
+            route_mode: crate::models::RouteMode::Global,
+            adblock: true,
+        };
+
+        let built = build_sing_box_config(
+            &config,
+            vec!["manual-a".to_string()],
+            vec![json!({
+                "type": "hysteria2",
+                "tag": "manual-a",
+                "server": "manual.example.com",
+                "server_port": 443,
+                "password": "secret"
+            })],
+            vec![],
+            vec![],
+        )
+        .unwrap();
+
+        // 全局模式下分流规则被裁掉,但广告拦截保留
+        let rules = built["route"]["rules"].as_array().unwrap();
+        assert_eq!(rules.len(), 3);
+        assert_eq!(rules[0]["action"], "sniff");
+        assert_eq!(rules[1]["action"], "hijack-dns");
+        assert_eq!(rules[2]["rule_set"], json!(["adblock"]));
+        assert_eq!(rules[2]["action"], "reject");
+
+        let dns_rules = built["dns"]["rules"].as_array().unwrap();
+        assert_eq!(dns_rules.len(), 1);
+        assert_eq!(dns_rules[0]["rule_set"], json!(["adblock"]));
+
+        assert!(built["route"]["rule_set"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|rule_set| rule_set["tag"] == "adblock"));
+    }
+
+    #[test]
+    fn build_sing_box_config_omits_adblock_when_disabled() {
+        let config = Config {
+            port: None,
+            subs: vec![],
+            nodes: vec![],
+            custom_rules: vec![],
+            route_mode: Default::default(),
+            adblock: false,
+        };
+
+        let built = build_sing_box_config(
+            &config,
+            vec!["manual-a".to_string()],
+            vec![json!({
+                "type": "hysteria2",
+                "tag": "manual-a",
+                "server": "manual.example.com",
+                "server_port": 443,
+                "password": "secret"
+            })],
+            vec![],
+            vec![],
+        )
+        .unwrap();
+
+        assert!(built["route"]["rule_set"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|rule_set| rule_set["tag"] != "adblock"));
+        assert!(built["route"]["rules"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|rule| rule.get("rule_set") != Some(&json!(["adblock"]))));
+    }
+
+    #[test]
     fn build_sing_box_config_binds_clash_api_to_localhost() {
         let config = Config {
             port: None,
@@ -1398,6 +1582,7 @@ mod tests {
             nodes: vec![],
             custom_rules: vec![],
             route_mode: Default::default(),
+            adblock: false,
         };
 
         let built = build_sing_box_config(
@@ -1433,6 +1618,7 @@ mod tests {
                 "".to_string(),
             ],
             route_mode: Default::default(),
+            adblock: false,
         };
 
         let my_outbounds = vec![json!({
@@ -1472,6 +1658,7 @@ mod tests {
             nodes: vec![],
             custom_rules: vec![],
             route_mode: Default::default(),
+            adblock: false,
         };
 
         save_config_to(&config_path, &config).await.unwrap();
@@ -1511,6 +1698,7 @@ mod tests {
             nodes: vec![],
             custom_rules: vec![],
             route_mode: Default::default(),
+            adblock: false,
         };
         save_config_to(&config_path, &config).await.unwrap();
 
@@ -1535,6 +1723,7 @@ mod tests {
             nodes: vec![],
             custom_rules: vec![],
             route_mode: Default::default(),
+            adblock: false,
         };
 
         save_config_to(&config_path, &config).await.unwrap();

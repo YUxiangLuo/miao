@@ -18,6 +18,9 @@ pub struct Config {
     pub nodes: Vec<String>,
     #[serde(default)]
     pub custom_rules: Vec<String>,
+    /// 去广告开关:命中内置广告规则集的域名在 DNS 和路由层双重 reject
+    #[serde(default)]
+    pub adblock: bool,
     #[serde(default, skip_serializing, skip_deserializing)]
     pub route_mode: RouteMode,
 }
@@ -50,6 +53,7 @@ nodes: []
             nodes: vec![],
             custom_rules: vec![],
             route_mode: super::RouteMode::Global,
+            adblock: false,
         };
 
         let yaml = serde_yaml::to_string(&config).unwrap();
@@ -65,6 +69,7 @@ nodes: []
             nodes: vec![],
             custom_rules: vec![],
             route_mode: Default::default(),
+            adblock: false,
         };
 
         let yaml = serde_yaml::to_string(&config).unwrap();

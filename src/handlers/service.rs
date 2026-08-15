@@ -47,6 +47,7 @@ pub async fn get_status(State(state): State<Arc<AppState>>) -> Json<ApiResponse<
         .read()
         .await
         .unwrap_or(RouteMode::default());
+    let adblock = state.config.read().await.adblock;
 
     success(
         if running { "running" } else { "stopped" },
@@ -54,6 +55,7 @@ pub async fn get_status(State(state): State<Arc<AppState>>) -> Json<ApiResponse<
             running,
             initializing,
             route_mode,
+            adblock,
             pid,
             uptime_secs,
             warning,
@@ -256,6 +258,7 @@ mod tests {
             nodes: vec![],
             custom_rules: vec![],
             route_mode: Default::default(),
+            adblock: false,
         });
 
         let axum::response::Json(response) = get_status(State(state)).await;
@@ -276,6 +279,7 @@ mod tests {
             nodes: vec![],
             custom_rules: vec![],
             route_mode: RouteMode::Rule,
+            adblock: false,
         });
         *state.route_mode_override.write().await = Some(RouteMode::Global);
 
@@ -294,6 +298,7 @@ mod tests {
             nodes: vec![],
             custom_rules: vec![],
             route_mode: RouteMode::Global,
+            adblock: false,
         });
 
         let axum::response::Json(response) = get_status(State(state)).await;

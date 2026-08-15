@@ -41,7 +41,7 @@ const RuleRow = memo(function RuleRow({ rule, onDelete, disabled }) {
   )
 })
 
-export function RulesCard({ rules, isInitializing, loadingAction, onAddRule, onDeleteRule }) {
+export function RulesCard({ rules, isInitializing, loadingAction, onAddRule, onDeleteRule, adblockEnabled, onToggleAdblock }) {
   const [field, setField] = useState('domain_suffix')
   const [target, setTarget] = useState('proxy')
   const [value, setValue] = useState('')
@@ -49,6 +49,7 @@ export function RulesCard({ rules, isInitializing, loadingAction, onAddRule, onD
   const fieldOption = RULE_FIELD_OPTIONS.find((option) => option.value === field)
   const canAdd = value.trim().length > 0
   const adding = loadingAction === 'addRule'
+  const adblockPending = loadingAction === 'toggleAdblock'
 
   const handleAdd = async () => {
     if (!canAdd || adding || isInitializing) return
@@ -66,6 +67,22 @@ export function RulesCard({ rules, isInitializing, loadingAction, onAddRule, onD
             <span>自定义规则</span>
             <span className="counter-pill">{rules.length}</span>
           </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={adblockEnabled}
+            aria-label="去广告"
+            title="拦截广告域名(DNS 与连接双重拦截,规则集内嵌)"
+            className={classNames('toggle-switch', adblockEnabled && 'on')}
+            disabled={isInitializing || adblockPending}
+            aria-busy={adblockPending || undefined}
+            onClick={() => onToggleAdblock(!adblockEnabled)}
+          >
+            <span className="toggle-switch-label">去广告</span>
+            <span className="toggle-switch-track">
+              <span className="toggle-switch-thumb" />
+            </span>
+          </button>
         </div>
       }
     >

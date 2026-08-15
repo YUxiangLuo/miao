@@ -6,7 +6,8 @@ export function useStatus() {
     pid: null,
     uptime_secs: null,
     initializing: false,
-    route_mode: 'rule'
+    route_mode: 'rule',
+    adblock: false
   })
 
   const fetchStatus = useCallback(async () => {

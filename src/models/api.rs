@@ -41,6 +41,7 @@ pub struct StatusData {
     pub running: bool,
     pub initializing: bool,
     pub route_mode: RouteMode,
+    pub adblock: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pid: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -73,6 +74,11 @@ pub struct RuleRequest {
 pub struct DeleteRuleRequest {
     pub index: usize,
     pub raw: String,
+}
+
+#[derive(Deserialize)]
+pub struct AdblockRequest {
+    pub enabled: bool,
 }
 
 #[derive(Deserialize)]
