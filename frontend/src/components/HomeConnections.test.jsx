@@ -23,8 +23,8 @@ function connection({ metadata, ...overrides } = {}) {
 }
 
 describe('HomeConnections', () => {
-  it('hides when the service is stopped', () => {
-    const { container } = render(
+  it('renders an empty placeholder when the service is stopped', () => {
+    render(
       <HomeConnections
         status={{ running: false }}
         data={{
@@ -34,7 +34,25 @@ describe('HomeConnections', () => {
       />,
     )
 
-    expect(container).toBeEmptyDOMElement()
+    // 布局占位始终存在,避免活跃链接出现/消失时主内容区高度跳动
+    expect(screen.getByRole('region', { name: '活跃链接' })).toBeInTheDocument()
+    expect(screen.getByText('暂无活跃链接')).toBeInTheDocument()
+    expect(screen.queryByText('api.github.com')).not.toBeInTheDocument()
+  })
+
+  it('renders an empty placeholder when all connections are idle', () => {
+    render(
+      <HomeConnections
+        status={{ running: true }}
+        data={{
+          connections: [connection({ id: 'idle', downloadSpeed: 0, uploadSpeed: 0 })],
+        }}
+        onOpenAll={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByText('暂无活跃链接')).toBeInTheDocument()
+    expect(screen.getByText('0')).toBeInTheDocument()
   })
 
   it('hides idle connections and lists active site cards by speed', () => {

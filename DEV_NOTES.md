@@ -58,7 +58,8 @@ const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype
 setter.call(input, '新值'); input.dispatchEvent(new Event('input', { bubbles: true }))
 ```
 
-- 首页是固定高度布局：`document.body.scrollHeight == innerHeight`，页面不滚动，**左右列各自内部滚动**(`.left-column`/`.right-column`)，别被"截断"误导
+- 首页是固定高度布局：`document.body.scrollHeight == innerHeight`，页面不滚动，**左右列各自内部滚动**(`.left-column`/`.right-column`)，别被“截断”误导
+- 活跃链接区（`.home-connections`）恒高 240px 且始终渲染（无活跃时显示占位文案）;`.content-grid` 用 `flex: 1 1 auto` 占满剩余空间。两者都不随活跃链接出现/消失变化——别再写“无连接时不渲染”或 `:last-child` 变高这类逻辑，会破坏布局稳定。移动端（≤840px）由 JS 的 `isDesktop` 门控不渲染该区域，不要再加 CSS `display:none` 双保险
 - 链接统计面板入口：状态卡的流量数字(`.traffic-chip`)
 
 ## 写测试的坑(都已踩过)

@@ -17,8 +17,10 @@ export function HomeConnections({ status, data, onOpenAll }) {
     [connections],
   )
 
-  if (!status.running || activeGroups.length === 0) return null
+  const hasActive = status.running && activeGroups.length > 0
 
+  // 始终渲染占位:不出现时不渲染会让 .content-grid 变成 last-child 而撑高,
+  // 导致活跃链接出现时主内容区高度突变、右列突然出现滚动条
   return (
     <section className="home-connections" aria-label="活跃链接">
       <div className="home-connections-header">
@@ -32,14 +34,18 @@ export function HomeConnections({ status, data, onOpenAll }) {
         </button>
       </div>
       <div className="home-connections-grid connection-card-grid">
-        {activeGroups.map((group) => (
-          <ConnectionCard
-            key={group.id}
-            group={group}
-            expanded={expandedId === group.id}
-            onToggle={() => setExpandedId(expandedId === group.id ? null : group.id)}
-          />
-        ))}
+        {hasActive ? (
+          activeGroups.map((group) => (
+            <ConnectionCard
+              key={group.id}
+              group={group}
+              expanded={expandedId === group.id}
+              onToggle={() => setExpandedId(expandedId === group.id ? null : group.id)}
+            />
+          ))
+        ) : (
+          <div className="empty-block home-connections-empty">暂无活跃链接</div>
+        )}
       </div>
     </section>
   )
