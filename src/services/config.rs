@@ -768,11 +768,20 @@ fn apply_route_mode(
 fn get_config_template() -> serde_json::Value {
     serde_json::json!({
         "log": {"disabled": false, "timestamp": true, "level": "info"},
-        "experimental": {"clash_api": {"external_controller": "127.0.0.1:6262"}},
+        "experimental": {
+            "clash_api": {"external_controller": "127.0.0.1:6262"},
+            "cache_file": {
+                "enabled": true,
+                "path": "cache.db",
+                "store_dns": true
+            }
+        },
         "dns": {
             "final": "cfdns",
             "strategy": "ipv4_only",
             "disable_cache": false,
+            "cache_capacity": 4096,
+            "optimistic": {"enabled": true, "timeout": "1h"},
             "servers": [
                 {"type": "https", "tag": "cfdns", "server": "1.1.1.1", "detour": "proxy"},
                 {"tag": "local", "type": "udp", "server": "223.5.5.5"}
@@ -1357,8 +1366,9 @@ mod tests {
         assert_eq!(dns_rules[1]["server"], "local");
 
         assert_eq!(built["dns"]["disable_cache"], false);
-        assert!(built["dns"].get("cache_capacity").is_none());
-        assert!(built["dns"].get("optimistic").is_none());
+        assert_eq!(built["dns"]["cache_capacity"], 4096);
+        assert_eq!(built["dns"]["optimistic"]["enabled"], true);
+        assert_eq!(built["dns"]["optimistic"]["timeout"], "1h");
 
         let dns_servers = built["dns"]["servers"].as_array().unwrap();
         let cfdns = dns_servers
@@ -1373,7 +1383,9 @@ mod tests {
             .iter()
             .all(|server| server["type"] != "fakeip" && server["tag"] != "fakeip"));
 
-        assert!(built["experimental"].get("cache_file").is_none());
+        assert_eq!(built["experimental"]["cache_file"]["enabled"], true);
+        assert_eq!(built["experimental"]["cache_file"]["path"], "cache.db");
+        assert_eq!(built["experimental"]["cache_file"]["store_dns"], true);
     }
 
     #[test]
