@@ -8,8 +8,8 @@
 # 清理范围:
 #   - systemd 服务 miao.service
 #   - 二进制 /usr/local/bin/miao(含 .bak)
-#   - 配置目录 /etc/miao(config.yaml、.last_proxy 等)
-#   - 运行时目录 /tmp/miao-sing-box(内嵌 sing-box、规则集、运行时配置)
+#   - 配置目录 /etc/miao(config.yaml、普通 Linux 上的 .last_proxy)
+#   - 运行时目录 /tmp/miao-sing-box(内嵌 sing-box、规则集、运行时配置、OpenWrt 上的 .last_proxy)
 #   - 残留的 sing-box 进程与 sing-tun 网卡
 set -euo pipefail
 
