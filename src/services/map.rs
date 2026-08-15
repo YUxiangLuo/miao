@@ -11,9 +11,10 @@ use crate::models::{
     ClientEntity, DestinationEntity, GeoLocation, MapSnapshot, NetworkFlow, ProxyEntity,
 };
 use crate::services::geo::{
-    cache_path_for_config, destination_geo_query, load_cache, proxy_geo_query, resolve_queries,
-    SELF_QUERY,
+    cache_path_for_config, destination_geo_query, load_cache, now_unix, proxy_geo_query,
+    resolve_queries, SELF_QUERY,
 };
+use crate::services::node_geo::geo_from_node_name;
 use crate::services::node_parser::parse_node_json;
 use crate::services::singbox::get_sing_box_home;
 use crate::state::{AppState, ConnectionByteSample};
@@ -139,7 +140,7 @@ fn unresolved_proxy(name: &str) -> ProxyEntity {
         entity_type: "proxy",
         name: name.to_string(),
         server: String::new(),
-        geo: None,
+        geo: geo_from_node_name(name),
     }
 }
 
@@ -254,6 +255,21 @@ fn lookup_geo(
     query.and_then(|key| resolved.get(key).cloned().flatten())
 }
 
+/// sing-box 运行中（TUN 接管）时，self 查询会经代理出口，只能信任
+/// 启动前直连环境下写入的缓存；未运行时走实时解析结果。
+pub fn resolve_client_geo(
+    running: bool,
+    cache: &crate::services::geo::GeoCache,
+    resolved: &HashMap<String, Option<GeoLocation>>,
+    now: u64,
+) -> Option<GeoLocation> {
+    if running {
+        cache.get(SELF_QUERY, now).flatten()
+    } else {
+        resolved.get(SELF_QUERY).cloned().flatten()
+    }
+}
+
 pub fn build_snapshot(
     client_name: &str,
     client_geo: Option<GeoLocation>,
@@ -268,7 +284,9 @@ pub fn build_snapshot(
             entity_type: "proxy",
             name: name.clone(),
             server: server.clone(),
-            geo: lookup_geo(resolved, proxy_geo_query(server).as_deref()),
+            // 节点名（国旗/地区关键字）比中转入口域名的 GeoIP 更能代表出口位置
+            geo: geo_from_node_name(name)
+                .or_else(|| lookup_geo(resolved, proxy_geo_query(server).as_deref())),
         })
         .collect();
     let proxy_by_name: HashMap<&str, &ProxyEntity> = proxies
@@ -416,7 +434,10 @@ pub async fn collect_map_snapshot(state: &Arc<AppState>) -> MapSnapshot {
     };
 
     let mut queries = Vec::new();
-    queries.push(SELF_QUERY.to_string());
+    if !running {
+        // TUN 未接管时才实时查询本机定位；运行中只能用启动前缓存的值
+        queries.push(SELF_QUERY.to_string());
+    }
     for (_, server) in &proxy_servers {
         if let Some(query) = proxy_geo_query(server) {
             queries.push(query);
@@ -447,7 +468,7 @@ pub async fn collect_map_snapshot(state: &Arc<AppState>) -> MapSnapshot {
         cache.merge_newer(&local_cache);
     }
 
-    let client_geo = resolved.get(SELF_QUERY).cloned().flatten();
+    let client_geo = resolve_client_geo(running, &local_cache, &resolved, now_unix());
     // Keep proxy list stable even if runtime + manual overlap after a refresh.
     let mut seen = HashSet::new();
     proxy_servers.retain(|(name, _)| seen.insert(name.clone()));
@@ -466,9 +487,10 @@ pub async fn collect_map_snapshot(state: &Arc<AppState>) -> MapSnapshot {
 mod tests {
     use super::{
         build_snapshot, compute_speeds, extract_proxy_servers, is_direct_chain, leaf_outbound,
-        parse_clash_connection, ClashConnection,
+        parse_clash_connection, resolve_client_geo, ClashConnection,
     };
     use crate::models::GeoLocation;
+    use crate::services::geo::{GeoCache, SELF_QUERY};
     use crate::state::ConnectionByteSample;
     use serde_json::json;
     use std::collections::HashMap;
@@ -588,7 +610,7 @@ mod tests {
                 destination_port: Some(443),
                 upload: 1,
                 download: 8,
-                chains: vec!["Tokyo 01".into(), "proxy".into()],
+                chains: vec!["Node A".into(), "proxy".into()],
                 rule: Some("final".into()),
             },
             ClashConnection {
@@ -610,10 +632,11 @@ mod tests {
         resolved.insert("tokyo.example.com".into(), Some(tokyo_geo()));
         resolved.insert("142.250.1.1".into(), Some(frankfurt_geo()));
 
+        // 节点名不含地区关键字时，走服务器地址的 GeoIP 结果
         let snapshot = build_snapshot(
             "This Device",
             None,
-            &[("Tokyo 01".into(), "tokyo.example.com".into())],
+            &[("Node A".into(), "tokyo.example.com".into())],
             &connections,
             &speeds,
             &resolved,
@@ -629,7 +652,7 @@ mod tests {
         assert_eq!(youtube.destination.domain.as_deref(), Some("youtube.com"));
         assert_eq!(
             youtube.proxy.as_ref().map(|proxy| proxy.name.as_str()),
-            Some("Tokyo 01")
+            Some("Node A")
         );
         assert_eq!(
             youtube.destination.geo.as_ref().unwrap().city.as_deref(),
@@ -638,6 +661,49 @@ mod tests {
         let github = snapshot.flows.iter().find(|flow| flow.id == "gh").unwrap();
         assert!(github.proxy.is_none());
         assert_eq!(github.download_speed, 2.0);
+    }
+
+    #[test]
+    fn resolve_client_geo_prefers_cache_while_running() {
+        let mut cache = GeoCache::default();
+        cache.insert(SELF_QUERY.to_string(), Some(tokyo_geo()), 1_000);
+        let mut resolved = HashMap::new();
+        resolved.insert(SELF_QUERY.to_string(), Some(frankfurt_geo()));
+
+        // 运行中：TUN 已接管，实时解析不可信，只用启动前缓存
+        let geo = resolve_client_geo(true, &cache, &resolved, 1_500).unwrap();
+        assert_eq!(geo.city.as_deref(), Some("Tokyo"));
+
+        // 未运行：直连环境，用实时解析结果
+        let geo = resolve_client_geo(false, &cache, &resolved, 1_500).unwrap();
+        assert_eq!(geo.city.as_deref(), Some("Frankfurt"));
+    }
+
+    #[test]
+    fn resolve_client_geo_running_with_expired_cache_is_none() {
+        let mut cache = GeoCache::default();
+        cache.insert(SELF_QUERY.to_string(), Some(tokyo_geo()), 1_000);
+        let resolved = HashMap::new();
+
+        let expired = 1_000 + 8 * 24 * 3600;
+        assert!(resolve_client_geo(true, &cache, &resolved, expired).is_none());
+        assert!(resolve_client_geo(true, &cache, &resolved, 1_500).is_some());
+    }
+
+    #[test]
+    fn build_snapshot_uses_name_geo_when_server_is_unresolvable() {
+        let snapshot = build_snapshot(
+            "This Device",
+            None,
+            &[("🇭🇰 香港W01".into(), "relay.entry.invalid".into())],
+            &[],
+            &HashMap::new(),
+            &HashMap::new(),
+        );
+
+        let geo = snapshot.proxies[0].geo.as_ref().unwrap();
+        assert_eq!(geo.country_code.as_deref(), Some("HK"));
+        assert!(geo.latitude.is_some());
     }
 
     #[test]

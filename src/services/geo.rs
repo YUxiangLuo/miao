@@ -425,6 +425,25 @@ async fn lookup_self(client: &reqwest::Client) -> AppResult<Option<GeoLocation>>
     Ok(parse_ip_api_item(&item))
 }
 
+/// 在 sing-box 启动前（流量还是直连时）无条件刷新本机定位并写入缓存。
+/// TUN 一旦起来，self 查询会经代理出口，把“本机”定位到节点所在城市——
+/// 所以这里总是重新查询，同时能覆盖掉此前被代理污染的旧缓存。
+pub async fn refresh_self_geo(client: &reqwest::Client, cache: &mut GeoCache, cache_path: &Path) {
+    let now = now_unix();
+    match lookup_self(client).await {
+        Ok(geo) => {
+            cache.insert(SELF_QUERY.to_string(), geo, now);
+        }
+        Err(error) => {
+            warn!(error = %error, "Client GeoIP refresh failed");
+            cache.insert_failure(SELF_QUERY.to_string(), now);
+        }
+    }
+    if let Err(error) = save_cache(cache_path, cache).await {
+        warn!(error = %error, "Failed to save GeoIP cache");
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{

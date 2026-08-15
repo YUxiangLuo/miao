@@ -18,6 +18,7 @@ use tracing::{error, info, warn};
 use models::{Config, DEFAULT_PORT};
 use services::{
     config::{gen_config, restore_config_from_cache, save_config_cache},
+    geo::{cache_path_for_config, load_cache, refresh_self_geo},
     openwrt::check_and_install_openwrt_dependencies,
     proxy::restore_last_proxy,
     singbox::{extract_sing_box, start_sing_internal, stop_sing_internal},
@@ -248,6 +249,17 @@ async fn main() -> AppResult<()> {
         info!("Checking dependencies...");
         if let Err(e) = check_and_install_openwrt_dependencies().await {
             error!("Failed to check or install OpenWrt dependencies: {}", e);
+        }
+
+        // TUN 起来之前流量仍是直连，此时刷新本机定位才是真实的；
+        // 否则 ip-api 看到的是代理出口，"This Device" 会落在节点城市
+        {
+            let cache_path = cache_path_for_config(&state_for_init.config_path);
+            let mut cache = state_for_init.geo_cache.lock().await;
+            if !cache.loaded {
+                *cache = load_cache(&cache_path).await;
+            }
+            refresh_self_geo(&state_for_init.http_client, &mut cache, &cache_path).await;
         }
 
         match start_sing_internal(&state_for_init).await {
