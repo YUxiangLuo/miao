@@ -51,16 +51,27 @@ if ! command -v systemctl >/dev/null 2>&1; then
   exit 1
 fi
 
+stop_miao_service() {
+  if systemctl is-active --quiet miao 2>/dev/null; then
+    log "检测到正在运行的 miao 服务,先停止以便升级"
+    systemctl stop miao
+  fi
+}
+
+# 本地安装时先停服务,避免 6161 仍被当前实例占用而误报端口冲突
+if [[ -n "$LOCAL_BIN" ]]; then
+  stop_miao_service
+fi
+
 # 预检:面板端口被占用(例如另一个非 systemd 的实例)时提前报错,而不是装完反复重启失败
 if command -v ss >/dev/null 2>&1 && ss -tlnH '( sport = :6161 )' | grep -q .; then
   echo "端口 6161 已被占用,请先停止占用进程(或先运行 remove.sh 卸载旧实例)" >&2
   exit 1
 fi
 
-# 已安装则视为升级:先停服务再替换二进制
-if systemctl is-active --quiet miao 2>/dev/null; then
-  log "检测到正在运行的 miao 服务,先停止以便升级"
-  systemctl stop miao
+# 在线安装升级:替换二进制前同样先停服务
+if [[ -z "$LOCAL_BIN" ]]; then
+  stop_miao_service
 fi
 
 tmp_file=$(mktemp)
