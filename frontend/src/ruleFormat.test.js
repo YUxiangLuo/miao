@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   describeRule,
+  PROTOCOL_OPTIONS,
   RULE_FIELD_OPTIONS,
   RULE_TARGET_OPTIONS,
   ruleFieldLabel,
@@ -14,11 +15,29 @@ describe('ruleFormat', () => {
       'domain',
       'domain_keyword',
       'ip_cidr',
+      'source_ip_cidr',
       'port',
+      'port_range',
+      'protocol',
       'process_name',
       'process_path',
     ])
     expect(RULE_TARGET_OPTIONS.map((option) => option.value)).toEqual(['proxy', 'direct', 'reject'])
+  })
+
+  it('covers the sniff protocols supported by the backend', () => {
+    expect(PROTOCOL_OPTIONS.map((option) => option.value)).toEqual([
+      'http',
+      'tls',
+      'quic',
+      'stun',
+      'dns',
+      'bittorrent',
+      'dtls',
+      'ssh',
+      'rdp',
+      'ntp',
+    ])
   })
 
   it('labels known fields and falls back to the raw field name', () => {

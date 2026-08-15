@@ -6,7 +6,10 @@ export const RULE_FIELD_OPTIONS = [
   { value: 'domain', label: '精确域名', placeholder: 'www.example.com' },
   { value: 'domain_keyword', label: '域名关键词', placeholder: 'google' },
   { value: 'ip_cidr', label: 'IP/CIDR', placeholder: '192.168.0.0/16' },
+  { value: 'source_ip_cidr', label: '来源 IP/CIDR', placeholder: '192.168.1.0/24' },
   { value: 'port', label: '目标端口', placeholder: '443' },
+  { value: 'port_range', label: '端口范围', placeholder: '1000:2000' },
+  { value: 'protocol', label: '嗅探协议', placeholder: 'quic / tls / http…' },
   { value: 'process_name', label: '进程名', placeholder: 'curl' },
   { value: 'process_path', label: '进程路径', placeholder: '/usr/bin/curl' },
 ]
@@ -15,6 +18,20 @@ export const RULE_TARGET_OPTIONS = [
   { value: 'proxy', label: '代理' },
   { value: 'direct', label: '直连' },
   { value: 'reject', label: '拦截' },
+]
+
+// 嗅探协议选项,与后端 src/validation.rs 的 VALID_PROTOCOLS 保持一致
+export const PROTOCOL_OPTIONS = [
+  { value: 'http', label: 'http' },
+  { value: 'tls', label: 'tls' },
+  { value: 'quic', label: 'quic' },
+  { value: 'stun', label: 'stun' },
+  { value: 'dns', label: 'dns' },
+  { value: 'bittorrent', label: 'bittorrent' },
+  { value: 'dtls', label: 'dtls' },
+  { value: 'ssh', label: 'ssh' },
+  { value: 'rdp', label: 'rdp' },
+  { value: 'ntp', label: 'ntp' },
 ]
 
 export function ruleFieldLabel(field) {

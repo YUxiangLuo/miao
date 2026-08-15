@@ -1,8 +1,9 @@
 import { memo, useState } from 'react'
 import { ListFilter, Plus, Trash2 } from 'lucide-react'
 import { Button, SectionCard } from './ui.jsx'
+import { RuleModal } from './RuleModal.jsx'
 import { classNames } from '../utils.js'
-import { describeRule, RULE_FIELD_OPTIONS, RULE_TARGET_OPTIONS, ruleTargetLabel } from '../ruleFormat.js'
+import { describeRule, ruleTargetLabel } from '../ruleFormat.js'
 
 const RuleRow = memo(function RuleRow({ rule, onDelete, disabled }) {
   const display = describeRule(rule)
@@ -42,104 +43,68 @@ const RuleRow = memo(function RuleRow({ rule, onDelete, disabled }) {
 })
 
 export function RulesCard({ rules, isInitializing, loadingAction, onAddRule, onDeleteRule, adblockEnabled, onToggleAdblock }) {
-  const [field, setField] = useState('domain_suffix')
-  const [target, setTarget] = useState('proxy')
-  const [value, setValue] = useState('')
-
-  const fieldOption = RULE_FIELD_OPTIONS.find((option) => option.value === field)
-  const canAdd = value.trim().length > 0
+  const [showRuleModal, setShowRuleModal] = useState(false)
   const adding = loadingAction === 'addRule'
   const adblockPending = loadingAction === 'toggleAdblock'
 
-  const handleAdd = async () => {
-    if (!canAdd || adding || isInitializing) return
-    const added = await onAddRule({ field, value: value.trim(), target })
-    if (added) setValue('')
-  }
-
   return (
-    <SectionCard
-      bodyClassName="panel-body-tight"
-      header={
-        <div className="section-header">
-          <div className="section-title-wrap">
-            <ListFilter size={14} className="section-icon" />
-            <span>自定义规则</span>
-            <span className="counter-pill">{rules.length}</span>
-          </div>
-          <button
-            type="button"
-            role="switch"
-            aria-checked={adblockEnabled}
-            aria-label="去广告"
-            title="拦截广告域名(连接层拦截,规则集内嵌)"
-            className={classNames('toggle-switch', adblockEnabled && 'on')}
-            disabled={isInitializing || adblockPending}
-            aria-busy={adblockPending || undefined}
-            onClick={() => onToggleAdblock(!adblockEnabled)}
-          >
-            <span className="toggle-switch-label">去广告</span>
-            <span className="toggle-switch-track">
-              <span className="toggle-switch-thumb" />
-            </span>
-          </button>
-        </div>
-      }
-    >
-      <div className="list-stack">
-        {rules.length === 0 && <div className="empty-block">暂无自定义规则</div>}
-        {rules.map((rule) => (
-          <RuleRow
-            key={rule.index}
-            rule={rule}
-            onDelete={onDeleteRule}
-            disabled={isInitializing}
-          />
-        ))}
-
-        <div className="rule-add-form">
-          <div className="rule-add-row">
-            <select
-              value={field}
-              onChange={(event) => setField(event.target.value)}
-              aria-label="规则字段"
+    <>
+      <SectionCard
+        bodyClassName="panel-body-tight"
+        header={
+          <div className="section-header">
+            <div className="section-title-wrap">
+              <ListFilter size={14} className="section-icon" />
+              <span>自定义规则</span>
+              <span className="counter-pill">{rules.length}</span>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={adblockEnabled}
+              aria-label="去广告"
+              title="拦截广告域名(连接层拦截,规则集内嵌)"
+              className={classNames('toggle-switch', adblockEnabled && 'on')}
+              disabled={isInitializing || adblockPending}
+              aria-busy={adblockPending || undefined}
+              onClick={() => onToggleAdblock(!adblockEnabled)}
             >
-              {RULE_FIELD_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>{option.label}</option>
-              ))}
-            </select>
-            <select
-              value={target}
-              onChange={(event) => setTarget(event.target.value)}
-              aria-label="规则目标"
-            >
-              {RULE_TARGET_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>{option.label}</option>
-              ))}
-            </select>
-          </div>
-          <div className="rule-add-row">
-            <input
-              value={value}
-              onChange={(event) => setValue(event.target.value)}
-              onKeyDown={(event) => event.key === 'Enter' && handleAdd()}
-              placeholder={fieldOption?.placeholder}
-              aria-label="规则值"
-            />
+              <span className="toggle-switch-label">去广告</span>
+              <span className="toggle-switch-track">
+                <span className="toggle-switch-thumb" />
+              </span>
+            </button>
             <Button
               tone="secondary"
               size="sm"
               icon={<Plus size={12} />}
-              loading={adding}
-              disabled={!canAdd || isInitializing}
-              onClick={handleAdd}
+              disabled={isInitializing}
+              onClick={() => setShowRuleModal(true)}
             >
               添加
             </Button>
           </div>
-          <div className="rule-add-hint">规则按顺序优先于内置分流(国内直连 / 国外代理)</div>
+        }
+      >
+        <div className="list-stack">
+          {rules.length === 0 && <div className="empty-block">暂无自定义规则</div>}
+          {rules.map((rule) => (
+            <RuleRow
+              key={rule.index}
+              rule={rule}
+              onDelete={onDeleteRule}
+              disabled={isInitializing}
+            />
+          ))}
         </div>
-      </div>
-    </SectionCard>
+      </SectionCard>
+
+      <RuleModal
+        open={showRuleModal}
+        loading={adding}
+        onClose={() => setShowRuleModal(false)}
+        onSubmit={onAddRule}
+      />
+    </>
   )
 }

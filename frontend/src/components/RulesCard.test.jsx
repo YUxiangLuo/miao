@@ -24,13 +24,17 @@ function renderCard(props = {}) {
   )
 }
 
+async function openRuleModal(user) {
+  await user.click(screen.getByRole('button', { name: '添加' }))
+  return screen.getByRole('dialog')
+}
+
 describe('RulesCard', () => {
   it('renders structured rules with labels and target badges', () => {
     renderCard()
 
     expect(screen.getByText('自定义规则')).toBeInTheDocument()
     expect(screen.getByText('curl')).toBeInTheDocument()
-    // 字段标签同时出现在行 chip 与添加区的下拉选项中
     expect(screen.getAllByText('进程名').length).toBeGreaterThan(0)
     expect(screen.getAllByText('直连').length).toBeGreaterThan(0)
     expect(screen.getByText('25')).toBeInTheDocument()
@@ -40,33 +44,95 @@ describe('RulesCard', () => {
     expect(screen.getByText('自定义 JSON 规则')).toBeInTheDocument()
   })
 
-  it('adds a rule with the selected field, value, and target', async () => {
+  it('keeps the rule modal closed until the add button is clicked', async () => {
+    const user = userEvent.setup()
+    renderCard()
+
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+
+    const dialog = await openRuleModal(user)
+    expect(dialog).toBeInTheDocument()
+  })
+
+  it('adds a rule through the modal form and closes on success', async () => {
     const user = userEvent.setup()
     const onAddRule = vi.fn().mockResolvedValue(true)
     renderCard({ onAddRule })
 
+    await openRuleModal(user)
     await user.selectOptions(screen.getByLabelText('规则字段'), 'process_name')
     await user.selectOptions(screen.getByLabelText('规则目标'), 'direct')
-    const input = screen.getByLabelText('规则值')
-    await user.type(input, 'curl')
-    await user.click(screen.getByRole('button', { name: '添加' }))
+    await user.type(screen.getByLabelText('规则值'), 'curl')
+    await user.click(screen.getByRole('button', { name: '添加规则' }))
 
     expect(onAddRule).toHaveBeenCalledWith({ field: 'process_name', value: 'curl', target: 'direct' })
-    // 添加成功后清空输入框
-    expect(input).toHaveValue('')
+    // 添加成功后弹窗关闭
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
 
-  it('keeps the input when adding fails', async () => {
+  it('keeps the modal input when adding fails', async () => {
     const user = userEvent.setup()
     const onAddRule = vi.fn().mockResolvedValue(false)
     renderCard({ onAddRule })
 
+    await openRuleModal(user)
     const input = screen.getByLabelText('规则值')
     await user.type(input, 'example.com')
-    await user.click(screen.getByRole('button', { name: '添加' }))
+    await user.click(screen.getByRole('button', { name: '添加规则' }))
 
     expect(onAddRule).toHaveBeenCalled()
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
     expect(input).toHaveValue('example.com')
+  })
+
+  it('resets the modal form after it is closed and reopened', async () => {
+    const user = userEvent.setup()
+    renderCard()
+
+    await openRuleModal(user)
+    await user.type(screen.getByLabelText('规则值'), 'example.com')
+    await user.click(screen.getByRole('button', { name: '取消' }))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+
+    await openRuleModal(user)
+    expect(screen.getByLabelText('规则值')).toHaveValue('')
+  })
+
+  it('disables submitting when the value is empty', async () => {
+    const user = userEvent.setup()
+    renderCard()
+
+    await openRuleModal(user)
+    expect(screen.getByRole('button', { name: '添加规则' })).toBeDisabled()
+  })
+
+  it('uses a select with a default value for the protocol field', async () => {
+    const user = userEvent.setup()
+    const onAddRule = vi.fn().mockResolvedValue(true)
+    renderCard({ onAddRule })
+
+    await openRuleModal(user)
+    await user.selectOptions(screen.getByLabelText('规则字段'), 'protocol')
+
+    const valueControl = screen.getByLabelText('规则值')
+    expect(valueControl.tagName).toBe('SELECT')
+    expect(valueControl).toHaveValue('quic')
+
+    await user.click(screen.getByRole('button', { name: '添加规则' }))
+    expect(onAddRule).toHaveBeenCalledWith({ field: 'protocol', value: 'quic', target: 'proxy' })
+  })
+
+  it('clears the protocol value when switching back to a text field', async () => {
+    const user = userEvent.setup()
+    renderCard()
+
+    await openRuleModal(user)
+    await user.selectOptions(screen.getByLabelText('规则字段'), 'protocol')
+    await user.selectOptions(screen.getByLabelText('规则字段'), 'domain_suffix')
+
+    const valueControl = screen.getByLabelText('规则值')
+    expect(valueControl.tagName).toBe('INPUT')
+    expect(valueControl).toHaveValue('')
   })
 
   it('deletes a rule by its index and raw payload', async () => {
@@ -76,11 +142,6 @@ describe('RulesCard', () => {
 
     await user.click(screen.getByRole('button', { name: '删除规则 curl' }))
     expect(onDeleteRule).toHaveBeenCalledWith(rules[0])
-  })
-
-  it('disables adding when the value is empty', () => {
-    renderCard()
-    expect(screen.getByRole('button', { name: '添加' })).toBeDisabled()
   })
 
   it('shows an empty state when there are no rules', () => {

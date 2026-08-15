@@ -66,7 +66,7 @@ setter.call(input, '新值'); input.dispatchEvent(new Event('input', { bubbles: 
 **前端(vitest + testing-library)**:
 
 - `<details>` 折叠时子元素**仍在 DOM 中**——断言折叠要查 `open` 属性，不是元素不存在
-- 字段标签会同时出现在列表行 chip 和添加区 `<option>` 里，用 `getAllByText` 或精确化选择器
+- 规则添加表单在弹窗（RuleModal）里，**关闭时完全不在 DOM 中**；打开后字段标签会同时出现在列表行 chip 和下拉 `<option>` 里，用 `getAllByText` 或精确化选择器
 - 节点密码校验 ≥8 位，测试数据别用 `pass123`;ss 的 2022-blake3 系列 cipher 要求密码是 base64 key,sing-box 会拒
 - `user.click(input)` 后 `user.paste(text)` 模拟粘贴
 - App 集成测试要 mock 全端点：`/api/status|subs|nodes|rules|version`、`/api/clash/proxies`、`/api/clash/proxies/*/delay`;WebSocket 失败会自行重连，组件卸载时清理定时器，不用管

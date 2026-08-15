@@ -1923,11 +1923,11 @@ button {
 }
 
 /* 自定义规则卡片 */
-.rule-add-form {
+.rule-modal-form {
     display: flex;
     flex-direction: column;
     gap: 8px;
-    padding: 10px 16px;
+    margin-top: 12px;
 }
 .rule-add-row {
     display: flex;
