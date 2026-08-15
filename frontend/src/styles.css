@@ -1992,6 +1992,19 @@ button {
     background: var(--surface-red);
     color: var(--danger);
 }
+.rule-target-badge.node {
+    background: var(--surface-soft);
+    color: var(--text-muted);
+}
+.list-row.skipped .list-row-content {
+    opacity: 0.5;
+}
+.rule-skipped-icon {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    color: var(--warning);
+}
 .list-row-title .rule-field-chip {
     margin-right: 6px;
 }

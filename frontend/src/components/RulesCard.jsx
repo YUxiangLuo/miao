@@ -1,5 +1,5 @@
 import { memo, useState } from 'react'
-import { ListFilter, Plus, Trash2 } from 'lucide-react'
+import { ListFilter, Plus, Trash2, TriangleAlert } from 'lucide-react'
 import { Button, SectionCard } from './ui.jsx'
 import { RuleModal } from './RuleModal.jsx'
 import { classNames } from '../utils.js'
@@ -8,7 +8,7 @@ import { describeRule, ruleTargetLabel } from '../ruleFormat.js'
 const RuleRow = memo(function RuleRow({ rule, onDelete, disabled }) {
   const display = describeRule(rule)
   return (
-    <div className="list-row">
+    <div className={classNames('list-row', rule.skipped && 'skipped')}>
       <div className="list-row-content">
         {display.structured ? (
           <>
@@ -25,8 +25,17 @@ const RuleRow = memo(function RuleRow({ rule, onDelete, disabled }) {
           </>
         )}
       </div>
+      {rule.skipped && (
+        <span
+          className="rule-skipped-icon"
+          title="出口节点不存在,该规则未生效;请删除后重新添加"
+          aria-label="规则未生效"
+        >
+          <TriangleAlert size={13} />
+        </span>
+      )}
       {display.structured && display.target && (
-        <span className={classNames('rule-target-badge', display.target)}>
+        <span className={classNames('rule-target-badge', ['proxy', 'direct', 'reject'].includes(display.target) ? display.target : 'node')}>
           {ruleTargetLabel(display.target)}
         </span>
       )}
@@ -42,7 +51,7 @@ const RuleRow = memo(function RuleRow({ rule, onDelete, disabled }) {
   )
 })
 
-export function RulesCard({ rules, isInitializing, loadingAction, onAddRule, onDeleteRule, adblockEnabled, onToggleAdblock }) {
+export function RulesCard({ rules, isInitializing, loadingAction, onAddRule, onDeleteRule, adblockEnabled, onToggleAdblock, nodeNames = [] }) {
   const [showRuleModal, setShowRuleModal] = useState(false)
   const adding = loadingAction === 'addRule'
   const adblockPending = loadingAction === 'toggleAdblock'
@@ -104,6 +113,7 @@ export function RulesCard({ rules, isInitializing, loadingAction, onAddRule, onD
         loading={adding}
         onClose={() => setShowRuleModal(false)}
         onSubmit={onAddRule}
+        nodeNames={nodeNames}
       />
     </>
   )

@@ -4,7 +4,7 @@ import { useDialog } from '../hooks/useDialog.js'
 import { Button } from './ui.jsx'
 import { PROTOCOL_OPTIONS, RULE_FIELD_OPTIONS, RULE_TARGET_OPTIONS } from '../ruleFormat.js'
 
-export function RuleModal({ open, loading, onClose, onSubmit }) {
+export function RuleModal({ open, loading, onClose, onSubmit, nodeNames = [] }) {
   const titleId = useId()
   const dialogRef = useDialog(open, onClose)
   const [field, setField] = useState('domain_suffix')
@@ -24,6 +24,8 @@ export function RuleModal({ open, loading, onClose, onSubmit }) {
 
   const isProtocol = field === 'protocol'
   const fieldOption = RULE_FIELD_OPTIONS.find((option) => option.value === field)
+  // 目标不在内置三项里即为指定节点出口
+  const isNodeTarget = !RULE_TARGET_OPTIONS.some((option) => option.value === target)
   const canSubmit = value.trim().length > 0
 
   // 协议字段用下拉选值;切入时给默认值,切出时清空,避免把协议名带进文本字段
@@ -80,6 +82,13 @@ export function RuleModal({ open, loading, onClose, onSubmit }) {
               {RULE_TARGET_OPTIONS.map((option) => (
                 <option key={option.value} value={option.value}>{option.label}</option>
               ))}
+              {nodeNames.length > 0 && (
+                <optgroup label="指定节点">
+                  {nodeNames.map((name) => (
+                    <option key={name} value={name}>{name}</option>
+                  ))}
+                </optgroup>
+              )}
             </select>
           </div>
           <div className="rule-add-row">
@@ -106,6 +115,9 @@ export function RuleModal({ open, loading, onClose, onSubmit }) {
             )}
           </div>
           <div className="rule-add-hint">规则按顺序优先于内置分流(国内直连 / 国外代理),全局模式下仍生效</div>
+          {isNodeTarget && (
+            <div className="rule-add-hint">若该节点日后消失(改名或订阅变更),此规则将暂停生效并在列表中标记,节点恢复后自动生效</div>
+          )}
           <div className="modal-actions">
             <Button tone="ghost" size="sm" onClick={onClose}>取消</Button>
             <Button

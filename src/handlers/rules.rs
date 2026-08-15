@@ -3,7 +3,7 @@ use std::sync::{atomic::Ordering, Arc};
 
 use crate::models::{AdblockRequest, ApiResponse, DeleteRuleRequest, RuleInfo, RuleRequest};
 use crate::responses::{status_error, success, success_no_data, HandlerResult};
-use crate::services::config::apply_config_change;
+use crate::services::config::{apply_config_change, known_rule_targets};
 use crate::state::AppState;
 use crate::validation::Validator;
 use serde_json::{json, Map, Value as JsonValue};
@@ -34,6 +34,7 @@ fn describe_rule(index: usize, raw: &str) -> RuleInfo {
         field: None,
         value: None,
         target: None,
+        skipped: false,
         raw: raw.to_string(),
     };
 
@@ -105,11 +106,18 @@ fn describe_rule(index: usize, raw: &str) -> RuleInfo {
 
 pub async fn get_rules(State(state): State<Arc<AppState>>) -> Json<ApiResponse<Vec<RuleInfo>>> {
     let config = state.config.read().await;
+    let skipped_rules = state.skipped_rules.lock().await;
+    let skipped_raws: std::collections::HashSet<&str> =
+        skipped_rules.iter().map(|rule| rule.raw.as_str()).collect();
     let rules: Vec<RuleInfo> = config
         .custom_rules
         .iter()
         .enumerate()
-        .map(|(index, raw)| describe_rule(index, raw))
+        .map(|(index, raw)| {
+            let mut info = describe_rule(index, raw);
+            info.skipped = skipped_raws.contains(raw.as_str());
+            info
+        })
         .collect();
 
     success("Rules loaded", rules)
@@ -126,7 +134,9 @@ pub async fn add_rule(
         ));
     }
 
-    Validator::custom_rule(&req).map_err(|e| status_error(StatusCode::BAD_REQUEST, e))?;
+    let extra_targets = known_rule_targets(&state.config.read().await.clone()).await;
+    Validator::custom_rule(&req, &extra_targets)
+        .map_err(|e| status_error(StatusCode::BAD_REQUEST, e))?;
 
     let rule_json = build_rule_json(&req);
     let rule_str = serde_json::to_string(&rule_json)
@@ -235,6 +245,15 @@ mod tests {
     }
 
     #[test]
+    fn build_rule_json_routes_to_specific_node() {
+        let rule = build_rule_json(&request("process_path", "/usr/bin/curl", "香港节点"));
+        assert_eq!(
+            rule,
+            json!({"process_path": "/usr/bin/curl", "action": "route", "outbound": "香港节点"})
+        );
+    }
+
+    #[test]
     fn build_rule_json_reject_has_no_outbound() {
         let rule = build_rule_json(&request("process_name", "curl", "reject"));
         assert_eq!(rule, json!({"process_name": "curl", "action": "reject"}));
@@ -290,6 +309,31 @@ mod tests {
         let broken = describe_rule(4, "not json");
         assert!(broken.field.is_none());
         assert_eq!(broken.raw, "not json");
+    }
+
+    #[tokio::test]
+    async fn get_rules_marks_rules_skipped_at_generation() {
+        use crate::models::Config;
+        use crate::state::SkippedRule;
+        use crate::test_support::app_state;
+        use axum::extract::State;
+
+        let raw_ok = r#"{"domain":"t.co","action":"route","outbound":"proxy"}"#.to_string();
+        let raw_gone =
+            r#"{"process_name":"nginx","action":"route","outbound":"ghost-node"}"#.to_string();
+        let state = app_state(Config {
+            custom_rules: vec![raw_ok, raw_gone.clone()],
+            ..Default::default()
+        });
+        *state.skipped_rules.lock().await = vec![SkippedRule {
+            raw: raw_gone,
+            description: "process_name=nginx → ghost-node".to_string(),
+        }];
+
+        let axum::Json(response) = super::get_rules(State(state)).await;
+        let rules = response.data.unwrap();
+        assert!(!rules[0].skipped);
+        assert!(rules[1].skipped);
     }
 
     #[test]

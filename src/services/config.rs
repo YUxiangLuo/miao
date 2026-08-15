@@ -16,7 +16,7 @@ use crate::services::{
     },
     subscription::fetch_sub,
 };
-use crate::state::AppState;
+use crate::state::{AppState, SkippedRule};
 
 const CONFIG_CACHE_PATH: &str = "/tmp/miao-sing-box/config.json.cache";
 const MAX_CONCURRENT_SUBS: usize = 5;
@@ -285,6 +285,7 @@ pub async fn apply_config_change(
         stop_sing_internal(state).await;
         clear_runtime_config(state).await;
         *state.config.write().await = persisted_new_config;
+        *state.skipped_rules.lock().await = Vec::new();
         return Ok(());
     }
 
@@ -576,7 +577,7 @@ pub async fn gen_config(config: &Config, state: &Arc<AppState>) -> AppResult<boo
 
     let has_sub_nodes = !final_node_names.is_empty();
 
-    let sing_box_config = build_sing_box_config(
+    let (sing_box_config, skipped_rules) = build_sing_box_config(
         config,
         my_names,
         my_outbounds,
@@ -591,6 +592,8 @@ pub async fn gen_config(config: &Config, state: &Arc<AppState>) -> AppResult<boo
         &serde_json::to_string(&sing_box_config)?,
     )
     .await?;
+
+    *state.skipped_rules.lock().await = skipped_rules;
 
     Ok(has_sub_nodes)
 }
@@ -615,6 +618,49 @@ fn collect_manual_outbounds(config: &Config) -> (Vec<serde_json::Value>, Vec<Str
     }
 
     (my_outbounds, my_names)
+}
+
+/// 从运行时 sing-box 配置中提取用户节点 tag(排除内置 outbound)
+fn runtime_config_node_tags(config_json: &serde_json::Value) -> Vec<String> {
+    config_json["outbounds"]
+        .as_array()
+        .map(|outbounds| {
+            outbounds
+                .iter()
+                .filter_map(|outbound| outbound["tag"].as_str())
+                .filter(|tag| *tag != "proxy" && *tag != "direct")
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// 自定义规则可选的节点目标:手动节点(配置直读)+ 订阅节点(最近一次生成的运行时配置)。
+/// 仅供规则校验给出友好报错,最终正确性由 sing-box check 保证。
+pub async fn known_rule_targets(config: &Config) -> Vec<String> {
+    use crate::services::node_parser::parse_node_json;
+
+    let mut tags: Vec<String> = Vec::new();
+    for node_str in &config.nodes {
+        if let Ok((info, _)) = parse_node_json(node_str) {
+            if !tags.contains(&info.tag) {
+                tags.push(info.tag);
+            }
+        }
+    }
+
+    let runtime_config_path = get_sing_box_home().join("config.json");
+    if let Ok(content) = tokio::fs::read_to_string(&runtime_config_path).await {
+        if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
+            for tag in runtime_config_node_tags(&json) {
+                if !tags.contains(&tag) {
+                    tags.push(tag);
+                }
+            }
+        }
+    }
+
+    tags
 }
 
 fn make_unique_tag(tag: &str, used: &mut HashSet<String>) -> String {
@@ -690,13 +736,83 @@ fn normalize_outbound_tags(
     (unique_names, unique_outbounds)
 }
 
+/// 提取规则的匹配条件摘要,用于告警文案
+fn summarize_rule_matcher(rule: &serde_json::Value) -> String {
+    const MATCHER_FIELDS: &[&str] = &[
+        "domain_suffix",
+        "domain",
+        "domain_keyword",
+        "ip_cidr",
+        "source_ip_cidr",
+        "port",
+        "port_range",
+        "protocol",
+        "process_name",
+        "process_path",
+        "rule_set",
+    ];
+    for field in MATCHER_FIELDS {
+        if let Some(value) = rule.get(*field) {
+            let value_str = match value {
+                serde_json::Value::String(s) => s.clone(),
+                serde_json::Value::Number(n) => n.to_string(),
+                serde_json::Value::Array(items) => items
+                    .iter()
+                    .filter_map(|item| item.as_str())
+                    .collect::<Vec<_>>()
+                    .join(","),
+                other => other.to_string(),
+            };
+            return format!("{field}={value_str}");
+        }
+    }
+    "自定义规则".to_string()
+}
+
+/// 跳过引用不存在出口节点的自定义规则,返回(保留的规则, 失效规则的告警描述)。
+/// 节点可能因订阅刷新改名或消失;跳过而非写入,避免 sing-box check 失败卡死所有配置变更。
+fn filter_rules_with_missing_outbound(
+    custom_rules: &[String],
+    available_outbounds: &HashSet<String>,
+) -> (Vec<String>, Vec<SkippedRule>) {
+    let mut kept = Vec::with_capacity(custom_rules.len());
+    let mut skipped = Vec::new();
+
+    for rule_str in custom_rules {
+        let missing = serde_json::from_str::<serde_json::Value>(rule_str)
+            .ok()
+            .and_then(|rule| {
+                let outbound = rule.get("outbound")?.as_str()?;
+                if available_outbounds.contains(outbound) {
+                    None
+                } else {
+                    Some((summarize_rule_matcher(&rule), outbound.to_string()))
+                }
+            });
+
+        match missing {
+            Some((summary, outbound)) => {
+                warn!(rule = %rule_str, outbound = %outbound, "Skipping custom rule with missing outbound node");
+                skipped.push(SkippedRule {
+                    raw: rule_str.clone(),
+                    description: format!("{summary} → {outbound}"),
+                });
+            }
+            // 无法解析的规则保留原有行为:交给 parse_custom_rules 跳过并告警
+            None => kept.push(rule_str.clone()),
+        }
+    }
+
+    (kept, skipped)
+}
+
 fn build_sing_box_config(
     config: &Config,
     my_names: Vec<String>,
     my_outbounds: Vec<serde_json::Value>,
     final_node_names: Vec<String>,
     final_outbounds: Vec<serde_json::Value>,
-) -> AppResult<serde_json::Value> {
+) -> AppResult<(serde_json::Value, Vec<SkippedRule>)> {
     let total_nodes = my_outbounds.len() + final_outbounds.len();
     if total_nodes == 0 {
         return Err(AppError::NoUsableNodes);
@@ -706,6 +822,13 @@ fn build_sing_box_config(
         my_names.into_iter().chain(final_node_names).collect(),
         my_outbounds.into_iter().chain(final_outbounds).collect(),
     );
+
+    // 规则引用不存在的节点会让 sing-box check 失败;生成时跳过这些规则并留痕告警
+    let mut available_outbounds: HashSet<String> = node_names.iter().cloned().collect();
+    available_outbounds.insert("proxy".to_string());
+    available_outbounds.insert("direct".to_string());
+    let (custom_rules, skipped_rules) =
+        filter_rules_with_missing_outbound(&config.custom_rules, &available_outbounds);
 
     let mut sing_box_config = get_config_template();
     if let Some(selector_outbounds) = sing_box_config["outbounds"][0].get_mut("outbounds") {
@@ -720,11 +843,11 @@ fn build_sing_box_config(
     apply_route_mode(
         &mut sing_box_config,
         config.route_mode,
-        &config.custom_rules,
+        &custom_rules,
         config.adblock,
     );
 
-    Ok(sing_box_config)
+    Ok((sing_box_config, skipped_rules))
 }
 
 fn parse_custom_rules(custom_rules: &[String]) -> Vec<serde_json::Value> {
@@ -847,14 +970,18 @@ fn get_config_template() -> serde_json::Value {
 mod tests {
     use super::{
         build_sing_box_config, collect_manual_outbounds, config_apply_mode,
-        config_with_route_override, no_usable_nodes_warning,
-        persist_config_without_usable_nodes_at, save_config_to, ConfigApplyMode,
+        config_with_route_override, filter_rules_with_missing_outbound, no_usable_nodes_warning,
+        persist_config_without_usable_nodes_at, runtime_config_node_tags, save_config_to,
+        ConfigApplyMode,
     };
     use crate::{
         models::{Config, RouteMode, SubStatus},
         test_support::app_state,
     };
     use serde_json::json;
+    use std::collections::HashSet;
+
+    use crate::state::SkippedRule;
 
     #[test]
     fn collect_manual_outbounds_ignores_invalid_json_nodes() {
@@ -902,6 +1029,89 @@ mod tests {
     }
 
     #[test]
+    fn filter_rules_skips_only_rules_with_missing_outbound() {
+        let available: HashSet<String> = ["proxy", "direct", "node-a"]
+            .into_iter()
+            .map(str::to_string)
+            .collect();
+        let rules = vec![
+            r#"{"process_name":"curl","action":"route","outbound":"gone-node"}"#.to_string(),
+            r#"{"process_name":"wget","action":"route","outbound":"node-a"}"#.to_string(),
+            r#"{"domain":"t.co","action":"route","outbound":"proxy"}"#.to_string(),
+            r#"{"domain_keyword":"ad","action":"reject"}"#.to_string(),
+            "not-json".to_string(),
+        ];
+
+        let (kept, skipped) = filter_rules_with_missing_outbound(&rules, &available);
+
+        // 失效规则被跳过,其余(含无法解析的)原样保留
+        assert_eq!(kept.len(), 4);
+        assert!(!kept.iter().any(|r| r.contains("gone-node")));
+        assert_eq!(
+            skipped,
+            vec![SkippedRule {
+                raw: rules[0].clone(),
+                description: "process_name=curl → gone-node".to_string(),
+            }]
+        );
+    }
+
+    #[test]
+    fn build_sing_box_config_skips_rules_with_missing_node() {
+        let config = Config {
+            port: None,
+            subs: vec![],
+            nodes: vec![],
+            custom_rules: vec![
+                r#"{"process_path":"/opt/app/run","action":"route","outbound":"已消失节点"}"#
+                    .to_string(),
+                r#"{"process_name":"curl","action":"route","outbound":"manual-a"}"#.to_string(),
+            ],
+            route_mode: Default::default(),
+            adblock: false,
+        };
+
+        let (built, skipped) = build_sing_box_config(
+            &config,
+            vec!["manual-a".to_string()],
+            vec![json!({"type":"hysteria2","tag":"manual-a","server":"a.example.com","server_port":443,"password":"p","tls":{"enabled":true}})],
+            vec![],
+            vec![],
+        )
+        .unwrap();
+
+        let rules = built["route"]["rules"].as_array().unwrap();
+        let rules_json = serde_json::to_string(rules).unwrap();
+        assert!(!rules_json.contains("已消失节点"));
+        assert!(rules_json.contains("manual-a"));
+        assert_eq!(skipped.len(), 1);
+        assert_eq!(
+            skipped[0].description,
+            "process_path=/opt/app/run → 已消失节点"
+        );
+        assert_eq!(skipped[0].raw, config.custom_rules[0]);
+    }
+
+    #[test]
+    fn runtime_config_node_tags_excludes_builtin_outbounds() {
+        let config_json = json!({
+            "outbounds": [
+                {"type": "selector", "tag": "proxy"},
+                {"type": "direct", "tag": "direct"},
+                {"type": "hysteria2", "tag": "香港节点"},
+                {"type": "shadowsocks", "tag": "ss-us"},
+                {"type": "urltest"}
+            ]
+        });
+
+        assert_eq!(
+            runtime_config_node_tags(&config_json),
+            vec!["香港节点", "ss-us"]
+        );
+        assert!(runtime_config_node_tags(&json!({})).is_empty());
+    }
+
+    #[test]
     fn build_sing_box_config_merges_nodes_and_valid_custom_rules() {
         let config = Config {
             port: None,
@@ -932,7 +1142,7 @@ mod tests {
             "password": "sub-secret"
         })];
 
-        let built = build_sing_box_config(
+        let (built, _skipped) = build_sing_box_config(
             &config,
             vec!["manual-a".to_string()],
             my_outbounds,
@@ -981,7 +1191,7 @@ mod tests {
             "password": "secret"
         })];
 
-        let built = build_sing_box_config(
+        let (built, _skipped) = build_sing_box_config(
             &config,
             vec!["manual-a".to_string()],
             my_outbounds,
@@ -1151,7 +1361,7 @@ mod tests {
             }),
         ];
 
-        let built = build_sing_box_config(
+        let (built, _skipped) = build_sing_box_config(
             &config,
             vec!["dup".to_string()],
             my_outbounds,
@@ -1201,7 +1411,7 @@ mod tests {
             }),
         ];
 
-        let built = build_sing_box_config(
+        let (built, _skipped) = build_sing_box_config(
             &config,
             vec!["proxy".to_string(), "direct".to_string()],
             my_outbounds,
@@ -1299,7 +1509,7 @@ mod tests {
             json!({"type": "hysteria2", "tag": "node-3", "server": "s3.example.com", "server_port": 443, "password": "p3"}),
         ];
 
-        let built = build_sing_box_config(
+        let (built, _skipped) = build_sing_box_config(
             &config,
             vec![
                 "node-1".to_string(),
@@ -1338,7 +1548,7 @@ mod tests {
             "password": "secret"
         })];
 
-        let built = build_sing_box_config(
+        let (built, _skipped) = build_sing_box_config(
             &config,
             vec!["manual-a".to_string()],
             my_outbounds,
@@ -1371,7 +1581,7 @@ mod tests {
             "password": "secret"
         })];
 
-        let built = build_sing_box_config(
+        let (built, _skipped) = build_sing_box_config(
             &config,
             vec!["manual-a".to_string()],
             my_outbounds,
@@ -1443,7 +1653,7 @@ mod tests {
             adblock: true,
         };
 
-        let built = build_sing_box_config(
+        let (built, _skipped) = build_sing_box_config(
             &config,
             vec!["manual-a".to_string()],
             vec![json!({
@@ -1494,7 +1704,7 @@ mod tests {
             adblock: true,
         };
 
-        let built = build_sing_box_config(
+        let (built, _skipped) = build_sing_box_config(
             &config,
             vec!["manual-a".to_string()],
             vec![json!({
@@ -1539,7 +1749,7 @@ mod tests {
             adblock: false,
         };
 
-        let built = build_sing_box_config(
+        let (built, _skipped) = build_sing_box_config(
             &config,
             vec!["manual-a".to_string()],
             vec![json!({
@@ -1577,7 +1787,7 @@ mod tests {
             adblock: false,
         };
 
-        let built = build_sing_box_config(
+        let (built, _skipped) = build_sing_box_config(
             &config,
             vec!["manual-a".to_string()],
             vec![json!({
@@ -1621,7 +1831,7 @@ mod tests {
             "password": "secret"
         })];
 
-        let built = build_sing_box_config(
+        let (built, _skipped) = build_sing_box_config(
             &config,
             vec!["manual-a".to_string()],
             my_outbounds,

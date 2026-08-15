@@ -60,6 +60,13 @@ export default function App() {
   const { nodes, fetchNodes } = useNodes()
   const { rules, fetchRules } = useRules()
   const { primaryGroupName, primaryGroup, fetchProxies } = useProxies(status)
+
+  // 规则「指定节点」下拉的候选:手动节点(服务停止时也在) ∪ 运行时分组节点
+  const ruleNodeNames = useMemo(() => {
+    const names = new Set(nodes.map((node) => node.tag))
+    ;(primaryGroup?.all || []).forEach((name) => names.add(name))
+    return [...names]
+  }, [nodes, primaryGroup])
   const { traffic, closeSockets } = useTraffic(status)
   const {
     connectionsInfo,
@@ -604,6 +611,7 @@ export default function App() {
               onDeleteRule={handleOpenDeleteRuleConfirm}
               adblockEnabled={Boolean(status.adblock)}
               onToggleAdblock={handleToggleAdblock}
+              nodeNames={ruleNodeNames}
             />
           </div>
         </div>

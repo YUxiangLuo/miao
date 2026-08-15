@@ -102,6 +102,8 @@ pub struct RuleInfo {
     pub value: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub target: Option<String>,
+    /// 出口节点不存在,生成配置时被跳过(未生效)
+    pub skipped: bool,
     pub raw: String,
 }
 

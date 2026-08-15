@@ -99,6 +99,8 @@ nodes:                     # 手动节点(sing-box outbound JSON)
 
 custom_rules:              # 可选:sing-box 路由规则,优先于内置分流,全局代理模式下仍生效
   - '{"domain_suffix":"example.com","action":"route","outbound":"direct"}'
+  # outbound 除 proxy/direct 外也可填节点 tag(面板「添加规则」可直接选进程名/路径 + 指定节点);
+  # 节点日后消失时该规则会在生成配置时被跳过,不阻塞服务,面板规则列表会有失效标记与 toast 提醒
 
 adblock: true              # 可选:去广告(内嵌规则集,连接层拦截,默认关闭)
 ```

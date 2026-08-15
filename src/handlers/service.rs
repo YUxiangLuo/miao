@@ -41,7 +41,28 @@ pub async fn get_status(State(state): State<Arc<AppState>>) -> Json<ApiResponse<
     let initializing = state
         .initializing
         .load(std::sync::atomic::Ordering::Relaxed);
-    let warning = state.config_warning.lock().await.clone();
+    let mut warnings: Vec<String> = Vec::new();
+    if let Some(warning) = state.config_warning.lock().await.clone() {
+        warnings.push(warning);
+    }
+    let skipped_rules = state.skipped_rules.lock().await;
+    if !skipped_rules.is_empty() {
+        warnings.push(format!(
+            "{} 条自定义规则因出口节点不存在已跳过: {}",
+            skipped_rules.len(),
+            skipped_rules
+                .iter()
+                .map(|rule| rule.description.as_str())
+                .collect::<Vec<_>>()
+                .join(";")
+        ));
+    }
+    drop(skipped_rules);
+    let warning = if warnings.is_empty() {
+        None
+    } else {
+        Some(warnings.join(";"))
+    };
     let route_mode = state
         .route_mode_override
         .read()

@@ -207,8 +207,8 @@ impl Validator {
         Ok(())
     }
 
-    /// 校验自定义规则的字段、目标与取值格式
-    pub fn custom_rule(req: &RuleRequest) -> Result<(), String> {
+    /// 校验自定义规则的字段、目标与取值格式;extra_targets 为内置目标之外可用的节点 tag
+    pub fn custom_rule(req: &RuleRequest, extra_targets: &[String]) -> Result<(), String> {
         static VALID_RULE_FIELDS: &[&str] = &[
             "domain_suffix",
             "domain",
@@ -230,9 +230,11 @@ impl Validator {
                 VALID_RULE_FIELDS.join(", ")
             ));
         }
-        if !VALID_RULE_TARGETS.contains(&req.target.as_str()) {
+        let target_known = VALID_RULE_TARGETS.contains(&req.target.as_str())
+            || extra_targets.iter().any(|tag| tag == &req.target);
+        if !target_known {
             return Err(format!(
-                "不支持的规则目标: {},支持的目标: {}",
+                "不支持的规则目标: {},支持的目标: {} 或已存在的节点名",
                 req.target,
                 VALID_RULE_TARGETS.join(", ")
             ));
@@ -545,11 +547,14 @@ mod tests {
     #[test]
     fn custom_rule_accepts_valid_entries() {
         let ok = |field: &str, value: &str| {
-            Validator::custom_rule(&RuleRequest {
-                field: field.to_string(),
-                value: value.to_string(),
-                target: "direct".to_string(),
-            })
+            Validator::custom_rule(
+                &RuleRequest {
+                    field: field.to_string(),
+                    value: value.to_string(),
+                    target: "direct".to_string(),
+                },
+                &[],
+            )
         };
         assert!(ok("domain_suffix", "example.com").is_ok());
         assert!(ok("domain_keyword", "google").is_ok());
@@ -569,11 +574,14 @@ mod tests {
     #[test]
     fn custom_rule_rejects_invalid_entries() {
         let err = |field: &str, value: &str, target: &str| {
-            Validator::custom_rule(&RuleRequest {
-                field: field.to_string(),
-                value: value.to_string(),
-                target: target.to_string(),
-            })
+            Validator::custom_rule(
+                &RuleRequest {
+                    field: field.to_string(),
+                    value: value.to_string(),
+                    target: target.to_string(),
+                },
+                &[],
+            )
         };
         assert!(err("rule_set", "x", "proxy").is_err());
         assert!(err("domain", "example.com", "block").is_err());
@@ -592,6 +600,29 @@ mod tests {
         assert!(err("protocol", "QUIC", "proxy").is_err());
         assert!(err("domain_suffix", "exa mple.com", "proxy").is_err());
         assert!(err("domain_suffix", "", "proxy").is_err());
+    }
+
+    #[test]
+    fn custom_rule_accepts_known_node_tag_as_target() {
+        let nodes = vec!["香港节点".to_string(), "hy2-us".to_string()];
+        let req = RuleRequest {
+            field: "process_name".to_string(),
+            value: "curl".to_string(),
+            target: "香港节点".to_string(),
+        };
+        assert!(Validator::custom_rule(&req, &nodes).is_ok());
+    }
+
+    #[test]
+    fn custom_rule_rejects_unknown_node_tag_as_target() {
+        let nodes = vec!["香港节点".to_string()];
+        let req = RuleRequest {
+            field: "process_path".to_string(),
+            value: "/usr/bin/curl".to_string(),
+            target: "不存在的节点".to_string(),
+        };
+        let err = Validator::custom_rule(&req, &nodes).unwrap_err();
+        assert!(err.contains("不支持的规则目标"));
     }
 
     #[test]

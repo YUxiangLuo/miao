@@ -18,6 +18,8 @@ pub struct AppState {
     pub sing_process: Mutex<Option<SingBoxProcess>>,
     pub sub_status: Mutex<HashMap<String, SubStatus>>,
     pub config_warning: Mutex<Option<String>>,
+    /// 最近一次生成配置时因出口节点不存在而被跳过的自定义规则,用于面板告警与规则列表标记
+    pub skipped_rules: Mutex<Vec<SkippedRule>>,
     pub initializing: AtomicBool,
     /// Desired service state. It remains true during onboarding so the first
     /// valid configuration starts sing-box, and becomes false after an
@@ -48,6 +50,7 @@ impl AppState {
             sing_process: Mutex::new(None),
             sub_status: Mutex::new(HashMap::new()),
             config_warning: Mutex::new(None),
+            skipped_rules: Mutex::new(Vec::new()),
             initializing: AtomicBool::new(true),
             service_should_run: AtomicBool::new(true),
             http_client,
@@ -58,6 +61,15 @@ impl AppState {
             upgrading: AtomicBool::new(false),
         })
     }
+}
+
+/// 因出口节点不存在而在生成配置时被跳过的自定义规则
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SkippedRule {
+    /// 配置文件中的规则原文,用于与规则列表条目对应
+    pub raw: String,
+    /// 人类可读的失效描述,用于状态告警
+    pub description: String,
 }
 
 pub struct SingBoxProcess {

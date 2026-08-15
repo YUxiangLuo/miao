@@ -81,7 +81,9 @@ setter.call(input, '新值'); input.dispatchEvent(new Event('input', { bubbles: 
 
 - 配置变更链路（增删节点/订阅/规则都走这条）:`config_update` 锁 → 克隆配置 → 改 → `apply_config_change`(原子写 config.yaml → 生成 sing-box 配置 → `sing-box check` 校验 → 热重启，失败回滚）
 - 面板不直接碰 sing-box，控制面是 Clash API(`127.0.0.1:6262`)：切节点、测延迟、连接统计都走它
-- 自定义规则(`custom_rules`）插入在 sniff/hijack-dns 之后、内置分流规则**之前**,用户规则优先;全局模式下内置分流被裁掉,自定义规则依然生效
+- 自定义规则(`custom_rules`)插入在 sniff/hijack-dns 之后、内置分流规则**之前**,用户规则优先;全局模式下内置分流被裁掉,自定义规则依然生效
+- 规则可指向具体节点 tag(面板下拉或手写);`build_sing_box_config` 生成时会跳过引用不存在节点的规则,记入 `state.skipped_rules`——状态接口并入 `warning`(面板 toast),规则列表按 raw 匹配标记 `skipped`(警示 icon,提示删除后重配)。节点回来了规则自动恢复生效
+- 添加规则时 `Validator::custom_rule` 会拿 `known_rule_targets`(手动节点 + 运行时配置里的订阅节点 tag)做存在性校验,但那只是友好报错;生成时跳过才是兜底
 - `route_mode`（分流/全局）是会话级状态，不进配置文件
 
 ## 脚本

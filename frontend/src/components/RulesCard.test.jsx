@@ -168,4 +168,45 @@ describe('RulesCard', () => {
     expect(toggle).toHaveAttribute('aria-checked', 'true')
     expect(toggle).toBeDisabled()
   })
+
+  it('offers node names as rule targets and submits the selected node', async () => {
+    const user = userEvent.setup()
+    const onAddRule = vi.fn().mockResolvedValue(true)
+    renderCard({ onAddRule, nodeNames: ['香港节点'] })
+
+    await openRuleModal(user)
+    await user.selectOptions(screen.getByLabelText('规则目标'), '香港节点')
+    // 选中节点目标后提示节点失效风险
+    expect(screen.getByText(/节点日后消失/)).toBeInTheDocument()
+
+    await user.type(screen.getByLabelText('规则值'), 'example.com')
+    await user.click(screen.getByRole('button', { name: '添加规则' }))
+    expect(onAddRule).toHaveBeenCalledWith({ field: 'domain_suffix', value: 'example.com', target: '香港节点' })
+  })
+
+  it('renders node-target rules with a neutral node badge', () => {
+    renderCard({
+      rules: [
+        { index: 0, field: 'process_name', value: 'curl', target: '香港节点', raw: '{"process_name":"curl","action":"route","outbound":"香港节点"}' },
+      ],
+    })
+
+    const badge = screen.getByText('香港节点')
+    expect(badge).toHaveClass('rule-target-badge', 'node')
+  })
+
+  it('marks skipped rules with a warning icon and dims the row', () => {
+    renderCard({
+      rules: [
+        { index: 0, field: 'process_name', value: 'nginx', target: 'ghost-node', skipped: true, raw: '{"process_name":"nginx","action":"route","outbound":"ghost-node"}' },
+        { index: 1, field: 'domain', value: 't.co', target: 'proxy', raw: '{"domain":"t.co","action":"route","outbound":"proxy"}' },
+      ],
+    })
+
+    const icon = screen.getByLabelText('规则未生效')
+    expect(icon).toHaveAttribute('title', expect.stringContaining('未生效'))
+    expect(icon.closest('.list-row')).toHaveClass('skipped')
+    // 正常规则不带失效标记
+    expect(screen.getByText('t.co').closest('.list-row')).not.toHaveClass('skipped')
+  })
 })
