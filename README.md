@@ -80,7 +80,7 @@ sudo bash remove.sh        # 交互确认;-y 跳过确认
 ```
 
 - 透明代理由 sing-box 的 TUN inbound 完成（`auto_route` + `auto_redirect`)，不碰 iptables
-- DNS 双轨：国外域名经代理走 Cloudflare DoH（https://1.1.1.1/dns-query），国内直连（223.5.5.5）；缓存落在运行时 `cache.db`，TTL 过期后一小时内先返回旧值再后台刷新
+- DNS 双轨：国外域名经代理走 Cloudflare DoH（https://1.1.1.1/dns-query），国内直连（223.5.5.5）；缓存落在运行时 `cache.db`，TTL 过期后 8 小时内先返回旧值再后台刷新
 - 面板通过 Clash API 切换节点、读取连接统计；配置变更先 `sing-box check` 校验再热重启
 - 运行时文件在 `/tmp/miao-sing-box`，重启即清，不留残渣
 

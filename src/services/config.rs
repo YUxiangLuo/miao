@@ -781,7 +781,7 @@ fn get_config_template() -> serde_json::Value {
             "strategy": "ipv4_only",
             "disable_cache": false,
             "cache_capacity": 4096,
-            "optimistic": {"enabled": true, "timeout": "1h"},
+            "optimistic": {"enabled": true, "timeout": "8h"},
             "servers": [
                 {"type": "https", "tag": "cfdns", "server": "1.1.1.1", "detour": "proxy"},
                 {"tag": "local", "type": "udp", "server": "223.5.5.5"}
@@ -1368,7 +1368,7 @@ mod tests {
         assert_eq!(built["dns"]["disable_cache"], false);
         assert_eq!(built["dns"]["cache_capacity"], 4096);
         assert_eq!(built["dns"]["optimistic"]["enabled"], true);
-        assert_eq!(built["dns"]["optimistic"]["timeout"], "1h");
+        assert_eq!(built["dns"]["optimistic"]["timeout"], "8h");
 
         let dns_servers = built["dns"]["servers"].as_array().unwrap();
         let cfdns = dns_servers
