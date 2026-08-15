@@ -1,4 +1,6 @@
 pub mod config;
+pub mod geo;
+pub mod map;
 pub mod node_parser;
 pub mod openwrt;
 pub mod proxy;

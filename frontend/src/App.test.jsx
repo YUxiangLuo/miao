@@ -46,6 +46,12 @@ describe('App onboarding integration', () => {
           data: { current: 'v0.27.0', latest: null, has_update: false },
         })
       }
+      if (url === '/api/map/snapshot') {
+        return jsonResponse({
+          success: true,
+          data: { client: { type: 'client', name: 'This Device' }, proxies: [], flows: [] },
+        })
+      }
       throw new Error(`Unexpected request: ${url}`)
     })
 
@@ -71,7 +77,7 @@ describe('App onboarding integration', () => {
       }))
     })
     expect(await screen.findByText('订阅已添加')).toBeInTheDocument()
-    expect(await screen.findByText('订阅管理')).toBeInTheDocument()
+    expect(await screen.findByLabelText('世界网络地图')).toBeInTheDocument()
   })
 
   it('auto-tests the current node delay once when the dashboard loads', async () => {
@@ -104,6 +110,12 @@ describe('App onboarding integration', () => {
         delayCalls.push(url)
         return jsonResponse({ delay: 123 })
       }
+      if (url === '/api/map/snapshot') {
+        return jsonResponse({
+          success: true,
+          data: { client: { type: 'client', name: 'This Device' }, proxies: [], flows: [] },
+        })
+      }
       throw new Error(`Unexpected request: ${url}`)
     })
 
@@ -117,8 +129,8 @@ describe('App onboarding integration', () => {
 
     render(<App />)
 
-    // 面板渲染出来后,应自动对当前节点发起一次测速
-    expect(await screen.findByText('代理节点选择')).toBeInTheDocument()
+    // 地图作为默认主视图渲染后,仍自动对当前节点发起一次测速
+    expect(await screen.findByLabelText('世界网络地图')).toBeInTheDocument()
     await waitFor(() => {
       expect(delayCalls.some((url) => url.includes('node-a'))).toBe(true)
     })

@@ -1,4 +1,5 @@
 pub mod clash;
+pub mod map;
 pub mod nodes;
 pub mod proxy;
 pub mod rules;

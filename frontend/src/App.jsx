@@ -26,10 +26,13 @@ import {
   useVersion,
   useDelays,
   useConnectivity,
-  usePolling
+  usePolling,
+  useMapSnapshot
 } from './hooks/index.js'
+import { NetworkMap } from './map/NetworkMap.jsx'
 import {
   EMPTY_NODE_FORM,
+  classNames,
   nodeTypeDefaults,
   validateSubscriptionUrl,
   CONNECTIVITY_SITES
@@ -49,6 +52,7 @@ export default function App() {
   const [showConnectionsModal, setShowConnectionsModal] = useState(false)
   const [confirmState, setConfirmState] = useState({ open: false, title: '', message: '', onConfirm: null })
   const [switchingNode, setSwitchingNode] = useState('')
+  const [view, setView] = useState('map')
 
   const clashApiBase = useMemo(() => '/api/clash', [])
 
@@ -77,6 +81,7 @@ export default function App() {
     stopConnectivity,
     clearConnectivity
   } = useConnectivity()
+  const { snapshot, error: mapError, fetchSnapshot } = useMapSnapshot()
 
   const nodeMetaMap = useMemo(() => {
     const map = new Map()
@@ -147,10 +152,12 @@ export default function App() {
   }, [fetchStatus, fetchSubs, fetchNodes, fetchRules, fetchProxies, status.running])
 
   const connectionPollingTasks = useMemo(() => [fetchConnections], [fetchConnections])
+  const mapPollingTasks = useMemo(() => [fetchSnapshot], [fetchSnapshot])
 
   // 使用统一的轮询管理（始终启用，由 tasks 数组内部决定是否执行）
   usePolling(pollingTasks, true)
   usePolling(connectionPollingTasks, showConnectionsModal && status.running)
+  usePolling(mapPollingTasks, firstLoadDone && !needsOnboarding && view === 'map')
 
   // 始终获取版本信息；后端会在服务停止时仅返回当前版本而不检测更新
   useEffect(() => {
@@ -538,10 +545,12 @@ export default function App() {
         status={status}
         versionInfo={versionInfo}
         upgrading={upgrading}
+        view={view}
+        onViewChange={setView}
         onUpgradeClick={handleUpgradeClick}
       />
 
-      <main className="workspace">
+      <main className={classNames('workspace', view === 'map' && 'workspace-map')}>
         <StatusCard 
           status={status} 
           traffic={traffic} 
@@ -551,62 +560,77 @@ export default function App() {
           onOpenConnections={handleOpenConnections}
         />
 
-        <div className="content-grid">
-          <div className="left-column">
-            <ProxyCard
-              status={status}
-              primaryGroup={primaryGroup}
-              primaryGroupName={primaryGroupName}
-              currentNodeMeta={currentNodeMeta}
-              delays={delays}
-              testingNodes={testingNodes}
-              testingGroup={testingGroup}
-              switchingNode={switchingNode}
-              onTestDelay={handleTestDelay}
-              onTestGroupDelays={handleTestGroupDelays}
-              onSwitchProxy={handleSwitchProxy}
-              onOpenAddNode={openNodeModal}
-            />
+        {view === 'map' ? (
+          <NetworkMap
+            snapshot={snapshot}
+            error={mapError}
+            status={status}
+            delays={delays}
+            testingNodes={testingNodes}
+            switchingNode={switchingNode}
+            primaryGroupName={primaryGroupName}
+            currentNodeName={primaryGroup?.now}
+            onSwitchProxy={handleSwitchProxy}
+            onTestDelay={handleTestDelay}
+          />
+        ) : (
+          <div className="content-grid">
+            <div className="left-column">
+              <ProxyCard
+                status={status}
+                primaryGroup={primaryGroup}
+                primaryGroupName={primaryGroupName}
+                currentNodeMeta={currentNodeMeta}
+                delays={delays}
+                testingNodes={testingNodes}
+                testingGroup={testingGroup}
+                switchingNode={switchingNode}
+                onTestDelay={handleTestDelay}
+                onTestGroupDelays={handleTestGroupDelays}
+                onSwitchProxy={handleSwitchProxy}
+                onOpenAddNode={openNodeModal}
+              />
+            </div>
+
+            <div className="right-column">
+              <NodesCard
+                nodes={nodes}
+                isInitializing={status.initializing}
+                onDeleteNode={handleOpenDeleteNodeConfirm}
+                onOpenAddNode={openNodeModal}
+              />
+
+              <SubsCard
+                subs={subs}
+                newSubUrl={newSubUrl}
+                setNewSubUrl={setNewSubUrl}
+                loadingAction={loadingAction}
+                onAddSub={handleAddSubscription}
+                onDeleteSub={handleOpenDeleteSubConfirm}
+                onRefreshSubs={handleRefreshSubscriptions}
+                isInitializing={status.initializing}
+              />
+
+              <RulesCard
+                rules={rules}
+                isInitializing={status.initializing}
+                loadingAction={loadingAction}
+                onAddRule={handleAddRule}
+                onDeleteRule={handleOpenDeleteRuleConfirm}
+              />
+
+              <ConnectivityCard
+                connectivityResults={connectivityResults}
+                testingConnectivity={testingConnectivity}
+                currentTestingSite={currentTestingSite}
+                status={status}
+                onTestAll={handleTestAllConnectivity}
+                onStopTest={stopConnectivity}
+                onTestSingleSite={handleTestSingleSite}
+              />
+            </div>
           </div>
-
-          <div className="right-column">
-            <NodesCard
-              nodes={nodes}
-              isInitializing={status.initializing}
-              onDeleteNode={handleOpenDeleteNodeConfirm}
-              onOpenAddNode={openNodeModal}
-            />
-
-            <SubsCard
-              subs={subs}
-              newSubUrl={newSubUrl}
-              setNewSubUrl={setNewSubUrl}
-              loadingAction={loadingAction}
-              onAddSub={handleAddSubscription}
-              onDeleteSub={handleOpenDeleteSubConfirm}
-              onRefreshSubs={handleRefreshSubscriptions}
-              isInitializing={status.initializing}
-            />
-
-            <RulesCard
-              rules={rules}
-              isInitializing={status.initializing}
-              loadingAction={loadingAction}
-              onAddRule={handleAddRule}
-              onDeleteRule={handleOpenDeleteRuleConfirm}
-            />
-
-            <ConnectivityCard
-              connectivityResults={connectivityResults}
-              testingConnectivity={testingConnectivity}
-              currentTestingSite={currentTestingSite}
-              status={status}
-              onTestAll={handleTestAllConnectivity}
-              onStopTest={stopConnectivity}
-              onTestSingleSite={handleTestSingleSite}
-            />
-          </div>
-        </div>
+        )}
       </main>
 
       <ToastStack toasts={toasts} onDismiss={dismissToast} />

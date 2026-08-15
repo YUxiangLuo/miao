@@ -3,3 +3,4 @@ export { useStatus, useSubs, useNodes, useRules, useVersion } from './useResourc
 export { useProxies, useTraffic, useConnections, useDelays } from './useClash.js'
 export { useConnectivity } from './useConnectivity.js'
 export { usePolling } from './usePolling.js'
+export { useMapSnapshot } from './useMapSnapshot.js'

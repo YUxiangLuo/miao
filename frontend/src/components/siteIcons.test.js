@@ -52,6 +52,7 @@ describe('iconForDomain', () => {
     expect(iconForDomain('pbs.twimg.com').id).toBe('x')
     expect(iconForDomain('www.kimi.ai').id).toBe('kimi')
     expect(iconForDomain('i0.hdslb.com').id).toBe('bilibili')
+    expect(iconForDomain('rr5---sn-abc.googlevideo.com').id).toBe('youtube')
   })
 
   it('returns a letter avatar for unknown or IP destinations', () => {

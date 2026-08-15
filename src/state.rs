@@ -7,6 +7,7 @@ use std::time::Instant;
 use tokio::sync::{Mutex, RwLock};
 
 use crate::models::{Config, GitHubRelease, RouteMode, SubStatus};
+use crate::services::geo::GeoCache;
 
 /// 应用状态容器 - 包含所有运行时状态
 /// 通过依赖注入传递，避免全局静态变量
@@ -26,6 +27,8 @@ pub struct AppState {
     pub http_client: reqwest::Client,
     pub version_cache: ArcSwap<VersionCache>, // 使用 ArcSwap 实现无锁读取
     pub upgrading: AtomicBool,                // 防止并发升级
+    pub geo_cache: Mutex<GeoCache>,
+    pub connection_bytes: Mutex<HashMap<String, ConnectionByteSample>>,
 }
 
 impl AppState {
@@ -56,6 +59,8 @@ impl AppState {
                 fetched_at: None,
             })),
             upgrading: AtomicBool::new(false),
+            geo_cache: Mutex::new(GeoCache::default()),
+            connection_bytes: Mutex::new(HashMap::new()),
         })
     }
 }
@@ -63,6 +68,12 @@ impl AppState {
 pub struct SingBoxProcess {
     pub child: tokio::process::Child,
     pub started_at: Instant,
+}
+
+pub struct ConnectionByteSample {
+    pub upload: u64,
+    pub download: u64,
+    pub at: Instant,
 }
 
 /// 版本信息缓存

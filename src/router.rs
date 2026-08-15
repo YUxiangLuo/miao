@@ -7,6 +7,7 @@ use axum::{
 
 use crate::handlers::{
     clash::{proxy_clash_http, proxy_clash_traffic},
+    map::get_map_snapshot,
     nodes::{add_node, delete_node, get_nodes},
     proxy::set_last_proxy,
     rules::{add_rule, delete_rule, get_rules},
@@ -23,6 +24,7 @@ pub fn build_router(app_state: Arc<AppState>) -> Router {
         .route("/", get(serve_index))
         .route("/favicon.svg", get(serve_favicon))
         .route("/api/status", get(get_status))
+        .route("/api/map/snapshot", get(get_map_snapshot))
         .route("/api/service/start", post(start_service))
         .route("/api/service/stop", post(stop_service))
         .route("/api/route-mode", post(set_route_mode))
