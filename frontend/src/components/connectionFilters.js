@@ -1,3 +1,5 @@
+import { connectionDomain } from './siteIcons.js'
+
 export const PATH_FILTERS = [
   { value: 'all', label: '全部' },
   { value: 'proxy', label: '代理' },
@@ -70,4 +72,77 @@ export function sortConnectionGroups(groups, sortKey = 'speed') {
     if (sortKey === 'speed') return groupSpeed(b) - groupSpeed(a) || a.domain.localeCompare(b.domain)
     return groupTraffic(b) - groupTraffic(a) || a.domain.localeCompare(b.domain)
   })
+}
+
+function connectionRule(connection) {
+  const rule = connection.rule || '-'
+  return connection.rulePayload ? `${rule} : ${connection.rulePayload}` : rule
+}
+
+function connectionOutbound(connection) {
+  if (Array.isArray(connection.chains) && connection.chains.length > 0) {
+    return connection.chains[0]
+  }
+  return connection.rule || 'direct'
+}
+
+function majorityValue(items, mapper) {
+  const counts = new Map()
+  for (const item of items) {
+    const value = mapper(item) || '-'
+    counts.set(value, (counts.get(value) || 0) + 1)
+  }
+
+  let winner = '-'
+  let winnerCount = 0
+  for (const [value, count] of counts) {
+    if (count > winnerCount) {
+      winner = value
+      winnerCount = count
+    }
+  }
+
+  return { value: winner, extra: Math.max(0, counts.size - 1) }
+}
+
+export function groupConnections(connections) {
+  const groups = new Map()
+
+  for (const connection of connections) {
+    const domain = connectionDomain(connection)
+    const key = domain.toLowerCase()
+    const existing = groups.get(key)
+    if (existing) {
+      existing.connections.push(connection)
+      existing.downloadSpeed += Number(connection.downloadSpeed || 0)
+      existing.uploadSpeed += Number(connection.uploadSpeed || 0)
+      existing.download += Number(connection.download || 0)
+      existing.upload += Number(connection.upload || 0)
+      continue
+    }
+
+    groups.set(key, {
+      id: key,
+      domain,
+      connections: [connection],
+      downloadSpeed: Number(connection.downloadSpeed || 0),
+      uploadSpeed: Number(connection.uploadSpeed || 0),
+      download: Number(connection.download || 0),
+      upload: Number(connection.upload || 0),
+    })
+  }
+
+  return [...groups.values()]
+    .map((group) => {
+      const rule = majorityValue(group.connections, connectionRule)
+      const outbound = majorityValue(group.connections, connectionOutbound)
+      return {
+        ...group,
+        count: group.connections.length,
+        rule: rule.value,
+        ruleLabel: displayRuleText(rule.value),
+        extraRules: rule.extra,
+        outbound: outbound.value,
+      }
+    })
 }

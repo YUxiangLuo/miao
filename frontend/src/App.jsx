@@ -7,6 +7,7 @@ import {
   SubsCard,
   RulesCard,
   ConnectivityCard,
+  HomeConnections,
   ConfirmModal,
   ConnectionsModal,
   NodeModal,
@@ -47,6 +48,9 @@ export default function App() {
   const [nodeType, setNodeType] = useState('hysteria2')
   const [showNodeModal, setShowNodeModal] = useState(false)
   const [showConnectionsModal, setShowConnectionsModal] = useState(false)
+  const [isDesktop, setIsDesktop] = useState(() => (
+    !window.matchMedia(`(max-width: ${CONNECTIONS_MODAL_MIN_WIDTH - 1}px)`).matches
+  ))
   const [confirmState, setConfirmState] = useState({ open: false, title: '', message: '', onConfirm: null })
   const [switchingNode, setSwitchingNode] = useState('')
 
@@ -150,7 +154,7 @@ export default function App() {
 
   // 使用统一的轮询管理（始终启用，由 tasks 数组内部决定是否执行）
   usePolling(pollingTasks, true)
-  usePolling(connectionPollingTasks, showConnectionsModal && status.running)
+  usePolling(connectionPollingTasks, status.running && (showConnectionsModal || isDesktop))
 
   // 始终获取版本信息；后端会在服务停止时仅返回当前版本而不检测更新
   useEffect(() => {
@@ -180,7 +184,9 @@ export default function App() {
   useEffect(() => {
     const mediaQuery = window.matchMedia(`(max-width: ${CONNECTIONS_MODAL_MIN_WIDTH - 1}px)`)
     const handleChange = () => {
-      if (mediaQuery.matches) setShowConnectionsModal(false)
+      const desktop = !mediaQuery.matches
+      setIsDesktop(desktop)
+      if (!desktop) setShowConnectionsModal(false)
     }
 
     handleChange()
@@ -624,6 +630,14 @@ export default function App() {
             />
           </div>
         </div>
+
+        {isDesktop && (
+          <HomeConnections
+            status={status}
+            data={connectionsInfo}
+            onOpenAll={handleOpenConnections}
+          />
+        )}
       </main>
 
       <ToastStack toasts={toasts} onDismiss={dismissToast} />

@@ -93,6 +93,9 @@ describe('App onboarding integration', () => {
           data: { current: 'v0.29.0', latest: null, has_update: false },
         })
       }
+      if (url === '/api/clash/connections') {
+        return jsonResponse({ connections: [], uploadTotal: 0, downloadTotal: 0 })
+      }
       if (url === '/api/clash/proxies') {
         return jsonResponse({
           proxies: {
@@ -144,6 +147,9 @@ describe('App onboarding integration', () => {
           success: true,
           data: { current: 'v0.29.5', latest: null, has_update: false },
         })
+      }
+      if (url === '/api/clash/connections') {
+        return jsonResponse({ connections: [], uploadTotal: 0, downloadTotal: 0 })
       }
       if (url === '/api/clash/proxies') {
         return jsonResponse({

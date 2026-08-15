@@ -67,7 +67,7 @@ button {
     display: flex;
     align-items: center;
     gap: 16px;
-    height: 80px;
+    height: 60px;
     padding: 0 24px;
 }
 .brand {
@@ -91,7 +91,7 @@ button {
 }
 .brand-name {
     color: var(--text);
-    font-size: 1.5rem;
+    font-size: 1.1875rem;
     font-weight: 600;
     letter-spacing: 0.5px;
 }
@@ -326,6 +326,55 @@ button {
 .left-column > *,
 .right-column > * {
     flex-shrink: 0;
+}
+.home-connections {
+    flex: 0 1 auto;
+    min-height: 0;
+    max-height: min(280px, 34vh);
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-top: 16px;
+}
+.home-connections-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-shrink: 0;
+    padding: 0 2px;
+}
+.home-connections-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--text);
+    font-size: 0.875rem;
+    font-weight: 600;
+}
+.home-connections-count {
+    min-width: 18px;
+    padding: 1px 6px;
+    border-radius: 999px;
+    background: var(--surface-green-soft);
+    color: var(--success);
+    font-size: 0.75rem;
+    font-weight: 700;
+    text-align: center;
+}
+.home-connections-all {
+    border: none;
+    background: none;
+    color: var(--text-muted);
+    font-size: 0.8125rem;
+    padding: 4px 2px;
+}
+.home-connections-all:hover {
+    color: var(--text);
+}
+.home-connections-grid {
+    flex: 1;
+    min-height: 0;
 }
 .section-header {
     display: flex;
@@ -1569,6 +1618,9 @@ button {
     .left-column,
     .right-column {
         overflow: visible;
+    }
+    .home-connections {
+        display: none;
     }
     .status-card-body {
         flex-wrap: wrap;
