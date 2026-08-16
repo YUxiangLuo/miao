@@ -13,7 +13,7 @@ Linux 版是：下载一个文件，`sudo` 跑，浏览器打开，TUN 接管流
 | TUN 透明代理 | 系统代理（WinINET）当主路径 |
 | Tauri 只当自带浏览器，打开 `http://127.0.0.1:<port>` | Linux / OpenWrt 也改成 Tauri |
 | 一次 UAC 对标一次 `sudo` | 第一版就上服务模式 / 免 UAC |
-| 内核钉 1.13.x，Wintun 已在 sing-box 里 | 旁边再塞一份 `wintun.dll`，或跟漂到 1.14 |
+| Wintun 已在 sing-box 里；内核跟默认分支走 | 旁边再塞一份 `wintun.dll` |
 | Windows 构建不编 VPS、不编换进程升级 | 把 Linux 的 `exec` 热更原样搬过去覆盖正在跑的 exe |
 
 本机 **正在跑的 systemd miao 不要停、不要重启** 来「试 Windows」。这台机器出网被它的 TUN 管着，一停 GitHub 就没了；也没有 Win10 真机验 TUN。Windows 工作用静态检查和 CI 编译代替真机。
@@ -140,7 +140,7 @@ sudo bash install.sh ./target/release/miao-rust
 | 日志轮转 | `miao.log` 超 8 MB 时启动改名 `.old`（单份滚动） |
 | 进程规则文案 | `/api/status` 的 `platform` 决定 placeholder（`qbittorrent.exe`） |
 
-TUN JSON：`auto_route` + `strict_route`，`interface_name` 仍是 `sing-tun`。`cfg(target_os = "linux")` 才写 `auto_redirect`。不要写 1.14 才有的 `dns_mode`。
+TUN JSON：`auto_route` + `strict_route`，`interface_name` 仍是 `sing-tun`。`cfg(target_os = "linux")` 才写 `auto_redirect`。
 
 ## 前端调试（agent-browser）
 

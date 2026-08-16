@@ -70,7 +70,7 @@ Win10/11 x64。哲学不变：还是 TUN 透明代理、还是这块面板、还
 | 一键升级 / VPS 部署 | 有 | 不编进桌面进程 |
 | 开机自启 | `install.sh` → systemd | 无（先每次双击） |
 
-内核版本钉在 sing-box **1.13.x**（构建默认 `SING_BOX_REF=v1.13.18`），不要跟默认分支漂到 1.14。
+内核跟 `build-embedded.sh` 当时拉到的 sing-box 默认分支；需要复现某版时再设 `SING_BOX_REF`。
 
 ## 面板里有什么
 
@@ -147,7 +147,7 @@ adblock: true              # 可选：去广告，默认关闭
 ./build.sh        # Linux 本机架构：前端 + 内核 + target/release/miao-rust
 ```
 
-`embedded/` 下的 sing-box 与规则集不入库。fresh clone 先 `./scripts/build-embedded.sh` 或直接 `./build.sh`。内核默认钉 `v1.13.18`，可用 `SING_BOX_REF` 覆盖。
+`embedded/` 下的 sing-box 与规则集不入库。fresh clone 先 `./scripts/build-embedded.sh` 或直接 `./build.sh`。内核默认拉 sing-box 仓库默认分支，可用 `SING_BOX_REF` 覆盖。
 
 编 Windows 内核（在 Linux 上交叉 Go，不跑 TUN）：
 

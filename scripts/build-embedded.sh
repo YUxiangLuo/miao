@@ -15,9 +15,7 @@ case "$host_goarch" in
     ;;
 esac
 
-# Pin the kernel so Linux and Windows do not drift onto 1.14 dns_mode defaults.
-# Override with SING_BOX_REF=... when deliberately upgrading.
-SING_BOX_REF="${SING_BOX_REF:-v1.13.18}"
+# Default: remote default branch (latest code). Set SING_BOX_REF=vX.Y.Z to pin.
 
 target="${MIAO_TARGET:-}"
 if [[ -z "$target" ]]; then
@@ -55,9 +53,15 @@ esac
 
 mkdir -p "$EMBEDDED_DIR"
 
-echo "==> Cloning sing-box source ($SING_BOX_REF)..."
-git clone --depth=1 --branch "$SING_BOX_REF" \
-  https://github.com/SagerNet/sing-box.git "$TMP_DIR/sing-box"
+if [[ -n "${SING_BOX_REF:-}" ]]; then
+  echo "==> Cloning sing-box source ($SING_BOX_REF)..."
+  git clone --depth=1 --branch "$SING_BOX_REF" \
+    https://github.com/SagerNet/sing-box.git "$TMP_DIR/sing-box"
+else
+  echo "==> Cloning sing-box source (default branch)..."
+  git clone --depth=1 \
+    https://github.com/SagerNet/sing-box.git "$TMP_DIR/sing-box"
+fi
 
 cd "$TMP_DIR/sing-box"
 build_tags="with_quic,with_clash_api,with_utls"
