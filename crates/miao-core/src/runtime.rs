@@ -1,0 +1,486 @@
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::{fs, io};
+
+use tokio::sync::oneshot;
+use tokio::task::JoinHandle;
+use tracing::{error, info, warn};
+
+use crate::error::{AppError, AppResult};
+use crate::models::{Config, DEFAULT_PORT};
+use crate::services::{
+    config::{gen_config, restore_config_from_cache, save_config_cache},
+    openwrt::check_and_install_openwrt_dependencies,
+    proxy::restore_last_proxy,
+    singbox::{extract_sing_box, start_sing_internal, stop_sing_internal},
+};
+use crate::state::AppState;
+use crate::VERSION;
+
+/// How the panel process should start. The CLI opens a browser; the desktop
+/// shell supplies its own window and skips that.
+#[derive(Clone, Debug, Default)]
+pub struct RuntimeOptions {
+    pub open_browser: bool,
+    pub install_tracing: bool,
+    /// Override the config `port`. `Some(0)` asks the OS for an ephemeral port.
+    pub bind_port: Option<u16>,
+    /// Skip path resolution and load this file (missing file → in-memory default).
+    pub config_path: Option<PathBuf>,
+    /// Tests can skip extracting the embedded kernel when they will not start it.
+    pub skip_extract: bool,
+}
+
+/// Running panel. Dropping it requests shutdown; call [`ServerHandle::shutdown`]
+/// to wait until axum and sing-box have actually stopped.
+pub struct ServerHandle {
+    port: u16,
+    url: String,
+    shutdown_tx: Option<oneshot::Sender<()>>,
+    server_task: Option<JoinHandle<AppResult<()>>>,
+}
+
+impl ServerHandle {
+    pub fn port(&self) -> u16 {
+        self.port
+    }
+
+    pub fn url(&self) -> &str {
+        &self.url
+    }
+
+    pub async fn shutdown(mut self) {
+        request_shutdown(&mut self).await;
+    }
+}
+
+impl Drop for ServerHandle {
+    fn drop(&mut self) {
+        if let Some(tx) = self.shutdown_tx.take() {
+            let _ = tx.send(());
+        }
+    }
+}
+
+pub async fn run() -> AppResult<()> {
+    if std::env::args().any(|a| a == "--version" || a == "-V") {
+        println!("miao v{}", VERSION);
+        return Ok(());
+    }
+
+    crate::require_privileges();
+
+    let handle = spawn_server(RuntimeOptions {
+        open_browser: true,
+        install_tracing: true,
+        ..RuntimeOptions::default()
+    })
+    .await?;
+
+    wait_os_shutdown().await;
+    handle.shutdown().await;
+    Ok(())
+}
+
+pub async fn spawn_server(options: RuntimeOptions) -> AppResult<ServerHandle> {
+    if options.install_tracing {
+        let _ = tracing_subscriber::fmt()
+            .with_env_filter(
+                tracing_subscriber::EnvFilter::from_default_env()
+                    .add_directive(tracing::Level::INFO.into()),
+            )
+            .try_init();
+    }
+
+    #[cfg(windows)]
+    crate::services::singbox::ensure_hidden_console();
+
+    if let Ok(current_exe) = std::env::current_exe() {
+        let backup_path = format!("{}.bak", current_exe.display());
+        if std::path::Path::new(&backup_path).exists() {
+            let _ = fs::remove_file(&backup_path);
+        }
+    }
+
+    info!("Reading configuration...");
+    let config_path = match options.config_path.clone() {
+        Some(path) => {
+            info!(config_path = ?path, source = "explicit", "Resolved configuration path");
+            path
+        }
+        None => {
+            let resolution = crate::paths::resolve_config_path()?;
+            info!(
+                config_path = ?resolution.path,
+                source = ?resolution.source,
+                "Resolved configuration path"
+            );
+            resolution.path
+        }
+    };
+
+    let config: Config = match tokio::fs::read_to_string(&config_path).await {
+        Ok(content) => {
+            let route_mode_declared = config_declares_route_mode(&content);
+            let mut config: Config = serde_yaml::from_str(&content)?;
+            if route_mode_declared {
+                info!(
+                    config_path = ?config_path,
+                    "Ignoring route_mode from configuration file; route mode is session-only"
+                );
+                config.route_mode = Default::default();
+            }
+            config
+        }
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {
+            info!(
+                config_path = ?config_path,
+                "No config file found, using in-memory default configuration"
+            );
+            Config::default()
+        }
+        Err(e) => return Err(e.into()),
+    };
+    let requested_port = options.bind_port.or(config.port).unwrap_or(DEFAULT_PORT);
+    let subs_count = config.subs.len();
+    let nodes_count = config.nodes.len();
+
+    info!(
+        port = requested_port,
+        subs = subs_count,
+        nodes = nodes_count,
+        "Configuration loaded"
+    );
+
+    if !options.skip_extract {
+        let _ = extract_sing_box()?;
+    }
+
+    let app_state = Arc::new(
+        AppState::with_config_path(config.clone(), config_path)
+            .map_err(|e| AppError::context("Failed to create HTTP client", e))?,
+    );
+    let state_for_init = app_state.clone();
+
+    let app = crate::router::build_router(app_state.clone());
+    let listener = tokio::net::TcpListener::bind(panel_bind_addr(requested_port)).await?;
+    let port = listener.local_addr()?.port();
+    let url = format!("http://127.0.0.1:{port}");
+    info!(port = port, url = %url, "Miao panel started");
+
+    if options.open_browser && config.subs.is_empty() && config.nodes.is_empty() {
+        let browser_url = url.clone();
+        tokio::spawn(async move {
+            open_onboarding_browser(browser_url).await;
+        });
+    }
+
+    tokio::spawn(async move {
+        initialize_runtime(config, state_for_init).await;
+    });
+
+    let (shutdown_tx, shutdown_rx) = oneshot::channel();
+    let state_for_shutdown = app_state.clone();
+    let server_task = tokio::spawn(async move {
+        axum::serve(listener, app)
+            .with_graceful_shutdown(async move {
+                let _ = shutdown_rx.await;
+                info!("Shutting down, stopping sing-box...");
+                stop_sing_internal(&state_for_shutdown).await;
+            })
+            .await?;
+        Ok(())
+    });
+
+    Ok(ServerHandle {
+        port,
+        url,
+        shutdown_tx: Some(shutdown_tx),
+        server_task: Some(server_task),
+    })
+}
+
+async fn initialize_runtime(config: Config, state: Arc<AppState>) {
+    let _config_update = state.config_update.lock().await;
+
+    if config.subs.is_empty() && config.nodes.is_empty() {
+        info!("No subscriptions or nodes configured, waiting for onboarding");
+        state
+            .initializing
+            .store(false, std::sync::atomic::Ordering::Relaxed);
+        return;
+    }
+
+    info!("Generating initial config...");
+    let mut all_subs_failed = false;
+    match gen_config(&config, &state).await {
+        Ok(has_sub_nodes) => {
+            if !has_sub_nodes && !config.subs.is_empty() {
+                all_subs_failed = true;
+            }
+        }
+        Err(e) => {
+            error!(error = %e, "Failed to generate config");
+            match restore_config_from_cache().await {
+                Ok(_) => {
+                    warn!("Using cached config as fallback");
+                    all_subs_failed = true;
+                }
+                Err(cache_err) => {
+                    error!(error = %cache_err, "No cached config available");
+                    *state.config_warning.lock().await =
+                        Some("所有订阅获取失败且无可用缓存，请添加订阅或手动节点".to_string());
+                    state
+                        .initializing
+                        .store(false, std::sync::atomic::Ordering::Relaxed);
+                    return;
+                }
+            }
+        }
+    }
+
+    info!("Checking dependencies...");
+    if let Err(e) = check_and_install_openwrt_dependencies().await {
+        error!("Failed to check or install OpenWrt dependencies: {}", e);
+    }
+
+    match start_sing_internal(&state).await {
+        Ok(_) => {
+            info!("sing-box started successfully");
+            save_config_cache().await;
+            if all_subs_failed {
+                warn!("所有订阅获取失败，请检查当前订阅");
+                *state.config_warning.lock().await =
+                    Some("所有订阅获取失败，请检查当前订阅".to_string());
+            }
+            let state_for_proxy = state.clone();
+            tokio::spawn(async move {
+                restore_last_proxy(&state_for_proxy).await;
+            });
+        }
+        Err(e) => error!("Failed to start sing-box: {}", e),
+    }
+    state
+        .initializing
+        .store(false, std::sync::atomic::Ordering::Relaxed);
+}
+
+async fn request_shutdown(handle: &mut ServerHandle) {
+    if let Some(tx) = handle.shutdown_tx.take() {
+        let _ = tx.send(());
+    }
+    if let Some(task) = handle.server_task.take() {
+        match task.await {
+            Ok(Ok(())) => {}
+            Ok(Err(err)) => error!(error = %err, "Panel server returned error on shutdown"),
+            Err(err) => error!(error = %err, "Panel server task failed on shutdown"),
+        }
+    }
+}
+
+async fn wait_os_shutdown() {
+    #[cfg(unix)]
+    {
+        let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+            .expect("failed to install SIGTERM handler");
+
+        tokio::select! {
+            result = tokio::signal::ctrl_c() => {
+                result.expect("failed to install Ctrl+C handler");
+            }
+            _ = sigterm.recv() => {}
+        }
+    }
+
+    #[cfg(not(unix))]
+    {
+        tokio::signal::ctrl_c()
+            .await
+            .expect("failed to install Ctrl+C handler");
+    }
+}
+
+fn panel_bind_addr(port: u16) -> String {
+    #[cfg(windows)]
+    {
+        format!("127.0.0.1:{port}")
+    }
+    #[cfg(not(windows))]
+    {
+        format!("0.0.0.0:{port}")
+    }
+}
+
+fn browser_launch_env() -> Vec<(String, String)> {
+    let mut envs = Vec::new();
+
+    for key in ["DISPLAY", "WAYLAND_DISPLAY", "XAUTHORITY"] {
+        if let Ok(value) = std::env::var(key) {
+            envs.push((key.to_string(), value));
+        }
+    }
+
+    let runtime_dir = std::env::var("XDG_RUNTIME_DIR").ok().or_else(|| {
+        std::env::var("SUDO_UID")
+            .ok()
+            .map(|uid| format!("/run/user/{uid}"))
+    });
+
+    if let Some(runtime_dir) = runtime_dir {
+        envs.push(("XDG_RUNTIME_DIR".to_string(), runtime_dir.clone()));
+
+        let bus_address = std::env::var("DBUS_SESSION_BUS_ADDRESS")
+            .ok()
+            .unwrap_or_else(|| format!("unix:path={runtime_dir}/bus"));
+        envs.push(("DBUS_SESSION_BUS_ADDRESS".to_string(), bus_address));
+    } else if let Ok(bus_address) = std::env::var("DBUS_SESSION_BUS_ADDRESS") {
+        envs.push(("DBUS_SESSION_BUS_ADDRESS".to_string(), bus_address));
+    }
+
+    envs
+}
+
+async fn open_onboarding_browser(url: String) {
+    let has_graphical_session =
+        std::env::var_os("DISPLAY").is_some() || std::env::var_os("WAYLAND_DISPLAY").is_some();
+    if !has_graphical_session {
+        return;
+    }
+
+    let launch_env = browser_launch_env();
+    let sudo_user = std::env::var("SUDO_USER")
+        .ok()
+        .filter(|user| !user.is_empty());
+    let use_runuser = sudo_user.is_some();
+    let mut command = if let Some(sudo_user) = sudo_user {
+        let mut command = tokio::process::Command::new("runuser");
+        command.arg("-u").arg(sudo_user).arg("--").arg("env");
+        for (key, value) in &launch_env {
+            command.arg(format!("{key}={value}"));
+        }
+        command.arg("xdg-open");
+        command
+    } else {
+        tokio::process::Command::new("xdg-open")
+    };
+
+    command.arg(&url);
+    if !use_runuser {
+        command.envs(launch_env);
+    }
+
+    match command
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .await
+    {
+        Ok(status) if status.success() => {}
+        Ok(status) => warn!(
+            url = %url,
+            status = ?status.code(),
+            "Failed to auto-open onboarding URL in browser"
+        ),
+        Err(err) => warn!(url = %url, error = %err, "Failed to launch browser opener"),
+    }
+}
+
+fn config_declares_route_mode(content: &str) -> bool {
+    let Ok(value) = serde_yaml::from_str::<serde_yaml::Value>(content) else {
+        return false;
+    };
+
+    value
+        .as_mapping()
+        .is_some_and(|mapping| mapping.contains_key("route_mode"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{config_declares_route_mode, spawn_server, RuntimeOptions};
+
+    #[test]
+    fn config_declares_route_mode_when_top_level_key_exists() {
+        let yaml = r#"
+port: 6161
+route_mode: global
+subs: []
+"#;
+
+        assert!(config_declares_route_mode(yaml));
+    }
+
+    #[test]
+    fn config_declares_route_mode_ignores_nested_key() {
+        let yaml = r#"
+custom_rules:
+  - '{"route_mode":"global"}'
+"#;
+
+        assert!(!config_declares_route_mode(yaml));
+    }
+
+    #[test]
+    fn config_declares_route_mode_handles_invalid_yaml() {
+        assert!(!config_declares_route_mode("route_mode: ["));
+    }
+
+    #[tokio::test]
+    async fn spawn_server_serves_status_and_shuts_down() {
+        let config_path = std::env::temp_dir().join(format!(
+            "miao-spawn-server-test-{}-{}.yaml",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+
+        let handle = spawn_server(RuntimeOptions {
+            open_browser: false,
+            install_tracing: false,
+            bind_port: Some(0),
+            config_path: Some(config_path),
+            skip_extract: true,
+        })
+        .await
+        .expect("spawn panel");
+
+        assert!(handle.url().starts_with("http://127.0.0.1:"));
+        assert_ne!(handle.port(), 0);
+
+        let client = reqwest::Client::new();
+        let status_url = format!("{}/api/status", handle.url());
+        let mut last_error = None;
+        let mut body = None;
+        for _ in 0..20 {
+            match client.get(&status_url).send().await {
+                Ok(response) => {
+                    assert!(response.status().is_success());
+                    body = Some(response.text().await.expect("status body"));
+                    last_error = None;
+                    break;
+                }
+                Err(err) => {
+                    last_error = Some(err);
+                    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                }
+            }
+        }
+        if let Some(err) = last_error {
+            panic!("panel did not become ready: {err}");
+        }
+        let body = body.expect("status body");
+        assert!(body.contains("stopped") || body.contains("running"));
+
+        let url = handle.url().to_string();
+        handle.shutdown().await;
+
+        let after = client.get(format!("{url}/api/status")).send().await;
+        assert!(
+            after.is_err(),
+            "panel should reject requests after shutdown"
+        );
+    }
+}

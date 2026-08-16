@@ -8,13 +8,22 @@ use tracing::info;
 use crate::error::{AppError, AppResult};
 use crate::state::{AppState, SingBoxProcess};
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(windows, target_arch = "x86_64"))]
+const SING_BOX_BINARY: &[u8] = include_bytes!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../embedded/sing-box-windows-amd64.exe"
+));
+
+#[cfg(all(windows, target_arch = "aarch64"))]
+compile_error!("Windows arm64 is not supported yet");
+
+#[cfg(all(not(windows), target_arch = "x86_64"))]
 const SING_BOX_BINARY: &[u8] = include_bytes!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../embedded/sing-box-amd64"
 ));
 
-#[cfg(target_arch = "aarch64")]
+#[cfg(all(not(windows), target_arch = "aarch64"))]
 const SING_BOX_BINARY: &[u8] = include_bytes!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../embedded/sing-box-arm64"
@@ -148,6 +157,9 @@ pub async fn start_sing_internal(state: &Arc<AppState>) -> AppResult<()> {
 
     info!(binary = ?sing_box_path, config = ?config_path, "Starting sing-box");
 
+    #[cfg(windows)]
+    ensure_hidden_console();
+
     let mut child = tokio::process::Command::new(&sing_box_path)
         .current_dir(&sing_box_home)
         .arg("run")
@@ -223,9 +235,62 @@ async fn request_graceful_exit(child: &mut tokio::process::Child) {
         }
     }
 
-    #[cfg(not(unix))]
+    #[cfg(windows)]
+    {
+        // CREATE_NO_WINDOW children cannot receive Ctrl+C (#3806). We inherit a
+        // hidden console and send CTRL_C so sing-box can close WinTun itself.
+        send_ctrl_c_to_console();
+        match tokio::time::timeout(Duration::from_secs(3), child.wait()).await {
+            Ok(Ok(_)) => restore_ctrl_c_handling(),
+            _ => {
+                restore_ctrl_c_handling();
+                let _ = child.start_kill();
+                let _ = child.wait().await;
+            }
+        }
+    }
+
+    #[cfg(not(any(unix, windows)))]
     {
         let _ = child.start_kill();
         let _ = child.wait().await;
+    }
+}
+
+/// Give this process a hidden console so a GUI parent can still deliver Ctrl+C
+/// to sing-box. No-op when a console is already attached (CLI in a terminal).
+#[cfg(windows)]
+pub(crate) fn ensure_hidden_console() {
+    use windows_sys::Win32::System::Console::{AllocConsole, GetConsoleWindow};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_HIDE};
+
+    unsafe {
+        if GetConsoleWindow().is_null() && AllocConsole() != 0 {
+            let hwnd = GetConsoleWindow();
+            if !hwnd.is_null() {
+                ShowWindow(hwnd, SW_HIDE);
+            }
+        }
+    }
+}
+
+#[cfg(windows)]
+fn send_ctrl_c_to_console() {
+    use windows_sys::Win32::System::Console::{
+        GenerateConsoleCtrlEvent, SetConsoleCtrlHandler, CTRL_C_EVENT,
+    };
+
+    unsafe {
+        SetConsoleCtrlHandler(None, 1);
+        let _ = GenerateConsoleCtrlEvent(CTRL_C_EVENT, 0);
+    }
+}
+
+#[cfg(windows)]
+fn restore_ctrl_c_handling() {
+    use windows_sys::Win32::System::Console::SetConsoleCtrlHandler;
+
+    unsafe {
+        SetConsoleCtrlHandler(None, 0);
     }
 }

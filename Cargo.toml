@@ -1,6 +1,8 @@
 [workspace]
 resolver = "2"
-members = ["crates/miao-core", "crates/miao-cli"]
+members = ["crates/miao-core", "crates/miao-cli", "desktop/src-tauri"]
+# Desktop pulls in webkit2gtk / WebView2. Keep it out of `cargo test` / CI clippy.
+default-members = ["crates/miao-core", "crates/miao-cli"]
 
 [workspace.package]
 version = "0.31.0"

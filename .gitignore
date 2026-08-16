@@ -42,6 +42,7 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 # Added by cargo
 
 /target
+desktop/src-tauri/gen
 
 # Embedded binaries (downloaded during CI build)
 /embedded/*
