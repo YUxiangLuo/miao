@@ -55,8 +55,19 @@ mkdir -p "$EMBEDDED_DIR"
 
 if [[ -n "${SING_BOX_REF:-}" ]]; then
   echo "==> Cloning sing-box source ($SING_BOX_REF)..."
-  git clone --depth=1 --branch "$SING_BOX_REF" \
-    https://github.com/SagerNet/sing-box.git "$TMP_DIR/sing-box"
+  if [[ "$SING_BOX_REF" =~ ^[0-9a-f]{40}$ ]]; then
+    # git clone --branch 只接受分支/tag 名；完整 commit sha 需直接 fetch
+    # （Build Release 流水线用它把三个目标钉到同一个内核提交）
+    mkdir -p "$TMP_DIR/sing-box"
+    git -C "$TMP_DIR/sing-box" init -q
+    git -C "$TMP_DIR/sing-box" remote add origin \
+      https://github.com/SagerNet/sing-box.git
+    git -C "$TMP_DIR/sing-box" fetch -q --depth=1 origin "$SING_BOX_REF"
+    git -C "$TMP_DIR/sing-box" checkout -q FETCH_HEAD
+  else
+    git clone --depth=1 --branch "$SING_BOX_REF" \
+      https://github.com/SagerNet/sing-box.git "$TMP_DIR/sing-box"
+  fi
 else
   echo "==> Cloning sing-box source (default branch)..."
   git clone --depth=1 \

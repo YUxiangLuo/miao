@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   quality:
@@ -31,9 +31,91 @@ jobs:
           name: frontend-dist
           path: public/
 
-  windows:
+  # 三个目标各自克隆 sing-box；先解析一次默认分支 HEAD，保证同一次发布里
+  # Linux amd64/arm64 与 Windows 的内核是同一个提交，发布结果可复现。
+  kernel-ref:
+    runs-on: ubuntu-latest
+    needs: quality
+    outputs:
+      sha: ${{ steps.resolve.outputs.sha }}
+    steps:
+      - name: Resolve sing-box default branch HEAD
+        id: resolve
+        run: |
+          sha=$(git ls-remote https://github.com/SagerNet/sing-box.git HEAD | cut -f1)
+          test -n "$sha"
+          echo "Resolved sing-box kernel commit: $sha"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+  build-linux:
+    runs-on: ubuntu-latest
+    needs: [frontend, kernel-ref]
+    env:
+      SING_BOX_REF: ${{ needs.kernel-ref.outputs.sha }}
+    strategy:
+      matrix:
+        include:
+          - target: amd64
+            rust_target: x86_64-unknown-linux-musl
+          - target: arm64
+            rust_target: aarch64-unknown-linux-musl
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download frontend artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-dist
+          path: public/
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_target }}
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: stable
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install Zig for cross-compilation
+        uses: mlugg/setup-zig@v2
+
+      - name: Install cargo-zigbuild
+        uses: taiki-e/install-action@cargo-zigbuild
+
+      - name: Build sing-box and geo rule files
+        run: MIAO_TARGET=${{ matrix.target }} ./scripts/build-embedded.sh
+
+      - name: Build release for ${{ matrix.target }}
+        run: cargo zigbuild --locked --release --target ${{ matrix.rust_target }}
+
+      - name: Prepare release asset
+        run: |
+          mv target/${{ matrix.rust_target }}/release/miao-rust miao-rust-linux-${{ matrix.target }}
+          ASSET="miao-rust-linux-${{ matrix.target }}"
+          # GNU sha256sum 标准一行：`<hex>  <filename>`，供本机校验与程序解析
+          sha256sum "$ASSET" | tee "${ASSET}.sha256"
+          printf 'RELEASE_ASSET=%s\n' "$ASSET" >> "$GITHUB_ENV"
+          printf 'RELEASE_SHA256=%s.sha256\n' "$ASSET" >> "$GITHUB_ENV"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: miao-rust-${{ matrix.target }}
+          path: |
+            ${{ env.RELEASE_ASSET }}
+            ${{ env.RELEASE_SHA256 }}
+
+  build-windows:
     runs-on: windows-latest
-    needs: frontend
+    needs: [frontend, kernel-ref]
+    env:
+      SING_BOX_REF: ${{ needs.kernel-ref.outputs.sha }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -93,6 +175,30 @@ jobs:
         with:
           name: miao-windows-amd64
           path: |
+            miao-windows-amd64.zip
+            miao-windows-amd64.zip.sha256
+            miao-windows-amd64-setup.exe
+            miao-windows-amd64-setup.exe.sha256
+
+  release:
+    runs-on: ubuntu-latest
+    needs: [build-linux, build-windows]
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+      - name: Download all release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: miao-*
+          merge-multiple: true
+
+      - name: Publish to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            miao-rust-linux-amd64
+            miao-rust-linux-amd64.sha256
+            miao-rust-linux-arm64
+            miao-rust-linux-arm64.sha256
             miao-windows-amd64.zip
             miao-windows-amd64.zip.sha256
             miao-windows-amd64-setup.exe
