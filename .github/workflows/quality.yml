@@ -94,7 +94,7 @@ jobs:
         run: cargo check -p miao-core --locked --target x86_64-pc-windows-gnu
 
   windows:
-    name: Windows desktop compile
+    name: Windows health check
     runs-on: windows-latest
     needs: frontend
     steps:
@@ -123,5 +123,6 @@ jobs:
       - name: Test miao-core
         run: cargo test -p miao-core --locked --all-targets
 
-      - name: Build desktop shell
-        run: cargo build -p miao-desktop --locked --release
+      # 健康检查即可：证明桌面壳能编过。完整 release 构建（真内核 + NSIS）由 Build Release 负责
+      - name: Check desktop shell
+        run: cargo check -p miao-desktop --locked

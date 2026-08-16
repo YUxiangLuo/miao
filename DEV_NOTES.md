@@ -198,7 +198,7 @@ Arch 上的面板仍是那份 systemd Linux 实例，可以用来看 **共享 UI
 
 1. Frontend quality
 2. Rust quality（default-members + `cargo check -p miao-core --target x86_64-pc-windows-gnu`）
-3. Windows（`windows-latest`：`cargo test -p miao-core`，再 `cargo build -p miao-desktop`；内核用 stub，**不跑 exe、不开 TUN**）
+3. Windows（`windows-latest`：`cargo test -p miao-core` + `cargo check -p miao-desktop` 健康检查；内核用 stub，**不跑 exe、不开 TUN**；完整 release 构建归 Build Release）
 
 打 `v*` tag 或手动跑 **Build Release**：quality → frontend → 并行编 Linux musl 矩阵（amd64/arm64，zigbuild）与 Windows 桌面（真内核 + NSIS 安装包）→ tag 触发时全部产物（`miao-rust-linux-*`、`miao-windows-amd64-setup.exe` 及各自 sha256）传到该 tag 的 GitHub Release；手动跑只留 Actions artifacts。发布产物以 CI 为准，本地产物只用于自测。
 
