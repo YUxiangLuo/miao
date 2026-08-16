@@ -4,7 +4,7 @@ import { useDialog } from '../hooks/useDialog.js'
 import { Button } from './ui.jsx'
 import { PROTOCOL_OPTIONS, RULE_TARGET_OPTIONS, ruleFieldOptions } from '../ruleFormat.js'
 
-export function RuleModal({ open, loading, onClose, onSubmit, nodeNames = [], platform = 'linux' }) {
+export function RuleModal({ open, loading, onClose, onSubmit, nodeNames = [], platform = 'linux', delays = {}, testingNodes = {} }) {
   const titleId = useId()
   const dialogRef = useDialog(open, onClose)
   const [field, setField] = useState('domain_suffix')
@@ -28,6 +28,14 @@ export function RuleModal({ open, loading, onClose, onSubmit, nodeNames = [], pl
   // 目标不在内置三项里即为指定节点出口
   const isNodeTarget = !RULE_TARGET_OPTIONS.some((option) => option.value === target)
   const canSubmit = value.trim().length > 0
+
+  // 打开弹窗时已触发批量测速；把结果追加在节点选项后面
+  const delaySuffix = (name) => {
+    if (testingNodes[name]) return ' · 测速中…'
+    const delay = delays[name]
+    if (delay === undefined) return ''
+    return delay > 0 ? ` · ${delay} ms` : ' · 超时'
+  }
 
   // 协议字段用下拉选值;切入时给默认值,切出时清空,避免把协议名带进文本字段
   const handleFieldChange = (event) => {
@@ -86,7 +94,7 @@ export function RuleModal({ open, loading, onClose, onSubmit, nodeNames = [], pl
               {nodeNames.length > 0 && (
                 <optgroup label="指定节点">
                   {nodeNames.map((name) => (
-                    <option key={name} value={name}>{name}</option>
+                    <option key={name} value={name}>{name}{delaySuffix(name)}</option>
                   ))}
                 </optgroup>
               )}

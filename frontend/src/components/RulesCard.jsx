@@ -66,6 +66,9 @@ export function RulesCard({
   nodeNames = [],
   connections = [],
   platform = 'linux',
+  delays = {},
+  testingNodes = {},
+  onTestNodes,
 }) {
   const [showRuleModal, setShowRuleModal] = useState(false)
   const adding = loadingAction === 'addRule'
@@ -107,7 +110,11 @@ export function RulesCard({
               size="sm"
               icon={<Plus size={12} />}
               disabled={isInitializing}
-              onClick={() => setShowRuleModal(true)}
+              onClick={() => {
+                setShowRuleModal(true)
+                // 打开弹窗即测全部候选节点，延迟结果显示在下拉选项里
+                onTestNodes?.()
+              }}
             >
               添加
             </Button>
@@ -135,6 +142,8 @@ export function RulesCard({
         onSubmit={onAddRule}
         nodeNames={nodeNames}
         platform={platform}
+        delays={delays}
+        testingNodes={testingNodes}
       />
     </>
   )

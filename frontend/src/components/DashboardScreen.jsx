@@ -80,6 +80,14 @@ export function DashboardScreen({ app }) {
               nodeNames={app.ruleNodeNames}
               connections={app.connectionsInfo?.connections}
               platform={app.status.platform || 'linux'}
+              delays={app.delays}
+              testingNodes={app.testingNodes}
+              onTestNodes={() => {
+                // 仅服务运行时测速有意义；候选 = 手动节点 ∪ 代理组节点
+                if (app.status.running && app.ruleNodeNames.length > 0) {
+                  app.handleTestGroupDelays(app.primaryGroupName || 'proxy', app.ruleNodeNames)
+                }
+              }}
             />
           </div>
         </div>

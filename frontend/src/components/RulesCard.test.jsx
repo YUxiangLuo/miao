@@ -184,6 +184,24 @@ describe('RulesCard', () => {
     expect(onAddRule).toHaveBeenCalledWith({ field: 'domain_suffix', value: 'example.com', target: '香港节点' })
   })
 
+  it('tests all candidate nodes on modal open and shows delays in the options', async () => {
+    const user = userEvent.setup()
+    const onTestNodes = vi.fn()
+    renderCard({
+      nodeNames: ['香港节点', '新加坡节点', '美国节点'],
+      onTestNodes,
+      delays: { '香港节点': 132, '新加坡节点': -1 },
+      testingNodes: { '美国节点': true },
+    })
+
+    await openRuleModal(user)
+    expect(onTestNodes).toHaveBeenCalledTimes(1)
+
+    expect(screen.getByRole('option', { name: /香港节点/ }).textContent).toContain('132 ms')
+    expect(screen.getByRole('option', { name: /新加坡节点/ }).textContent).toContain('超时')
+    expect(screen.getByRole('option', { name: /美国节点/ }).textContent).toContain('测速中')
+  })
+
   it('renders node-target rules with a neutral node badge', () => {
     renderCard({
       rules: [
