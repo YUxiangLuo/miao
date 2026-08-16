@@ -4,19 +4,16 @@ import {
   Activity,
   Globe2,
   LoaderCircle,
-  Power,
   PowerOff,
-  Route,
-  Square
+  Route
 } from 'lucide-react'
-import { Button, SectionCard } from './ui.jsx'
+import { SectionCard } from './ui.jsx'
 import { classNames, formatUptime, formatSpeed } from '../utils.js'
 
 export function StatusCard({
   status,
   traffic,
   loadingAction,
-  onToggleService,
   onSetRouteMode,
   onOpenConnections
 }) {
@@ -90,32 +87,6 @@ export function StatusCard({
           <span>{modeSwitching ? '切换中' : '全局代理'}</span>
         </button>
       </div>
-      {status.running ? (
-        <button
-          type="button"
-          className="service-stop-button"
-          onClick={onToggleService}
-          disabled={loadingAction === 'start' || loadingAction === 'stop' || status.initializing}
-          title="停止服务"
-          aria-label="停止服务"
-        >
-          {loadingAction === 'stop' ? (
-            <LoaderCircle size={14} className="spin" />
-          ) : (
-            <Square size={12} fill="currentColor" />
-          )}
-        </button>
-      ) : (
-        <Button
-          tone="success"
-          icon={<Power size={14} />}
-          loading={loadingAction === 'start' || status.initializing}
-          disabled={loadingAction === 'start' || loadingAction === 'stop' || status.initializing}
-          onClick={onToggleService}
-        >
-          启动服务
-        </Button>
-      )}
     </SectionCard>
   )
 }
