@@ -12,7 +12,7 @@ Linux 版是：下载一个文件，`sudo` 跑，浏览器打开，TUN 接管流
 | 没配置就进引导页 | 安装向导、强制落盘 |
 | TUN 透明代理 | 系统代理（WinINET）当主路径 |
 | Tauri 只当自带浏览器，打开 `http://127.0.0.1:<port>` | Linux / OpenWrt 也改成 Tauri |
-| 一次 UAC 对标一次 `sudo` | 第一版就上服务模式 / 免 UAC |
+| 一次 UAC 对标一次 `sudo`；自启须用户显式勾选（任务计划，不是服务） | 服务模式 / 默认免 UAC |
 | Wintun 已在 sing-box 里；内核跟默认分支走 | 旁边再塞一份 `wintun.dll` |
 | Windows 构建不编 VPS、不编换进程升级 | 把 Linux 的 `exec` 热更原样搬过去覆盖正在跑的 exe |
 
@@ -160,6 +160,7 @@ sudo bash install.sh ./target/release/miao-rust
 | 内核看门狗 | 崩溃自动拉起（2s 巡检、1–16s 退避、最多 5 次），放弃时写 `config_warning`；有意启动/停核先递增 `sing_generation`，spawn 不覆盖仍活着的子进程 |
 | 日志轮转 | `miao.log` 超 8 MB 时启动改名 `.old`（单份滚动） |
 | 进程规则文案 | `/api/status` 的 `platform` 决定 placeholder（`qbittorrent.exe`） |
+| 开机自启 | 托盘 CheckMenuItem → 任务计划 `Miao`（ONLOGON + HIGHEST + `--minimized`），勾选状态即任务存在性、不落配置，切换后回读校验；卸载钩子 best-effort `schtasks /Delete` |
 
 TUN JSON：`auto_route` + `strict_route`，`interface_name` 仍是 `sing-tun`。`cfg(target_os = "linux")` 才写 `auto_redirect`。
 

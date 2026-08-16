@@ -53,8 +53,9 @@ Win10/11 x64。哲学不变：还是 TUN 透明代理、还是这块面板、还
 1. 从 [Releases](https://github.com/YUxiangLuo/miao/releases/latest) 下载 `miao-windows-amd64-setup.exe`（NSIS 安装包，装到当前用户，**安装本身不要管理员**）
 2. 每次启动点一次 UAC（TUN / Wintun 要管理员；没有做成服务模式）
 3. 窗口打开即铺满工作区，不能改大小；关窗口进托盘；托盘「退出」才停内核
-4. 更新：先退出，再装新安装包。面板里没有 Windows 一键升级
-5. 出问题：托盘「打开日志」，文件在 `%LOCALAPPDATA%\io.github.yuxiangluo.miao\miao.log`
+4. 开机自启（可选）：托盘菜单勾选「开机自启」。用任务计划实现，勾选后登录时直接进托盘、**不再弹 UAC**
+5. 更新：先退出，再装新安装包。面板里没有 Windows 一键升级
+6. 出问题：托盘「打开日志」，文件在 `%LOCALAPPDATA%\io.github.yuxiangluo.miao\miao.log`
 
 系统通常已有 WebView2，没有的话安装包走 bootstrapper。未签名时 SmartScreen 可能提示「仍要运行」。卸载会尽量结束残留内核，但当前用户安装包无权处理已提权的 `sing-box` / `sing-tun`；必要时重启或在设备管理器里删网卡。日志超过 8 MB 时启动自动轮转为 `miao.log.old`。
 
@@ -68,7 +69,7 @@ Win10/11 x64。哲学不变：还是 TUN 透明代理、还是这块面板、还
 | TUN | `auto_route` + Linux 的 `auto_redirect` | `auto_route` + `strict_route`，**没有** `auto_redirect` |
 | 内核 | 内嵌 Linux sing-box | 内嵌 Windows sing-box（Wintun 已编进内核，不必再带 dll） |
 | 一键升级 / VPS 部署 | 有 | 不编进桌面进程 |
-| 开机自启 | `install.sh` → systemd | 无（先每次双击） |
+| 开机自启 | `install.sh` → systemd | 托盘勾选（任务计划，登录免 UAC 直进托盘） |
 
 内核跟 `build-embedded.sh` 当时拉到的 sing-box 默认分支 HEAD；需要复现某版时手动设 `SING_BOX_REF`（分支/tag/完整 commit sha 均可）。
 
