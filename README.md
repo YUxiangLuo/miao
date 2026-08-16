@@ -50,7 +50,7 @@ Win10/11 x64。哲学不变：还是 TUN 透明代理、还是这块面板、还
 
 日常用法：
 
-1. 下载 NSIS 安装包（装到当前用户，**安装本身不要管理员**）或 `miao-windows-amd64.zip`
+1. 从 [Releases](https://github.com/YUxiangLuo/miao/releases/latest) 下载 `miao-windows-amd64-setup.exe`（NSIS 安装包，装到当前用户，**安装本身不要管理员**）或便携 `miao-windows-amd64.zip`
 2. 每次启动点一次 UAC（TUN / Wintun 要管理员；没有做成服务模式）
 3. 窗口打开即铺满工作区，不能改大小；关窗口进托盘；托盘「退出」才停内核
 4. 更新：先退出，再换安装包或 zip。面板里没有 Windows 一键升级
@@ -70,7 +70,7 @@ Win10/11 x64。哲学不变：还是 TUN 透明代理、还是这块面板、还
 | 一键升级 / VPS 部署 | 有 | 不编进桌面进程 |
 | 开机自启 | `install.sh` → systemd | 无（先每次双击） |
 
-正式发版会把三个架构钉到流水线当场解析出的同一个 sing-box 提交；手动构建默认拉默认分支，可用 `SING_BOX_REF` 覆盖（分支/tag/完整 commit sha 均可）。
+正式发版会把三个目标钉到流水线当场解析出的同一个 sing-box 提交；手动构建默认拉默认分支，可用 `SING_BOX_REF` 覆盖（分支/tag/完整 commit sha 均可）。
 
 ## 面板里有什么
 

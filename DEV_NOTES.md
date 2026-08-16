@@ -55,8 +55,10 @@ MIAO_TARGET=windows-amd64 ./scripts/build-embedded.sh
 # 前端改完必须重新嵌入
 ./scripts/build-frontend.sh
 
-# 全量 Linux 发布构建
+# 本机全量构建（只出 Linux 本机架构）
 ./build.sh
+
+# 发版：bump [workspace.package] 版本 + 打 tag，全平台同号（Linux musl ×2 + Windows 桌面）
 ./release.sh vX.Y.Z
 
 gh run list --limit 5
@@ -174,3 +176,4 @@ TUN JSON：`auto_route` + `strict_route`，`interface_name` 仍是 `sing-tun`。
 
 - `install.sh` / `remove.sh` 仍是 Linux systemd 的事，提交前 `shellcheck`
 - `build-embedded.sh` 的 `MIAO_TARGET=windows-amd64` 只多编一份 Windows 内核，也会编 host 规则编译器用的 `sing-box-host`，不要拿它去抽本机正在跑的实例
+- `build-embedded.sh` 的 `SING_BOX_REF` 接受分支/tag/完整 commit sha（sha 走 init+fetch，`clone --branch` 不收 sha）；Build Release 的 `kernel-ref` 靠它把三个目标钉到同一内核提交
