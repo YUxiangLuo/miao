@@ -195,6 +195,19 @@ describe('RulesCard', () => {
     expect(badge).toHaveClass('rule-target-badge', 'node')
   })
 
+  it('pulses a rule row when a live connection reports that rule', () => {
+    renderCard({
+      connections: [
+        { id: 'c1', rule: 'process_name=curl => route(direct)' },
+        { id: 'c2', rule: 'final' },
+      ],
+    })
+
+    expect(screen.getByText('curl').closest('.list-row')).toHaveClass('rule-active')
+    expect(screen.getByText('curl').closest('.list-row')).toHaveAttribute('title', '该规则正在匹配连接')
+    expect(screen.getByText('25').closest('.list-row')).not.toHaveClass('rule-active')
+  })
+
   it('marks skipped rules with a warning icon and dims the row', () => {
     renderCard({
       rules: [

@@ -84,3 +84,37 @@
 .list-row-title .rule-field-chip {
     margin-right: 6px;
 }
+.list-row.rule-active {
+    background: rgba(74, 158, 117, 0.1);
+    box-shadow: inset 3px 0 0 var(--success);
+    animation: ruleActivePulse 1.6s ease-in-out infinite;
+}
+.list-row.rule-active .rule-field-chip {
+    background: var(--surface-green-soft);
+    color: var(--success);
+}
+.list-row.rule-active .rule-target-badge {
+    animation: ruleActiveBadge 1.6s ease-in-out infinite;
+}
+@keyframes ruleActivePulse {
+    0%, 100% {
+        background: rgba(74, 158, 117, 0.08);
+    }
+    50% {
+        background: rgba(74, 158, 117, 0.22);
+    }
+}
+@keyframes ruleActiveBadge {
+    0%, 100% {
+        filter: brightness(1);
+    }
+    50% {
+        filter: brightness(1.18);
+    }
+}
+@media (prefers-reduced-motion: reduce) {
+    .list-row.rule-active,
+    .list-row.rule-active .rule-target-badge {
+        animation: none;
+    }
+}

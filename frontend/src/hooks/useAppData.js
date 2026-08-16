@@ -93,7 +93,10 @@ export function useAppData() {
   const connectionPollingTasks = useMemo(() => [fetchConnections], [fetchConnections])
 
   usePolling(pollingTasks, true)
-  usePolling(connectionPollingTasks, status.running && (showConnectionsModal || isDesktop))
+  usePolling(
+    connectionPollingTasks,
+    status.running && (showConnectionsModal || isDesktop || rules.length > 0),
+  )
 
   useEffect(() => {
     fetchVersion()

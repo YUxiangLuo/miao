@@ -1,14 +1,18 @@
-import { memo, useState } from 'react'
+import { memo, useMemo, useState } from 'react'
 import { ListFilter, Plus, Trash2, TriangleAlert } from 'lucide-react'
 import { Button, SectionCard } from './ui.jsx'
 import { RuleModal } from './RuleModal.jsx'
 import { classNames } from '../utils.js'
 import { describeRule, ruleTargetLabel } from '../ruleFormat.js'
+import { activeRuleIndexes } from '../ruleActivity.js'
 
-const RuleRow = memo(function RuleRow({ rule, onDelete, disabled }) {
+const RuleRow = memo(function RuleRow({ rule, onDelete, disabled, active }) {
   const display = describeRule(rule)
   return (
-    <div className={classNames('list-row', rule.skipped && 'skipped')}>
+    <div
+      className={classNames('list-row', rule.skipped && 'skipped', active && 'rule-active')}
+      title={active ? '该规则正在匹配连接' : undefined}
+    >
       <div className="list-row-content">
         {display.structured ? (
           <>
@@ -51,10 +55,24 @@ const RuleRow = memo(function RuleRow({ rule, onDelete, disabled }) {
   )
 })
 
-export function RulesCard({ rules, isInitializing, loadingAction, onAddRule, onDeleteRule, adblockEnabled, onToggleAdblock, nodeNames = [] }) {
+export function RulesCard({
+  rules,
+  isInitializing,
+  loadingAction,
+  onAddRule,
+  onDeleteRule,
+  adblockEnabled,
+  onToggleAdblock,
+  nodeNames = [],
+  connections = [],
+}) {
   const [showRuleModal, setShowRuleModal] = useState(false)
   const adding = loadingAction === 'addRule'
   const adblockPending = loadingAction === 'toggleAdblock'
+  const activeIndexes = useMemo(
+    () => activeRuleIndexes(rules, connections),
+    [rules, connections],
+  )
 
   return (
     <>
@@ -103,6 +121,7 @@ export function RulesCard({ rules, isInitializing, loadingAction, onAddRule, onD
               rule={rule}
               onDelete={onDeleteRule}
               disabled={isInitializing}
+              active={activeIndexes.has(rule.index)}
             />
           ))}
         </div>
