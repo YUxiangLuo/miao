@@ -160,13 +160,38 @@ pub async fn start_sing_internal(state: &Arc<AppState>) -> AppResult<()> {
     #[cfg(windows)]
     ensure_hidden_console();
 
-    let mut child = tokio::process::Command::new(&sing_box_path)
+    let mut command = tokio::process::Command::new(&sing_box_path);
+    command
         .current_dir(&sing_box_home)
         .arg("run")
         .arg("-c")
-        .arg(&config_path)
-        .stdout(std::process::Stdio::inherit())
-        .stderr(std::process::Stdio::inherit())
+        .arg(&config_path);
+
+    if let Some(log_path) = crate::paths::active_log_path() {
+        if let Ok(file) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(log_path)
+        {
+            if let Ok(stderr) = file.try_clone() {
+                command.stdout(file).stderr(stderr);
+            } else {
+                command
+                    .stdout(std::process::Stdio::inherit())
+                    .stderr(std::process::Stdio::inherit());
+            }
+        } else {
+            command
+                .stdout(std::process::Stdio::inherit())
+                .stderr(std::process::Stdio::inherit());
+        }
+    } else {
+        command
+            .stdout(std::process::Stdio::inherit())
+            .stderr(std::process::Stdio::inherit());
+    }
+
+    let mut child = command
         .spawn()
         .map_err(|e| AppError::context("Failed to spawn sing-box process", e))?;
 

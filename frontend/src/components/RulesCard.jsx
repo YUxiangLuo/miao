@@ -65,6 +65,7 @@ export function RulesCard({
   onToggleAdblock,
   nodeNames = [],
   connections = [],
+  platform = 'linux',
 }) {
   const [showRuleModal, setShowRuleModal] = useState(false)
   const adding = loadingAction === 'addRule'
@@ -133,6 +134,7 @@ export function RulesCard({
         onClose={() => setShowRuleModal(false)}
         onSubmit={onAddRule}
         nodeNames={nodeNames}
+        platform={platform}
       />
     </>
   )

@@ -2,9 +2,9 @@ import { useEffect, useId, useState } from 'react'
 import { Plus, X } from 'lucide-react'
 import { useDialog } from '../hooks/useDialog.js'
 import { Button } from './ui.jsx'
-import { PROTOCOL_OPTIONS, RULE_FIELD_OPTIONS, RULE_TARGET_OPTIONS } from '../ruleFormat.js'
+import { PROTOCOL_OPTIONS, RULE_TARGET_OPTIONS, ruleFieldOptions } from '../ruleFormat.js'
 
-export function RuleModal({ open, loading, onClose, onSubmit, nodeNames = [] }) {
+export function RuleModal({ open, loading, onClose, onSubmit, nodeNames = [], platform = 'linux' }) {
   const titleId = useId()
   const dialogRef = useDialog(open, onClose)
   const [field, setField] = useState('domain_suffix')
@@ -22,8 +22,9 @@ export function RuleModal({ open, loading, onClose, onSubmit, nodeNames = [] }) 
 
   if (!open) return null
 
+  const fieldOptions = ruleFieldOptions(platform)
   const isProtocol = field === 'protocol'
-  const fieldOption = RULE_FIELD_OPTIONS.find((option) => option.value === field)
+  const fieldOption = fieldOptions.find((option) => option.value === field)
   // 目标不在内置三项里即为指定节点出口
   const isNodeTarget = !RULE_TARGET_OPTIONS.some((option) => option.value === target)
   const canSubmit = value.trim().length > 0
@@ -70,7 +71,7 @@ export function RuleModal({ open, loading, onClose, onSubmit, nodeNames = [] }) 
               onChange={handleFieldChange}
               aria-label="规则字段"
             >
-              {RULE_FIELD_OPTIONS.map((option) => (
+              {fieldOptions.map((option) => (
                 <option key={option.value} value={option.value}>{option.label}</option>
               ))}
             </select>

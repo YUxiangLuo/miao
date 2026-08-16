@@ -28,11 +28,17 @@ chmod +x miao && sudo ./miao
 
 ### Windows 桌面版
 
-Win10/11 x64：下载 Release 里的 NSIS 安装包（当前用户，安装本身不抬 UAC）或 `miao-windows-amd64.zip` 便携包。第一次运行会要一次管理员权限（TUN / Wintun）。系统通常已有 WebView2，没有的话安装包会走 bootstrapper。未签名时 SmartScreen 可能提示「仍要运行」。
+Win10/11 x64。日常用法：
 
-Windows 上请退出后再换新的安装包或 zip 更新，面板里的一键升级是 Linux 路径。VPS 一键部署在 Windows 上不可用。
+1. 下载 NSIS 安装包（装到当前用户，安装本身不要管理员）或 `miao-windows-amd64.zip`
+2. 每次启动点一次 UAC（TUN 需要管理员）
+3. 窗口和托盘用一天；关窗口会进托盘，托盘「退出」才停内核
+4. 要更新：先退出，再装新包或换 zip。面板里没有 Windows 一键升级
+5. 出问题：托盘「打开日志」，文件在 `%LOCALAPPDATA%\miao\miao.log`
 
-配置在 `%LOCALAPPDATA%\miao\config.yaml`。内核版本钉在 sing-box 1.13.x，不要跟默认分支漂到 1.14。
+系统通常已有 WebView2，没有的话安装包会走 bootstrapper。未签名时 SmartScreen 可能提示「仍要运行」。VPS 一键部署在 Windows 上不可用。卸载后若设备管理器里还有 `sing-tun`，重启一次或手动删。
+
+配置和上次节点在 `%LOCALAPPDATA%\miao`。内核运行时仍在 `%TEMP%\miao-sing-box`。内核版本钉在 sing-box 1.13.x。
 
 ### 用脚本安装为 systemd 服务
 
@@ -71,7 +77,7 @@ sudo bash remove.sh        # 交互确认;-y 跳过确认
 | 去广告 | 内嵌广告规则集，路由层拦截，一键开关 |
 | 手动节点 | 粘贴分享链接批量导入，或手动填写（高级参数折叠收纳） |
 | 订阅管理 | 添加/刷新 Clash YAML 订阅，失败自动回退缓存配置 |
-| 版本升级 | 检测新版本并面板内一键自升级 |
+| 版本升级 | Linux：检测新版本并面板内一键自升级。Windows：退出后换安装包或便携包 |
 
 ## 节点的三种来法
 

@@ -1,5 +1,6 @@
 mod error;
 mod handlers;
+mod instance;
 mod models;
 mod paths;
 mod platform;
@@ -14,7 +15,11 @@ mod test_support;
 mod validation;
 
 pub use error::{AppError, AppResult};
-pub use privilege::{is_elevated, require_privileges};
+pub use instance::{
+    acquire_single_instance, focus_existing_window, InstanceAcquire, InstanceGuard,
+};
+pub use paths::default_log_path;
+pub use privilege::{is_elevated, require_privileges, show_user_error};
 pub use runtime::{run, spawn_server, RuntimeOptions, ServerHandle};
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

@@ -64,21 +64,25 @@ fn relaunch_elevated() -> Result<(), String> {
     Ok(())
 }
 
-#[cfg(windows)]
-fn show_privilege_error() {
-    use windows_sys::Win32::UI::WindowsAndMessaging::{MessageBoxW, MB_ICONERROR, MB_OK};
+pub fn show_user_error(title: &str, message: &str) {
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::UI::WindowsAndMessaging::{MessageBoxW, MB_ICONERROR, MB_OK};
 
-    let text: Vec<u16> = "TUN 需要管理员权限。请在弹出的权限请求中选择“是”。\0"
-        .encode_utf16()
-        .collect();
-    let title: Vec<u16> = "Miao\0".encode_utf16().collect();
-    unsafe {
-        MessageBoxW(
-            std::ptr::null_mut(),
-            text.as_ptr(),
-            title.as_ptr(),
-            MB_OK | MB_ICONERROR,
-        );
+        let text: Vec<u16> = format!("{message}\0").encode_utf16().collect();
+        let title: Vec<u16> = format!("{title}\0").encode_utf16().collect();
+        unsafe {
+            MessageBoxW(
+                std::ptr::null_mut(),
+                text.as_ptr(),
+                title.as_ptr(),
+                MB_OK | MB_ICONERROR,
+            );
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        eprintln!("{title}: {message}");
     }
 }
 
@@ -93,7 +97,7 @@ pub fn require_privileges() {
             Ok(()) => std::process::exit(0),
             Err(err) => {
                 error!(error = %err, "TUN requires administrator privileges");
-                show_privilege_error();
+                show_user_error("Miao", "TUN 需要管理员权限。请在弹出的权限请求中选择“是”。");
                 std::process::exit(1);
             }
         }

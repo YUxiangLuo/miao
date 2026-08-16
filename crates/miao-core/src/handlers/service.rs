@@ -81,6 +81,7 @@ pub async fn get_status(State(state): State<Arc<AppState>>) -> Json<ApiResponse<
             uptime_secs,
             warning,
             vps_supported: crate::platform::vps_supported(),
+            platform: if cfg!(windows) { "windows" } else { "linux" },
         },
     )
 }
@@ -292,6 +293,10 @@ mod tests {
         assert!(data.pid.is_none());
         assert!(data.uptime_secs.is_none());
         assert_eq!(data.vps_supported, crate::platform::vps_supported());
+        assert_eq!(
+            data.platform,
+            if cfg!(windows) { "windows" } else { "linux" }
+        );
     }
 
     #[tokio::test]

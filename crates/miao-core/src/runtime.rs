@@ -29,6 +29,8 @@ pub struct RuntimeOptions {
     pub config_path: Option<PathBuf>,
     /// Tests can skip extracting the embedded kernel when they will not start it.
     pub skip_extract: bool,
+    /// Override the log file. Windows defaults to `%LOCALAPPDATA%\miao\miao.log`.
+    pub log_path: Option<PathBuf>,
 }
 
 /// Running panel. Dropping it requests shutdown; call [`ServerHandle::shutdown`]
@@ -36,6 +38,7 @@ pub struct RuntimeOptions {
 pub struct ServerHandle {
     port: u16,
     url: String,
+    log_path: Option<PathBuf>,
     shutdown_tx: Option<oneshot::Sender<()>>,
     server_task: Option<JoinHandle<AppResult<()>>>,
 }
@@ -47,6 +50,10 @@ impl ServerHandle {
 
     pub fn url(&self) -> &str {
         &self.url
+    }
+
+    pub fn log_path(&self) -> Option<&std::path::Path> {
+        self.log_path.as_deref()
     }
 
     pub async fn shutdown(mut self) {
@@ -83,13 +90,12 @@ pub async fn run() -> AppResult<()> {
 }
 
 pub async fn spawn_server(options: RuntimeOptions) -> AppResult<ServerHandle> {
+    let log_path = resolve_log_path(&options);
     if options.install_tracing {
-        let _ = tracing_subscriber::fmt()
-            .with_env_filter(
-                tracing_subscriber::EnvFilter::from_default_env()
-                    .add_directive(tracing::Level::INFO.into()),
-            )
-            .try_init();
+        install_tracing(log_path.as_deref());
+    }
+    if let Some(path) = log_path.clone() {
+        let _ = crate::paths::set_active_log_path(path);
     }
 
     #[cfg(windows)]
@@ -195,6 +201,7 @@ pub async fn spawn_server(options: RuntimeOptions) -> AppResult<ServerHandle> {
     Ok(ServerHandle {
         port,
         url,
+        log_path,
         shutdown_tx: Some(shutdown_tx),
         server_task: Some(server_task),
     })
@@ -300,6 +307,48 @@ async fn wait_os_shutdown() {
     }
 }
 
+fn resolve_log_path(options: &RuntimeOptions) -> Option<PathBuf> {
+    if let Some(path) = &options.log_path {
+        return Some(path.clone());
+    }
+    if cfg!(windows) {
+        Some(crate::paths::default_log_path())
+    } else {
+        None
+    }
+}
+
+fn install_tracing(log_path: Option<&std::path::Path>) {
+    use tracing_subscriber::fmt::writer::MakeWriterExt;
+
+    let filter = || {
+        tracing_subscriber::EnvFilter::from_default_env().add_directive(tracing::Level::INFO.into())
+    };
+
+    if let Some(path) = log_path {
+        if let Some(parent) = path.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        match fs::OpenOptions::new().create(true).append(true).open(path) {
+            Ok(file) => {
+                let writer = std::io::stdout.and(std::sync::Mutex::new(file));
+                let _ = tracing_subscriber::fmt()
+                    .with_env_filter(filter())
+                    .with_writer(writer)
+                    .try_init();
+                return;
+            }
+            Err(err) => {
+                eprintln!("Failed to open log file {}: {err}", path.display());
+            }
+        }
+    }
+
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(filter())
+        .try_init();
+}
+
 fn panel_bind_addr(port: u16) -> String {
     #[cfg(windows)]
     {
@@ -398,6 +447,8 @@ fn config_declares_route_mode(content: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
     use super::{config_declares_route_mode, spawn_server, RuntimeOptions};
 
     #[test]
@@ -426,6 +477,16 @@ custom_rules:
         assert!(!config_declares_route_mode("route_mode: ["));
     }
 
+    #[test]
+    fn resolve_log_path_honors_explicit_override() {
+        let path = PathBuf::from("/tmp/miao-test.log");
+        let options = RuntimeOptions {
+            log_path: Some(path.clone()),
+            ..RuntimeOptions::default()
+        };
+        assert_eq!(super::resolve_log_path(&options), Some(path));
+    }
+
     #[tokio::test]
     async fn spawn_server_serves_status_and_shuts_down() {
         let config_path = std::env::temp_dir().join(format!(
@@ -443,6 +504,7 @@ custom_rules:
             bind_port: Some(0),
             config_path: Some(config_path),
             skip_extract: true,
+            log_path: None,
         })
         .await
         .expect("spawn panel");

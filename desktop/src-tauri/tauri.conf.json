@@ -25,7 +25,8 @@
     "category": "Utility",
     "windows": {
       "nsis": {
-        "installMode": "currentUser"
+        "installMode": "currentUser",
+        "installerHooks": "nsis/hooks.nsh"
       },
       "webviewInstallMode": {
         "type": "downloadBootstrapper",

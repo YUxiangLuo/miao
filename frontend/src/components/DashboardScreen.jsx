@@ -79,6 +79,7 @@ export function DashboardScreen({ app }) {
               onToggleAdblock={app.handleToggleAdblock}
               nodeNames={app.ruleNodeNames}
               connections={app.connectionsInfo?.connections}
+              platform={app.status.platform || 'linux'}
             />
           </div>
         </div>

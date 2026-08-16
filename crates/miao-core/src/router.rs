@@ -132,6 +132,10 @@ mod tests {
             json["data"]["vps_supported"],
             crate::platform::vps_supported()
         );
+        assert_eq!(
+            json["data"]["platform"],
+            if cfg!(windows) { "windows" } else { "linux" }
+        );
     }
 
     #[tokio::test]

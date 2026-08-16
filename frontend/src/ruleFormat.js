@@ -14,6 +14,22 @@ export const RULE_FIELD_OPTIONS = [
   { value: 'process_path', label: '进程路径', placeholder: '/usr/bin/curl' },
 ]
 
+export function ruleFieldOptions(platform = 'linux') {
+  if (platform !== 'windows') {
+    return RULE_FIELD_OPTIONS
+  }
+
+  return RULE_FIELD_OPTIONS.map((option) => {
+    if (option.value === 'process_name') {
+      return { ...option, placeholder: 'qbittorrent.exe' }
+    }
+    if (option.value === 'process_path') {
+      return { ...option, placeholder: 'C:\\Program Files\\qBittorrent\\qbittorrent.exe' }
+    }
+    return option
+  })
+}
+
 export const RULE_TARGET_OPTIONS = [
   { value: 'proxy', label: '代理' },
   { value: 'direct', label: '直连' },

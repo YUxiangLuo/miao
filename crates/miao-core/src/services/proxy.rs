@@ -18,25 +18,27 @@ const LAST_PROXY_FILENAME: &str = ".last_proxy";
 /// only used when PID 1 is systemd and the system does not look like OpenWrt.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum LastProxyStore {
-    RuntimeDir,
-    WorkingDir,
+    Runtime,
+    Working,
+    Persistent,
 }
 
 fn last_proxy_store(openwrt_like: bool, pid1_comm: &str) -> LastProxyStore {
     if cfg!(windows) {
-        return LastProxyStore::RuntimeDir;
+        return LastProxyStore::Persistent;
     }
     if openwrt_like || pid1_comm.trim() != "systemd" {
-        LastProxyStore::RuntimeDir
+        LastProxyStore::Runtime
     } else {
-        LastProxyStore::WorkingDir
+        LastProxyStore::Working
     }
 }
 
 fn last_proxy_path_for(store: LastProxyStore) -> PathBuf {
     match store {
-        LastProxyStore::RuntimeDir => get_sing_box_home().join(LAST_PROXY_FILENAME),
-        LastProxyStore::WorkingDir => PathBuf::from(LAST_PROXY_FILENAME),
+        LastProxyStore::Runtime => get_sing_box_home().join(LAST_PROXY_FILENAME),
+        LastProxyStore::Working => PathBuf::from(LAST_PROXY_FILENAME),
+        LastProxyStore::Persistent => crate::paths::platform_data_dir().join(LAST_PROXY_FILENAME),
     }
 }
 
@@ -181,7 +183,7 @@ mod tests {
     #[test]
     fn last_proxy_path_uses_tmp_on_openwrt() {
         assert_eq!(
-            last_proxy_path_for(LastProxyStore::RuntimeDir),
+            last_proxy_path_for(LastProxyStore::Runtime),
             get_sing_box_home().join(LAST_PROXY_FILENAME)
         );
     }
@@ -189,41 +191,39 @@ mod tests {
     #[test]
     fn last_proxy_path_uses_working_directory_on_regular_linux() {
         assert_eq!(
-            last_proxy_path_for(LastProxyStore::WorkingDir),
+            last_proxy_path_for(LastProxyStore::Working),
             std::path::PathBuf::from(LAST_PROXY_FILENAME)
         );
     }
 
     #[test]
     fn last_proxy_store_uses_tmp_when_openwrt_markers_exist() {
-        assert_eq!(
-            last_proxy_store(true, "systemd"),
-            LastProxyStore::RuntimeDir
-        );
-        assert_eq!(last_proxy_store(true, "procd"), LastProxyStore::RuntimeDir);
+        assert_eq!(last_proxy_store(true, "systemd"), LastProxyStore::Runtime);
+        assert_eq!(last_proxy_store(true, "procd"), LastProxyStore::Runtime);
     }
 
     #[test]
     fn last_proxy_store_uses_tmp_when_pid1_is_not_systemd() {
-        assert_eq!(last_proxy_store(false, "procd"), LastProxyStore::RuntimeDir);
-        assert_eq!(last_proxy_store(false, ""), LastProxyStore::RuntimeDir);
+        assert_eq!(last_proxy_store(false, "procd"), LastProxyStore::Runtime);
+        assert_eq!(last_proxy_store(false, ""), LastProxyStore::Runtime);
     }
 
     #[cfg(not(windows))]
     #[test]
     fn last_proxy_store_uses_cwd_only_for_systemd_linux() {
-        assert_eq!(
-            last_proxy_store(false, "systemd"),
-            LastProxyStore::WorkingDir
-        );
+        assert_eq!(last_proxy_store(false, "systemd"), LastProxyStore::Working);
     }
 
     #[cfg(windows)]
     #[test]
-    fn last_proxy_store_is_runtime_dir_on_windows() {
+    fn last_proxy_store_is_persistent_dir_on_windows() {
         assert_eq!(
             last_proxy_store(false, "systemd"),
-            LastProxyStore::RuntimeDir
+            LastProxyStore::Persistent
+        );
+        assert_eq!(
+            last_proxy_path_for(LastProxyStore::Persistent),
+            crate::paths::platform_data_dir().join(LAST_PROXY_FILENAME)
         );
     }
 

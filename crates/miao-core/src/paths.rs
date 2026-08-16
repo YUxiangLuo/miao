@@ -1,5 +1,16 @@
 use std::ffi::OsString;
 use std::path::PathBuf;
+use std::sync::OnceLock;
+
+static ACTIVE_LOG_PATH: OnceLock<PathBuf> = OnceLock::new();
+
+pub fn set_active_log_path(path: PathBuf) -> Result<(), PathBuf> {
+    ACTIVE_LOG_PATH.set(path)
+}
+
+pub fn active_log_path() -> Option<&'static PathBuf> {
+    ACTIVE_LOG_PATH.get()
+}
 
 use crate::error::{AppError, AppResult};
 
@@ -88,16 +99,27 @@ fn resolve_config_path_from_parts(
     }
 }
 
-pub fn platform_default_config_path() -> PathBuf {
+pub fn platform_data_dir() -> PathBuf {
     if cfg!(windows) {
         std::env::var_os("LOCALAPPDATA")
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from(r"C:\ProgramData"))
             .join("miao")
-            .join(CONFIG_FILENAME)
+    } else {
+        PathBuf::from("/etc/miao")
+    }
+}
+
+pub fn platform_default_config_path() -> PathBuf {
+    if cfg!(windows) {
+        platform_data_dir().join(CONFIG_FILENAME)
     } else {
         PathBuf::from(ETC_CONFIG_PATH)
     }
+}
+
+pub fn default_log_path() -> PathBuf {
+    platform_data_dir().join("miao.log")
 }
 
 #[cfg(test)]
@@ -158,6 +180,22 @@ mod tests {
         assert_eq!(
             super::platform_default_config_path(),
             PathBuf::from(super::ETC_CONFIG_PATH)
+        );
+        assert_eq!(
+            super::default_log_path(),
+            PathBuf::from("/etc/miao/miao.log")
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn platform_paths_live_under_local_app_data_on_windows() {
+        let data_dir = super::platform_data_dir();
+        assert!(data_dir.ends_with("miao"));
+        assert_eq!(super::default_log_path(), data_dir.join("miao.log"));
+        assert_eq!(
+            super::platform_default_config_path(),
+            data_dir.join(super::CONFIG_FILENAME)
         );
     }
 }

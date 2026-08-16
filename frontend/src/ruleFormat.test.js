@@ -5,6 +5,7 @@ import {
   RULE_FIELD_OPTIONS,
   RULE_TARGET_OPTIONS,
   ruleFieldLabel,
+  ruleFieldOptions,
   ruleTargetLabel,
 } from './ruleFormat.js'
 
@@ -46,6 +47,19 @@ describe('ruleFormat', () => {
     expect(ruleTargetLabel('reject')).toBe('拦截')
     expect(ruleTargetLabel('proxy')).toBe('代理')
     expect(ruleTargetLabel(undefined)).toBe('未知')
+  })
+
+  it('uses windows process placeholders without changing field values', () => {
+    const options = ruleFieldOptions('windows')
+    expect(options.find((option) => option.value === 'process_name')?.placeholder).toBe(
+      'qbittorrent.exe',
+    )
+    expect(options.find((option) => option.value === 'process_path')?.placeholder).toContain(
+      'Program Files',
+    )
+    expect(ruleFieldOptions('linux').find((option) => option.value === 'process_name')?.placeholder).toBe(
+      'curl',
+    )
   })
 
   it('describes structured rules from the API', () => {
