@@ -6,4 +6,5 @@ pub mod service;
 pub mod static_assets;
 pub mod subs;
 pub mod version;
+#[cfg(not(windows))]
 pub mod vps;

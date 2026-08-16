@@ -83,12 +83,14 @@ pub struct AdblockRequest {
     pub enabled: bool,
 }
 
+#[cfg(not(windows))]
 #[derive(Deserialize)]
 pub struct VpsDeployRequest {
     pub ip: String,
     pub password: String,
 }
 
+#[cfg(not(windows))]
 #[derive(Serialize)]
 pub struct VpsDeployResponse {
     pub tag: String,

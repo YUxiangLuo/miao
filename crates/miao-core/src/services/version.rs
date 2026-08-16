@@ -1,24 +1,34 @@
-use std::{
-    fs,
-    path::Path,
-    sync::{atomic::Ordering, Arc},
-    time::Instant,
-};
+use std::sync::Arc;
+use std::time::Instant;
+#[cfg(not(windows))]
+use std::{fs, path::Path, sync::atomic::Ordering};
 
+#[cfg(not(windows))]
 use futures::StreamExt;
+#[cfg(not(windows))]
 use sha2::{Digest, Sha256};
+#[cfg(not(windows))]
 use tokio::io::AsyncWriteExt;
-use tokio::time::{sleep, Duration};
-use tracing::{error, info, warn};
+#[cfg(not(windows))]
+use tokio::time::sleep;
+use tokio::time::Duration;
+#[cfg(not(windows))]
+use tracing::info;
+use tracing::{error, warn};
 
 use crate::error::{AppError, AppResult};
-use crate::models::{GitHubAsset, GitHubRelease, VersionInfo};
+#[cfg(not(windows))]
+use crate::models::GitHubAsset;
+use crate::models::{GitHubRelease, VersionInfo};
+#[cfg(not(windows))]
 use crate::services::singbox::stop_sing_internal;
 use crate::state::{AppState, VersionCache};
 use crate::VERSION;
 
 const CACHE_TTL: Duration = Duration::from_secs(300);
+#[cfg(not(windows))]
 const DOWNLOAD_MAX_ATTEMPTS: u32 = 3;
+#[cfg(not(windows))]
 const DOWNLOAD_RETRY_BASE_MS: u64 = 500;
 
 /// 解析 `sha256sum` 输出首行：`<64 hex>[  *]<filename>`
@@ -36,6 +46,7 @@ fn parse_sha256sum_line(line: &str) -> AppResult<String> {
     Ok(hex.to_ascii_lowercase())
 }
 
+#[cfg(not(windows))]
 async fn fetch_checksum_hex(client: &reqwest::Client, url: &str) -> AppResult<String> {
     let text = client
         .get(url)
@@ -53,6 +64,7 @@ async fn fetch_checksum_hex(client: &reqwest::Client, url: &str) -> AppResult<St
     parse_sha256sum_line(first)
 }
 
+#[cfg(not(windows))]
 async fn fetch_checksum_hex_retried(client: &reqwest::Client, url: &str) -> AppResult<String> {
     let mut last_err: Option<AppError> = None;
     for attempt in 0..DOWNLOAD_MAX_ATTEMPTS {
@@ -76,6 +88,7 @@ async fn fetch_checksum_hex_retried(client: &reqwest::Client, url: &str) -> AppR
 }
 
 /// 流式下载到临时文件并增量 SHA256；成功时文件已关闭且校验通过。
+#[cfg(not(windows))]
 async fn download_binary_streaming_once(
     client: &reqwest::Client,
     url: &str,
@@ -168,6 +181,7 @@ async fn download_binary_streaming_once(
     Ok(())
 }
 
+#[cfg(not(windows))]
 async fn download_binary_streaming_retried(
     client: &reqwest::Client,
     url: &str,
@@ -234,6 +248,7 @@ async fn fetch_latest_release(
     Ok(release)
 }
 
+#[cfg(not(windows))]
 async fn invalidate_release_cache(state: &Arc<AppState>) {
     state.version_cache.store(Arc::new(VersionCache {
         release: None,
@@ -290,6 +305,7 @@ pub async fn get_version_info(state: &Arc<AppState>) -> VersionInfo {
     }
 }
 
+#[cfg(not(windows))]
 fn get_temp_binary_path() -> String {
     let pid = std::process::id();
     let timestamp = std::time::SystemTime::now()
@@ -302,10 +318,12 @@ fn get_temp_binary_path() -> String {
         .into_owned()
 }
 
+#[cfg(not(windows))]
 fn checksum_asset_name(binary_asset_name: &str) -> String {
     format!("{binary_asset_name}.sha256")
 }
 
+#[cfg(not(windows))]
 fn find_binary_and_checksum_assets<'a>(
     release: &'a GitHubRelease,
     asset_name: &str,
@@ -352,6 +370,7 @@ fn release_is_newer_than_current(current: &str, release_tag: &str) -> bool {
 }
 
 /// 对已通过 SHA256 校验的临时文件 chmod 并执行 `--version` 核对。
+#[cfg(not(windows))]
 async fn verify_temp_binary_executable(temp_path: &Path, tag_name: &str) -> AppResult<()> {
     set_executable(temp_path).map_err(|e| AppError::context("Failed to chmod temp binary", e))?;
 
@@ -391,13 +410,8 @@ fn stdout_version_matches_release(stdout: &str, tag_name: &str) -> bool {
     stdout.contains(tag_trim) || stdout.contains(no_v)
 }
 
+#[cfg(not(windows))]
 pub async fn upgrade_binary(state: &Arc<AppState>) -> AppResult<String> {
-    if !crate::platform::upgrade_supported() {
-        return Err(AppError::message(
-            "当前平台请下载新的安装包或便携包，退出后再替换",
-        ));
-    }
-
     if state
         .upgrading
         .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
@@ -519,6 +533,7 @@ pub async fn upgrade_binary(state: &Arc<AppState>) -> AppResult<String> {
     Ok(new_version)
 }
 
+#[cfg(not(windows))]
 fn set_executable(path: &Path) -> std::io::Result<()> {
     #[cfg(unix)]
     {
@@ -532,6 +547,7 @@ fn set_executable(path: &Path) -> std::io::Result<()> {
     }
 }
 
+#[cfg(not(windows))]
 fn exec_replace(command: &mut std::process::Command) -> std::io::Error {
     #[cfg(unix)]
     {
@@ -547,6 +563,7 @@ fn exec_replace(command: &mut std::process::Command) -> std::io::Error {
     }
 }
 
+#[cfg(not(windows))]
 fn upgrade_failure_log_path() -> std::path::PathBuf {
     #[cfg(unix)]
     {
@@ -590,7 +607,7 @@ fn version_info_without_release(current: String) -> VersionInfo {
 mod tests {
     use super::{
         current_arch_asset_name, get_version_info, parse_semver_tag, parse_sha256sum_line,
-        release_is_newer_than_current, stdout_version_matches_release, upgrade_binary,
+        release_is_newer_than_current, stdout_version_matches_release,
     };
     use crate::models::Config;
     use crate::platform::upgrade_supported;
@@ -665,17 +682,5 @@ mod tests {
         assert_eq!(info.upgrade_supported, upgrade_supported());
         assert!(!info.has_update);
         assert!(info.download_url.is_none());
-    }
-
-    #[tokio::test]
-    async fn upgrade_binary_is_rejected_when_platform_cannot_replace_itself() {
-        if upgrade_supported() {
-            return;
-        }
-
-        let state = app_state(Config::default());
-        let err = upgrade_binary(&state).await.expect_err("windows upgrade");
-        assert!(err.to_string().contains("安装包"));
-        assert!(!state.upgrading.load(std::sync::atomic::Ordering::SeqCst));
     }
 }

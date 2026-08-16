@@ -10,7 +10,6 @@ use crate::error::{AppError, AppResult};
 use crate::models::{Config, DEFAULT_PORT};
 use crate::services::{
     config::{gen_config, restore_config_from_cache, save_config_cache},
-    openwrt::check_and_install_openwrt_dependencies,
     proxy::restore_last_proxy,
     singbox::{extract_sing_box, start_sing_internal, stop_sing_internal},
 };
@@ -246,9 +245,12 @@ async fn initialize_runtime(config: Config, state: Arc<AppState>) {
         }
     }
 
-    info!("Checking dependencies...");
-    if let Err(e) = check_and_install_openwrt_dependencies().await {
-        error!("Failed to check or install OpenWrt dependencies: {}", e);
+    #[cfg(not(windows))]
+    {
+        info!("Checking dependencies...");
+        if let Err(e) = crate::services::openwrt::check_and_install_openwrt_dependencies().await {
+            error!("Failed to check or install OpenWrt dependencies: {}", e);
+        }
     }
 
     match start_sing_internal(&state).await {

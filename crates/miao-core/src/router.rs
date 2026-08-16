@@ -5,6 +5,10 @@ use axum::{
     Router,
 };
 
+#[cfg(not(windows))]
+use crate::handlers::version::upgrade;
+#[cfg(not(windows))]
+use crate::handlers::vps::deploy_vps;
 use crate::handlers::{
     clash::{proxy_clash_http, proxy_clash_traffic},
     nodes::{add_node, delete_node, get_nodes},
@@ -13,13 +17,12 @@ use crate::handlers::{
     service::{get_status, set_route_mode, start_service, stop_service, test_connectivity},
     static_assets::{serve_favicon, serve_index},
     subs::{add_sub, delete_sub, get_subs, refresh_subs},
-    version::{get_version, upgrade},
-    vps::deploy_vps,
+    version::get_version,
 };
 use crate::state::AppState;
 
 pub fn build_router(app_state: Arc<AppState>) -> Router {
-    Router::new()
+    let router = Router::new()
         .route("/", get(serve_index))
         .route("/favicon.svg", get(serve_favicon))
         .route("/api/status", get(get_status))
@@ -30,7 +33,6 @@ pub fn build_router(app_state: Arc<AppState>) -> Router {
         .route("/api/clash/traffic", get(proxy_clash_traffic))
         .route("/api/clash/{*path}", any(proxy_clash_http))
         .route("/api/version", get(get_version))
-        .route("/api/upgrade", post(upgrade))
         .route("/api/subs", get(get_subs))
         .route("/api/subs", post(add_sub))
         .route("/api/subs", delete(delete_sub))
@@ -42,9 +44,14 @@ pub fn build_router(app_state: Arc<AppState>) -> Router {
         .route("/api/rules", post(add_rule))
         .route("/api/rules", delete(delete_rule))
         .route("/api/adblock", post(set_adblock))
-        .route("/api/vps/deploy", post(deploy_vps))
-        .route("/api/last-proxy", post(set_last_proxy))
-        .with_state(app_state)
+        .route("/api/last-proxy", post(set_last_proxy));
+
+    #[cfg(not(windows))]
+    let router = router
+        .route("/api/upgrade", post(upgrade))
+        .route("/api/vps/deploy", post(deploy_vps));
+
+    router.with_state(app_state)
 }
 
 #[cfg(test)]
@@ -475,6 +482,38 @@ mod tests {
         );
     }
 
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn router_omits_upgrade_and_vps_on_windows() {
+        let app = test_app(Config {
+            port: None,
+            subs: vec![],
+            nodes: vec![],
+            custom_rules: vec![],
+            route_mode: Default::default(),
+            adblock: false,
+        })
+        .await;
+
+        let upgrade = app
+            .clone()
+            .oneshot(empty_request("POST", "/api/upgrade"))
+            .await
+            .unwrap();
+        assert_eq!(upgrade.status(), StatusCode::NOT_FOUND);
+
+        let vps = app
+            .oneshot(json_request(
+                "POST",
+                "/api/vps/deploy",
+                json!({ "ip": "203.0.113.10", "password": "secret" }),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(vps.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[cfg(not(windows))]
     #[tokio::test]
     async fn router_rejects_vps_deploy_with_invalid_ip() {
         let app = test_app(Config {
@@ -501,6 +540,7 @@ mod tests {
         assert_eq!(json["success"], false);
     }
 
+    #[cfg(not(windows))]
     #[tokio::test]
     async fn router_rejects_vps_deploy_with_empty_password() {
         let app = test_app(Config {
@@ -528,6 +568,7 @@ mod tests {
         assert_eq!(json["message"], "root 密码不能为空");
     }
 
+    #[cfg(not(windows))]
     #[tokio::test]
     async fn router_vps_deploy_returns_existing_node_without_ssh() {
         let app = test_app(Config {
