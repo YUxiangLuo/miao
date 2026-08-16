@@ -70,7 +70,7 @@ Win10/11 x64。哲学不变：还是 TUN 透明代理、还是这块面板、还
 | 一键升级 / VPS 部署 | 有 | 不编进桌面进程 |
 | 开机自启 | `install.sh` → systemd | 无（先每次双击） |
 
-内核跟 `build-embedded.sh` 当时拉到的 sing-box 默认分支；需要复现某版时再设 `SING_BOX_REF`。
+正式发版会把三个架构钉到流水线当场解析出的同一个 sing-box 提交；手动构建默认拉默认分支，可用 `SING_BOX_REF` 覆盖（分支/tag/完整 commit sha 均可）。
 
 ## 面板里有什么
 

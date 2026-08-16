@@ -1,6 +1,6 @@
 # 开发调试笔记
 
-本机是 Arch。**`feat/windows-tauri` 是 Windows 线**，不合回 master。在这台 Linux 上按同一套产品哲学做 Tauri 桌面版。命令以仓库根目录为基准。
+本机是 Arch。**master 单分支**：Linux CLI 与 Windows 桌面版都从这里出，不再分线维护（`feat/windows-tauri` 已并入）。在这台 Linux 上按同一套产品哲学做 Tauri 桌面版。命令以仓库根目录为基准。
 
 ## 要守住的哲学
 
@@ -59,7 +59,7 @@ MIAO_TARGET=windows-amd64 ./scripts/build-embedded.sh
 ./build.sh
 ./release.sh vX.Y.Z
 
-gh run list --branch feat/windows-tauri --limit 5
+gh run list --limit 5
 gh run watch <id> --exit-status
 ```
 
@@ -162,13 +162,13 @@ TUN JSON：`auto_route` + `strict_route`，`interface_name` 仍是 `sing-tun`。
 
 ## CI
 
-`ci.yml` 在这条分支的 push、以及 PR 上跑：
+`ci.yml` 在 master 的 push、以及所有 PR 上跑：
 
 1. Frontend quality
 2. Rust quality（default-members + `cargo check -p miao-core --target x86_64-pc-windows-gnu`）
 3. Windows（`windows-latest`：`cargo test -p miao-core`，再 `cargo build -p miao-desktop`；内核用 stub，**不跑 exe、不开 TUN**）
 
-打 `v*` tag 或手动跑 **Build Release**：只编 Windows 真内核 + zip / NSIS，产物挂在该次 run 的 Artifacts（`miao-windows-amd64`），不上 GitHub Releases，也不编 Linux 包。本机不出安装包。
+打 `v*` tag 或手动跑 **Build Release**：quality → frontend → `kernel-ref`（解析一次 sing-box 默认分支 HEAD，三个目标钉同一提交）→ 并行编 Linux musl 矩阵（amd64/arm64，zigbuild）与 Windows 桌面（真内核 + zip/NSIS）→ tag 触发时全部产物（`miao-rust-linux-*`、`miao-windows-amd64.zip`、`miao-windows-amd64-setup.exe` 及各自 sha256）传到该 tag 的 GitHub Release；手动跑只留 Actions artifacts。本机不出安装包。
 
 ## 脚本
 
