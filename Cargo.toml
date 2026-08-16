@@ -24,6 +24,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 arc-swap = "1.7"
 bytes = "1.0"
 tokio-tungstenite = "0.29"
+maxminddb = "0.26"
 
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }

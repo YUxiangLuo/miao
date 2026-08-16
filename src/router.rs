@@ -7,6 +7,7 @@ use axum::{
 
 use crate::handlers::{
     clash::{proxy_clash_http, proxy_clash_traffic},
+    map::get_map_overview,
     nodes::{add_node, delete_node, get_nodes},
     proxy::set_last_proxy,
     rules::{add_rule, delete_rule, get_rules, set_adblock},
@@ -44,6 +45,7 @@ pub fn build_router(app_state: Arc<AppState>) -> Router {
         .route("/api/adblock", post(set_adblock))
         .route("/api/vps/deploy", post(deploy_vps))
         .route("/api/last-proxy", post(set_last_proxy))
+        .route("/api/map/overview", get(get_map_overview))
         .with_state(app_state)
 }
 
@@ -70,6 +72,7 @@ mod tests {
             custom_rules: vec![],
             route_mode: Default::default(),
             adblock: false,
+            location: None,
         })
         .await;
 
@@ -89,6 +92,7 @@ mod tests {
             custom_rules: vec![],
             route_mode: Default::default(),
             adblock: false,
+            location: None,
         })
         .await;
 
@@ -115,6 +119,7 @@ mod tests {
             custom_rules: vec![],
             route_mode: Default::default(),
             adblock: false,
+            location: None,
         })
         .await;
 
@@ -141,6 +146,7 @@ mod tests {
             custom_rules: vec![],
             route_mode: Default::default(),
             adblock: false,
+            location: None,
         })
         .await;
 
@@ -167,6 +173,7 @@ mod tests {
             custom_rules: vec![],
             route_mode: Default::default(),
             adblock: false,
+            location: None,
         })
         .await;
 
@@ -212,6 +219,7 @@ mod tests {
             custom_rules: vec![],
             route_mode: Default::default(),
             adblock: false,
+            location: None,
         })
         .await;
 
@@ -239,6 +247,7 @@ mod tests {
             custom_rules: vec![],
             route_mode: Default::default(),
             adblock: false,
+            location: None,
         })
         .await;
 
@@ -268,6 +277,7 @@ mod tests {
             custom_rules: vec![],
             route_mode: Default::default(),
             adblock: false,
+            location: None,
         })
         .await;
 
@@ -302,6 +312,7 @@ mod tests {
             custom_rules: vec![],
             route_mode: Default::default(),
             adblock: false,
+            location: None,
         })
         .await;
 
@@ -329,6 +340,7 @@ mod tests {
             custom_rules: vec![],
             route_mode: Default::default(),
             adblock: false,
+            location: None,
         })
         .await;
 
@@ -359,6 +371,7 @@ mod tests {
             custom_rules: vec![],
             route_mode: Default::default(),
             adblock: false,
+            location: None,
         })
         .await;
 
@@ -388,6 +401,7 @@ mod tests {
             ],
             route_mode: Default::default(),
             adblock: false,
+            location: None,
         })
         .await;
 
@@ -418,6 +432,7 @@ mod tests {
             ],
             route_mode: Default::default(),
             adblock: false,
+            location: None,
         })
         .await;
 
@@ -449,6 +464,7 @@ mod tests {
             custom_rules: vec![],
             route_mode: Default::default(),
             adblock: false,
+            location: None,
         })
         .await;
 
@@ -475,6 +491,7 @@ mod tests {
             custom_rules: vec![],
             route_mode: Default::default(),
             adblock: false,
+            location: None,
         })
         .await;
 
@@ -504,6 +521,7 @@ mod tests {
             custom_rules: vec![],
             route_mode: Default::default(),
             adblock: false,
+            location: None,
         })
         .await;
 
@@ -532,6 +550,7 @@ mod tests {
             custom_rules: vec![],
             route_mode: Default::default(),
             adblock: false,
+            location: None,
         })
         .await;
 

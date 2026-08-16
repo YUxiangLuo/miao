@@ -113,6 +113,60 @@ pub struct RouteModeRequest {
 }
 
 #[derive(Clone, Serialize)]
+pub struct MapSelfPoint {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ip: Option<String>,
+    pub lat: f64,
+    pub lng: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub country: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub city: Option<String>,
+}
+
+#[derive(Clone, Serialize)]
+pub struct MapProxyPoint {
+    pub node: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ip: Option<String>,
+    pub lat: f64,
+    pub lng: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub country: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub city: Option<String>,
+}
+
+#[derive(Clone, Serialize)]
+pub struct MapConnection {
+    pub ip: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub host: Option<String>,
+    pub network: String,
+    pub lat: f64,
+    pub lng: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub country: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub city: Option<String>,
+    pub up: u64,
+    pub down: u64,
+    /// 流量经代理出口(chains 中不含 direct)
+    pub proxied: bool,
+}
+
+#[derive(Serialize)]
+pub struct MapOverview {
+    /// sing-box 是否在运行(Clash API 可达)
+    pub running: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub self_point: Option<MapSelfPoint>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub proxy_point: Option<MapProxyPoint>,
+    pub connections: Vec<MapConnection>,
+}
+
+#[derive(Clone, Serialize)]
 pub struct SubStatus {
     pub url: String,
     pub success: bool,

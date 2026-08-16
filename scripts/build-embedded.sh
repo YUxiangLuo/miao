@@ -79,8 +79,29 @@ curl --fail --location --retry 3 \
   -o "$EMBEDDED_DIR/adblock_reject.srs" \
   https://raw.githubusercontent.com/REIJI007/AdBlock_Rule_For_Sing-box/main/adblock_reject.srs
 
+echo "==> Downloading GeoIP city database (mmdb, for map mode)..."
+# 首选 DB-IP 官方(CC BY 4.0);不可达时回退 GitHub 上的 GeoLite2 镜像
+geo_month="$(date +%Y-%m)"
+geo_prev_month="$(date -d '-1 month' +%Y-%m 2>/dev/null || date -v-1m +%Y-%m)"
+geo_mmdb_tmp="$TMP_DIR/geoip-city.mmdb"
+if curl --fail --location --retry 3 \
+    -o "$geo_mmdb_tmp.gz" \
+    "https://download.db-ip.com/free/dbip-city-lite-${geo_month}.mmdb.gz" || \
+   curl --fail --location --retry 3 \
+    -o "$geo_mmdb_tmp.gz" \
+    "https://download.db-ip.com/free/dbip-city-lite-${geo_prev_month}.mmdb.gz"; then
+  gunzip -c "$geo_mmdb_tmp.gz" > "$geo_mmdb_tmp"
+else
+  echo "DB-IP unreachable, falling back to GeoLite2 mirror..."
+  curl --fail --location --retry 3 -C - \
+    -o "$geo_mmdb_tmp" \
+    https://raw.githubusercontent.com/P3TERX/GeoLite.mmdb/download/GeoLite2-City.mmdb
+fi
+mv "$geo_mmdb_tmp" "$EMBEDDED_DIR/geoip-city.mmdb"
+
 echo "==> Embedded resources ready for $target"
 ls -lh "$EMBEDDED_DIR/sing-box-$target" \
   "$EMBEDDED_DIR/geoip-cn.srs" \
   "$EMBEDDED_DIR/geosite-geolocation-cn.srs" \
-  "$EMBEDDED_DIR/adblock_reject.srs"
+  "$EMBEDDED_DIR/adblock_reject.srs" \
+  "$EMBEDDED_DIR/geoip-city.mmdb"

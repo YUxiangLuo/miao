@@ -28,7 +28,7 @@ gh run list --limit 5 && gh run watch <id> --exit-status
 
 **前端改动只跑 `cargo build` 不会生效**:`include_str!` 嵌入的是 `public/index.html`(上一次 vite 构建的产物),它不变 cargo 照样编译通过,装进服务的是旧页面。改前端后必须 `./scripts/build-frontend.sh`(或全量 `./build.sh`)再 `cargo build`。
 
-**首次克隆的前置步骤**:`embedded/` 下的 sing-box 二进制与 3 个 srs 规则集不入库(.gitignore),而 Rust 代码用 `include_bytes!` 引用它们——fresh clone 直接 `cargo build`/`cargo test` 会因缺文件编译失败。先跑一次 `./scripts/build-embedded.sh`(编译 sing-box 源码 + 下载 geo 规则,耗时较长)或 `./build.sh`。CI 的 quality 流水线是用空壳 stub 文件绕过,别学。
+**首次克隆的前置步骤**:`embedded/` 下的 sing-box 二进制与 3 个 srs 规则集、GeoIP 城市数据库(`geoip-city.mmdb`,地图模式用)不入库(.gitignore),而 Rust 代码用 `include_bytes!` 引用它们——fresh clone 直接 `cargo build`/`cargo test` 会因缺文件编译失败。先跑一次 `./scripts/build-embedded.sh`(编译 sing-box 源码 + 下载 geo 规则与 mmdb,耗时较长)或 `./build.sh`。CI 的 quality 流水线是用空壳 stub 文件绕过,别学。
 
 ## 本机调试环境
 
@@ -101,6 +101,7 @@ setter.call(input, '新值'); input.dispatchEvent(new Event('input', { bubbles: 
 - 规则可指向具体节点 tag（面板下拉或手写）;`build_sing_box_config` 生成时会跳过引用不存在节点的规则，记入 `state.skipped_rules`——状态接口并入 `warning`（面板 toast)，规则列表按 raw 匹配标记 `skipped`（警示 icon，提示删除后重配）。节点回来了规则自动恢复生效
 - 添加规则时 `Validator::custom_rule` 会拿 `known_rule_targets`（手动节点 + 运行时配置里的订阅节点 tag）做存在性校验，但那只是友好报错；生成时跳过才是兜底
 - `route_mode`（分流/全局）是会话级状态，不进配置文件
+- **地图模式**:`GET /api/map/overview` 聚合 Clash connections 并按目的 IP 本地定位（内嵌 `geoip-city.mmdb`,maxminddb 读,LRU 缓存 4096 条);本机真实出口靠内置直连规则（`cip.cc`/`myip.ipip.net`，全局模式也保留）+ IP 回显服务探测,`config.yaml` 的 `location: "lat,lng"` 可手动覆盖;代理节点位置 = selector 当前节点 server 解析,机场占位 IP(如 127.127.127.5)时回退 AliDNS/Cloudflare DoH 重查。入口在状态卡「地图模式」按钮,前端 Leaflet + turf 大圆航线,单测里 leaflet 整体 mock,注意 mock 的 `layerGroup.addTo` 必须返回自身(组件存返回值进 ref)
 - **最后选择的节点**持久化在 `.last_proxy`(JSON `{group, name}`)，路径按平台分：OpenWrt/非 systemd → `/tmp/miao-sing-box/`（避免写 flash)；普通 systemd Linux → **工作目录**（本机 unit 是 `/etc/miao`)。恢复时机：sing-box 启动后约 1s，经 Clash API PUT 选中；节点不在当前列表则跳过（**文件不自清**，下次面板切换才覆盖）。只有走 `/api/last-proxy` 的调用（即面板切换）会更新它；直接调 Clash API 切节点不会
 
 ## 脚本

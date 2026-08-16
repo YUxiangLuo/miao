@@ -22,6 +22,9 @@ pub struct Config {
     /// 不拦 DNS,自定义放行规则才能对误拦域名生效
     #[serde(default)]
     pub adblock: bool,
+    /// 本机位置手动覆盖("lat,lng");设置后地图模式不再通过 IP 回显服务探测真实出口
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub location: Option<String>,
     #[serde(default, skip_serializing, skip_deserializing)]
     pub route_mode: RouteMode,
 }
@@ -55,6 +58,7 @@ nodes: []
             custom_rules: vec![],
             route_mode: super::RouteMode::Global,
             adblock: false,
+            location: None,
         };
 
         let yaml = serde_yaml::to_string(&config).unwrap();
@@ -71,6 +75,7 @@ nodes: []
             custom_rules: vec![],
             route_mode: Default::default(),
             adblock: false,
+            location: None,
         };
 
         let yaml = serde_yaml::to_string(&config).unwrap();

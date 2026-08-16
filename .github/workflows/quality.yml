@@ -68,6 +68,7 @@ jobs:
           : > embedded/geoip-cn.srs
           : > embedded/geosite-geolocation-cn.srs
           : > embedded/adblock_reject.srs
+          : > embedded/geoip-city.mmdb
 
       - name: Check formatting
         run: cargo fmt --all -- --check

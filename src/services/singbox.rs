@@ -9,6 +9,7 @@ use tokio::time::{sleep, Duration};
 use tracing::info;
 
 use crate::error::{AppError, AppResult};
+use crate::services::geoip;
 use crate::state::{AppState, SingBoxProcess};
 
 #[cfg(target_arch = "x86_64")]
@@ -23,6 +24,7 @@ compile_error!("Unsupported architecture: only x86_64 and aarch64 are supported.
 const IP_RULE_BINARY: &[u8] = include_bytes!("../../embedded/geoip-cn.srs");
 const SITE_RULE_BINARY: &[u8] = include_bytes!("../../embedded/geosite-geolocation-cn.srs");
 const ADBLOCK_RULE_BINARY: &[u8] = include_bytes!("../../embedded/adblock_reject.srs");
+const GEO_DB_BINARY: &[u8] = include_bytes!("../../embedded/geoip-city.mmdb");
 
 pub fn get_sing_box_home() -> PathBuf {
     PathBuf::from("/tmp/miao-sing-box")
@@ -41,11 +43,12 @@ pub fn extract_sing_box() -> AppResult<PathBuf> {
     // install.sh 升级、手动替换二进制等路径不经过面板自升级的清理逻辑。
     // 先删再写而非覆盖写:若有上次崩溃残留的 sing-box 进程仍在运行,覆盖写会得到 ETXTBSY。
     // 其余运行时文件(cache.db / config.json.cache / .last_proxy)有意保留。
-    let embedded_files: [(&str, &[u8]); 4] = [
+    let embedded_files: [(&str, &[u8]); 5] = [
         ("sing-box", SING_BOX_BINARY),
         ("chinaip.srs", IP_RULE_BINARY),
         ("chinasite.srs", SITE_RULE_BINARY),
         ("adblock_reject.srs", ADBLOCK_RULE_BINARY),
+        (geoip::GEO_DB_FILENAME, GEO_DB_BINARY),
     ];
 
     for (name, bytes) in embedded_files {

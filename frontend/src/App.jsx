@@ -10,6 +10,7 @@ import {
   ConfirmModal,
   ConnectionsModal,
   NodeModal,
+  MapMode,
   ToastStack,
   OnboardingScreen
 } from './components/index.js'
@@ -45,6 +46,7 @@ export default function App() {
   const [nodeType, setNodeType] = useState('hysteria2')
   const [showNodeModal, setShowNodeModal] = useState(false)
   const [showConnectionsModal, setShowConnectionsModal] = useState(false)
+  const [showMapMode, setShowMapMode] = useState(false)
   const [isDesktop, setIsDesktop] = useState(() => (
     !window.matchMedia(`(max-width: ${CONNECTIONS_MODAL_MIN_WIDTH - 1}px)`).matches
   ))
@@ -564,6 +566,7 @@ export default function App() {
           onToggleService={handleToggleService} 
           onSetRouteMode={handleOpenSetRouteModeConfirm}
           onOpenConnections={handleOpenConnections}
+          onOpenMap={() => setShowMapMode(true)}
         />
 
         <div className="content-grid">
@@ -649,6 +652,8 @@ export default function App() {
         onClose={() => setShowConnectionsModal(false)}
         onRefresh={fetchConnections}
       />
+
+      {showMapMode && <MapMode onClose={() => setShowMapMode(false)} />}
 
       <ConfirmModal
         open={confirmState.open}

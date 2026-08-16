@@ -4,6 +4,7 @@ import {
   Activity,
   Globe2,
   LoaderCircle,
+  Map,
   Power,
   PowerOff,
   Route
@@ -17,7 +18,8 @@ export function StatusCard({
   loadingAction,
   onToggleService,
   onSetRouteMode,
-  onOpenConnections
+  onOpenConnections,
+  onOpenMap
 }) {
   const isGlobalMode = status.route_mode === 'global'
   const modeSwitching = loadingAction === 'routeMode'
@@ -89,6 +91,14 @@ export function StatusCard({
           <span>{modeSwitching ? '切换中' : '全局代理'}</span>
         </button>
       </div>
+      <Button
+        tone="ghost"
+        icon={<Map size={14} />}
+        onClick={onOpenMap}
+        title="在世界地图上查看本机、代理节点与全部连接的地理分布"
+      >
+        地图模式
+      </Button>
       <Button 
         tone={status.running ? 'danger' : 'success'} 
         icon={<Power size={14} />} 

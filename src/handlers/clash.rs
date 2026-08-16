@@ -16,7 +16,7 @@ use tracing::warn;
 
 use crate::state::AppState;
 
-const CLASH_API_BASE: &str = "http://127.0.0.1:6262";
+pub(crate) const CLASH_API_BASE: &str = "http://127.0.0.1:6262";
 const CLASH_TRAFFIC_WS: &str = "ws://127.0.0.1:6262/traffic";
 
 fn clash_target_url(uri: &axum::http::Uri) -> String {

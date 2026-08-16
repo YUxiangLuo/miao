@@ -7,13 +7,18 @@ use std::time::Instant;
 use tokio::sync::{Mutex, RwLock};
 
 use crate::models::{Config, GitHubRelease, RouteMode, SubStatus};
+use crate::services::geoip::{GeoIp, GeoPoint};
 
 /// 应用状态容器 - 包含所有运行时状态
 /// 通过依赖注入传递，避免全局静态变量
+/// Clash 控制面的默认地址(sing-box 外部控制器)
+pub const DEFAULT_CLASH_API_BASE: &str = "http://127.0.0.1:6262";
+
 pub struct AppState {
     pub config: RwLock<Config>, // 使用 RwLock 支持并发读
     pub route_mode_override: RwLock<Option<RouteMode>>,
     pub config_path: PathBuf,
+    pub clash_api_base: String,
     pub config_update: Mutex<()>,
     pub sing_process: Mutex<Option<SingBoxProcess>>,
     pub sub_status: Mutex<HashMap<String, SubStatus>>,
@@ -28,6 +33,10 @@ pub struct AppState {
     pub http_client: reqwest::Client,
     pub version_cache: ArcSwap<VersionCache>, // 使用 ArcSwap 实现无锁读取
     pub upgrading: AtomicBool,                // 防止并发升级
+    /// IP 地理定位数据库(内嵌 mmdb,启动时释放);库不可用时所有查询返回 None
+    pub geo: GeoIp,
+    /// 地图模式的本机/代理位置缓存,避免频繁探测与重复定位
+    pub map_cache: Mutex<MapCache>,
 }
 
 impl AppState {
@@ -35,6 +44,14 @@ impl AppState {
     #[cfg(test)]
     pub fn new(config: Config) -> Result<Self, reqwest::Error> {
         Self::with_config_path(config, PathBuf::from("config.yaml"))
+    }
+
+    /// 覆盖 Clash API 地址,用于隔离依赖真实控制面的测试
+    /// (开发机上 systemd 常驻服务会占用 6262,测试必须指向不可达地址)
+    #[cfg(test)]
+    pub fn with_clash_api_base(mut self, base: &str) -> Self {
+        self.clash_api_base = base.to_string();
+        self
     }
 
     pub fn with_config_path(config: Config, config_path: PathBuf) -> Result<Self, reqwest::Error> {
@@ -46,6 +63,7 @@ impl AppState {
             config: RwLock::new(config),
             route_mode_override: RwLock::new(None),
             config_path,
+            clash_api_base: DEFAULT_CLASH_API_BASE.to_string(),
             config_update: Mutex::new(()),
             sing_process: Mutex::new(None),
             sub_status: Mutex::new(HashMap::new()),
@@ -59,8 +77,30 @@ impl AppState {
                 fetched_at: None,
             })),
             upgrading: AtomicBool::new(false),
+            geo: GeoIp::open_default(),
+            map_cache: Mutex::new(MapCache::default()),
         })
     }
+}
+
+/// 地图模式位置缓存(本机出口 / 代理节点),TTL 由调用方控制
+#[derive(Default)]
+pub struct MapCache {
+    pub self_location: Option<CachedLocation>,
+    pub proxy_location: Option<CachedProxyLocation>,
+}
+
+pub struct CachedLocation {
+    pub fetched_at: Instant,
+    pub ip: String,
+    pub point: Option<GeoPoint>,
+}
+
+pub struct CachedProxyLocation {
+    pub node: String,
+    pub fetched_at: Instant,
+    pub ip: Option<String>,
+    pub point: Option<GeoPoint>,
 }
 
 /// 因出口节点不存在而在生成配置时被跳过的自定义规则
@@ -97,6 +137,7 @@ mod tests {
             custom_rules: vec![],
             route_mode: Default::default(),
             adblock: false,
+            location: None,
         };
 
         let state = AppState::new(config.clone()).unwrap();
@@ -127,6 +168,7 @@ mod tests {
             custom_rules: vec![],
             route_mode: Default::default(),
             adblock: false,
+            location: None,
         };
 
         let state = AppState::new(config).unwrap();

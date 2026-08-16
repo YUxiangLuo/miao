@@ -635,6 +635,23 @@ fn runtime_config_node_tags(config_json: &serde_json::Value) -> Vec<String> {
         .unwrap_or_default()
 }
 
+/// 运行时配置中指定 outbound 的 server 地址(域名或 IP 字面量)
+pub async fn runtime_outbound_server(tag: &str) -> Option<String> {
+    let runtime_config_path = get_sing_box_home().join("config.json");
+    let content = tokio::fs::read_to_string(&runtime_config_path).await.ok()?;
+    let json = serde_json::from_str::<serde_json::Value>(&content).ok()?;
+    outbound_server(&json, tag)
+}
+
+fn outbound_server(config_json: &serde_json::Value, tag: &str) -> Option<String> {
+    config_json["outbounds"]
+        .as_array()?
+        .iter()
+        .find(|outbound| outbound["tag"].as_str() == Some(tag))
+        .and_then(|outbound| outbound["server"].as_str())
+        .map(str::to_string)
+}
+
 /// 自定义规则可选的节点目标:手动节点(配置直读)+ 订阅节点(最近一次生成的运行时配置)。
 /// 仅供规则校验给出友好报错,最终正确性由 sing-box check 保证。
 pub async fn known_rule_targets(config: &Config) -> Vec<String> {
@@ -886,6 +903,9 @@ fn apply_route_mode(
     if let Some(rules) = sing_box_config["route"]["rules"].as_array_mut() {
         // 两种模式下自定义规则都优先生效;广告拦截排在其后,用户可放行误拦域名
         let mut insertions = parse_custom_rules(custom_rules);
+        // IP 回显服务固定直连:地图模式探测本机真实出口用,全局模式下也必须保留,
+        // 否则探测到的只是代理出口 IP
+        insertions.push(serde_json::json!({"domain_suffix": ["cip.cc", "myip.ipip.net"], "action": "route", "outbound": "direct"}));
         if adblock {
             insertions.push(serde_json::json!({"rule_set": ["adblock"], "action": "reject"}));
         }
@@ -995,6 +1015,7 @@ mod tests {
             custom_rules: vec![],
             route_mode: Default::default(),
             adblock: false,
+            location: None,
         };
 
         let (outbounds, names) = collect_manual_outbounds(&config);
@@ -1017,6 +1038,7 @@ mod tests {
             custom_rules: vec![],
             route_mode: Default::default(),
             adblock: false,
+            location: None,
         };
 
         let (outbounds, names) = collect_manual_outbounds(&config);
@@ -1069,6 +1091,7 @@ mod tests {
             ],
             route_mode: Default::default(),
             adblock: false,
+            location: None,
         };
 
         let (built, skipped) = build_sing_box_config(
@@ -1124,6 +1147,7 @@ mod tests {
             ],
             route_mode: Default::default(),
             adblock: false,
+            location: None,
         };
 
         let my_outbounds = vec![json!({
@@ -1162,11 +1186,16 @@ mod tests {
         assert_eq!(all_outbounds[3]["tag"], "sub-a");
 
         let rules = built["route"]["rules"].as_array().unwrap();
-        assert_eq!(rules.len(), 7);
+        assert_eq!(rules.len(), 8);
         assert_eq!(rules[0]["action"], "sniff");
         assert_eq!(rules[1]["action"], "hijack-dns");
         assert_eq!(rules[2]["domain_suffix"][0], "example.com");
-        assert_eq!(rules[3]["ip_is_private"], true);
+        // 内置的 IP 回显直连规则,供地图模式探测本机真实出口
+        assert_eq!(
+            rules[3]["domain_suffix"],
+            json!(["cip.cc", "myip.ipip.net"])
+        );
+        assert_eq!(rules[4]["ip_is_private"], true);
     }
 
     #[test]
@@ -1181,6 +1210,7 @@ mod tests {
             ],
             route_mode: RouteMode::Global,
             adblock: false,
+            location: None,
         };
 
         let my_outbounds = vec![json!({
@@ -1202,11 +1232,17 @@ mod tests {
 
         let rules = built["route"]["rules"].as_array().unwrap();
         // 内置分流规则被裁掉,但自定义规则在全局模式下仍然生效
-        assert_eq!(rules.len(), 3);
+        assert_eq!(rules.len(), 4);
         assert_eq!(rules[0]["action"], "sniff");
         assert_eq!(rules[1]["action"], "hijack-dns");
         assert_eq!(rules[2]["domain_suffix"], json!(["example.com"]));
         assert_eq!(rules[2]["outbound"], "direct");
+        // 回显服务直连规则在全局模式下同样保留
+        assert_eq!(
+            rules[3]["domain_suffix"],
+            json!(["cip.cc", "myip.ipip.net"])
+        );
+        assert_eq!(rules[3]["outbound"], "direct");
         assert!(rules[..2].iter().all(|rule| rule.get("outbound").is_none()));
 
         let dns_rules = built["dns"]["rules"].as_array().unwrap();
@@ -1318,6 +1354,7 @@ mod tests {
             custom_rules: vec![],
             route_mode: RouteMode::Global,
             adblock: false,
+            location: None,
         };
 
         let runtime_config = config_with_route_override(&config, None);
@@ -1334,6 +1371,7 @@ mod tests {
             custom_rules: vec![],
             route_mode: Default::default(),
             adblock: false,
+            location: None,
         };
 
         let my_outbounds = vec![json!({
@@ -1392,6 +1430,7 @@ mod tests {
             custom_rules: vec![],
             route_mode: Default::default(),
             adblock: false,
+            location: None,
         };
 
         let my_outbounds = vec![
@@ -1443,6 +1482,7 @@ mod tests {
             custom_rules: vec![],
             route_mode: Default::default(),
             adblock: false,
+            location: None,
         };
 
         let err = build_sing_box_config(&config, vec![], vec![], vec![], vec![]).unwrap_err();
@@ -1462,6 +1502,7 @@ mod tests {
             custom_rules: vec![],
             route_mode: Default::default(),
             adblock: false,
+            location: None,
         };
 
         let (outbounds, names) = collect_manual_outbounds(&config);
@@ -1483,6 +1524,7 @@ mod tests {
             custom_rules: vec![],
             route_mode: Default::default(),
             adblock: false,
+            location: None,
         };
 
         let (outbounds, names) = collect_manual_outbounds(&config);
@@ -1501,6 +1543,7 @@ mod tests {
             custom_rules: vec![],
             route_mode: Default::default(),
             adblock: false,
+            location: None,
         };
 
         let my_outbounds = vec![
@@ -1538,6 +1581,7 @@ mod tests {
             custom_rules: vec![],
             route_mode: Default::default(),
             adblock: false,
+            location: None,
         };
 
         let my_outbounds = vec![json!({
@@ -1558,8 +1602,8 @@ mod tests {
         .unwrap();
 
         let rules = built["route"]["rules"].as_array().unwrap();
-        // Should have the default direct-split rules.
-        assert_eq!(rules.len(), 6);
+        // 默认分流规则 + 内置的回显服务直连规则
+        assert_eq!(rules.len(), 7);
     }
 
     #[test]
@@ -1571,6 +1615,7 @@ mod tests {
             custom_rules: vec![],
             route_mode: Default::default(),
             adblock: false,
+            location: None,
         };
 
         let my_outbounds = vec![json!({
@@ -1592,22 +1637,29 @@ mod tests {
 
         let rules = built["route"]["rules"].as_array().unwrap();
 
-        assert_eq!(rules[2]["ip_is_private"], true);
+        assert_eq!(
+            rules[2]["domain_suffix"],
+            json!(["cip.cc", "myip.ipip.net"])
+        );
         assert_eq!(rules[2]["outbound"], "direct");
         assert!(rules[2].get("rule_set").is_none());
 
-        assert_eq!(rules[3]["domain_suffix"], json!(["hdslb.com"]));
+        assert_eq!(rules[3]["ip_is_private"], true);
         assert_eq!(rules[3]["outbound"], "direct");
         assert!(rules[3].get("rule_set").is_none());
-        assert!(rules[3].get("ip_is_private").is_none());
 
-        assert_eq!(rules[4]["rule_set"], json!(["chinasite"]));
+        assert_eq!(rules[4]["domain_suffix"], json!(["hdslb.com"]));
         assert_eq!(rules[4]["outbound"], "direct");
+        assert!(rules[4].get("rule_set").is_none());
         assert!(rules[4].get("ip_is_private").is_none());
 
-        assert_eq!(rules[5]["rule_set"], json!(["chinaip"]));
+        assert_eq!(rules[5]["rule_set"], json!(["chinasite"]));
         assert_eq!(rules[5]["outbound"], "direct");
         assert!(rules[5].get("ip_is_private").is_none());
+
+        assert_eq!(rules[6]["rule_set"], json!(["chinaip"]));
+        assert_eq!(rules[6]["outbound"], "direct");
+        assert!(rules[6].get("ip_is_private").is_none());
 
         let dns_rules = built["dns"]["rules"].as_array().unwrap();
         assert_eq!(dns_rules.len(), 2);
@@ -1651,6 +1703,7 @@ mod tests {
             ],
             route_mode: Default::default(),
             adblock: true,
+            location: None,
         };
 
         let (built, _skipped) = build_sing_box_config(
@@ -1675,14 +1728,18 @@ mod tests {
         assert_eq!(rule_sets[0]["path"], "./adblock_reject.srs");
 
         let rules = built["route"]["rules"].as_array().unwrap();
-        // 自定义规则在前、广告拦截在后,用户可以放行误拦域名
+        // 自定义规则在前、回显直连次之、广告拦截在后,用户可以放行误拦域名
         assert_eq!(
             rules[2]["domain_suffix"],
             json!("ads-whitelist.example.com")
         );
-        assert_eq!(rules[3]["rule_set"], json!(["adblock"]));
-        assert_eq!(rules[3]["action"], "reject");
-        assert_eq!(rules[4]["ip_is_private"], true);
+        assert_eq!(
+            rules[3]["domain_suffix"],
+            json!(["cip.cc", "myip.ipip.net"])
+        );
+        assert_eq!(rules[4]["rule_set"], json!(["adblock"]));
+        assert_eq!(rules[4]["action"], "reject");
+        assert_eq!(rules[5]["ip_is_private"], true);
 
         // 广告拦截只在路由层;DNS 规则保持原样,自定义放行规则才能生效
         let dns_rules = built["dns"]["rules"].as_array().unwrap();
@@ -1702,6 +1759,7 @@ mod tests {
             custom_rules: vec![],
             route_mode: crate::models::RouteMode::Global,
             adblock: true,
+            location: None,
         };
 
         let (built, _skipped) = build_sing_box_config(
@@ -1719,13 +1777,17 @@ mod tests {
         )
         .unwrap();
 
-        // 全局模式下分流规则被裁掉,广告拦截保留(仅路由层)
+        // 全局模式下分流规则被裁掉,回显直连与广告拦截保留(仅路由层)
         let rules = built["route"]["rules"].as_array().unwrap();
-        assert_eq!(rules.len(), 3);
+        assert_eq!(rules.len(), 4);
         assert_eq!(rules[0]["action"], "sniff");
         assert_eq!(rules[1]["action"], "hijack-dns");
-        assert_eq!(rules[2]["rule_set"], json!(["adblock"]));
-        assert_eq!(rules[2]["action"], "reject");
+        assert_eq!(
+            rules[2]["domain_suffix"],
+            json!(["cip.cc", "myip.ipip.net"])
+        );
+        assert_eq!(rules[3]["rule_set"], json!(["adblock"]));
+        assert_eq!(rules[3]["action"], "reject");
 
         // DNS 层不注入广告拦截
         let dns_rules = built["dns"]["rules"].as_array().unwrap();
@@ -1747,6 +1809,7 @@ mod tests {
             custom_rules: vec![],
             route_mode: Default::default(),
             adblock: false,
+            location: None,
         };
 
         let (built, _skipped) = build_sing_box_config(
@@ -1785,6 +1848,7 @@ mod tests {
             custom_rules: vec![],
             route_mode: Default::default(),
             adblock: false,
+            location: None,
         };
 
         let (built, _skipped) = build_sing_box_config(
@@ -1821,6 +1885,7 @@ mod tests {
             ],
             route_mode: Default::default(),
             adblock: false,
+            location: None,
         };
 
         let my_outbounds = vec![json!({
@@ -1841,8 +1906,8 @@ mod tests {
         .unwrap();
 
         let rules = built["route"]["rules"].as_array().unwrap();
-        // Should have only the default direct-split rules.
-        assert_eq!(rules.len(), 6);
+        // 默认分流规则 + 内置的回显服务直连规则
+        assert_eq!(rules.len(), 7);
     }
 
     #[tokio::test]
@@ -1861,6 +1926,7 @@ mod tests {
             custom_rules: vec![],
             route_mode: Default::default(),
             adblock: false,
+            location: None,
         };
 
         save_config_to(&config_path, &config).await.unwrap();
@@ -1901,6 +1967,7 @@ mod tests {
             custom_rules: vec![],
             route_mode: Default::default(),
             adblock: false,
+            location: None,
         };
         save_config_to(&config_path, &config).await.unwrap();
 
@@ -1926,6 +1993,7 @@ mod tests {
             custom_rules: vec![],
             route_mode: Default::default(),
             adblock: false,
+            location: None,
         };
 
         save_config_to(&config_path, &config).await.unwrap();
