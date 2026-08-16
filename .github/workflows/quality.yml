@@ -120,5 +120,8 @@ jobs:
           : > embedded/geosite-geolocation-cn.srs
           : > embedded/adblock_reject.srs
 
+      - name: Test miao-core
+        run: cargo test -p miao-core --locked --all-targets
+
       - name: Build desktop shell
         run: cargo build -p miao-desktop --locked --release

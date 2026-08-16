@@ -54,7 +54,7 @@ Win10/11 x64。哲学不变：还是 TUN 透明代理、还是这块面板、还
 2. 每次启动点一次 UAC（TUN / Wintun 要管理员；没有做成服务模式）
 3. 关窗口进托盘；托盘「退出」才停内核
 4. 更新：先退出，再换安装包或 zip。面板里没有 Windows 一键升级
-5. 出问题：托盘「打开日志」，文件在 `%LOCALAPPDATA%\miao\miao.log`
+5. 出问题：托盘「打开日志」，文件在 `%LOCALAPPDATA%\io.github.yuxiangluo.miao\miao.log`
 
 系统通常已有 WebView2，没有的话安装包走 bootstrapper。未签名时 SmartScreen 可能提示「仍要运行」。卸载后若设备管理器里还有 `sing-tun`，重启一次或手动删。
 
@@ -63,7 +63,7 @@ Win10/11 x64。哲学不变：还是 TUN 透明代理、还是这块面板、还
 | 拿到手 | 一个 musl 文件 | 安装包或便携 `miao.exe`（要 WebView2） |
 | 提权 | `sudo` | 每次运行 UAC |
 | 面板 | 浏览器打开 `localhost:6161`，默认听 `0.0.0.0` | 自带窗口，听 `127.0.0.1` |
-| 配置 | `/etc/miao/config.yaml` | `%LOCALAPPDATA%\miao\config.yaml` |
+| 配置 | `/etc/miao/config.yaml` | `%LOCALAPPDATA%\io.github.yuxiangluo.miao\config.yaml` |
 | 运行时内核 | `/tmp/miao-sing-box` | `%TEMP%\miao-sing-box` |
 | TUN | `auto_route` + Linux 的 `auto_redirect` | `auto_route` + `strict_route`，**没有** `auto_redirect` |
 | 内核 | 内嵌 Linux sing-box | 内嵌 Windows sing-box（Wintun 已编进内核，不必再带 dll） |
@@ -117,7 +117,7 @@ Tauri 窗口（只当浏览器）              系统浏览器
 
 ## 配置参考（进阶）
 
-不创建任何文件也能用。查找顺序：`--config` → 可执行文件同目录的 `config.yaml` → 平台默认路径（Linux `/etc/miao/config.yaml`，Windows `%LOCALAPPDATA%\miao\config.yaml`）。
+不创建任何文件也能用。查找顺序：`--config` → 可执行文件同目录的 `config.yaml` → 平台默认路径（Linux `/etc/miao/config.yaml`，Windows `%LOCALAPPDATA%\io.github.yuxiangluo.miao\config.yaml`）。
 
 ```yaml
 port: 6161                 # 面板端口

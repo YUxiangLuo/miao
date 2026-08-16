@@ -127,14 +127,14 @@ sudo bash install.sh ./target/release/miao-rust
 
 | 项 | 实现 |
 | --- | --- |
-| 配置 | `%LOCALAPPDATA%\miao\config.yaml` |
-| 日志 | `%LOCALAPPDATA%\miao\miao.log`（GUI 没控制台） |
-| 上次节点 | `%LOCALAPPDATA%\miao\.last_proxy`（不要再放 Temp） |
+| 配置 | `%LOCALAPPDATA%\io.github.yuxiangluo.miao\config.yaml` |
+| 日志 | `%LOCALAPPDATA%\io.github.yuxiangluo.miao\miao.log`（GUI 没控制台） |
+| 上次节点 | `%LOCALAPPDATA%\io.github.yuxiangluo.miao\.last_proxy`（不要再放 Temp） |
 | 内核运行时 | `%TEMP%\miao-sing-box` |
 | 面板绑定 | `127.0.0.1` |
-| 单实例 | 命名 mutex `Local\io.github.yuxiangluo.miao` |
-| 停核 | 隐藏控制台 + Ctrl+C；超时再杀，然后拼装删 `sing-tun` 的 PowerShell（本机/CI 不要真执行） |
-| 提权 | `ShellExecuteW runas`；取消则 MessageBox |
+| 单实例 | 命名 mutex `Local\io.github.yuxiangluo.miao`；未提权先 `OpenMutexW`，已有实例不再 UAC |
+| 停核 | `CREATE_NEW_PROCESS_GROUP` + `CTRL_BREAK`；超时再杀并只清 `sing-tun`（本机/CI 不要真执行） |
+| 提权 | 确认无实例后再 `ShellExecuteW runas`；取消则 MessageBox |
 | 进程规则文案 | `/api/status` 的 `platform` 决定 placeholder（`qbittorrent.exe`） |
 
 TUN JSON：`auto_route` + `strict_route`，`interface_name` 仍是 `sing-tun`。`cfg(target_os = "linux")` 才写 `auto_redirect`。不要写 1.14 才有的 `dns_mode`。
@@ -159,11 +159,11 @@ TUN JSON：`auto_route` + `strict_route`，`interface_name` 仍是 `sing-tun`。
 
 ## CI
 
-`ci.yml` 在 `master` 和 `feat/windows-tauri` 的 push、以及 PR 上跑：
+`ci.yml` 在 `master` 的 push、以及 PR 上跑：
 
 1. Frontend quality
 2. Rust quality（default-members + `cargo check -p miao-core --target x86_64-pc-windows-gnu`）
-3. Windows desktop compile（`windows-latest`，先下载 `public/`，内核用 stub，**不跑 exe、不开 TUN**）
+3. Windows（`windows-latest`：`cargo test -p miao-core`，再 `cargo build -p miao-desktop`；内核用 stub，**不跑 exe、不开 TUN**）
 
 tag 发布另加 Windows job 编真内核 + zip + NSIS。本机不出安装包。
 

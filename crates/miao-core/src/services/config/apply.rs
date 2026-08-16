@@ -16,7 +16,7 @@ use crate::state::AppState;
 
 use super::generate::gen_config;
 use super::persist::{
-    restore_config_from_cache, save_config_cache, save_config_to, CONFIG_CACHE_PATH,
+    config_cache_path, restore_config_from_cache, save_config_cache, save_config_to,
 };
 
 pub(super) async fn regenerate_and_restart_runtime(
@@ -147,7 +147,8 @@ async fn remove_runtime_config_files_at(runtime_config_path: &Path, cache_path: 
 
 async fn remove_runtime_config_files() {
     let runtime_config_path = get_sing_box_home().join("config.json");
-    remove_runtime_config_files_at(&runtime_config_path, Path::new(CONFIG_CACHE_PATH)).await;
+    let cache_path = config_cache_path();
+    remove_runtime_config_files_at(&runtime_config_path, &cache_path).await;
 }
 
 async fn clear_runtime_config(state: &Arc<AppState>) {
@@ -183,11 +184,12 @@ async fn persist_config_without_usable_nodes(
     persisted_config: Config,
 ) -> AppResult<()> {
     let runtime_config_path = get_sing_box_home().join("config.json");
+    let cache_path = config_cache_path();
     persist_config_without_usable_nodes_at(
         state,
         persisted_config,
         &runtime_config_path,
-        Path::new(CONFIG_CACHE_PATH),
+        &cache_path,
     )
     .await
 }

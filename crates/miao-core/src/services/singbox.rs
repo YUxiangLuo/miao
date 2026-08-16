@@ -79,7 +79,7 @@ pub fn extract_sing_box() -> AppResult<PathBuf> {
     // 每次启动都删除并重新释放内嵌文件,保证与当前运行的二进制一致:
     // install.sh 升级、手动替换二进制等路径不经过面板自升级的清理逻辑。
     // 先删再写而非覆盖写:若有上次崩溃残留的 sing-box 进程仍在运行,覆盖写会得到 ETXTBSY。
-    // 其余运行时文件(cache.db / config.json.cache / .last_proxy)有意保留。
+    // 其余运行时文件(cache.db / config.json.cache)有意保留。
     let embedded_files: [(&str, &[u8]); 4] = [
         (sing_box_file_name(), SING_BOX_BINARY),
         ("chinaip.srs", IP_RULE_BINARY),
@@ -90,9 +90,7 @@ pub fn extract_sing_box() -> AppResult<PathBuf> {
     for (name, bytes) in embedded_files {
         let path = sing_box_home.join(name);
         if path.exists() {
-            fs::remove_file(&path).map_err(|e| {
-                AppError::context(format!("Failed to remove stale embedded file {name}"), e)
-            })?;
+            fs::remove_file(&path).map_err(|e| map_remove_embedded_error(name, e))?;
         }
         info!("Extracting embedded file to {:?}", path);
         fs::write(&path, bytes)
@@ -158,7 +156,10 @@ pub async fn start_sing_internal(state: &Arc<AppState>) -> AppResult<()> {
     info!(binary = ?sing_box_path, config = ?config_path, "Starting sing-box");
 
     #[cfg(windows)]
-    ensure_hidden_console();
+    {
+        cleanup_stale_tun_adapter();
+        ensure_hidden_console();
+    }
 
     let mut command = tokio::process::Command::new(&sing_box_path);
     command
@@ -166,6 +167,11 @@ pub async fn start_sing_internal(state: &Arc<AppState>) -> AppResult<()> {
         .arg("run")
         .arg("-c")
         .arg(&config_path);
+
+    #[cfg(windows)]
+    command.creation_flags(WINDOWS_CREATE_NEW_PROCESS_GROUP);
+    // If start is cancelled between spawn and store, Drop must not leak the kernel.
+    command.kill_on_drop(true);
 
     if let Some(log_path) = crate::paths::active_log_path() {
         if let Ok(file) = std::fs::OpenOptions::new()
@@ -191,30 +197,44 @@ pub async fn start_sing_internal(state: &Arc<AppState>) -> AppResult<()> {
             .stderr(std::process::Stdio::inherit());
     }
 
-    let mut child = command
+    let child = command
         .spawn()
         .map_err(|e| AppError::context("Failed to spawn sing-box process", e))?;
+
+    #[cfg(windows)]
+    assign_child_to_kernel_job(&child);
 
     let pid = child.id();
     info!(pid = pid, "sing-box process spawned");
 
+    // Own the child before the first await so cancelling init cannot drop it
+    // untracked; stop_sing_internal then finds it.
+    *lock = Some(SingBoxProcess {
+        child,
+        started_at: Instant::now(),
+    });
+    drop(lock);
+
     sleep(Duration::from_millis(500)).await;
-    if let Some(exit_status) = child
+
+    let mut lock = state.sing_process.lock().await;
+    let Some(proc) = lock.as_mut() else {
+        return Ok(());
+    };
+    if let Some(exit_status) = proc
+        .child
         .try_wait()
         .map_err(|e| AppError::context("Failed to check sing-box startup status", e))?
     {
+        *lock = None;
+        #[cfg(windows)]
+        cleanup_stale_tun_adapter();
         let code = exit_status.code().unwrap_or(-1);
         return Err(AppError::message(format!(
             "sing-box exited immediately with code {}",
             code
         )));
     }
-
-    *lock = Some(SingBoxProcess {
-        child,
-        started_at: Instant::now(),
-    });
-    drop(lock);
 
     Ok(())
 }
@@ -262,13 +282,15 @@ async fn request_graceful_exit(child: &mut tokio::process::Child) {
 
     #[cfg(windows)]
     {
-        // CREATE_NO_WINDOW children cannot receive Ctrl+C (#3806). We inherit a
-        // hidden console and send CTRL_C so sing-box can close WinTun itself.
-        send_ctrl_c_to_console();
+        // CREATE_NEW_PROCESS_GROUP child; CTRL_BREAK reaches that group only.
+        // Go maps CTRL_BREAK to os.Interrupt so sing-box can close WinTun.
+        if let Some(pid) = child.id() {
+            send_ctrl_break_to_group(pid);
+        }
         match tokio::time::timeout(Duration::from_secs(3), child.wait()).await {
-            Ok(Ok(_)) => restore_ctrl_c_handling(),
+            Ok(Ok(_)) => restore_ctrl_handler(),
             _ => {
-                restore_ctrl_c_handling();
+                restore_ctrl_handler();
                 let _ = child.start_kill();
                 let _ = child.wait().await;
                 cleanup_stale_tun_adapter();
@@ -301,19 +323,17 @@ pub(crate) fn ensure_hidden_console() {
 }
 
 #[cfg(windows)]
-fn send_ctrl_c_to_console() {
-    use windows_sys::Win32::System::Console::{
-        GenerateConsoleCtrlEvent, SetConsoleCtrlHandler, CTRL_C_EVENT,
-    };
+fn send_ctrl_break_to_group(pid: u32) {
+    use windows_sys::Win32::System::Console::{GenerateConsoleCtrlEvent, SetConsoleCtrlHandler};
 
     unsafe {
         SetConsoleCtrlHandler(None, 1);
-        let _ = GenerateConsoleCtrlEvent(CTRL_C_EVENT, 0);
+        let _ = GenerateConsoleCtrlEvent(WINDOWS_CTRL_BREAK_EVENT, pid);
     }
 }
 
 #[cfg(windows)]
-fn restore_ctrl_c_handling() {
+fn restore_ctrl_handler() {
     use windows_sys::Win32::System::Console::SetConsoleCtrlHandler;
 
     unsafe {
@@ -321,11 +341,105 @@ fn restore_ctrl_c_handling() {
     }
 }
 
+fn map_remove_embedded_error(name: &str, err: std::io::Error) -> AppError {
+    if is_windows_sharing_violation(&err) {
+        AppError::message(format!(
+            "无法更新内核文件 {name}：残留的 sing-box 仍在运行。请结束该进程后重试。"
+        ))
+    } else {
+        AppError::context(format!("Failed to remove stale embedded file {name}"), err)
+    }
+}
+
+/// ERROR_SHARING_VIOLATION / ERROR_LOCK_VIOLATION: the previous kernel still
+/// has the exe mapped.
+fn is_windows_sharing_violation(err: &std::io::Error) -> bool {
+    matches!(err.raw_os_error(), Some(32) | Some(33))
+}
+
+/// CREATE_NEW_PROCESS_GROUP. The child is its own group so CTRL_BREAK can
+/// target that pid instead of broadcasting CTRL_C on the hidden console.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub(crate) const WINDOWS_CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+
+/// CTRL_BREAK_EVENT. Go treats this like CTRL_C (`os.Interrupt`).
+#[cfg_attr(not(windows), allow(dead_code))]
+pub(crate) const WINDOWS_CTRL_BREAK_EVENT: u32 = 0x0000_0001;
+
+/// JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE. Closing miao.exe kills assigned children.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub(crate) const WINDOWS_JOB_KILL_ON_CLOSE: u32 = 0x0000_2000;
+
+#[cfg(windows)]
+fn kernel_job_handle() -> Option<windows_sys::Win32::Foundation::HANDLE> {
+    use std::sync::OnceLock;
+    static JOB: OnceLock<isize> = OnceLock::new();
+    let raw = *JOB.get_or_init(|| {
+        create_kill_on_close_job()
+            .map(|handle| handle as isize)
+            .unwrap_or(0)
+    });
+    if raw == 0 {
+        None
+    } else {
+        Some(raw as windows_sys::Win32::Foundation::HANDLE)
+    }
+}
+
+#[cfg(windows)]
+fn create_kill_on_close_job() -> Option<windows_sys::Win32::Foundation::HANDLE> {
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::JobObjects::{
+        CreateJobObjectW, JobObjectExtendedLimitInformation, SetInformationJobObject,
+        JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+    };
+
+    let job = unsafe { CreateJobObjectW(std::ptr::null(), std::ptr::null()) };
+    if job.is_null() {
+        return None;
+    }
+
+    let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = unsafe { std::mem::zeroed() };
+    info.BasicLimitInformation.LimitFlags = WINDOWS_JOB_KILL_ON_CLOSE;
+    let ok = unsafe {
+        SetInformationJobObject(
+            job,
+            JobObjectExtendedLimitInformation,
+            (&info as *const JOBOBJECT_EXTENDED_LIMIT_INFORMATION).cast(),
+            std::mem::size_of_val(&info) as u32,
+        )
+    };
+    if ok == 0 {
+        unsafe {
+            CloseHandle(job);
+        }
+        return None;
+    }
+    Some(job)
+}
+
+#[cfg(windows)]
+fn assign_child_to_kernel_job(child: &tokio::process::Child) {
+    use windows_sys::Win32::Foundation::HANDLE;
+    use windows_sys::Win32::System::JobObjects::AssignProcessToJobObject;
+
+    let Some(job) = kernel_job_handle() else {
+        tracing::warn!("No kernel job object; leftover sing-box will not die with this process");
+        return;
+    };
+    let Some(process) = child.raw_handle() else {
+        tracing::warn!("sing-box process handle is unavailable");
+        return;
+    };
+    if unsafe { AssignProcessToJobObject(job, process as HANDLE) } == 0 {
+        tracing::warn!("Failed to assign sing-box to kernel job object");
+    }
+}
+
 #[cfg(test)]
 const TUN_ADAPTER_NAME: &str = "sing-tun";
 
-/// Command used after a forced Windows kill. Tests assert the shape only;
-/// callers on Windows spawn it, Linux/CI never execute it.
+/// Forced TerminateProcess leaves WinTun attached; remove only `sing-tun`.
 #[cfg(any(windows, test))]
 pub(crate) fn tun_adapter_cleanup_command() -> (&'static str, Vec<&'static str>) {
     (
@@ -364,11 +478,35 @@ mod tests {
 
     #[test]
     fn tun_adapter_cleanup_targets_sing_tun_only() {
+        // Assembled for Windows callers; this test never executes the command.
         let (program, args) = tun_adapter_cleanup_command();
         let joined = args.join(" ");
         assert_eq!(program, "powershell.exe");
         assert!(joined.contains(TUN_ADAPTER_NAME));
         assert!(joined.contains("Remove-NetAdapter"));
         assert!(!joined.contains("Get-NetAdapter -Name '*'"));
+    }
+
+    #[test]
+    fn windows_stop_signal_targets_process_group() {
+        assert_eq!(super::WINDOWS_CREATE_NEW_PROCESS_GROUP, 0x0000_0200);
+        assert_eq!(super::WINDOWS_CTRL_BREAK_EVENT, 0x0000_0001);
+        assert_eq!(super::WINDOWS_JOB_KILL_ON_CLOSE, 0x0000_2000);
+    }
+
+    #[test]
+    fn sharing_violation_codes_are_detected() {
+        assert!(super::is_windows_sharing_violation(
+            &std::io::Error::from_raw_os_error(32)
+        ));
+        assert!(super::is_windows_sharing_violation(
+            &std::io::Error::from_raw_os_error(33)
+        ));
+        assert!(!super::is_windows_sharing_violation(
+            &std::io::Error::from_raw_os_error(2)
+        ));
+        let message =
+            super::map_remove_embedded_error("sing-box.exe", std::io::Error::from_raw_os_error(32));
+        assert!(message.to_string().contains("残留的 sing-box"));
     }
 }

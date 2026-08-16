@@ -3,8 +3,9 @@
 use std::sync::Mutex;
 
 use miao_core::{
-    acquire_single_instance, default_log_path, focus_existing_window, require_privileges,
-    show_user_error, spawn_server, InstanceAcquire, RuntimeOptions, ServerHandle,
+    acquire_single_instance, default_log_path, focus_existing_window, is_elevated,
+    peek_single_instance, require_privileges, show_user_error, spawn_server, InstanceAcquire,
+    InstancePeek, RuntimeOptions, ServerHandle,
 };
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
@@ -13,13 +14,33 @@ use tauri::{AppHandle, Manager, RunEvent, WebviewUrl, WebviewWindowBuilder, Wind
 struct Panel(Mutex<Option<ServerHandle>>);
 
 fn main() {
-    require_privileges();
+    match peek_single_instance() {
+        InstancePeek::AlreadyRunning => {
+            if !focus_existing_window() {
+                show_user_error("Miao", "Miao 已在运行");
+            }
+            return;
+        }
+        InstancePeek::Failed => {
+            show_user_error("Miao", "无法检查是否已在运行");
+            return;
+        }
+        InstancePeek::None => {}
+    }
+
+    if !is_elevated() {
+        require_privileges();
+    }
 
     match acquire_single_instance() {
         InstanceAcquire::AlreadyRunning => {
             if !focus_existing_window() {
                 show_user_error("Miao", "Miao 已在运行");
             }
+            return;
+        }
+        InstanceAcquire::Failed => {
+            show_user_error("Miao", "无法创建单实例锁");
             return;
         }
         InstanceAcquire::Unique(guard) => {
@@ -43,34 +64,19 @@ fn main() {
 fn run_app() -> Result<(), Box<dyn std::error::Error>> {
     let app = tauri::Builder::default()
         .setup(|app| {
-            let handle = match tauri::async_runtime::block_on(spawn_server(RuntimeOptions {
+            let handle = tauri::async_runtime::block_on(spawn_server(RuntimeOptions {
                 open_browser: false,
                 install_tracing: true,
                 ..RuntimeOptions::default()
-            })) {
-                Ok(handle) => handle,
-                Err(err) => {
-                    show_user_error(
-                        "Miao",
-                        &format!(
-                            "Miao 启动失败：{err}\n日志：{}",
-                            default_log_path().display()
-                        ),
-                    );
-                    return Err(err.into());
-                }
-            };
+            }))?;
 
             let url = handle.url().to_string();
+            if let Err(err) = finish_desktop_shell(app, &url) {
+                tauri::async_runtime::block_on(handle.shutdown());
+                return Err(err);
+            }
+
             app.manage(Panel(Mutex::new(Some(handle))));
-
-            WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url.parse()?))
-                .title("Miao")
-                .inner_size(1280.0, 840.0)
-                .min_inner_size(960.0, 640.0)
-                .build()?;
-
-            install_tray(app.handle())?;
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -124,6 +130,16 @@ fn install_tray(app: &AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
+fn finish_desktop_shell(app: &mut tauri::App, url: &str) -> Result<(), Box<dyn std::error::Error>> {
+    WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url.parse()?))
+        .title("Miao")
+        .inner_size(1280.0, 840.0)
+        .min_inner_size(960.0, 640.0)
+        .build()?;
+    install_tray(app.handle())?;
+    Ok(())
+}
+
 fn show_main_window(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.unminimize();
@@ -146,10 +162,16 @@ fn open_log_file() {
 
     #[cfg(windows)]
     {
+        use std::os::windows::process::CommandExt;
         let _ = std::process::Command::new("explorer.exe")
-            .arg(format!("/select,{}", path.display()))
+            .raw_arg(explorer_select_arg(&path))
             .spawn();
     }
+}
+
+#[cfg_attr(not(windows), allow(dead_code))]
+fn explorer_select_arg(path: &std::path::Path) -> String {
+    format!("/select,\"{}\"", path.display())
 }
 
 fn shutdown_panel(app: &AppHandle) {
@@ -159,5 +181,20 @@ fn shutdown_panel(app: &AppHandle) {
                 tauri::async_runtime::block_on(handle.shutdown());
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::explorer_select_arg;
+    use std::path::Path;
+
+    #[test]
+    fn explorer_select_quotes_paths_with_spaces() {
+        let path = Path::new(r"C:\Users\Jane Doe\AppData\Local\io.github.yuxiangluo.miao\miao.log");
+        assert_eq!(
+            explorer_select_arg(path),
+            r#"/select,"C:\Users\Jane Doe\AppData\Local\io.github.yuxiangluo.miao\miao.log""#
+        );
     }
 }

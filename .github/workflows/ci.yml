@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [master, feat/windows-tauri]
+    branches: [master]
   pull_request:
 
 permissions:

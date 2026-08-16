@@ -16,7 +16,8 @@ mod validation;
 
 pub use error::{AppError, AppResult};
 pub use instance::{
-    acquire_single_instance, focus_existing_window, InstanceAcquire, InstanceGuard,
+    acquire_single_instance, focus_existing_window, peek_single_instance, InstanceAcquire,
+    InstanceGuard, InstancePeek,
 };
 pub use paths::default_log_path;
 pub use privilege::{is_elevated, require_privileges, show_user_error};

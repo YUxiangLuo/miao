@@ -4,6 +4,7 @@ use std::{fs, io};
 
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
+use tokio::time::Duration;
 use tracing::{error, info, warn};
 
 use crate::error::{AppError, AppResult};
@@ -28,7 +29,8 @@ pub struct RuntimeOptions {
     pub config_path: Option<PathBuf>,
     /// Tests can skip extracting the embedded kernel when they will not start it.
     pub skip_extract: bool,
-    /// Override the log file. Windows defaults to `%LOCALAPPDATA%\miao\miao.log`.
+    /// Override the log file. Windows defaults to
+    /// `%LOCALAPPDATA%\io.github.yuxiangluo.miao\miao.log`.
     pub log_path: Option<PathBuf>,
 }
 
@@ -38,6 +40,8 @@ pub struct ServerHandle {
     port: u16,
     url: String,
     log_path: Option<PathBuf>,
+    init_cancel: Option<oneshot::Sender<()>>,
+    init_task: Option<JoinHandle<()>>,
     shutdown_tx: Option<oneshot::Sender<()>>,
     server_task: Option<JoinHandle<AppResult<()>>>,
 }
@@ -62,6 +66,9 @@ impl ServerHandle {
 
 impl Drop for ServerHandle {
     fn drop(&mut self) {
+        if let Some(tx) = self.init_cancel.take() {
+            let _ = tx.send(());
+        }
         if let Some(tx) = self.shutdown_tx.take() {
             let _ = tx.send(());
         }
@@ -180,8 +187,14 @@ pub async fn spawn_server(options: RuntimeOptions) -> AppResult<ServerHandle> {
         });
     }
 
-    tokio::spawn(async move {
-        initialize_runtime(config, state_for_init).await;
+    let (init_cancel, init_rx) = oneshot::channel();
+    let init_task = tokio::spawn(async move {
+        tokio::select! {
+            _ = init_rx => {
+                info!("Runtime initialization cancelled");
+            }
+            _ = initialize_runtime(config, state_for_init) => {}
+        }
     });
 
     let (shutdown_tx, shutdown_rx) = oneshot::channel();
@@ -201,6 +214,8 @@ pub async fn spawn_server(options: RuntimeOptions) -> AppResult<ServerHandle> {
         port,
         url,
         log_path,
+        init_cancel: Some(init_cancel),
+        init_task: Some(init_task),
         shutdown_tx: Some(shutdown_tx),
         server_task: Some(server_task),
     })
@@ -275,6 +290,23 @@ async fn initialize_runtime(config: Config, state: Arc<AppState>) {
 }
 
 async fn request_shutdown(handle: &mut ServerHandle) {
+    if let Some(tx) = handle.init_cancel.take() {
+        let _ = tx.send(());
+    }
+    if let Some(mut task) = handle.init_task.take() {
+        match tokio::time::timeout(Duration::from_secs(8), &mut task).await {
+            Ok(Ok(())) => {}
+            Ok(Err(err)) if err.is_cancelled() => {}
+            Ok(Err(err)) => {
+                error!(error = %err, "Runtime initialization task failed on shutdown")
+            }
+            Err(_) => {
+                warn!("Runtime initialization did not finish before shutdown");
+                task.abort();
+                let _ = task.await;
+            }
+        }
+    }
     if let Some(tx) = handle.shutdown_tx.take() {
         let _ = tx.send(());
     }

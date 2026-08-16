@@ -1,11 +1,13 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use tracing::{error, info};
 
 use crate::error::{AppError, AppResult};
 use crate::models::Config;
 use crate::services::singbox::get_sing_box_home;
 
-pub(super) const CONFIG_CACHE_PATH: &str = "/tmp/miao-sing-box/config.json.cache";
+pub(super) fn config_cache_path() -> PathBuf {
+    get_sing_box_home().join("config.json.cache")
+}
 
 /// 原子写入文件：先写入临时文件，再重命名为目标文件
 pub(super) async fn write_file_atomic(path: &Path, content: &str) -> AppResult<()> {
@@ -46,23 +48,44 @@ pub async fn save_config_to(path: &Path, config: &Config) -> AppResult<()> {
 }
 
 pub async fn save_config_cache() {
+    let cache_path = config_cache_path();
+    if let Some(parent) = cache_path.parent() {
+        if let Err(e) = tokio::fs::create_dir_all(parent).await {
+            error!("Failed to create config cache directory: {}", e);
+            return;
+        }
+    }
+
     let config_path = get_sing_box_home().join("config.json");
-    if let Err(e) = tokio::fs::copy(&config_path, CONFIG_CACHE_PATH).await {
+    if let Err(e) = tokio::fs::copy(&config_path, &cache_path).await {
         error!("Failed to save config cache: {}", e);
     } else {
-        info!("Config cache saved to {}", CONFIG_CACHE_PATH);
+        info!(path = %cache_path.display(), "Config cache saved");
     }
 }
 
 pub async fn restore_config_from_cache() -> AppResult<()> {
-    let cache = std::path::Path::new(CONFIG_CACHE_PATH);
-    if !cache.exists() {
+    let cache_path = config_cache_path();
+    if !cache_path.exists() {
         return Err(AppError::message("No cached config available"));
     }
     let config_path = get_sing_box_home().join("config.json");
-    tokio::fs::copy(CONFIG_CACHE_PATH, &config_path)
+    tokio::fs::copy(&cache_path, &config_path)
         .await
         .map_err(|e| AppError::context("Failed to restore config from cache", e))?;
-    info!("Restored config from cache");
+    info!(path = %cache_path.display(), "Restored config from cache");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{config_cache_path, get_sing_box_home};
+
+    #[test]
+    fn config_cache_lives_under_sing_box_home() {
+        assert_eq!(
+            config_cache_path(),
+            get_sing_box_home().join("config.json.cache")
+        );
+    }
 }

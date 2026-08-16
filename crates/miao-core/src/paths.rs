@@ -99,12 +99,16 @@ fn resolve_config_path_from_parts(
     }
 }
 
+/// Windows app-data folder. Must not be `$LOCALAPPDATA\Miao` — that is the
+/// current-user NSIS install dir on a case-insensitive volume.
+pub const WINDOWS_APP_DIR: &str = "io.github.yuxiangluo.miao";
+
 pub fn platform_data_dir() -> PathBuf {
     if cfg!(windows) {
         std::env::var_os("LOCALAPPDATA")
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from(r"C:\ProgramData"))
-            .join("miao")
+            .join(WINDOWS_APP_DIR)
     } else {
         PathBuf::from("/etc/miao")
     }
@@ -191,7 +195,8 @@ mod tests {
     #[test]
     fn platform_paths_live_under_local_app_data_on_windows() {
         let data_dir = super::platform_data_dir();
-        assert!(data_dir.ends_with("miao"));
+        assert!(data_dir.ends_with(super::WINDOWS_APP_DIR));
+        assert!(!data_dir.ends_with("miao"));
         assert_eq!(super::default_log_path(), data_dir.join("miao.log"));
         assert_eq!(
             super::platform_default_config_path(),
