@@ -114,6 +114,7 @@ Tauri 窗口（只当浏览器）              系统浏览器
 - 透明代理走 sing-box TUN。Linux 用 `auto_route` + `auto_redirect`（nftables）；Windows 只用 `auto_route` + `strict_route`，不手写防火墙
 - DNS 双轨：国外经代理走 Cloudflare DoH，国内直连 223.5.5.5；缓存落在运行时 `cache.db`
 - 面板通过 Clash API（`127.0.0.1:6262`）切节点、读连接；配置变更先 `sing-box check` 再热重启
+- 启动时优先用上次成功的配置缓存**秒开内核**，订阅在后台刷新——有变化才重启内核，全部失败则继续用缓存运行并告警
 - 内核与规则集每次启动重新释放，保证与当前二进制一致；`cache.db` / 配置缓存有意保留
 - 内核异常退出会自动拉起（退避重试，连续失败后面板告警）
 

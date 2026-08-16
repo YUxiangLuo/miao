@@ -184,6 +184,8 @@ Arch 上的面板仍是那份 systemd Linux 实例，可以用来看 **共享 UI
 
 配置变更链路没变：`config_update` 锁 → 改克隆 → `apply_config_change`（原子写 → 生成 → `sing-box check` → 热重启）。面板不直接碰内核，走 Clash API。`route_mode` 仍是会话级。
 
+启动是两条路：`config.json.cache` 存在且通过 `sing-box check` → 直接起内核（秒开），订阅在后台刷新（仍持 `config_update` 锁，与面板编辑互斥；全失败则保留缓存运行并告警；逐字节比对无变化则不重启）；无缓存/缓存失效 → 原同步拉取路径。后台刷新随初始化任务一同被关停取消。
+
 ## MCP 端点
 
 `POST /mcp`（`services/mcp.rs` + `handlers/mcp.rs`）：MCP 2026-07-28 无状态 JSON-RPC——无握手无会话，通知回 202。开关是配置 `mcp: true`，**默认关**，关闭时 404 不暴露端点存在；运行时改配置即时生效（handler 内读配置做门控，不是路由注册时）。工具面与面板同构的平铺节点模型：selector（`proxy`）只是实现细节，永不暴露；`switch_node` 走 Clash PUT + `save_last_proxy`（与面板切换同路径，重启恢复）。测速/连接/当前节点都代理 Clash API（`127.0.0.1:6262`）。测试只覆盖纯分发、参数校验、无网络读路径；写路径成功分支会触网/起内核，单测别碰。

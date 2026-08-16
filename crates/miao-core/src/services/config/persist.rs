@@ -64,6 +64,16 @@ pub async fn save_config_cache() {
     }
 }
 
+/// 上次成功运行的生成配置缓存是否存在（启动快速通道的入场券）
+pub fn has_config_cache() -> bool {
+    config_cache_path().exists()
+}
+
+/// 读取缓存内容，用于订阅刷新后的变更比对
+pub async fn read_config_cache() -> Option<Vec<u8>> {
+    tokio::fs::read(config_cache_path()).await.ok()
+}
+
 pub async fn restore_config_from_cache() -> AppResult<()> {
     let cache_path = config_cache_path();
     if !cache_path.exists() {

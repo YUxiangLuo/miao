@@ -10,4 +10,7 @@ pub use apply::{
     apply_config_change, apply_runtime_config_change, regenerate_preserving_service_state,
 };
 pub use generate::{gen_config, known_rule_targets};
-pub use persist::{restore_config_from_cache, save_config_cache, save_config_to};
+pub use persist::{
+    has_config_cache, read_config_cache, restore_config_from_cache, save_config_cache,
+    save_config_to,
+};
