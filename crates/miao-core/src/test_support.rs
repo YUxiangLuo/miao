@@ -9,11 +9,24 @@ use serde_json::Value;
 
 use crate::{models::Config, router::build_router, state::AppState};
 
+/// Test thread names look like `foo::bar::baz`; `:` is illegal in Windows paths.
+fn safe_test_path_component(raw: &str) -> String {
+    raw.chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
+
 pub fn app_state(config: Config) -> Arc<AppState> {
     let config_path = std::env::temp_dir().join(format!(
         "miao-test-config-{}-{}.yaml",
         std::process::id(),
-        std::thread::current().name().unwrap_or("unnamed")
+        safe_test_path_component(std::thread::current().name().unwrap_or("unnamed"))
     ));
     Arc::new(
         AppState::with_config_path(config, config_path).expect("Failed to create AppState in test"),
@@ -63,4 +76,16 @@ pub async fn response_text(response: axum::response::Response) -> String {
 pub async fn response_json(response: axum::response::Response) -> Value {
     let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
     serde_json::from_slice(&bytes).unwrap()
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn test_path_component_strips_windows_illegal_chars() {
+        assert_eq!(
+            super::safe_test_path_component("services::config::tests::foo"),
+            "services__config__tests__foo"
+        );
+        assert!(!super::safe_test_path_component("a:b").contains(':'));
+    }
 }

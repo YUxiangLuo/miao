@@ -528,7 +528,51 @@ fn config_declares_route_mode(content: &str) -> bool {
 mod tests {
     use std::path::PathBuf;
 
-    use super::{config_declares_route_mode, spawn_server, RuntimeOptions};
+    use super::{config_declares_route_mode, panel_bind_addr, spawn_server, RuntimeOptions};
+
+    /// Hold a port the panel would bind. Windows needs SO_EXCLUSIVEADDRUSE so
+    /// Tokio's SO_REUSEADDR cannot hijack it.
+    fn occupy_panel_port() -> (std::net::TcpListener, u16) {
+        let probe = std::net::TcpListener::bind(panel_bind_addr(0)).expect("probe port");
+        let port = probe.local_addr().expect("probe addr").port();
+        drop(probe);
+
+        #[cfg(windows)]
+        {
+            use std::os::windows::io::AsRawSocket;
+            use windows_sys::Win32::Networking::WinSock::{
+                setsockopt, SOL_SOCKET, SO_EXCLUSIVEADDRUSE,
+            };
+
+            let socket = tokio::net::TcpSocket::new_v4().expect("tcp socket");
+            let enable: i32 = 1;
+            let rc = unsafe {
+                setsockopt(
+                    socket.as_raw_socket() as _,
+                    SOL_SOCKET,
+                    SO_EXCLUSIVEADDRUSE,
+                    (&enable as *const i32).cast(),
+                    std::mem::size_of_val(&enable) as i32,
+                )
+            };
+            assert_ne!(rc, -1, "SO_EXCLUSIVEADDRUSE");
+            socket
+                .bind(panel_bind_addr(port).parse().expect("addr"))
+                .expect("exclusive bind");
+            let listener = socket
+                .listen(1)
+                .expect("listen")
+                .into_std()
+                .expect("into std listener");
+            (listener, port)
+        }
+
+        #[cfg(not(windows))]
+        {
+            let listener = std::net::TcpListener::bind(panel_bind_addr(port)).expect("occupy port");
+            (listener, port)
+        }
+    }
 
     #[test]
     fn config_declares_route_mode_when_top_level_key_exists() {
@@ -621,8 +665,7 @@ custom_rules:
 
     #[tokio::test]
     async fn spawn_server_falls_back_to_ephemeral_port_when_occupied() {
-        let blocker = std::net::TcpListener::bind("0.0.0.0:0").expect("bind blocker");
-        let occupied_port = blocker.local_addr().expect("blocker addr").port();
+        let (blocker, occupied_port) = occupy_panel_port();
 
         let handle = spawn_server(RuntimeOptions {
             open_browser: false,
@@ -643,8 +686,7 @@ custom_rules:
 
     #[tokio::test]
     async fn spawn_server_without_port_fallback_fails_when_occupied() {
-        let blocker = std::net::TcpListener::bind("0.0.0.0:0").expect("bind blocker");
-        let occupied_port = blocker.local_addr().expect("blocker addr").port();
+        let (blocker, occupied_port) = occupy_panel_port();
 
         let result = spawn_server(RuntimeOptions {
             open_browser: false,

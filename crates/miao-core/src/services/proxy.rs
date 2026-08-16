@@ -196,12 +196,14 @@ mod tests {
         );
     }
 
+    #[cfg(not(windows))]
     #[test]
     fn last_proxy_store_uses_tmp_when_openwrt_markers_exist() {
         assert_eq!(last_proxy_store(true, "systemd"), LastProxyStore::Runtime);
         assert_eq!(last_proxy_store(true, "procd"), LastProxyStore::Runtime);
     }
 
+    #[cfg(not(windows))]
     #[test]
     fn last_proxy_store_uses_tmp_when_pid1_is_not_systemd() {
         assert_eq!(last_proxy_store(false, "procd"), LastProxyStore::Runtime);
@@ -221,6 +223,7 @@ mod tests {
             last_proxy_store(false, "systemd"),
             LastProxyStore::Persistent
         );
+        assert_eq!(last_proxy_store(true, "procd"), LastProxyStore::Persistent);
         assert_eq!(
             last_proxy_path_for(LastProxyStore::Persistent),
             crate::paths::platform_data_dir().join(LAST_PROXY_FILENAME)
