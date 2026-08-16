@@ -128,6 +128,9 @@ jobs:
         shell: bash
         run: MIAO_TARGET=windows-amd64 ./scripts/build-embedded.sh
 
+      - name: Smoke test the real Windows kernel
+        run: ./embedded/sing-box-windows-amd64.exe version
+
       - name: Build desktop shell
         run: cargo build -p miao-desktop --locked --release
 

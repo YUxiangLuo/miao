@@ -29,8 +29,16 @@ export function TopBar({ status, versionInfo, upgrading, onUpgradeClick }) {
           <span>{label}</span>
         </button>
       ) : (
-        <div className="version-chip" title="请通过安装包或便携包更新">
-          <span>{versionInfo.current || 'v--'}</span>
+        <div
+          className={classNames('version-chip', versionInfo.has_update && 'has-update')}
+          title={
+            versionInfo.has_update
+              ? `发现新版本 ${versionInfo.latest}，请通过安装包或便携包更新`
+              : '请通过安装包或便携包更新'
+          }
+        >
+          {versionInfo.has_update && <span className="version-dot" />}
+          <span>{label}</span>
         </div>
       )}
     </header>

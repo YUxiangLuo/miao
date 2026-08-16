@@ -274,34 +274,48 @@ async fn sing_box_is_running(state: &Arc<AppState>) -> bool {
 
 pub async fn get_version_info(state: &Arc<AppState>) -> VersionInfo {
     let current = current_version();
-    if !crate::platform::upgrade_supported() || !sing_box_is_running(state).await {
+    // Skip GitHub while the kernel is down (no TUN / likely no route). Still
+    // fetch when in-app upgrade is unsupported so Windows can show a chip.
+    if !sing_box_is_running(state).await {
         return version_info_without_release(current);
     }
 
-    let asset_name = current_arch_asset_name().unwrap_or("");
-
     match fetch_latest_release(&state.http_client, state).await {
         Ok(release) => {
-            let latest = release.tag_name.clone();
-            let has_update = release_is_newer_than_current(&current, &latest);
-            let download_url = release
-                .assets
-                .iter()
-                .find(|a| a.name == asset_name)
-                .map(|a| a.browser_download_url.clone());
-
-            VersionInfo {
-                current,
-                latest: Some(latest),
-                has_update,
-                download_url,
-                upgrade_supported: true,
-            }
+            version_info_from_release(current, &release, crate::platform::upgrade_supported())
         }
         Err(e) => {
             warn!(error = %e, "Failed to fetch latest release from GitHub");
             version_info_without_release(current)
         }
+    }
+}
+
+fn version_info_from_release(
+    current: String,
+    release: &GitHubRelease,
+    upgrade_supported: bool,
+) -> VersionInfo {
+    let latest = release.tag_name.clone();
+    let has_update = release_is_newer_than_current(&current, &latest);
+    let download_url = if upgrade_supported {
+        current_arch_asset_name().and_then(|asset_name| {
+            release
+                .assets
+                .iter()
+                .find(|asset| asset.name == asset_name)
+                .map(|asset| asset.browser_download_url.clone())
+        })
+    } else {
+        None
+    };
+
+    VersionInfo {
+        current,
+        latest: Some(latest),
+        has_update,
+        download_url,
+        upgrade_supported,
     }
 }
 
@@ -607,9 +621,9 @@ fn version_info_without_release(current: String) -> VersionInfo {
 mod tests {
     use super::{
         current_arch_asset_name, get_version_info, parse_semver_tag, parse_sha256sum_line,
-        release_is_newer_than_current, stdout_version_matches_release,
+        release_is_newer_than_current, stdout_version_matches_release, version_info_from_release,
     };
-    use crate::models::Config;
+    use crate::models::{Config, GitHubAsset, GitHubRelease};
     use crate::platform::upgrade_supported;
     use crate::test_support::app_state;
 
@@ -677,10 +691,49 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn version_info_never_advertises_update_when_upgrade_is_unsupported() {
+    async fn version_info_skips_github_when_kernel_is_down() {
         let info = get_version_info(&app_state(Config::default())).await;
         assert_eq!(info.upgrade_supported, upgrade_supported());
         assert!(!info.has_update);
+        assert!(info.latest.is_none());
         assert!(info.download_url.is_none());
+    }
+
+    #[test]
+    fn version_info_reports_update_without_download_when_upgrade_unsupported() {
+        let release = GitHubRelease {
+            tag_name: "v99.0.0".to_string(),
+            assets: vec![GitHubAsset {
+                name: "miao-windows-amd64-setup.exe".to_string(),
+                browser_download_url: "https://example.com/setup.exe".to_string(),
+                size: 1,
+            }],
+        };
+        let info = version_info_from_release("v0.31.0".to_string(), &release, false);
+        assert!(!info.upgrade_supported);
+        assert!(info.has_update);
+        assert_eq!(info.latest.as_deref(), Some("v99.0.0"));
+        assert!(info.download_url.is_none());
+    }
+
+    #[test]
+    fn version_info_includes_linux_asset_url_when_upgrade_supported() {
+        let release = GitHubRelease {
+            tag_name: "v99.0.0".to_string(),
+            assets: vec![GitHubAsset {
+                name: "miao-rust-linux-amd64".to_string(),
+                browser_download_url: "https://example.com/miao".to_string(),
+                size: 1,
+            }],
+        };
+        let info = version_info_from_release("v0.31.0".to_string(), &release, true);
+        assert!(info.upgrade_supported);
+        assert!(info.has_update);
+        if cfg!(all(not(windows), target_arch = "x86_64")) {
+            assert_eq!(
+                info.download_url.as_deref(),
+                Some("https://example.com/miao")
+            );
+        }
     }
 }

@@ -2,8 +2,7 @@ import { useEffect, useRef, useCallback } from 'react'
 
 /**
  * 健壮的 WebSocket hook
- * - 指数退避重连（带最大延迟）
- * - 最大重试次数限制
+ * - 指数退避重连（延迟封顶，无次数上限，桌面壳没有手动刷新手段）
  * - 页面可见性感知
  * - 正常/异常关闭区分处理
  */
@@ -23,7 +22,6 @@ export function useWebSocket(url, onMessage, enabled = true) {
     enabledRef.current = enabled
   }, [enabled])
 
-  const MAX_RETRIES = 10
   const BASE_DELAY = 1000
   const MAX_DELAY = 15000
 
@@ -84,12 +82,7 @@ export function useWebSocket(url, onMessage, enabled = true) {
           return
         }
 
-        // 超过最大重试次数
-        if (retryCountRef.current >= MAX_RETRIES) {
-          return
-        }
-
-        // 指数退避重连
+        // 指数退避重连（无次数上限；退避延迟封顶在 MAX_DELAY）
         const delay = getRetryDelay()
         retryCountRef.current++
         retryTimerRef.current = window.setTimeout(() => {

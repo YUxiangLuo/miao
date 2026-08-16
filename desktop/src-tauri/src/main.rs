@@ -67,6 +67,8 @@ fn run_app() -> Result<(), Box<dyn std::error::Error>> {
             let handle = tauri::async_runtime::block_on(spawn_server(RuntimeOptions {
                 open_browser: false,
                 install_tracing: true,
+                // 单实例由 mutex 保证，面板端口被占用时让操作系统分配新端口
+                port_fallback: true,
                 ..RuntimeOptions::default()
             }))?;
 

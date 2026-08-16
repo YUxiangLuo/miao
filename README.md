@@ -56,7 +56,7 @@ Win10/11 x64。哲学不变：还是 TUN 透明代理、还是这块面板、还
 4. 更新：先退出，再换安装包或 zip。面板里没有 Windows 一键升级
 5. 出问题：托盘「打开日志」，文件在 `%LOCALAPPDATA%\io.github.yuxiangluo.miao\miao.log`
 
-系统通常已有 WebView2，没有的话安装包走 bootstrapper。未签名时 SmartScreen 可能提示「仍要运行」。卸载后若设备管理器里还有 `sing-tun`，重启一次或手动删。
+系统通常已有 WebView2，没有的话安装包走 bootstrapper。未签名时 SmartScreen 可能提示「仍要运行」。卸载会尽量结束残留内核，但当前用户安装包无权处理已提权的 `sing-box` / `sing-tun`；必要时重启或在设备管理器里删网卡。日志超过 8 MB 时启动自动轮转为 `miao.log.old`。
 
 | | Linux / OpenWrt | Windows |
 | --- | --- | --- |
@@ -114,6 +114,7 @@ Tauri 窗口（只当浏览器）              系统浏览器
 - DNS 双轨：国外经代理走 Cloudflare DoH，国内直连 223.5.5.5；缓存落在运行时 `cache.db`
 - 面板通过 Clash API（`127.0.0.1:6262`）切节点、读连接；配置变更先 `sing-box check` 再热重启
 - 内核与规则集每次启动重新释放，保证与当前二进制一致；`cache.db` / 配置缓存有意保留
+- 内核异常退出会自动拉起（退避重试，连续失败后面板告警）
 
 ## 配置参考（进阶）
 

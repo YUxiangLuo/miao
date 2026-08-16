@@ -8,7 +8,7 @@ const running = { running: true, initializing: false }
 describe('TopBar version chip', () => {
   it('does not offer in-app upgrade when the platform cannot replace the binary', () => {
     const onUpgradeClick = vi.fn()
-    render(
+    const { container } = render(
       <TopBar
         status={running}
         versionInfo={{
@@ -22,8 +22,11 @@ describe('TopBar version chip', () => {
       />,
     )
 
+    // 不提供面板内升级按钮，但仍提示有新版本
     expect(screen.queryByRole('button', { name: /v0/ })).not.toBeInTheDocument()
-    expect(screen.getByText('v0.31.0')).toBeInTheDocument()
+    expect(screen.getByText('v0.32.0')).toBeInTheDocument()
+    expect(container.querySelector('.version-dot')).toBeInTheDocument()
+    expect(container.querySelector('.version-chip')).toHaveClass('has-update')
     expect(onUpgradeClick).not.toHaveBeenCalled()
   })
 

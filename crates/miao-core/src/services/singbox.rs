@@ -1,9 +1,10 @@
 use std::fs;
 use std::path::PathBuf;
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::time::{sleep, Duration};
-use tracing::info;
+use tracing::{error, info, warn};
 
 use crate::error::{AppError, AppResult};
 use crate::state::{AppState, SingBoxProcess};
@@ -135,7 +136,40 @@ pub async fn validate_sing_box_config() -> AppResult<()> {
 }
 
 pub async fn start_sing_internal(state: &Arc<AppState>) -> AppResult<()> {
+    let generation = {
+        let mut lock = state.sing_process.lock().await;
+        if let Some(ref mut proc) = *lock {
+            if proc
+                .child
+                .try_wait()
+                .map_err(|e| {
+                    AppError::context("Failed to check whether sing-box is already running", e)
+                })?
+                .is_none()
+            {
+                return Err(AppError::AlreadyRunning);
+            }
+        }
+        // Retire any watcher from the previous start before this spawn begins.
+        state.sing_generation.fetch_add(1, Ordering::Relaxed) + 1
+    };
+
+    spawn_and_probe_sing_box(state, generation).await?;
+    spawn_crash_watcher(state.clone(), generation);
+    clear_kernel_give_up_warning(state).await;
+    Ok(())
+}
+
+/// Spawn sing-box from the current config.json. `expected_generation` must
+/// still be current; a live child in the slot is never overwritten.
+async fn spawn_and_probe_sing_box(
+    state: &Arc<AppState>,
+    expected_generation: u64,
+) -> AppResult<()> {
     let mut lock = state.sing_process.lock().await;
+    if !start_still_current(state, expected_generation) {
+        return Err(AppError::message("sing-box start was cancelled"));
+    }
     if let Some(ref mut proc) = *lock {
         if proc
             .child
@@ -218,8 +252,11 @@ pub async fn start_sing_internal(state: &Arc<AppState>) -> AppResult<()> {
     sleep(Duration::from_millis(500)).await;
 
     let mut lock = state.sing_process.lock().await;
+    if !start_still_current(state, expected_generation) {
+        return Err(AppError::message("sing-box start was cancelled"));
+    }
     let Some(proc) = lock.as_mut() else {
-        return Ok(());
+        return Err(AppError::message("sing-box start was cancelled"));
     };
     if let Some(exit_status) = proc
         .child
@@ -247,6 +284,110 @@ pub async fn stop_sing_internal(state: &Arc<AppState>) {
         }
     }
     *lock = None;
+    // 让正在监护的崩溃看门狗退出：这是一次有意停止。
+    state.sing_generation.fetch_add(1, Ordering::Relaxed);
+}
+
+/// 崩溃看门狗的巡检间隔。测试里缩短以保持用例快速。
+#[cfg(not(test))]
+const KERNEL_WATCH_INTERVAL: Duration = Duration::from_secs(2);
+#[cfg(test)]
+const KERNEL_WATCH_INTERVAL: Duration = Duration::from_millis(200);
+
+/// 连续自动重启超过此次数后放弃，并在面板上告警。
+const MAX_KERNEL_RESTARTS: u32 = 5;
+
+/// 内核存活超过该时长则认为已稳定，重置重启计数。
+const KERNEL_STABLE_AFTER: Duration = Duration::from_secs(60);
+
+const KERNEL_GIVE_UP_WARNING: &str = "sing-box 反复异常退出，已停止自动拉起。请检查配置或查看日志";
+
+fn restart_backoff(attempt: u32) -> Duration {
+    Duration::from_secs(1u64 << (attempt.saturating_sub(1)).min(4))
+}
+
+fn spawn_crash_watcher(state: Arc<AppState>, generation: u64) {
+    tokio::spawn(watch_sing_box(state, generation));
+}
+
+fn start_still_current(state: &AppState, expected_generation: u64) -> bool {
+    state.sing_generation.load(Ordering::Relaxed) == expected_generation
+        && state.service_should_run.load(Ordering::Relaxed)
+}
+
+async fn clear_kernel_give_up_warning(state: &Arc<AppState>) {
+    let mut warning = state.config_warning.lock().await;
+    if warning.as_deref() == Some(KERNEL_GIVE_UP_WARNING) {
+        *warning = None;
+    }
+}
+
+/// 监护一次 sing-box 启动：异常退出时按退避自动拉起（复用当前 config.json，
+/// 不重新生成）。有意停核/重启会递增 generation，看门狗随即退出。
+async fn watch_sing_box(state: Arc<AppState>, generation: u64) {
+    let mut restarts = 0u32;
+    loop {
+        sleep(KERNEL_WATCH_INTERVAL).await;
+        if state.sing_generation.load(Ordering::Relaxed) != generation {
+            return;
+        }
+
+        let crashed = {
+            let mut lock = state.sing_process.lock().await;
+            match lock.as_mut() {
+                Some(proc) => match proc.child.try_wait() {
+                    Ok(None) => {
+                        if proc.started_at.elapsed() >= KERNEL_STABLE_AFTER {
+                            restarts = 0;
+                        }
+                        false
+                    }
+                    Ok(Some(status)) => {
+                        warn!(exit_code = ?status.code(), "sing-box exited unexpectedly");
+                        *lock = None;
+                        true
+                    }
+                    Err(err) => {
+                        warn!(error = %err, "Failed to poll sing-box process state");
+                        *lock = None;
+                        true
+                    }
+                },
+                // 状态轮询等路径可能先收割了已退出的进程：槽位为空且
+                // generation 未变，仍视为一次异常退出。
+                None => true,
+            }
+        };
+        if !crashed {
+            continue;
+        }
+        if state.sing_generation.load(Ordering::Relaxed) != generation
+            || !state.service_should_run.load(Ordering::Relaxed)
+        {
+            return;
+        }
+
+        restarts += 1;
+        if restarts > MAX_KERNEL_RESTARTS {
+            error!("sing-box kept crashing; giving up on automatic restarts");
+            *state.config_warning.lock().await = Some(KERNEL_GIVE_UP_WARNING.to_string());
+            return;
+        }
+
+        sleep(restart_backoff(restarts)).await;
+        if state.sing_generation.load(Ordering::Relaxed) != generation
+            || !state.service_should_run.load(Ordering::Relaxed)
+        {
+            return;
+        }
+
+        match spawn_and_probe_sing_box(&state, generation).await {
+            Ok(()) => info!(restarts, "sing-box restarted after an unexpected exit"),
+            Err(err) => {
+                warn!(error = %err, "Failed to restart sing-box after an unexpected exit")
+            }
+        }
+    }
 }
 
 fn set_executable(path: &std::path::Path) -> std::io::Result<()> {
@@ -474,7 +615,129 @@ fn cleanup_stale_tun_adapter() {
 
 #[cfg(test)]
 mod tests {
-    use super::{tun_adapter_cleanup_command, TUN_ADAPTER_NAME};
+    use super::{restart_backoff, tun_adapter_cleanup_command, TUN_ADAPTER_NAME};
+    use tokio::time::Duration;
+
+    #[test]
+    fn restart_backoff_grows_exponentially_and_caps() {
+        assert_eq!(restart_backoff(1), Duration::from_secs(1));
+        assert_eq!(restart_backoff(2), Duration::from_secs(2));
+        assert_eq!(restart_backoff(3), Duration::from_secs(4));
+        assert_eq!(restart_backoff(5), Duration::from_secs(16));
+        assert_eq!(restart_backoff(42), Duration::from_secs(16));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn watcher_exits_when_its_generation_is_stale() {
+        use std::time::Instant;
+
+        let state = crate::test_support::app_state(crate::models::Config::default());
+        let child = tokio::process::Command::new("sleep")
+            .arg("30")
+            .kill_on_drop(true)
+            .spawn()
+            .expect("spawn dummy child");
+        *state.sing_process.lock().await = Some(crate::state::SingBoxProcess {
+            child,
+            started_at: Instant::now(),
+        });
+        state
+            .sing_generation
+            .store(7, std::sync::atomic::Ordering::Relaxed);
+
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            super::watch_sing_box(state.clone(), 3),
+        )
+        .await
+        .expect("stale watcher should exit");
+
+        // 过时的看门狗不得收割或重启仍在运行的进程
+        let mut lock = state.sing_process.lock().await;
+        let proc = lock.as_mut().expect("dummy child must be kept");
+        assert!(proc.child.try_wait().expect("poll").is_none());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn watcher_returns_without_restart_when_service_should_not_run() {
+        let state = crate::test_support::app_state(crate::models::Config::default());
+        state
+            .service_should_run
+            .store(false, std::sync::atomic::Ordering::Relaxed);
+        state
+            .sing_generation
+            .store(4, std::sync::atomic::Ordering::Relaxed);
+
+        // 槽位为空且 generation 匹配 → 视为异常退出；但服务已被明确停止，直接退出
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            super::watch_sing_box(state.clone(), 4),
+        )
+        .await
+        .expect("watcher should exit when service should not run");
+        assert!(state.config_warning.lock().await.is_none());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn spawn_and_probe_refuses_stale_generation() {
+        let state = crate::test_support::app_state(crate::models::Config::default());
+        state
+            .sing_generation
+            .store(9, std::sync::atomic::Ordering::Relaxed);
+
+        let err = super::spawn_and_probe_sing_box(&state, 3)
+            .await
+            .expect_err("stale generation");
+        assert!(err.to_string().contains("cancelled"));
+        assert!(state.sing_process.lock().await.is_none());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn spawn_and_probe_refuses_to_overwrite_a_live_child() {
+        use std::time::Instant;
+
+        let state = crate::test_support::app_state(crate::models::Config::default());
+        let child = tokio::process::Command::new("sleep")
+            .arg("30")
+            .kill_on_drop(true)
+            .spawn()
+            .expect("spawn dummy child");
+        *state.sing_process.lock().await = Some(crate::state::SingBoxProcess {
+            child,
+            started_at: Instant::now(),
+        });
+        state
+            .sing_generation
+            .store(1, std::sync::atomic::Ordering::Relaxed);
+
+        let err = super::spawn_and_probe_sing_box(&state, 1)
+            .await
+            .expect_err("live child");
+        assert!(matches!(err, crate::error::AppError::AlreadyRunning));
+
+        let mut lock = state.sing_process.lock().await;
+        let proc = lock.as_mut().expect("dummy child must be kept");
+        assert!(proc.child.try_wait().expect("poll").is_none());
+    }
+
+    #[tokio::test]
+    async fn successful_start_clears_only_the_give_up_warning() {
+        let state = crate::test_support::app_state(crate::models::Config::default());
+        *state.config_warning.lock().await = Some(super::KERNEL_GIVE_UP_WARNING.to_string());
+        super::clear_kernel_give_up_warning(&state).await;
+        assert!(state.config_warning.lock().await.is_none());
+
+        *state.config_warning.lock().await = Some("所有订阅获取失败，请检查当前订阅".to_string());
+        super::clear_kernel_give_up_warning(&state).await;
+        assert_eq!(
+            state.config_warning.lock().await.as_deref(),
+            Some("所有订阅获取失败，请检查当前订阅")
+        );
+    }
 
     #[test]
     fn tun_adapter_cleanup_targets_sing_tun_only() {

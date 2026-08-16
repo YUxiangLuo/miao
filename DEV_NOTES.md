@@ -132,9 +132,12 @@ sudo bash install.sh ./target/release/miao-rust
 | 上次节点 | `%LOCALAPPDATA%\io.github.yuxiangluo.miao\.last_proxy`（不要再放 Temp） |
 | 内核运行时 | `%TEMP%\miao-sing-box` |
 | 面板绑定 | `127.0.0.1` |
-| 单实例 | 命名 mutex `Local\io.github.yuxiangluo.miao`；未提权先 `OpenMutexW`，已有实例不再 UAC |
+| 单实例 | 命名 mutex 优先 `Global\io.github.yuxiangluo.miao`（跨会话，防快速用户切换双开抢 TUN），无权时退 `Local\`；未提权先 `OpenMutexW`，已有实例不再 UAC；已有实例的窗口按标题 + 进程镜像（miao.exe）双重确认 |
 | 停核 | `CREATE_NEW_PROCESS_GROUP` + `CTRL_BREAK`；超时再杀并只清 `sing-tun`（本机/CI 不要真执行） |
 | 提权 | 确认无实例后再 `ShellExecuteW runas`；取消则 MessageBox |
+| 端口 | `port_fallback`：6161 被占时桌面壳改绑随机端口，不再直接退出 |
+| 内核看门狗 | 崩溃自动拉起（2s 巡检、1–16s 退避、最多 5 次），放弃时写 `config_warning`；有意启动/停核先递增 `sing_generation`，spawn 不覆盖仍活着的子进程 |
+| 日志轮转 | `miao.log` 超 8 MB 时启动改名 `.old`（单份滚动） |
 | 进程规则文案 | `/api/status` 的 `platform` 决定 placeholder（`qbittorrent.exe`） |
 
 TUN JSON：`auto_route` + `strict_route`，`interface_name` 仍是 `sing-tun`。`cfg(target_os = "linux")` 才写 `auto_redirect`。不要写 1.14 才有的 `dns_mode`。

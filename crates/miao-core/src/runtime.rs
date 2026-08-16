@@ -25,6 +25,10 @@ pub struct RuntimeOptions {
     pub install_tracing: bool,
     /// Override the config `port`. `Some(0)` asks the OS for an ephemeral port.
     pub bind_port: Option<u16>,
+    /// When the requested panel port is occupied, bind an ephemeral port
+    /// instead of failing. The desktop shell sets this: its single-instance
+    /// lock is the mutex, so the port is free to move.
+    pub port_fallback: bool,
     /// Skip path resolution and load this file (missing file → in-memory default).
     pub config_path: Option<PathBuf>,
     /// Tests can skip extracting the embedded kernel when they will not start it.
@@ -97,6 +101,9 @@ pub async fn run() -> AppResult<()> {
 
 pub async fn spawn_server(options: RuntimeOptions) -> AppResult<ServerHandle> {
     let log_path = resolve_log_path(&options);
+    if let Some(path) = log_path.as_deref() {
+        rotate_oversized_log(path);
+    }
     if options.install_tracing {
         install_tracing(log_path.as_deref());
     }
@@ -175,7 +182,18 @@ pub async fn spawn_server(options: RuntimeOptions) -> AppResult<ServerHandle> {
     let state_for_init = app_state.clone();
 
     let app = crate::router::build_router(app_state.clone());
-    let listener = tokio::net::TcpListener::bind(panel_bind_addr(requested_port)).await?;
+    let bind_addr = panel_bind_addr(requested_port);
+    let listener = match tokio::net::TcpListener::bind(&bind_addr).await {
+        Ok(listener) => listener,
+        Err(err) if options.port_fallback && err.kind() == io::ErrorKind::AddrInUse => {
+            warn!(
+                port = requested_port,
+                "Panel port is already in use, falling back to an ephemeral port"
+            );
+            tokio::net::TcpListener::bind(panel_bind_addr(0)).await?
+        }
+        Err(err) => return Err(err.into()),
+    };
     let port = listener.local_addr()?.port();
     let url = format!("http://127.0.0.1:{port}");
     info!(port = port, url = %url, "Miao panel started");
@@ -352,6 +370,33 @@ fn resolve_log_path(options: &RuntimeOptions) -> Option<PathBuf> {
     }
 }
 
+/// 日志文件（tracing + sing-box 输出）只追加不清理，长期常驻会无限增长。
+/// 启动时把超限的日志改名为 `.old`（覆盖上一份），实现单份滚动。
+const MAX_LOG_FILE_BYTES: u64 = 8 * 1024 * 1024;
+
+fn rotate_oversized_log(path: &std::path::Path) {
+    let Ok(metadata) = fs::metadata(path) else {
+        return;
+    };
+    if metadata.len() <= MAX_LOG_FILE_BYTES {
+        return;
+    }
+    let rotated = rotated_log_path(path);
+    match fs::rename(path, &rotated) {
+        Ok(()) => info!(log = ?path, rotated_to = ?rotated, "Rotated oversized log file"),
+        Err(err) => warn!(log = ?path, error = %err, "Failed to rotate oversized log file"),
+    }
+}
+
+fn rotated_log_path(path: &std::path::Path) -> PathBuf {
+    let mut name = path
+        .file_name()
+        .map(|n| n.to_os_string())
+        .unwrap_or_default();
+    name.push(".old");
+    path.with_file_name(name)
+}
+
 fn install_tracing(log_path: Option<&std::path::Path>) {
     use tracing_subscriber::fmt::writer::MakeWriterExt;
 
@@ -523,19 +568,13 @@ custom_rules:
 
     #[tokio::test]
     async fn spawn_server_serves_status_and_shuts_down() {
-        let config_path = std::env::temp_dir().join(format!(
-            "miao-spawn-server-test-{}-{}.yaml",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .expect("clock")
-                .as_nanos()
-        ));
+        let config_path = unique_test_config_path();
 
         let handle = spawn_server(RuntimeOptions {
             open_browser: false,
             install_tracing: false,
             bind_port: Some(0),
+            port_fallback: false,
             config_path: Some(config_path),
             skip_extract: true,
             log_path: None,
@@ -578,5 +617,107 @@ custom_rules:
             after.is_err(),
             "panel should reject requests after shutdown"
         );
+    }
+
+    #[tokio::test]
+    async fn spawn_server_falls_back_to_ephemeral_port_when_occupied() {
+        let blocker = std::net::TcpListener::bind("0.0.0.0:0").expect("bind blocker");
+        let occupied_port = blocker.local_addr().expect("blocker addr").port();
+
+        let handle = spawn_server(RuntimeOptions {
+            open_browser: false,
+            install_tracing: false,
+            bind_port: Some(occupied_port),
+            port_fallback: true,
+            config_path: Some(unique_test_config_path()),
+            skip_extract: true,
+            log_path: None,
+        })
+        .await
+        .expect("spawn panel with port fallback");
+
+        assert_ne!(handle.port(), occupied_port);
+        handle.shutdown().await;
+        drop(blocker);
+    }
+
+    #[tokio::test]
+    async fn spawn_server_without_port_fallback_fails_when_occupied() {
+        let blocker = std::net::TcpListener::bind("0.0.0.0:0").expect("bind blocker");
+        let occupied_port = blocker.local_addr().expect("blocker addr").port();
+
+        let result = spawn_server(RuntimeOptions {
+            open_browser: false,
+            install_tracing: false,
+            bind_port: Some(occupied_port),
+            port_fallback: false,
+            config_path: Some(unique_test_config_path()),
+            skip_extract: true,
+            log_path: None,
+        })
+        .await;
+
+        assert!(result.is_err());
+        drop(blocker);
+    }
+
+    #[test]
+    fn rotated_log_path_appends_old_suffix() {
+        let path = PathBuf::from("/tmp/miao.log");
+        assert_eq!(
+            super::rotated_log_path(&path),
+            PathBuf::from("/tmp/miao.log.old")
+        );
+    }
+
+    #[test]
+    fn rotate_oversized_log_keeps_small_file() {
+        let path = unique_test_log_path("small");
+        std::fs::write(&path, b"small").expect("write small log");
+
+        super::rotate_oversized_log(&path);
+
+        assert!(path.exists());
+        assert!(!super::rotated_log_path(&path).exists());
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn rotate_oversized_log_renames_big_file() {
+        let path = unique_test_log_path("big");
+        let big = vec![b'x'; (super::MAX_LOG_FILE_BYTES + 1) as usize];
+        std::fs::write(&path, &big).expect("write big log");
+
+        super::rotate_oversized_log(&path);
+
+        assert!(!path.exists());
+        let rotated = super::rotated_log_path(&path);
+        assert_eq!(
+            std::fs::metadata(&rotated).expect("rotated log").len(),
+            super::MAX_LOG_FILE_BYTES + 1
+        );
+        let _ = std::fs::remove_file(&rotated);
+    }
+
+    fn unique_test_config_path() -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "miao-spawn-server-test-{}-{}.yaml",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ))
+    }
+
+    fn unique_test_log_path(tag: &str) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "miao-rotate-{tag}-{}-{}.log",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ))
     }
 }

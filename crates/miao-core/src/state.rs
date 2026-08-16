@@ -1,7 +1,7 @@
 use arc_swap::ArcSwap;
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::{Mutex, RwLock};
@@ -16,6 +16,9 @@ pub struct AppState {
     pub config_path: PathBuf,
     pub config_update: Mutex<()>,
     pub sing_process: Mutex<Option<SingBoxProcess>>,
+    /// 每次有意启动/停止 sing-box 都会递增。崩溃看门狗以此识别自己监护的
+    /// 那次启动是否已被取代，避免与配置热重启、用户停核等路径打架。
+    pub sing_generation: AtomicU64,
     pub sub_status: Mutex<HashMap<String, SubStatus>>,
     pub config_warning: Mutex<Option<String>>,
     /// 最近一次生成配置时因出口节点不存在而被跳过的自定义规则,用于面板告警与规则列表标记
@@ -48,6 +51,7 @@ impl AppState {
             config_path,
             config_update: Mutex::new(()),
             sing_process: Mutex::new(None),
+            sing_generation: AtomicU64::new(0),
             sub_status: Mutex::new(HashMap::new()),
             config_warning: Mutex::new(None),
             skipped_rules: Mutex::new(Vec::new()),
