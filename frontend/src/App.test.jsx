@@ -212,4 +212,70 @@ describe('App onboarding integration', () => {
     })
     expect(await screen.findByText('已切换为分流模式')).toBeInTheDocument()
   })
+
+  it('asks for confirmation before stopping the service', async () => {
+    let stopped = false
+    const fetchMock = vi.fn(async (input, options = {}) => {
+      const url = String(input)
+      if (url === '/api/status') {
+        return jsonResponse({
+          success: true,
+          data: { running: !stopped, initializing: false, route_mode: 'rule', pid: 1, uptime_secs: 10 },
+        })
+      }
+      if (url === '/api/nodes' || url === '/api/subs' || url === '/api/rules') {
+        return jsonResponse({ success: true, data: [] })
+      }
+      if (url === '/api/version') {
+        return jsonResponse({
+          success: true,
+          data: { current: 'v0.31.0', latest: null, has_update: false },
+        })
+      }
+      if (url === '/api/clash/connections') {
+        return jsonResponse({ connections: [], uploadTotal: 0, downloadTotal: 0 })
+      }
+      if (url === '/api/clash/proxies') {
+        return jsonResponse({
+          proxies: {
+            proxy: { type: 'Selector', name: 'proxy', now: 'node-a', all: ['node-a'] },
+          },
+        })
+      }
+      if (url.startsWith('/api/clash/proxies/') && url.includes('/delay')) {
+        return jsonResponse({ delay: 100 })
+      }
+      if (url === '/api/service/stop' && options.method === 'POST') {
+        stopped = true
+        return jsonResponse({ success: true, message: 'sing-box stopped' })
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    })
+
+    vi.stubGlobal('fetch', fetchMock)
+    vi.stubGlobal('matchMedia', vi.fn().mockImplementation(() => ({
+      matches: false,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    })))
+    window.matchMedia = globalThis.matchMedia
+
+    const user = userEvent.setup()
+    render(<App />)
+
+    // 运行中显示方形纯色停止按钮（无文字，aria-label 标识）
+    const stopButton = await screen.findByRole('button', { name: '停止服务' })
+    await user.click(stopButton)
+
+    // 先弹确认，未确认前不发停止请求
+    expect(await screen.findByRole('dialog', { name: '停止服务' })).toBeInTheDocument()
+    expect(fetchMock).not.toHaveBeenCalledWith('/api/service/stop', expect.anything())
+
+    await user.click(screen.getByRole('button', { name: '确认' }))
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith('/api/service/stop', expect.objectContaining({
+        method: 'POST',
+      }))
+    })
+  })
 })

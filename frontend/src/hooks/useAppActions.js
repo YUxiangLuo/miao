@@ -70,6 +70,19 @@ export function useAppActions(data) {
     }
   }, [status.running, apiCall, clearDelays, fetchStatus, showToast])
 
+  // 停止是破坏性操作（全机代理流量中断），先确认；启动不需要
+  const handleToggleServiceWithConfirm = useCallback(() => {
+    if (!status.running) {
+      handleToggleService()
+      return
+    }
+    openConfirm(
+      '停止服务',
+      '确定要停止服务吗？所有代理流量将随之中断。',
+      () => handleToggleService(),
+    )
+  }, [status.running, openConfirm, handleToggleService])
+
   const handleSetRouteMode = useCallback(async (nextMode) => {
     if (nextMode === status.route_mode) return
 
@@ -401,6 +414,7 @@ export function useAppActions(data) {
     openNodeModal,
     closeNodeModal,
     handleToggleService,
+    handleToggleServiceWithConfirm,
     handleOpenSetRouteModeConfirm,
     handleSwitchProxy,
     handleAddSubscription,

@@ -2,6 +2,28 @@
     flex-shrink: 0;
     margin-bottom: 20px;
 }
+/* 运行中的停止按钮：方形纯色图标按钮，无文字 */
+.service-stop-button {
+    flex: 0 0 auto;
+    width: 34px;
+    height: 34px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    border-radius: 8px;
+    background: var(--danger);
+    color: #fff;
+    cursor: pointer;
+    transition: filter 0.15s ease;
+}
+.service-stop-button:hover:not(:disabled) {
+    filter: brightness(1.15);
+}
+.service-stop-button:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
 .status-card-body {
     display: flex;
     align-items: center;

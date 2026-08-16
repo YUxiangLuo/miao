@@ -28,7 +28,7 @@ export function DashboardScreen({ app }) {
           status={app.status}
           traffic={app.traffic}
           loadingAction={app.loadingAction}
-          onToggleService={app.handleToggleService}
+          onToggleService={app.handleToggleServiceWithConfirm}
           onSetRouteMode={app.handleOpenSetRouteModeConfirm}
           onOpenConnections={app.handleOpenConnections}
         />
