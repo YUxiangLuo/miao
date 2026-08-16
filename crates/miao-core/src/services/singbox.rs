@@ -246,6 +246,7 @@ async fn request_graceful_exit(child: &mut tokio::process::Child) {
                 restore_ctrl_c_handling();
                 let _ = child.start_kill();
                 let _ = child.wait().await;
+                cleanup_stale_tun_adapter();
             }
         }
     }
@@ -292,5 +293,57 @@ fn restore_ctrl_c_handling() {
 
     unsafe {
         SetConsoleCtrlHandler(None, 0);
+    }
+}
+
+#[cfg(test)]
+const TUN_ADAPTER_NAME: &str = "sing-tun";
+
+/// Command used after a forced Windows kill. Tests assert the shape only;
+/// callers on Windows spawn it, Linux/CI never execute it.
+#[cfg(any(windows, test))]
+pub(crate) fn tun_adapter_cleanup_command() -> (&'static str, Vec<&'static str>) {
+    (
+        "powershell.exe",
+        vec![
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            "Get-NetAdapter -Name 'sing-tun' -ErrorAction SilentlyContinue | Remove-NetAdapter -Confirm:$false",
+        ],
+    )
+}
+
+#[cfg(windows)]
+fn cleanup_stale_tun_adapter() {
+    let (program, args) = tun_adapter_cleanup_command();
+    match std::process::Command::new(program).args(args).output() {
+        Ok(output) if output.status.success() => {
+            info!("Removed leftover sing-tun adapter if it was present");
+        }
+        Ok(output) => {
+            tracing::warn!(
+                status = ?output.status,
+                "sing-tun adapter cleanup returned non-success"
+            );
+        }
+        Err(err) => {
+            tracing::warn!(error = %err, "Failed to run sing-tun adapter cleanup");
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{tun_adapter_cleanup_command, TUN_ADAPTER_NAME};
+
+    #[test]
+    fn tun_adapter_cleanup_targets_sing_tun_only() {
+        let (program, args) = tun_adapter_cleanup_command();
+        let joined = args.join(" ");
+        assert_eq!(program, "powershell.exe");
+        assert!(joined.contains(TUN_ADAPTER_NAME));
+        assert!(joined.contains("Remove-NetAdapter"));
+        assert!(!joined.contains("Get-NetAdapter -Name '*'"));
     }
 }

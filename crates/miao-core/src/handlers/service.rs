@@ -80,6 +80,7 @@ pub async fn get_status(State(state): State<Arc<AppState>>) -> Json<ApiResponse<
             pid,
             uptime_secs,
             warning,
+            vps_supported: crate::platform::vps_supported(),
         },
     )
 }
@@ -290,6 +291,7 @@ mod tests {
         assert!(!data.running);
         assert!(data.pid.is_none());
         assert!(data.uptime_secs.is_none());
+        assert_eq!(data.vps_supported, crate::platform::vps_supported());
     }
 
     #[tokio::test]

@@ -65,6 +65,7 @@ jobs:
           mkdir -p embedded
           printf '#!/bin/sh\nexit 1\n' > embedded/sing-box-amd64
           chmod 755 embedded/sing-box-amd64
+          : > embedded/sing-box-windows-amd64.exe
           : > embedded/geoip-cn.srs
           : > embedded/geosite-geolocation-cn.srs
           : > embedded/adblock_reject.srs
@@ -80,3 +81,37 @@ jobs:
 
       - name: Audit dependencies
         run: cargo audit
+
+      - name: Install MinGW for Windows cross-check
+        run: sudo apt-get update && sudo apt-get install -y gcc-mingw-w64-x86-64
+
+      - name: Add Windows GNU target
+        run: rustup target add x86_64-pc-windows-gnu
+
+      - name: Check miao-core for Windows
+        env:
+          CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER: x86_64-w64-mingw32-gcc
+        run: cargo check -p miao-core --locked --target x86_64-pc-windows-gnu
+
+  windows:
+    name: Windows desktop compile
+    runs-on: windows-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Prepare inert embedded assets
+        shell: bash
+        run: |
+          mkdir -p embedded
+          : > embedded/sing-box-windows-amd64.exe
+          : > embedded/sing-box-amd64
+          : > embedded/geoip-cn.srs
+          : > embedded/geosite-geolocation-cn.srs
+          : > embedded/adblock_reject.srs
+
+      - name: Build desktop shell
+        run: cargo build -p miao-desktop --locked --release

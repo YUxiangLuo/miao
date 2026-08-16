@@ -105,6 +105,7 @@ export function DashboardScreen({ app }) {
         onSubmit={app.handleAddNode}
         onImport={app.handleImportNodes}
         onDeployVps={app.handleDeployVps}
+        vpsSupported={app.status.vps_supported !== false}
       />
 
       <ConnectionsModal

@@ -3,7 +3,7 @@
   "productName": "Miao",
   "identifier": "io.github.yuxiangluo.miao",
   "build": {
-    "frontendDist": "http://127.0.0.1:6161"
+    "frontendDist": "panel-placeholder"
   },
   "app": {
     "windows": [],

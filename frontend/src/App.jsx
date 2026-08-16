@@ -34,6 +34,7 @@ export default function App() {
           onSubmit={app.handleAddNode}
           onImport={app.handleImportNodes}
           onDeployVps={app.handleDeployVps}
+          vpsSupported={app.status.vps_supported !== false}
         />
       </div>
     )

@@ -6,6 +6,7 @@ pub struct VersionInfo {
     pub latest: Option<String>,
     pub has_update: bool,
     pub download_url: Option<String>,
+    pub upgrade_supported: bool,
 }
 
 #[derive(Clone, Deserialize)]

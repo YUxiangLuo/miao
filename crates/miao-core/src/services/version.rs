@@ -259,13 +259,8 @@ async fn sing_box_is_running(state: &Arc<AppState>) -> bool {
 
 pub async fn get_version_info(state: &Arc<AppState>) -> VersionInfo {
     let current = current_version();
-    if !sing_box_is_running(state).await {
-        return VersionInfo {
-            current,
-            latest: None,
-            has_update: false,
-            download_url: None,
-        };
+    if !crate::platform::upgrade_supported() || !sing_box_is_running(state).await {
+        return version_info_without_release(current);
     }
 
     let asset_name = current_arch_asset_name().unwrap_or("");
@@ -285,16 +280,12 @@ pub async fn get_version_info(state: &Arc<AppState>) -> VersionInfo {
                 latest: Some(latest),
                 has_update,
                 download_url,
+                upgrade_supported: true,
             }
         }
         Err(e) => {
             warn!(error = %e, "Failed to fetch latest release from GitHub");
-            VersionInfo {
-                current,
-                latest: None,
-                has_update: false,
-                download_url: None,
-            }
+            version_info_without_release(current)
         }
     }
 }
@@ -401,6 +392,12 @@ fn stdout_version_matches_release(stdout: &str, tag_name: &str) -> bool {
 }
 
 pub async fn upgrade_binary(state: &Arc<AppState>) -> AppResult<String> {
+    if !crate::platform::upgrade_supported() {
+        return Err(AppError::message(
+            "当前平台请下载新的安装包或便携包，退出后再替换",
+        ));
+    }
+
     if state
         .upgrading
         .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
@@ -566,6 +563,10 @@ fn current_version() -> String {
 }
 
 fn current_arch_asset_name() -> Option<&'static str> {
+    if cfg!(windows) {
+        return None;
+    }
+
     if cfg!(target_arch = "x86_64") {
         Some("miao-rust-linux-amd64")
     } else if cfg!(target_arch = "aarch64") {
@@ -575,12 +576,25 @@ fn current_arch_asset_name() -> Option<&'static str> {
     }
 }
 
+fn version_info_without_release(current: String) -> VersionInfo {
+    VersionInfo {
+        current,
+        latest: None,
+        has_update: false,
+        download_url: None,
+        upgrade_supported: crate::platform::upgrade_supported(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        current_arch_asset_name, parse_semver_tag, parse_sha256sum_line,
-        release_is_newer_than_current, stdout_version_matches_release,
+        current_arch_asset_name, get_version_info, parse_semver_tag, parse_sha256sum_line,
+        release_is_newer_than_current, stdout_version_matches_release, upgrade_binary,
     };
+    use crate::models::Config;
+    use crate::platform::upgrade_supported;
+    use crate::test_support::app_state;
 
     #[test]
     fn parse_semver_tag_accepts_prefixed_and_unprefixed() {
@@ -634,12 +648,34 @@ mod tests {
 
     #[test]
     fn current_arch_asset_name_matches_supported_targets() {
-        if cfg!(target_arch = "x86_64") {
+        if cfg!(windows) {
+            assert_eq!(current_arch_asset_name(), None);
+        } else if cfg!(target_arch = "x86_64") {
             assert_eq!(current_arch_asset_name(), Some("miao-rust-linux-amd64"));
         } else if cfg!(target_arch = "aarch64") {
             assert_eq!(current_arch_asset_name(), Some("miao-rust-linux-arm64"));
         } else {
             assert_eq!(current_arch_asset_name(), None);
         }
+    }
+
+    #[tokio::test]
+    async fn version_info_never_advertises_update_when_upgrade_is_unsupported() {
+        let info = get_version_info(&app_state(Config::default())).await;
+        assert_eq!(info.upgrade_supported, upgrade_supported());
+        assert!(!info.has_update);
+        assert!(info.download_url.is_none());
+    }
+
+    #[tokio::test]
+    async fn upgrade_binary_is_rejected_when_platform_cannot_replace_itself() {
+        if upgrade_supported() {
+            return;
+        }
+
+        let state = app_state(Config::default());
+        let err = upgrade_binary(&state).await.expect_err("windows upgrade");
+        assert!(err.to_string().contains("安装包"));
+        assert!(!state.upgrading.load(std::sync::atomic::Ordering::SeqCst));
     }
 }

@@ -5,7 +5,7 @@
   <p>
     <a href="https://github.com/YUxiangLuo/miao/releases/latest"><img src="https://img.shields.io/github/v/release/YUxiangLuo/miao?style=flat-square" alt="Release" /></a>
     <a href="https://github.com/YUxiangLuo/miao/actions/workflows/ci.yml"><img src="https://github.com/YUxiangLuo/miao/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
-    <img src="https://img.shields.io/badge/platform-Linux%20%7C%20OpenWrt-blue?style=flat-square" alt="Platform" />
+    <img src="https://img.shields.io/badge/platform-Linux%20%7C%20OpenWrt%20%7C%20Windows-blue?style=flat-square" alt="Platform" />
   </p>
 </div>
 
@@ -25,6 +25,14 @@ chmod +x miao && sudo ./miao
 ```
 
 浏览器打开 <http://localhost:6161>，按引导页添加订阅或节点即可。需要 root(TUN 透明代理所需）；找不到配置时会先进入引导页，不落盘任何文件。
+
+### Windows 桌面版
+
+Win10/11 x64：下载 Release 里的 NSIS 安装包（当前用户，安装本身不抬 UAC）或 `miao-windows-amd64.zip` 便携包。第一次运行会要一次管理员权限（TUN / Wintun）。系统通常已有 WebView2，没有的话安装包会走 bootstrapper。未签名时 SmartScreen 可能提示「仍要运行」。
+
+Windows 上请退出后再换新的安装包或 zip 更新，面板里的一键升级是 Linux 路径。VPS 一键部署在 Windows 上不可用。
+
+配置在 `%LOCALAPPDATA%\miao\config.yaml`。内核版本钉在 sing-box 1.13.x，不要跟默认分支漂到 1.14。
 
 ### 用脚本安装为 systemd 服务
 

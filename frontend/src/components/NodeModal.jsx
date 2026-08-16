@@ -603,7 +603,7 @@ function VpsDeployPane({ onDeploy, loading }) {
   )
 }
 
-export function NodeModal({ open, nodeType, setNodeType, form, setForm, loading, onClose, onSubmit, onImport, onDeployVps }) {
+export function NodeModal({ open, nodeType, setNodeType, form, setForm, loading, onClose, onSubmit, onImport, onDeployVps, vpsSupported = true }) {
   const titleId = useId()
   const dialogRef = useDialog(open, onClose)
   const [mode, setMode] = useState('link')
@@ -612,6 +612,10 @@ export function NodeModal({ open, nodeType, setNodeType, form, setForm, loading,
   useEffect(() => {
     if (!open) setMode('link')
   }, [open])
+
+  useEffect(() => {
+    if (!vpsSupported && mode === 'vps') setMode('link')
+  }, [vpsSupported, mode])
 
   if (!open) return null
 
@@ -653,14 +657,16 @@ export function NodeModal({ open, nodeType, setNodeType, form, setForm, loading,
           >
             手动填写
           </button>
-          <button
-            type="button"
-            className={classNames('connections-pill', mode === 'vps' && 'active')}
-            aria-pressed={mode === 'vps'}
-            onClick={() => setMode('vps')}
-          >
-            VPS 部署
-          </button>
+          {vpsSupported ? (
+            <button
+              type="button"
+              className={classNames('connections-pill', mode === 'vps' && 'active')}
+              aria-pressed={mode === 'vps'}
+              onClick={() => setMode('vps')}
+            >
+              VPS 部署
+            </button>
+          ) : null}
         </div>
 
         {mode === 'link' ? (

@@ -128,6 +128,37 @@ mod tests {
         assert_eq!(json["success"], true);
         assert_eq!(json["message"], "stopped");
         assert_eq!(json["data"]["running"], false);
+        assert_eq!(
+            json["data"]["vps_supported"],
+            crate::platform::vps_supported()
+        );
+    }
+
+    #[tokio::test]
+    async fn router_returns_version_capability_flags() {
+        let app = test_app(Config {
+            port: None,
+            subs: vec![],
+            nodes: vec![],
+            custom_rules: vec![],
+            route_mode: Default::default(),
+            adblock: false,
+        })
+        .await;
+
+        let response = app
+            .oneshot(empty_request("GET", "/api/version"))
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let json = response_json(response).await;
+        assert_eq!(json["success"], true);
+        assert_eq!(
+            json["data"]["upgrade_supported"],
+            crate::platform::upgrade_supported()
+        );
+        assert_eq!(json["data"]["has_update"], false);
     }
 
     #[tokio::test]

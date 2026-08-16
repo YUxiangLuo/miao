@@ -99,3 +99,77 @@ jobs:
           files: |
             ${{ env.RELEASE_ASSET }}
             ${{ env.RELEASE_SHA256 }}
+
+  windows:
+    runs-on: windows-latest
+    needs: frontend
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download frontend artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-dist
+          path: public/
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: stable
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Build Windows sing-box and geo files
+        shell: bash
+        run: MIAO_TARGET=windows-amd64 ./scripts/build-embedded.sh
+
+      - name: Build desktop shell
+        run: cargo build -p miao-desktop --locked --release
+
+      - name: Package portable zip
+        shell: pwsh
+        run: |
+          Copy-Item target/release/miao.exe miao.exe
+          Compress-Archive -Path miao.exe -DestinationPath miao-windows-amd64.zip
+          $hash = (Get-FileHash .\miao-windows-amd64.zip -Algorithm SHA256).Hash.ToLower()
+          Set-Content -Path miao-windows-amd64.zip.sha256 -Value "$hash  miao-windows-amd64.zip" -NoNewline
+
+      - name: Install Tauri CLI
+        run: npm install -g @tauri-apps/cli@2.11.4
+
+      - name: Bundle NSIS installer
+        working-directory: desktop/src-tauri
+        run: npx --yes @tauri-apps/cli@2.11.4 build --bundles nsis --ci
+
+      - name: Collect NSIS installer
+        shell: bash
+        run: |
+          installer=$(find target/release/bundle/nsis -name '*.exe' | head -n 1)
+          test -n "$installer"
+          cp "$installer" miao-windows-amd64-setup.exe
+          sha256sum miao-windows-amd64-setup.exe | tee miao-windows-amd64-setup.exe.sha256
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: miao-windows-amd64
+          path: |
+            miao-windows-amd64.zip
+            miao-windows-amd64.zip.sha256
+            miao-windows-amd64-setup.exe
+            miao-windows-amd64-setup.exe.sha256
+
+      - name: Release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: |
+            miao-windows-amd64.zip
+            miao-windows-amd64.zip.sha256
+            miao-windows-amd64-setup.exe
+            miao-windows-amd64-setup.exe.sha256

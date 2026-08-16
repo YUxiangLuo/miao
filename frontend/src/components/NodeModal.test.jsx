@@ -108,4 +108,11 @@ describe('NodeModal link import', () => {
 
     expect(onDeployVps).toHaveBeenCalledWith({ ip: '203.0.113.10', password: 'rootpass' })
   })
+
+  it('hides vps deploy when the platform does not support askpass', () => {
+    renderModal({ vpsSupported: false })
+
+    expect(screen.queryByRole('button', { name: 'VPS 部署' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '粘贴链接' })).toBeInTheDocument()
+  })
 })

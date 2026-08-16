@@ -2,6 +2,7 @@ mod error;
 mod handlers;
 mod models;
 mod paths;
+mod platform;
 mod privilege;
 mod responses;
 mod router;

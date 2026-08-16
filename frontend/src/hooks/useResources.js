@@ -72,7 +72,12 @@ export function useRules() {
 }
 
 export function useVersion() {
-  const [versionInfo, setVersionInfo] = useState({ current: '', latest: null, has_update: false })
+  const [versionInfo, setVersionInfo] = useState({
+    current: '',
+    latest: null,
+    has_update: false,
+    upgrade_supported: true,
+  })
 
   const fetchVersion = useCallback(async () => {
     try {

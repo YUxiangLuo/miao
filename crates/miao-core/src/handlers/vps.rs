@@ -19,6 +19,13 @@ pub async fn deploy_vps(
         ));
     }
 
+    if !crate::platform::vps_supported() {
+        return Err(status_error(
+            StatusCode::BAD_REQUEST,
+            "当前平台不支持 VPS 一键部署",
+        ));
+    }
+
     let ip = req.ip.trim();
     Validator::server_address(ip).map_err(|e| status_error(StatusCode::BAD_REQUEST, e))?;
     if req.password.is_empty() {
@@ -55,4 +62,40 @@ pub async fn deploy_vps(
         format!("VPS 节点已添加: {tag}"),
         VpsDeployResponse { tag },
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use axum::{extract::State, http::StatusCode, Json};
+
+    use super::deploy_vps;
+    use crate::models::{Config, VpsDeployRequest};
+    use crate::test_support::app_state;
+
+    #[tokio::test]
+    async fn deploy_vps_is_rejected_when_platform_cannot_run_askpass() {
+        if crate::platform::vps_supported() {
+            return;
+        }
+
+        let state = app_state(Config::default());
+        state
+            .initializing
+            .store(false, std::sync::atomic::Ordering::Relaxed);
+
+        let status = match deploy_vps(
+            State(state),
+            Json(VpsDeployRequest {
+                ip: "203.0.113.10".into(),
+                password: "secret".into(),
+            }),
+        )
+        .await
+        {
+            Ok(_) => panic!("windows vps deploy unexpectedly succeeded"),
+            Err((status, _)) => status,
+        };
+
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
 }

@@ -23,6 +23,9 @@ enum LastProxyStore {
 }
 
 fn last_proxy_store(openwrt_like: bool, pid1_comm: &str) -> LastProxyStore {
+    if cfg!(windows) {
+        return LastProxyStore::RuntimeDir;
+    }
     if openwrt_like || pid1_comm.trim() != "systemd" {
         LastProxyStore::RuntimeDir
     } else {
@@ -206,11 +209,21 @@ mod tests {
         assert_eq!(last_proxy_store(false, ""), LastProxyStore::RuntimeDir);
     }
 
+    #[cfg(not(windows))]
     #[test]
     fn last_proxy_store_uses_cwd_only_for_systemd_linux() {
         assert_eq!(
             last_proxy_store(false, "systemd"),
             LastProxyStore::WorkingDir
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn last_proxy_store_is_runtime_dir_on_windows() {
+        assert_eq!(
+            last_proxy_store(false, "systemd"),
+            LastProxyStore::RuntimeDir
         );
     }
 

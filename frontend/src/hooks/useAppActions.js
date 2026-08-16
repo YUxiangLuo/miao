@@ -287,6 +287,11 @@ export function useAppActions(data) {
   }, [fetchConnections, showToast, setShowConnectionsModal])
 
   const handleUpgradeClick = useCallback(async () => {
+    if (versionInfo.upgrade_supported === false) {
+      showToast('当前平台请下载安装包或便携包，退出后再替换', 'info')
+      return
+    }
+
     if (!status.running) {
       showToast('sing-box 未运行，暂不检测更新', 'info')
       return
