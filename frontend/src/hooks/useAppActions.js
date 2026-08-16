@@ -288,7 +288,7 @@ export function useAppActions(data) {
 
   const handleUpgradeClick = useCallback(async () => {
     if (versionInfo.upgrade_supported === false) {
-      showToast('当前平台请下载安装包或便携包，退出后再替换', 'info')
+      showToast('当前平台请下载安装包，退出后覆盖安装', 'info')
       return
     }
 
