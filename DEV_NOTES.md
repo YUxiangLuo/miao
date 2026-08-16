@@ -160,6 +160,7 @@ sudo bash install.sh ./target/release/miao-rust
 | 内核看门狗 | 崩溃自动拉起（2s 巡检、1–16s 退避、最多 5 次），放弃时写 `config_warning`；有意启动/停核先递增 `sing_generation`，spawn 不覆盖仍活着的子进程 |
 | 日志轮转 | `miao.log` 超 8 MB 时启动改名 `.old`（单份滚动） |
 | 进程规则文案 | `/api/status` 的 `platform` 决定 placeholder（`qbittorrent.exe`） |
+| 托盘 | 左键单击唤出窗口，左键双击唤出/收回；右键菜单：显示窗口/打开日志/开机自启/退出 |
 | 开机自启 | 托盘 CheckMenuItem → 任务计划 `Miao`（ONLOGON + HIGHEST + `--minimized`），勾选状态即任务存在性、不落配置，切换后回读校验；卸载钩子 best-effort `schtasks /Delete` |
 
 TUN JSON：`auto_route` + `strict_route`，`interface_name` 仍是 `sing-tun`。`cfg(target_os = "linux")` 才写 `auto_redirect`。

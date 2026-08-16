@@ -120,15 +120,17 @@ fn install_tray(app: &AppHandle) -> tauri::Result<()> {
             "quit" => app.exit(0),
             _ => {}
         })
-        .on_tray_icon_event(|tray, event| {
-            if let TrayIconEvent::Click {
+        .on_tray_icon_event(|tray, event| match event {
+            TrayIconEvent::Click {
                 button: MouseButton::Left,
                 button_state: MouseButtonState::Up,
                 ..
-            } = event
-            {
-                show_main_window(tray.app_handle());
-            }
+            } => show_main_window(tray.app_handle()),
+            TrayIconEvent::DoubleClick {
+                button: MouseButton::Left,
+                ..
+            } => toggle_main_window(tray.app_handle()),
+            _ => {}
         });
 
     if let Some(icon) = app.default_window_icon() {
@@ -169,6 +171,20 @@ fn show_main_window(app: &AppHandle) {
         let _ = window.maximize();
         let _ = window.show();
         let _ = window.set_focus();
+    }
+}
+
+/// 双击托盘图标：窗口显示中（且未最小化）则收回托盘，否则唤出。
+/// 与单击「只显示」配合后，双击在两种起始状态下的结果都符合直觉。
+fn toggle_main_window(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let visible = window.is_visible().unwrap_or(false);
+        let minimized = window.is_minimized().unwrap_or(false);
+        if visible && !minimized {
+            let _ = window.hide();
+        } else {
+            show_main_window(app);
+        }
     }
 }
 
