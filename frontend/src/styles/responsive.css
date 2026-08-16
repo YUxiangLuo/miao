@@ -1,6 +1,8 @@
 @media (max-width: 1180px) {
     .content-grid {
-        grid-template-columns: 1fr;
+        /* 必须 minmax(0,1fr)：裸 1fr 等价 minmax(auto,1fr)，轨道最小值是内容
+           min-content，长节点名等不可断字符串会把单列布局撑出全局横向滚动 */
+        grid-template-columns: minmax(0, 1fr);
     }
 }
 @media (max-width: 840px) {
@@ -53,7 +55,7 @@
     }
     .proxy-grid,
     .form-grid.two {
-        grid-template-columns: 1fr;
+        grid-template-columns: minmax(0, 1fr);
     }
     .subscription-add-row {
         flex-direction: column;
@@ -67,10 +69,10 @@
         min-width: 0;
     }
     .connection-stat-grid {
-        grid-template-columns: 1fr;
+        grid-template-columns: minmax(0, 1fr);
     }
     .connection-card-grid {
-        grid-template-columns: 1fr;
+        grid-template-columns: minmax(0, 1fr);
     }
     .onboarding-card {
         margin: 0 16px;
