@@ -68,7 +68,7 @@ export function ProxyCard({
         <div className="section-header">
           <div className="section-title-wrap">
             <Waypoints size={14} className="section-icon" />
-            <span>代理节点选择</span>
+            <span>节点列表</span>
           </div>
           <Button 
             tone="secondary" 

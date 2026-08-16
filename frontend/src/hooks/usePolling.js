@@ -3,9 +3,10 @@ import { POLL_INTERVAL } from '../utils.js'
 
 /**
  * 统一轮询管理 hook
- * 合并多个定时任务到单个定时器，减少资源消耗
+ * 合并多个定时任务到单个定时器，减少资源消耗。
+ * interval 变化时会重建定时器并立即补跑一轮（启动期加速轮询靠它生效）。
  */
-export function usePolling(tasks, enabled = true) {
+export function usePolling(tasks, enabled = true, interval = POLL_INTERVAL) {
   const tasksRef = useRef(tasks)
   const timerRef = useRef(null)
   const runningTaskIndexesRef = useRef(new Set())
@@ -53,7 +54,7 @@ export function usePolling(tasks, enabled = true) {
     const startTimer = () => {
       stopTimer()
       runTasks()
-      timerRef.current = window.setInterval(runTasks, POLL_INTERVAL)
+      timerRef.current = window.setInterval(runTasks, interval)
     }
 
     startTimer()
@@ -72,7 +73,7 @@ export function usePolling(tasks, enabled = true) {
       stopTimer()
       document.removeEventListener('visibilitychange', handleVisibilityChange)
     }
-  }, [enabled, runTasks])
+  }, [enabled, interval, runTasks])
 
   // 返回手动触发函数
   return { triggerPoll: runTasks }

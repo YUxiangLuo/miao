@@ -4,7 +4,7 @@ import { useStatus, useSubs, useNodes, useRules, useVersion } from './useResourc
 import { useProxies, useTraffic, useConnections, useDelays } from './useClash.js'
 import { usePolling } from './usePolling.js'
 import { useDesktopLayout } from './useDesktopLayout.js'
-import { EMPTY_NODE_FORM, nodeTypeDefaults } from '../utils.js'
+import { EMPTY_NODE_FORM, nodeTypeDefaults, POLL_INTERVAL, POLL_INTERVAL_STARTUP } from '../utils.js'
 
 export function useAppData() {
   const [firstLoadDone, setFirstLoadDone] = useState(false)
@@ -92,7 +92,8 @@ export function useAppData() {
 
   const connectionPollingTasks = useMemo(() => [fetchConnections], [fetchConnections])
 
-  usePolling(pollingTasks, true)
+  // 初始化期（内核正在拉起）加速轮询，就绪状态近乎即时呈现；平时 3s
+  usePolling(pollingTasks, true, status.initializing ? POLL_INTERVAL_STARTUP : POLL_INTERVAL)
   usePolling(
     connectionPollingTasks,
     status.running && (showConnectionsModal || isDesktop || rules.length > 0),

@@ -121,7 +121,7 @@ describe('App onboarding integration', () => {
     render(<App />)
 
     // 面板渲染出来后,应自动对当前节点发起一次测速
-    expect(await screen.findByText('代理节点选择')).toBeInTheDocument()
+    expect(await screen.findByText('节点列表')).toBeInTheDocument()
     await waitFor(() => {
       expect(delayCalls.some((url) => url.includes('node-a'))).toBe(true)
     })

@@ -2,6 +2,8 @@
 
 export const API_HEADERS = { 'Content-Type': 'application/json' }
 export const POLL_INTERVAL = 3000
+// 启动初始化期（内核正在拉起的几秒内）用更快轮询，让就绪状态近乎即时可见
+export const POLL_INTERVAL_STARTUP = 500
 
 export const EMPTY_NODE_FORM = {
   tag: '',
