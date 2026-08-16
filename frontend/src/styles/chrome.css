@@ -268,6 +268,10 @@
     color: var(--text-muted);
     font-size: 0.8125rem;
     margin-top: 2px;
+    /* 与标题行同款截断：无空格的长 token（URL/错误串）不可断行，否则会水平顶穿容器 */
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 .list-row-meta.error {
     color: var(--danger);

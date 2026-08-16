@@ -13,9 +13,12 @@ const SubRow = memo(function SubRow({ sub, onDelete, disabled }) {
       </div>
       <div className="list-row-content">
         <div className="list-row-title">{maskSubscription(sub.url)}</div>
-        <div className={classNames('list-row-meta', !sub.success && 'error')}>
-          {sub.success 
-            ? `${sub.node_count} 个节点` 
+        <div
+          className={classNames('list-row-meta', !sub.success && 'error')}
+          title={sub.success ? undefined : sub.error}
+        >
+          {sub.success
+            ? `${sub.node_count} 个节点`
             : sub.error || '获取失败'}
         </div>
       </div>

@@ -9,7 +9,9 @@ const NodeRow = memo(function NodeRow({ node, onDelete, disabled }) {
       <Server size={13} className="list-leading-icon" />
       <div className="list-row-content">
         <div className="list-row-title">{node.tag}</div>
-        <div className="list-row-meta">{node.server}:{node.server_port} · {protocolLabel(node.node_type)}</div>
+        <div className="list-row-meta" title={`${node.server}:${node.server_port}`}>
+          {node.server}:{node.server_port} · {protocolLabel(node.node_type)}
+        </div>
       </div>
       <button
         className="icon-button subtle"
