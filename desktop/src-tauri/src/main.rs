@@ -133,8 +133,8 @@ fn install_tray(app: &AppHandle) -> tauri::Result<()> {
 fn finish_desktop_shell(app: &mut tauri::App, url: &str) -> Result<(), Box<dyn std::error::Error>> {
     WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url.parse()?))
         .title("Miao")
-        .inner_size(1280.0, 840.0)
-        .min_inner_size(960.0, 640.0)
+        .resizable(false)
+        .maximized(true)
         .build()?;
     install_tray(app.handle())?;
     Ok(())
@@ -143,6 +143,7 @@ fn finish_desktop_shell(app: &mut tauri::App, url: &str) -> Result<(), Box<dyn s
 fn show_main_window(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.unminimize();
+        let _ = window.maximize();
         let _ = window.show();
         let _ = window.set_focus();
     }
