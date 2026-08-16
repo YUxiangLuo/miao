@@ -168,7 +168,7 @@ TUN JSON：`auto_route` + `strict_route`，`interface_name` 仍是 `sing-tun`。
 2. Rust quality（default-members + `cargo check -p miao-core --target x86_64-pc-windows-gnu`）
 3. Windows（`windows-latest`：`cargo test -p miao-core`，再 `cargo build -p miao-desktop`；内核用 stub，**不跑 exe、不开 TUN**）
 
-打 `v*` tag 或手动跑 **Build Release**：编真内核，产物只挂在该次 run 的 Artifacts（`miao-windows-amd64`），不上 GitHub Releases 页面。本机不出安装包。
+打 `v*` tag 或手动跑 **Build Release**：只编 Windows 真内核 + zip / NSIS，产物挂在该次 run 的 Artifacts（`miao-windows-amd64`），不上 GitHub Releases，也不编 Linux 包。本机不出安装包。
 
 ## 脚本
 

@@ -31,68 +31,6 @@ jobs:
           name: frontend-dist
           path: public/
 
-  build:
-    runs-on: ubuntu-latest
-    needs: frontend
-    strategy:
-      matrix:
-        include:
-          - target: amd64
-            rust_target: x86_64-unknown-linux-musl
-          - target: arm64
-            rust_target: aarch64-unknown-linux-musl
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Download frontend artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: frontend-dist
-          path: public/
-
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.rust_target }}
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: stable
-
-      - name: Set up Bun
-        uses: oven-sh/setup-bun@v2
-
-      - name: Install Zig for cross-compilation
-        uses: mlugg/setup-zig@v2
-
-      - name: Install cargo-zigbuild
-        uses: taiki-e/install-action@cargo-zigbuild
-
-      - name: Build sing-box and geo rule files
-        run: MIAO_TARGET=${{ matrix.target }} ./scripts/build-embedded.sh
-
-      - name: Build release for ${{ matrix.target }}
-        run: cargo zigbuild --locked --release --target ${{ matrix.rust_target }}
-
-      - name: Prepare release asset
-        run: |
-          mv target/${{ matrix.rust_target }}/release/miao-rust miao-rust-linux-${{ matrix.target }}
-          ASSET="miao-rust-linux-${{ matrix.target }}"
-          # GNU sha256sum 标准一行：`<hex>  <filename>`，供本机校验与程序解析
-          sha256sum "$ASSET" | tee "${ASSET}.sha256"
-          printf 'RELEASE_ASSET=%s\n' "$ASSET" >> "$GITHUB_ENV"
-          printf 'RELEASE_SHA256=%s.sha256\n' "$ASSET" >> "$GITHUB_ENV"
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: miao-rust-${{ matrix.target }}
-          path: |
-            ${{ env.RELEASE_ASSET }}
-            ${{ env.RELEASE_SHA256 }}
-
   windows:
     runs-on: windows-latest
     needs: frontend
