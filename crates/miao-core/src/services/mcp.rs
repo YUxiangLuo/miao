@@ -75,6 +75,9 @@ fn discover_result() -> JsonValue {
         "protocolVersion": MCP_PROTOCOL_VERSION,
         "capabilities": { "tools": { "listChanged": false } },
         "serverInfo": { "name": "miao", "version": VERSION },
+        // 给调用者的使用说明：客户端连接时读取。核心目的——防「自伤」：
+        // agent 的出网流量很可能正经过本代理，破坏性操作会断它自己的网
+        "instructions": "miao 是本机/路由器的透明代理控制面。你（调用者）的出网流量很可能正经过它：停止或重启内核、切换路由模式都会造成秒级网络中断——包括你自己的连接。执行此类操作前请先向用户说明并确认。切换节点是毫秒级操作，但已建立的连接会重置。",
     })
 }
 
@@ -122,7 +125,7 @@ fn tools_catalog() -> JsonValue {
         },
         {
             "name": "switch_node",
-            "description": "切换当前节点；选择会持久化，重启后自动恢复",
+            "description": "切换当前节点；选择会持久化，重启后自动恢复。毫秒级完成，但已建立的连接会重置",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -143,7 +146,7 @@ fn tools_catalog() -> JsonValue {
         },
         {
             "name": "set_route_mode",
-            "description": "切换路由模式：rule=规则分流（国内直连/国外代理），global=全局代理。会话级，不写配置文件",
+            "description": "切换路由模式：rule=规则分流（国内直连/国外代理），global=全局代理。会话级，不写配置文件。注意：会热重启内核，所有连接（可能包括你自己的）秒级中断，操作前请先向用户确认",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -659,6 +662,11 @@ mod tests {
             assert_eq!(result["protocolVersion"], MCP_PROTOCOL_VERSION);
             assert_eq!(result["serverInfo"]["name"], "miao");
             assert!(result["capabilities"]["tools"].is_object());
+            // 调用者须知：流量可能经过本代理，破坏性操作会自断其网
+            assert!(result["instructions"]
+                .as_str()
+                .unwrap()
+                .contains("网络中断"));
         }
     }
 
