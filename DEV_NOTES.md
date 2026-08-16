@@ -171,7 +171,7 @@ Arch 上的面板仍是那份 systemd Linux 实例，可以用来看 **共享 UI
 - `agent-browser open <url>` / `eval '<js>'` / `screenshot [--full] <path>`；`set viewport <w> <h>`
 - `eval` 跨调用保留 JS 上下文，同名 `const` 会炸，用 IIFE
 - React 受控组件要走原生 setter + `input`/`change` 事件
-- 首页固定高度，左右列内部滚；活跃链接区恒高 240px 且始终渲染
+- 首页固定高度，左右列内部滚；活跃链接区恒高且始终渲染，只显示一行、放不下直接裁切不滚动，条带卡片不可展开（明细走「查看全部」）
 - 移动端 ≤840px 由 `isDesktop` 门控，不要再加 CSS `display:none`
 
 ## 写测试

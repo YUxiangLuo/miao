@@ -82,58 +82,70 @@ function ConnectionDetailRow({ connection }) {
 
 export function ConnectionCard({ group, expanded, onToggle }) {
   const active = groupSpeed(group) > 0
+  // 不传 onToggle 时为纯展示模式（首页条带）：无 chevron、不可展开，
+  // 每条链接的明细由「查看全部」的完整视图承载
+  const expandable = typeof onToggle === 'function'
+  const head = (
+    <>
+      <div className="connection-card-top">
+        <SiteMark domain={group.domain} />
+        <div className="connection-card-identity">
+          <strong className="connection-card-domain" title={group.domain}>{group.domain}</strong>
+          <span className="connection-card-rule" title={group.rule}>
+            {group.ruleLabel}
+            {group.extraRules > 0 && <em>+{group.extraRules}</em>}
+          </span>
+        </div>
+        {active && <span className="connection-live-dot" title="正在传输" aria-hidden="true" />}
+        {expandable && <ChevronDown size={14} className="connection-card-chevron" aria-hidden="true" />}
+      </div>
+      <div className="connection-card-meta">
+        <span className={classNames('connection-outbound-chip', group.outbound === 'direct' && 'direct')}>
+          {group.outbound}
+        </span>
+        {group.count > 1 && <span className="connection-count-chip">{group.count} 条链接</span>}
+        <span className="connection-card-speed">
+          <small className="tone-download">
+            <ArrowDown size={11} />
+            <AnimatedValue value={formatSpeed(group.downloadSpeed)} />
+          </small>
+          <small className="tone-upload">
+            <ArrowUp size={11} />
+            <AnimatedValue value={formatSpeed(group.uploadSpeed)} />
+          </small>
+        </span>
+      </div>
+      <div className="connection-card-total">
+        <span className="connection-card-total-label">累计</span>
+        <span className="connection-card-total-values">
+          <small className="tone-download">
+            <ArrowDown size={11} />
+            <AnimatedValue value={formatBytes(group.download)} />
+          </small>
+          <small className="tone-upload">
+            <ArrowUp size={11} />
+            <AnimatedValue value={formatBytes(group.upload)} />
+          </small>
+        </span>
+      </div>
+    </>
+  )
   return (
     <article className={classNames('connection-card', active && 'active', expanded && 'expanded')}>
-      <button
-        type="button"
-        className="connection-card-head"
-        aria-expanded={expanded}
-        aria-label={`${group.domain} 链接详情`}
-        onClick={onToggle}
-      >
-        <div className="connection-card-top">
-          <SiteMark domain={group.domain} />
-          <div className="connection-card-identity">
-            <strong className="connection-card-domain" title={group.domain}>{group.domain}</strong>
-            <span className="connection-card-rule" title={group.rule}>
-              {group.ruleLabel}
-              {group.extraRules > 0 && <em>+{group.extraRules}</em>}
-            </span>
-          </div>
-          {active && <span className="connection-live-dot" title="正在传输" aria-hidden="true" />}
-          <ChevronDown size={14} className="connection-card-chevron" aria-hidden="true" />
-        </div>
-        <div className="connection-card-meta">
-          <span className={classNames('connection-outbound-chip', group.outbound === 'direct' && 'direct')}>
-            {group.outbound}
-          </span>
-          {group.count > 1 && <span className="connection-count-chip">{group.count} 条链接</span>}
-          <span className="connection-card-speed">
-            <small className="tone-download">
-              <ArrowDown size={11} />
-              <AnimatedValue value={formatSpeed(group.downloadSpeed)} />
-            </small>
-            <small className="tone-upload">
-              <ArrowUp size={11} />
-              <AnimatedValue value={formatSpeed(group.uploadSpeed)} />
-            </small>
-          </span>
-        </div>
-        <div className="connection-card-total">
-          <span className="connection-card-total-label">累计</span>
-          <span className="connection-card-total-values">
-            <small className="tone-download">
-              <ArrowDown size={11} />
-              <AnimatedValue value={formatBytes(group.download)} />
-            </small>
-            <small className="tone-upload">
-              <ArrowUp size={11} />
-              <AnimatedValue value={formatBytes(group.upload)} />
-            </small>
-          </span>
-        </div>
-      </button>
-      {expanded && (
+      {expandable ? (
+        <button
+          type="button"
+          className="connection-card-head"
+          aria-expanded={expanded}
+          aria-label={`${group.domain} 链接详情`}
+          onClick={onToggle}
+        >
+          {head}
+        </button>
+      ) : (
+        <div className="connection-card-head">{head}</div>
+      )}
+      {expandable && expanded && (
         <div className="connection-card-details">
           {group.connections.map((item) => (
             <ConnectionDetailRow key={item.id} connection={item} />

@@ -91,4 +91,18 @@ describe('HomeConnections', () => {
     await user.click(screen.getByRole('button', { name: '查看全部' }))
     expect(onOpenAll).toHaveBeenCalledTimes(1)
   })
+
+  it('renders strip cards as static (details live in the full view)', () => {
+    render(
+      <HomeConnections
+        status={{ running: true }}
+        data={{ connections: [connection({ id: 'a', downloadSpeed: 80 })] }}
+        onOpenAll={vi.fn()}
+      />,
+    )
+
+    // 条带单行裁切,卡片不提供展开入口;明细由「查看全部」承载
+    expect(screen.getByText('api.github.com')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /链接详情/ })).not.toBeInTheDocument()
+  })
 })
