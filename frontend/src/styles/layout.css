@@ -115,3 +115,51 @@
 .home-connections-empty {
     grid-column: 1 / -1;
 }
+
+/* ── 桌面双列（>1180px）固定几何：六个板块位置与大小钉死 ──────────────
+   状态卡 76 / 网格 630（右列 156+196+246+2×16 gap 恰好等于列高）/ 条带 184。
+   窗口偏矮：content-grid 可收缩，列内滚动兜底（与既有行为一致）；
+   窗口偏高：多余空间在条带下方留白，板块不再拉伸。841–1180px 单列堆叠带
+   不受此约束，保持弹性。 */
+@media (min-width: 1181px) {
+    .status-card {
+        height: 76px;
+    }
+    .status-card .status-card-body {
+        height: 100%;
+    }
+    .content-grid {
+        flex: 0 1 auto;
+        height: var(--home-grid-height);
+    }
+    /* 左列节点卡恒等于列高（取代 flex-grow 填满），收缩/滚动兜底不变 */
+    .left-column > *:last-child {
+        flex-grow: 0;
+        height: 100%;
+    }
+    /* 右列三张卡各自钉死；超出部分在卡片 body 内部滚动，header 固定 */
+    .right-column > *:nth-child(1) {
+        height: 156px;
+    }
+    .right-column > *:nth-child(2) {
+        height: 196px;
+    }
+    .right-column > *:nth-child(3) {
+        height: 246px;
+    }
+    .right-column > *:last-child {
+        flex-grow: 0;
+    }
+    .right-column > * {
+        display: flex;
+        flex-direction: column;
+    }
+    .right-column .section-header {
+        flex-shrink: 0;
+    }
+    .right-column .panel-card-body {
+        flex: 1;
+        min-height: 0;
+        overflow-y: auto;
+    }
+}

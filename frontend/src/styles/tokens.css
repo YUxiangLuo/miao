@@ -22,6 +22,9 @@
     --shadow: 0 16px 32px rgba(0, 0, 0, 0.25);
     --radius: 8px;
     --home-connections-height: 184px;
+    /* 桌面双列（>1180px）内容网格固定高度：状态卡 76 + 网格 + 条带 184，
+       整页需求 ≈ 网格高 + 392px；窗口偏矮时列内滚动兜底，偏高时底部留白 */
+    --home-grid-height: 630px;
     --node-card-min-height: 326px;
 }
 
