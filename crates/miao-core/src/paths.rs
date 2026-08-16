@@ -83,8 +83,20 @@ fn resolve_config_path_from_parts(
     }
 
     ConfigPathResolution {
-        path: PathBuf::from(ETC_CONFIG_PATH),
+        path: platform_default_config_path(),
         source: ConfigPathSource::EtcDefault,
+    }
+}
+
+pub fn platform_default_config_path() -> PathBuf {
+    if cfg!(windows) {
+        std::env::var_os("LOCALAPPDATA")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from(r"C:\ProgramData"))
+            .join("miao")
+            .join(CONFIG_FILENAME)
+    } else {
+        PathBuf::from(ETC_CONFIG_PATH)
     }
 }
 
@@ -93,9 +105,7 @@ mod tests {
     use std::ffi::OsString;
     use std::path::PathBuf;
 
-    use super::{
-        config_arg_from, resolve_config_path_from_parts, ConfigPathSource, ETC_CONFIG_PATH,
-    };
+    use super::{config_arg_from, resolve_config_path_from_parts, ConfigPathSource};
 
     #[test]
     fn config_arg_parses_separate_value() {
@@ -138,7 +148,16 @@ mod tests {
         let resolution =
             resolve_config_path_from_parts(false, Some(PathBuf::from("/opt/miao/config.yaml")));
 
-        assert_eq!(resolution.path, PathBuf::from(ETC_CONFIG_PATH));
+        assert_eq!(resolution.path, super::platform_default_config_path());
         assert_eq!(resolution.source, ConfigPathSource::EtcDefault);
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn platform_default_config_is_etc_on_unix() {
+        assert_eq!(
+            super::platform_default_config_path(),
+            PathBuf::from(super::ETC_CONFIG_PATH)
+        );
     }
 }

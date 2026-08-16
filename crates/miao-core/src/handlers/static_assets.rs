@@ -1,7 +1,10 @@
 use axum::response::Html;
 
 pub async fn serve_index() -> Html<&'static str> {
-    Html(include_str!("../../public/index.html"))
+    Html(include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../public/index.html"
+    )))
 }
 
 pub async fn serve_favicon() -> (
@@ -10,7 +13,10 @@ pub async fn serve_favicon() -> (
 ) {
     (
         [(axum::http::header::CONTENT_TYPE, "image/svg+xml")],
-        include_str!("../../public/icon.svg"),
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../public/icon.svg"
+        )),
     )
 }
 

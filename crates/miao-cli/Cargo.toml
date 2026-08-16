@@ -1,0 +1,13 @@
+[package]
+name = "miao-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "miao-rust"
+path = "src/main.rs"
+
+[dependencies]
+miao-core = { path = "../miao-core" }
+tokio = { version = "1.0", features = ["macros", "rt-multi-thread"] }

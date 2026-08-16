@@ -253,6 +253,22 @@ fn apply_route_mode(
     }
 }
 
+pub(super) fn tun_inbound() -> serde_json::Value {
+    let mut inbound = serde_json::json!({
+        "type": "tun",
+        "tag": "tun-in",
+        "interface_name": "sing-tun",
+        "address": ["172.18.0.1/30"],
+        "mtu": 9000,
+        "auto_route": true,
+        "strict_route": true
+    });
+    if cfg!(target_os = "linux") {
+        inbound["auto_redirect"] = serde_json::json!(true);
+    }
+    inbound
+}
+
 fn get_config_template() -> serde_json::Value {
     serde_json::json!({
         "log": {"disabled": false, "timestamp": true, "level": "info"},
@@ -280,9 +296,7 @@ fn get_config_template() -> serde_json::Value {
                 {"rule_set": ["chinasite"], "action": "route", "server": "local"}
             ]
         },
-        "inbounds": [
-            {"type": "tun", "tag": "tun-in", "interface_name": "sing-tun", "address": ["172.18.0.1/30"], "mtu": 9000, "auto_route": true, "strict_route": true, "auto_redirect": true}
-        ],
+        "inbounds": [tun_inbound()],
         "outbounds": [
             {"type": "selector", "tag": "proxy", "outbounds": []},
             {"type": "direct", "tag": "direct"}

@@ -1,6 +1,5 @@
 use std::{
     fs,
-    os::unix::{fs::PermissionsExt, process::CommandExt},
     path::Path,
     sync::{atomic::Ordering, Arc},
     time::Instant,
@@ -306,7 +305,10 @@ fn get_temp_binary_path() -> String {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs();
-    format!("/tmp/miao-new-{}-{}", pid, timestamp)
+    std::env::temp_dir()
+        .join(format!("miao-new-{pid}-{timestamp}"))
+        .to_string_lossy()
+        .into_owned()
 }
 
 fn checksum_asset_name(binary_asset_name: &str) -> String {
@@ -360,8 +362,7 @@ fn release_is_newer_than_current(current: &str, release_tag: &str) -> bool {
 
 /// 对已通过 SHA256 校验的临时文件 chmod 并执行 `--version` 核对。
 async fn verify_temp_binary_executable(temp_path: &Path, tag_name: &str) -> AppResult<()> {
-    std::fs::set_permissions(temp_path, std::fs::Permissions::from_mode(0o755))
-        .map_err(|e| AppError::context("Failed to chmod temp binary", e))?;
+    set_executable(temp_path).map_err(|e| AppError::context("Failed to chmod temp binary", e))?;
 
     let output = tokio::process::Command::new(temp_path)
         .arg("--version")
@@ -471,7 +472,7 @@ pub async fn upgrade_binary(state: &Arc<AppState>) -> AppResult<String> {
         let _ = tokio::fs::remove_file(temp_path).await;
         return Err(AppError::context("Failed to install new binary", e));
     }
-    if let Err(e) = fs::set_permissions(&current_exe, fs::Permissions::from_mode(0o755)) {
+    if let Err(e) = set_executable(&current_exe) {
         let _ = fs::remove_file(&current_exe);
         let _ = fs::rename(&backup_path, &current_exe);
         let _ = tokio::fs::remove_file(temp_path).await;
@@ -495,31 +496,69 @@ pub async fn upgrade_binary(state: &Arc<AppState>) -> AppResult<String> {
         // 内嵌文件的刷新由新进程启动时的 extract_sing_box 无条件重释放保证,此处无需清理
 
         let args: Vec<String> = std::env::args().collect();
-        let err = std::process::Command::new(&current_exe)
-            .args(&args[1..])
-            .exec();
+        let err = exec_replace(std::process::Command::new(&current_exe).args(&args[1..]));
 
         error!("Failed to exec new binary: {}", err);
         error!("Attempting to restore from backup...");
 
         if fs::rename(&backup_path, &current_exe).is_ok() {
-            let _ = fs::set_permissions(&current_exe, fs::Permissions::from_mode(0o755));
+            let _ = set_executable(&current_exe);
             error!("Restored from backup, restarting with old version...");
-            let _ = std::process::Command::new(&current_exe)
-                .args(&args[1..])
-                .exec();
+            let _ = exec_replace(std::process::Command::new(&current_exe).args(&args[1..]));
         }
         let diag = format!(
             "miao upgrade failure: exec and backup restore both failed.\nbinary: {:?}\nbackup: {}\n",
             current_exe, backup_path
         );
-        let _ = std::fs::write("/tmp/miao-upgrade-failure.log", &diag);
-        error!("Diagnostics written to /tmp/miao-upgrade-failure.log");
+        let _ = std::fs::write(upgrade_failure_log_path(), &diag);
+        error!(
+            "Diagnostics written to {}",
+            upgrade_failure_log_path().display()
+        );
         error!("Failed to restore from backup, manual intervention required");
         std::process::exit(1);
     });
 
     Ok(new_version)
+}
+
+fn set_executable(path: &Path) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(path, fs::Permissions::from_mode(0o755))
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = path;
+        Ok(())
+    }
+}
+
+fn exec_replace(command: &mut std::process::Command) -> std::io::Error {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.exec()
+    }
+    #[cfg(not(unix))]
+    {
+        match command.spawn() {
+            Ok(_) => std::io::Error::other("spawned replacement process"),
+            Err(err) => err,
+        }
+    }
+}
+
+fn upgrade_failure_log_path() -> std::path::PathBuf {
+    #[cfg(unix)]
+    {
+        std::path::PathBuf::from("/tmp/miao-upgrade-failure.log")
+    }
+    #[cfg(not(unix))]
+    {
+        std::env::temp_dir().join("miao-upgrade-failure.log")
+    }
 }
 
 fn current_version() -> String {

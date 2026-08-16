@@ -1,7 +1,4 @@
-use nix::sys::signal::{kill, Signal};
-use nix::unistd::Pid;
 use std::fs;
-use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
@@ -12,20 +9,53 @@ use crate::error::{AppError, AppResult};
 use crate::state::{AppState, SingBoxProcess};
 
 #[cfg(target_arch = "x86_64")]
-const SING_BOX_BINARY: &[u8] = include_bytes!("../../embedded/sing-box-amd64");
+const SING_BOX_BINARY: &[u8] = include_bytes!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../embedded/sing-box-amd64"
+));
 
 #[cfg(target_arch = "aarch64")]
-const SING_BOX_BINARY: &[u8] = include_bytes!("../../embedded/sing-box-arm64");
+const SING_BOX_BINARY: &[u8] = include_bytes!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../embedded/sing-box-arm64"
+));
 
 #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
 compile_error!("Unsupported architecture: only x86_64 and aarch64 are supported. Please add support for your target architecture in embedded/ directory.");
 
-const IP_RULE_BINARY: &[u8] = include_bytes!("../../embedded/geoip-cn.srs");
-const SITE_RULE_BINARY: &[u8] = include_bytes!("../../embedded/geosite-geolocation-cn.srs");
-const ADBLOCK_RULE_BINARY: &[u8] = include_bytes!("../../embedded/adblock_reject.srs");
+const IP_RULE_BINARY: &[u8] = include_bytes!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../embedded/geoip-cn.srs"
+));
+const SITE_RULE_BINARY: &[u8] = include_bytes!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../embedded/geosite-geolocation-cn.srs"
+));
+const ADBLOCK_RULE_BINARY: &[u8] = include_bytes!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../embedded/adblock_reject.srs"
+));
 
 pub fn get_sing_box_home() -> PathBuf {
-    PathBuf::from("/tmp/miao-sing-box")
+    #[cfg(windows)]
+    {
+        std::env::temp_dir().join("miao-sing-box")
+    }
+    #[cfg(not(windows))]
+    {
+        PathBuf::from("/tmp/miao-sing-box")
+    }
+}
+
+fn sing_box_file_name() -> &'static str {
+    #[cfg(windows)]
+    {
+        "sing-box.exe"
+    }
+    #[cfg(not(windows))]
+    {
+        "sing-box"
+    }
 }
 
 pub fn extract_sing_box() -> AppResult<PathBuf> {
@@ -35,14 +65,14 @@ pub fn extract_sing_box() -> AppResult<PathBuf> {
             .map_err(|e| AppError::context("Failed to create sing-box home directory", e))?;
     }
 
-    let sing_box_path = sing_box_home.join("sing-box");
+    let sing_box_path = sing_box_home.join(sing_box_file_name());
 
     // 每次启动都删除并重新释放内嵌文件,保证与当前运行的二进制一致:
     // install.sh 升级、手动替换二进制等路径不经过面板自升级的清理逻辑。
     // 先删再写而非覆盖写:若有上次崩溃残留的 sing-box 进程仍在运行,覆盖写会得到 ETXTBSY。
     // 其余运行时文件(cache.db / config.json.cache / .last_proxy)有意保留。
     let embedded_files: [(&str, &[u8]); 4] = [
-        ("sing-box", SING_BOX_BINARY),
+        (sing_box_file_name(), SING_BOX_BINARY),
         ("chinaip.srs", IP_RULE_BINARY),
         ("chinasite.srs", SITE_RULE_BINARY),
         ("adblock_reject.srs", ADBLOCK_RULE_BINARY),
@@ -59,7 +89,7 @@ pub fn extract_sing_box() -> AppResult<PathBuf> {
         fs::write(&path, bytes)
             .map_err(|e| AppError::context(format!("Failed to write embedded file {name}"), e))?;
     }
-    fs::set_permissions(&sing_box_path, fs::Permissions::from_mode(0o755))
+    set_executable(&sing_box_path)
         .map_err(|e| AppError::context("Failed to set permissions on sing-box binary", e))?;
 
     let dashboard_dir = sing_box_home.join("dashboard");
@@ -74,7 +104,7 @@ pub fn extract_sing_box() -> AppResult<PathBuf> {
 /// 在停止运行中的实例前验证 sing-box 配置，避免不必要的服务中断
 pub async fn validate_sing_box_config() -> AppResult<()> {
     let sing_box_home = get_sing_box_home();
-    let sing_box_path = sing_box_home.join("sing-box");
+    let sing_box_path = sing_box_home.join(sing_box_file_name());
     let config_path = sing_box_home.join("config.json");
 
     let output = tokio::process::Command::new(&sing_box_path)
@@ -113,7 +143,7 @@ pub async fn start_sing_internal(state: &Arc<AppState>) -> AppResult<()> {
     }
 
     let sing_box_home = get_sing_box_home();
-    let sing_box_path = sing_box_home.join("sing-box");
+    let sing_box_path = sing_box_home.join(sing_box_file_name());
     let config_path = sing_box_home.join("config.json");
 
     info!(binary = ?sing_box_path, config = ?config_path, "Starting sing-box");
@@ -156,26 +186,46 @@ pub async fn stop_sing_internal(state: &Arc<AppState>) {
     let mut lock = state.sing_process.lock().await;
     if let Some(ref mut proc) = *lock {
         if proc.child.try_wait().ok().flatten().is_none() {
-            if let Some(pid) = proc.child.id() {
-                // 发送 SIGTERM 信号请求进程优雅退出
-                let _ = kill(Pid::from_raw(pid as i32), Signal::SIGTERM);
+            request_graceful_exit(&mut proc.child).await;
+        }
+    }
+    *lock = None;
+}
 
-                // 使用 timeout 等待进程退出，避免忙等待
-                let wait_result =
-                    tokio::time::timeout(Duration::from_secs(3), proc.child.wait()).await;
+fn set_executable(path: &std::path::Path) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(path, fs::Permissions::from_mode(0o755))
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = path;
+        Ok(())
+    }
+}
 
-                match wait_result {
-                    Ok(Ok(_)) => {
-                        // 进程正常退出
-                    }
-                    _ => {
-                        // 超时或等待失败，强制杀死进程
-                        let _ = proc.child.start_kill();
-                        let _ = proc.child.wait().await;
-                    }
+async fn request_graceful_exit(child: &mut tokio::process::Child) {
+    #[cfg(unix)]
+    {
+        use nix::sys::signal::{kill, Signal};
+        use nix::unistd::Pid;
+
+        if let Some(pid) = child.id() {
+            let _ = kill(Pid::from_raw(pid as i32), Signal::SIGTERM);
+            match tokio::time::timeout(Duration::from_secs(3), child.wait()).await {
+                Ok(Ok(_)) => {}
+                _ => {
+                    let _ = child.start_kill();
+                    let _ = child.wait().await;
                 }
             }
         }
     }
-    *lock = None;
+
+    #[cfg(not(unix))]
+    {
+        let _ = child.start_kill();
+        let _ = child.wait().await;
+    }
 }

@@ -2,7 +2,7 @@ use super::apply::{
     config_apply_mode, config_with_route_override, no_usable_nodes_warning,
     persist_config_without_usable_nodes_at, ConfigApplyMode,
 };
-use super::builder::{build_sing_box_config, filter_rules_with_missing_outbound};
+use super::builder::{build_sing_box_config, filter_rules_with_missing_outbound, tun_inbound};
 use super::generate::{collect_manual_outbounds, runtime_config_node_tags};
 use super::persist::save_config_to;
 use crate::{
@@ -975,4 +975,17 @@ async fn save_config_skips_identical_content() {
     assert_eq!(before, after);
 
     let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+}
+
+#[test]
+fn tun_inbound_enables_auto_redirect_only_on_linux() {
+    let inbound = tun_inbound();
+    assert_eq!(inbound["type"], "tun");
+    assert_eq!(inbound["auto_route"], true);
+    assert_eq!(inbound["strict_route"], true);
+    if cfg!(target_os = "linux") {
+        assert_eq!(inbound["auto_redirect"], true);
+    } else {
+        assert!(inbound.get("auto_redirect").is_none());
+    }
 }

@@ -2,6 +2,7 @@ mod error;
 mod handlers;
 mod models;
 mod paths;
+mod privilege;
 mod responses;
 mod router;
 mod services;
@@ -10,8 +11,6 @@ mod state;
 mod test_support;
 mod validation;
 
-use crate::error::{AppError, AppResult};
-use nix::unistd::Uid;
 use std::{fs, sync::Arc};
 use tracing::{error, info, warn};
 
@@ -24,7 +23,9 @@ use services::{
 };
 use state::AppState;
 
-pub(crate) const VERSION: &str = env!("CARGO_PKG_VERSION");
+pub use error::{AppError, AppResult};
+
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 fn browser_launch_env() -> Vec<(String, String)> {
     let mut envs = Vec::new();
@@ -101,6 +102,17 @@ async fn open_onboarding_browser(url: String) {
     }
 }
 
+fn panel_bind_addr(port: u16) -> String {
+    #[cfg(windows)]
+    {
+        format!("127.0.0.1:{port}")
+    }
+    #[cfg(not(windows))]
+    {
+        format!("0.0.0.0:{port}")
+    }
+}
+
 fn config_declares_route_mode(content: &str) -> bool {
     let Ok(value) = serde_yaml::from_str::<serde_yaml::Value>(content) else {
         return false;
@@ -111,9 +123,7 @@ fn config_declares_route_mode(content: &str) -> bool {
         .is_some_and(|mapping| mapping.contains_key("route_mode"))
 }
 
-#[tokio::main]
-async fn main() -> AppResult<()> {
-    // 初始化结构化日志
+pub async fn run() -> AppResult<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::from_default_env()
@@ -126,10 +136,7 @@ async fn main() -> AppResult<()> {
         return Ok(());
     }
 
-    if !Uid::effective().is_root() {
-        error!("This application must be run as root");
-        std::process::exit(1);
-    }
+    privilege::require_privileges();
 
     if let Ok(current_exe) = std::env::current_exe() {
         let backup_path = format!("{}.bak", current_exe.display());
@@ -182,19 +189,16 @@ async fn main() -> AppResult<()> {
 
     let _ = extract_sing_box()?;
 
-    // 初始化应用状态
     let app_state = Arc::new(
         AppState::with_config_path(config.clone(), config_path)
             .map_err(|e| AppError::context("Failed to create HTTP client", e))?,
     );
     let state_for_init = app_state.clone();
 
-    // Start web server immediately so the panel is accessible during initialization
     let app = router::build_router(app_state.clone());
-    let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", port)).await?;
+    let listener = tokio::net::TcpListener::bind(panel_bind_addr(port)).await?;
     info!(port = port, url = %format!("http://localhost:{}", port), "Miao panel started");
 
-    // Auto-open browser for onboarding when no subs/nodes configured
     if config.subs.is_empty() && config.nodes.is_empty() {
         let url = format!("http://localhost:{}", port);
         tokio::spawn(async move {
@@ -202,10 +206,7 @@ async fn main() -> AppResult<()> {
         });
     }
 
-    // Background: generate config, check dependencies, and start sing-box
     tokio::spawn(async move {
-        // Serialize startup provisioning/config generation with every API-driven
-        // configuration mutation so an early request cannot overwrite startup state.
         let _config_update = state_for_init.config_update.lock().await;
         let config = config;
 
@@ -279,14 +280,24 @@ async fn main() -> AppResult<()> {
 }
 
 async fn shutdown_signal(state: Arc<AppState>) {
-    let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-        .expect("failed to install SIGTERM handler");
+    #[cfg(unix)]
+    {
+        let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+            .expect("failed to install SIGTERM handler");
 
-    tokio::select! {
-        result = tokio::signal::ctrl_c() => {
-            result.expect("failed to install Ctrl+C handler");
+        tokio::select! {
+            result = tokio::signal::ctrl_c() => {
+                result.expect("failed to install Ctrl+C handler");
+            }
+            _ = sigterm.recv() => {}
         }
-        _ = sigterm.recv() => {}
+    }
+
+    #[cfg(not(unix))]
+    {
+        tokio::signal::ctrl_c()
+            .await
+            .expect("failed to install Ctrl+C handler");
     }
 
     info!("Shutting down, stopping sing-box...");

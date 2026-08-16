@@ -18,6 +18,19 @@ const SSH_CONNECT_TIMEOUT_SECS: &str = "10";
 const SSH_PROBE_TIMEOUT: Duration = Duration::from_secs(30);
 const SSH_PROVISION_TIMEOUT: Duration = Duration::from_secs(300);
 
+fn set_file_mode(path: &Path, mode: u32) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode))
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (path, mode);
+        Ok(())
+    }
+}
+
 /// SSH_ASKPASS 临时文件:密码写 600 权限文件,askpass 脚本(700)cat 它。
 /// 密码不出现在进程 argv;文件随作用域删除,不落配置。
 /// (OpenSSH >= 8.4 的 SSH_ASKPASS_REQUIRE=force,无需 sshpass 依赖)
@@ -28,8 +41,6 @@ struct AskpassFiles {
 
 impl AskpassFiles {
     fn new(password: &str) -> AppResult<Self> {
-        use std::os::unix::fs::PermissionsExt;
-
         let id = random_password()?;
         let temp_dir = std::env::temp_dir();
         let script_path = temp_dir.join(format!("miao-askpass-{id}.sh"));
@@ -40,14 +51,14 @@ impl AskpassFiles {
         let result = (|| -> AppResult<Self> {
             std::fs::write(&password_path, password)
                 .map_err(|e| AppError::context("Failed to write askpass password file", e))?;
-            std::fs::set_permissions(&password_path, std::fs::Permissions::from_mode(0o600))
+            set_file_mode(&password_path, 0o600)
                 .map_err(|e| AppError::context("Failed to secure askpass password file", e))?;
             std::fs::write(
                 &script_path,
                 format!("#!/bin/sh\ncat \"{}\"\n", password_path.display()),
             )
             .map_err(|e| AppError::context("Failed to write askpass script", e))?;
-            std::fs::set_permissions(&script_path, std::fs::Permissions::from_mode(0o700))
+            set_file_mode(&script_path, 0o700)
                 .map_err(|e| AppError::context("Failed to secure askpass script", e))?;
             Ok(Self {
                 script_path,
