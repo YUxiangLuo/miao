@@ -4,6 +4,7 @@
 # 用法:
 #   curl -fsSL https://raw.githubusercontent.com/YUxiangLuo/miao/master/install.sh | sudo bash
 #   sudo bash install.sh /path/to/miao-binary   # 离线安装本地二进制(网络受限时先另行下载)
+#   curl -fsSL https://miao.vesein.dev/install.sh | sudo MIAO_BASE_URL=https://miao.vesein.dev/dl bash   # 镜像站(无法访问 GitHub 时)
 # 重复运行即升级到最新版本。
 set -euo pipefail
 
@@ -12,6 +13,14 @@ CONFIG_DIR=/etc/miao
 UNIT_PATH=/etc/systemd/system/miao.service
 REPO=YUxiangLuo/miao
 LOCAL_BIN="${1:-}"
+# 二进制下载基地址;无法访问 GitHub 时可用镜像站
+BASE_URL="${MIAO_BASE_URL:-https://github.com/$REPO/releases/latest/download}"
+# 卸载脚本地址(随下载基地址切换)
+if [[ -n "${MIAO_BASE_URL:-}" ]]; then
+  REMOVE_SH_URL="${MIAO_BASE_URL%/dl}/remove.sh"
+else
+  REMOVE_SH_URL="https://raw.githubusercontent.com/$REPO/master/remove.sh"
+fi
 
 log() { echo "==> $*"; }
 
@@ -82,7 +91,7 @@ if [[ -n "$LOCAL_BIN" ]]; then
   cp "$LOCAL_BIN" "$tmp_file"
 else
   log "下载最新 release(linux-$asset_arch)..."
-  download "https://github.com/$REPO/releases/latest/download/miao-rust-linux-$asset_arch" "$tmp_file"
+  download "$BASE_URL/miao-rust-linux-$asset_arch" "$tmp_file"
 fi
 
 # 完整性自检:必须是 ELF 可执行文件(挡下载损坏或被镜像劫持返回的错误页)
@@ -127,7 +136,7 @@ if systemctl is-active --quiet miao; then
   echo "常用命令:"
   echo "  systemctl status miao    # 查看状态"
   echo "  journalctl -u miao -f    # 查看日志"
-  echo "  卸载: curl -fsSL https://raw.githubusercontent.com/$REPO/master/remove.sh | sudo bash"
+  echo "  卸载: curl -fsSL $REMOVE_SH_URL | sudo bash"
 else
   echo "服务启动失败,请用 journalctl -u miao -e 查看日志" >&2
   exit 1
