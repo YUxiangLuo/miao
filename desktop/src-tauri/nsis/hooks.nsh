@@ -11,6 +11,9 @@
   Pop $0
   nsExec::Exec "powershell -NoProfile -NonInteractive -WindowStyle Hidden -Command $\"Get-NetAdapter -Name 'sing-tun' -ErrorAction SilentlyContinue | Remove-NetAdapter -Confirm:$$false$\""
   Pop $0
+  ; 开机自启的任务计划（若用户在托盘勾选过）。同为 best-effort。
+  nsExec::Exec "schtasks /Delete /TN Miao /F"
+  Pop $0
   ${If} $UpdateMode <> 1
   ${AndIf} $DeleteAppDataCheckboxState = 1
     RMDir /r "$LOCALAPPDATA\io.github.yuxiangluo.miao"

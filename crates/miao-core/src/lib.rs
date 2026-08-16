@@ -1,3 +1,4 @@
+mod autostart;
 mod error;
 mod handlers;
 mod instance;
@@ -14,6 +15,9 @@ mod state;
 mod test_support;
 mod validation;
 
+pub use autostart::{
+    is_enabled as autostart_is_enabled, set_enabled as autostart_set_enabled, MINIMIZED_ARG,
+};
 pub use error::{AppError, AppResult};
 pub use instance::{
     acquire_single_instance, focus_existing_window, peek_single_instance, InstanceAcquire,

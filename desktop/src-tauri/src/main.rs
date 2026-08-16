@@ -3,11 +3,12 @@
 use std::sync::Mutex;
 
 use miao_core::{
-    acquire_single_instance, default_log_path, focus_existing_window, is_elevated,
-    peek_single_instance, require_privileges, show_user_error, spawn_server, InstanceAcquire,
-    InstancePeek, RuntimeOptions, ServerHandle,
+    acquire_single_instance, autostart_is_enabled, autostart_set_enabled, default_log_path,
+    focus_existing_window, is_elevated, peek_single_instance, require_privileges,
+    show_user_error, spawn_server, InstanceAcquire, InstancePeek, RuntimeOptions, ServerHandle,
+    MINIMIZED_ARG,
 };
-use tauri::menu::{Menu, MenuItem};
+use tauri::menu::{CheckMenuItem, CheckMenuItemBuilder, Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Manager, RunEvent, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 
@@ -62,8 +63,9 @@ fn main() {
 }
 
 fn run_app() -> Result<(), Box<dyn std::error::Error>> {
+    let start_minimized = std::env::args().any(|arg| arg == MINIMIZED_ARG);
     let app = tauri::Builder::default()
-        .setup(|app| {
+        .setup(move |app| {
             let handle = tauri::async_runtime::block_on(spawn_server(RuntimeOptions {
                 open_browser: false,
                 install_tracing: true,
@@ -73,7 +75,7 @@ fn run_app() -> Result<(), Box<dyn std::error::Error>> {
             }))?;
 
             let url = handle.url().to_string();
-            if let Err(err) = finish_desktop_shell(app, &url) {
+            if let Err(err) = finish_desktop_shell(app, &url, start_minimized) {
                 tauri::async_runtime::block_on(handle.shutdown());
                 return Err(err);
             }
@@ -100,16 +102,21 @@ fn run_app() -> Result<(), Box<dyn std::error::Error>> {
 fn install_tray(app: &AppHandle) -> tauri::Result<()> {
     let show = MenuItem::with_id(app, "show", "显示窗口", true, None::<&str>)?;
     let log = MenuItem::with_id(app, "log", "打开日志", true, None::<&str>)?;
+    let autostart = CheckMenuItemBuilder::with_id("autostart", "开机自启")
+        .checked(autostart_is_enabled())
+        .build(app)?;
     let quit = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&show, &log, &quit])?;
+    let menu = Menu::with_items(app, &[&show, &log, &autostart, &quit])?;
 
+    let autostart_for_event = autostart.clone();
     let mut tray = TrayIconBuilder::new()
         .menu(&menu)
         .show_menu_on_left_click(false)
         .tooltip("Miao")
-        .on_menu_event(|app, event| match event.id.as_ref() {
+        .on_menu_event(move |app, event| match event.id.as_ref() {
             "show" => show_main_window(app),
             "log" => open_log_file(),
+            "autostart" => toggle_autostart(&autostart_for_event),
             "quit" => app.exit(0),
             _ => {}
         })
@@ -132,14 +139,28 @@ fn install_tray(app: &AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
-fn finish_desktop_shell(app: &mut tauri::App, url: &str) -> Result<(), Box<dyn std::error::Error>> {
+fn finish_desktop_shell(
+    app: &mut tauri::App,
+    url: &str,
+    start_minimized: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
     WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url.parse()?))
         .title("Miao")
         .resizable(false)
         .maximized(true)
+        .visible(!start_minimized)
         .build()?;
     install_tray(app.handle())?;
     Ok(())
+}
+
+/// 托盘勾选开机自启：尝试切换后把勾选状态对齐到真实状态（任务存在性）。
+fn toggle_autostart(item: &CheckMenuItem<tauri::Wry>) {
+    let target = !autostart_is_enabled();
+    if let Err(err) = autostart_set_enabled(target) {
+        show_user_error("Miao", &format!("设置开机自启失败：{err}"));
+    }
+    let _ = item.set_checked(autostart_is_enabled());
 }
 
 fn show_main_window(app: &AppHandle) {
