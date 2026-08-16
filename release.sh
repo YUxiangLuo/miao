@@ -1,5 +1,5 @@
 #!/bin/bash
-# 发布脚本 - 自动更新 Cargo.toml 版本并创建 tag
+# 发布脚本 - 自动更新 [workspace.package] 版本并创建 tag
 # 用法: ./release.sh v0.3.3
 
 set -e
@@ -36,9 +36,16 @@ fi
 
 echo "📦 发布版本: $TAG_VERSION (Cargo: $CARGO_VERSION)"
 
-# 更新 Cargo.toml 中的版本号 (仅替换 [package] 段的 version)
-sed -i '0,/^version = ".*"/{s/^version = ".*"/version = "'"$CARGO_VERSION"'"/}' Cargo.toml
-echo "✅ 已更新 Cargo.toml 版本为 $CARGO_VERSION"
+# 更新 Cargo.toml 中的版本号（锚定 [workspace.package] 段内的 version 行；
+# 段内替换比「第一个 version 行」稳健，不会误伤未来其他段的 version 条目）
+sed -i '/^\[workspace\.package\]/,/^\[/ s/^version = ".*"/version = "'"$CARGO_VERSION"'"/' Cargo.toml
+
+# 确认替换生效（段内没找到 version 行时 sed 静默成功但什么都没改）
+if ! grep -q '^version = "'"$CARGO_VERSION"'"' Cargo.toml; then
+    echo "❌ 未能在 [workspace.package] 段更新版本号，请检查 Cargo.toml"
+    exit 1
+fi
+echo "✅ 已更新 [workspace.package] 版本为 $CARGO_VERSION（全 workspace 同号）"
 
 # 验证编译
 echo "🔍 验证编译..."
@@ -60,5 +67,5 @@ git push origin "$TAG_VERSION"
 echo "✅ 已创建并推送 tag: $TAG_VERSION"
 
 echo ""
-echo "🎉 发布完成！GitHub Actions 将自动构建 Release。"
+echo "🎉 发布完成！GitHub Actions 将构建 Linux（amd64/arm64 musl）与 Windows（NSIS 安装包）并上传到 Release。"
 echo "   查看进度: https://github.com/YUxiangLuo/miao/actions"
