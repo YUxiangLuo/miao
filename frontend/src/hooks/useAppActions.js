@@ -385,6 +385,16 @@ export function useAppActions(data) {
     }
   }, [apiCall, fetchStatus, showToast])
 
+  const handleToggleMcp = useCallback(async (enabled) => {
+    try {
+      await apiCall('mcp', { method: 'POST', body: JSON.stringify({ enabled }) }, 'toggleMcp')
+      await fetchStatus()
+      showToast(enabled ? 'MCP 端点已开启' : 'MCP 端点已关闭', 'success')
+    } catch (error) {
+      showToast(error.message, 'error')
+    }
+  }, [apiCall, fetchStatus, showToast])
+
   return {
     openConfirm,
     closeConfirm,
@@ -408,5 +418,6 @@ export function useAppActions(data) {
     handleAddRule,
     handleOpenDeleteRuleConfirm,
     handleToggleAdblock,
+    handleToggleMcp,
   }
 }

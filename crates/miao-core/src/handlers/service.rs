@@ -68,7 +68,10 @@ pub async fn get_status(State(state): State<Arc<AppState>>) -> Json<ApiResponse<
         .read()
         .await
         .unwrap_or(RouteMode::default());
-    let adblock = state.config.read().await.adblock;
+    let (adblock, mcp) = {
+        let config = state.config.read().await;
+        (config.adblock, config.mcp)
+    };
 
     success(
         if running { "running" } else { "stopped" },
@@ -82,6 +85,7 @@ pub async fn get_status(State(state): State<Arc<AppState>>) -> Json<ApiResponse<
             warning,
             vps_supported: crate::platform::vps_supported(),
             platform: if cfg!(windows) { "windows" } else { "linux" },
+            mcp,
         },
     )
 }

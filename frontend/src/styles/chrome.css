@@ -180,6 +180,30 @@
     transform: translateX(11px);
     background: var(--text-strong);
 }
+/* 首页右下角的 MCP 浮动控件；z-index 低于 modal-overlay(50) */
+.mcp-float {
+    position: fixed;
+    right: 20px;
+    bottom: 20px;
+    z-index: 40;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    border-radius: 999px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    box-shadow: var(--shadow);
+}
+.mcp-float .toggle-switch {
+    margin-left: 0;
+}
+.mcp-float-label {
+    color: var(--text-muted);
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 0.4px;
+}
 .btn {
     border: 1px solid transparent;
     border-radius: 6px;

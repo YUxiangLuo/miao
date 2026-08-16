@@ -50,6 +50,8 @@ pub struct StatusData {
     pub warning: Option<String>,
     pub vps_supported: bool,
     pub platform: &'static str,
+    /// MCP 端点（POST /mcp）开关状态
+    pub mcp: bool,
 }
 
 #[derive(Serialize, Clone)]
@@ -80,6 +82,11 @@ pub struct DeleteRuleRequest {
 
 #[derive(Deserialize)]
 pub struct AdblockRequest {
+    pub enabled: bool,
+}
+
+#[derive(Deserialize)]
+pub struct McpRequest {
     pub enabled: bool,
 }
 

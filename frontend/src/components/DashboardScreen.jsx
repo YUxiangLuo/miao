@@ -6,6 +6,7 @@ import {
   SubsCard,
   RulesCard,
   HomeConnections,
+  McpFloat,
   ConfirmModal,
   ConnectionsModal,
   NodeModal,
@@ -100,6 +101,13 @@ export function DashboardScreen({ app }) {
           />
         )}
       </main>
+
+      <McpFloat
+        enabled={Boolean(app.status.mcp)}
+        pending={app.loadingAction === 'toggleMcp'}
+        onToggle={app.handleToggleMcp}
+        showToast={app.showToast}
+      />
 
       <ToastStack toasts={app.toasts} onDismiss={app.dismissToast} />
 

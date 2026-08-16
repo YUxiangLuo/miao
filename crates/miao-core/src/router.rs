@@ -11,7 +11,7 @@ use crate::handlers::version::upgrade;
 use crate::handlers::vps::deploy_vps;
 use crate::handlers::{
     clash::{proxy_clash_http, proxy_clash_traffic},
-    mcp::handle_mcp,
+    mcp::{handle_mcp, set_mcp},
     nodes::{add_node, delete_node, get_nodes},
     proxy::set_last_proxy,
     rules::{add_rule, delete_rule, get_rules, set_adblock},
@@ -45,6 +45,7 @@ pub fn build_router(app_state: Arc<AppState>) -> Router {
         .route("/api/rules", post(add_rule))
         .route("/api/rules", delete(delete_rule))
         .route("/api/adblock", post(set_adblock))
+        .route("/api/mcp", post(set_mcp))
         .route("/api/last-proxy", post(set_last_proxy))
         .route("/mcp", post(handle_mcp));
 
