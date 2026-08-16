@@ -56,7 +56,7 @@ sudo bash install.sh ./target/release/miao-rust
 - `install.sh` 的在线下载路径没法在本机测；用离线路径：`sudo bash install.sh ./target/release/miao-rust`
 - 同样道理，改网络栈/sing-box 配置的改动，先想好后端停了之后怎么验证
 - `remove.sh` 会删 `/etc/miao`（含用户配置）!**实测前先备份**:`sudo cp -a /etc/miao /tmp/miao-config-backup`
-- git push：本机 SSH key 当前是禁用状态（`~/.ssh/id_ed25519.back`)。用 gh 凭据走 HTTPS:`git -c credential.helper='!gh auth git-credential' push https://github.com/YUxiangLuo/miao.git master`。注意 URL 推送不更新 tracking ref，需要时补 `git update-ref refs/remotes/origin/master master`
+- git push：直接用 SSH(`origin` 就是 `git@github.com:...`,`~/.ssh/id_ed25519` 已恢复可用,且 **HTTPS + gh 凭据推不动 workflow 文件改动**——token 缺 `workflow` scope;SSH 无此限制)。若走 HTTPS 则：`git -c credential.helper='!gh auth git-credential' push https://github.com/YUxiangLuo/miao.git master`,注意 URL 推送不更新 tracking ref,需要时补 `git update-ref refs/remotes/origin/master master`
 
 ## 前端调试（agent-browser)
 
