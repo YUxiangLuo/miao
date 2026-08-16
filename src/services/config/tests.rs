@@ -1,0 +1,978 @@
+use super::apply::{
+    config_apply_mode, config_with_route_override, no_usable_nodes_warning,
+    persist_config_without_usable_nodes_at, ConfigApplyMode,
+};
+use super::builder::{build_sing_box_config, filter_rules_with_missing_outbound};
+use super::generate::{collect_manual_outbounds, runtime_config_node_tags};
+use super::persist::save_config_to;
+use crate::{
+    models::{Config, RouteMode, SubStatus},
+    test_support::app_state,
+};
+use serde_json::json;
+use std::collections::HashSet;
+
+use crate::state::SkippedRule;
+
+#[test]
+fn collect_manual_outbounds_ignores_invalid_json_nodes() {
+    let config = Config {
+            port: None,
+            subs: vec![],
+            nodes: vec![
+                r#"{"type":"hysteria2","tag":"manual-a","server":"a.example.com","server_port":443,"password":"p","up_mbps":40,"down_mbps":350,"tls":{"enabled":true,"insecure":true}}"#.to_string(),
+                "{invalid-json".to_string(),
+            ],
+            custom_rules: vec![],
+            route_mode: Default::default(),
+            adblock: false,
+        };
+
+    let (outbounds, names) = collect_manual_outbounds(&config);
+
+    assert_eq!(outbounds.len(), 1);
+    assert_eq!(names, vec!["manual-a"]);
+    assert_eq!(outbounds[0]["tag"], "manual-a");
+}
+
+#[test]
+fn collect_manual_outbounds_preserves_hysteria2_without_default_bandwidth() {
+    // 测试：Hysteria2 节点不强制包含带宽默认值
+    let config = Config {
+            port: None,
+            subs: vec![],
+            nodes: vec![
+                // 不包含 up_mbps/down_mbps 的节点
+                r#"{"type":"hysteria2","tag":"no-bandwidth","server":"example.com","server_port":443,"password":"secret","tls":{"enabled":true}}"#.to_string(),
+            ],
+            custom_rules: vec![],
+            route_mode: Default::default(),
+            adblock: false,
+        };
+
+    let (outbounds, names) = collect_manual_outbounds(&config);
+
+    assert_eq!(outbounds.len(), 1);
+    assert_eq!(names, vec!["no-bandwidth"]);
+    // 验证不包含硬编码的带宽字段
+    assert!(outbounds[0].get("up_mbps").is_none() || outbounds[0]["up_mbps"].is_null());
+    assert!(outbounds[0].get("down_mbps").is_none() || outbounds[0]["down_mbps"].is_null());
+}
+
+#[test]
+fn filter_rules_skips_only_rules_with_missing_outbound() {
+    let available: HashSet<String> = ["proxy", "direct", "node-a"]
+        .into_iter()
+        .map(str::to_string)
+        .collect();
+    let rules = vec![
+        r#"{"process_name":"curl","action":"route","outbound":"gone-node"}"#.to_string(),
+        r#"{"process_name":"wget","action":"route","outbound":"node-a"}"#.to_string(),
+        r#"{"domain":"t.co","action":"route","outbound":"proxy"}"#.to_string(),
+        r#"{"domain_keyword":"ad","action":"reject"}"#.to_string(),
+        "not-json".to_string(),
+    ];
+
+    let (kept, skipped) = filter_rules_with_missing_outbound(&rules, &available);
+
+    // 失效规则被跳过,其余(含无法解析的)原样保留
+    assert_eq!(kept.len(), 4);
+    assert!(!kept.iter().any(|r| r.contains("gone-node")));
+    assert_eq!(
+        skipped,
+        vec![SkippedRule {
+            raw: rules[0].clone(),
+            description: "process_name=curl → gone-node".to_string(),
+        }]
+    );
+}
+
+#[test]
+fn build_sing_box_config_skips_rules_with_missing_node() {
+    let config = Config {
+        port: None,
+        subs: vec![],
+        nodes: vec![],
+        custom_rules: vec![
+            r#"{"process_path":"/opt/app/run","action":"route","outbound":"已消失节点"}"#
+                .to_string(),
+            r#"{"process_name":"curl","action":"route","outbound":"manual-a"}"#.to_string(),
+        ],
+        route_mode: Default::default(),
+        adblock: false,
+    };
+
+    let (built, skipped) = build_sing_box_config(
+            &config,
+            vec!["manual-a".to_string()],
+            vec![json!({"type":"hysteria2","tag":"manual-a","server":"a.example.com","server_port":443,"password":"p","tls":{"enabled":true}})],
+            vec![],
+            vec![],
+        )
+        .unwrap();
+
+    let rules = built["route"]["rules"].as_array().unwrap();
+    let rules_json = serde_json::to_string(rules).unwrap();
+    assert!(!rules_json.contains("已消失节点"));
+    assert!(rules_json.contains("manual-a"));
+    assert_eq!(skipped.len(), 1);
+    assert_eq!(
+        skipped[0].description,
+        "process_path=/opt/app/run → 已消失节点"
+    );
+    assert_eq!(skipped[0].raw, config.custom_rules[0]);
+}
+
+#[test]
+fn runtime_config_node_tags_excludes_builtin_outbounds() {
+    let config_json = json!({
+        "outbounds": [
+            {"type": "selector", "tag": "proxy"},
+            {"type": "direct", "tag": "direct"},
+            {"type": "hysteria2", "tag": "香港节点"},
+            {"type": "shadowsocks", "tag": "ss-us"},
+            {"type": "urltest"}
+        ]
+    });
+
+    assert_eq!(
+        runtime_config_node_tags(&config_json),
+        vec!["香港节点", "ss-us"]
+    );
+    assert!(runtime_config_node_tags(&json!({})).is_empty());
+}
+
+#[test]
+fn build_sing_box_config_merges_nodes_and_valid_custom_rules() {
+    let config = Config {
+        port: None,
+        subs: vec![],
+        nodes: vec![],
+        custom_rules: vec![
+            r#"{"domain_suffix":["example.com"],"action":"route","outbound":"proxy"}"#.to_string(),
+            "not-json".to_string(),
+        ],
+        route_mode: Default::default(),
+        adblock: false,
+    };
+
+    let my_outbounds = vec![json!({
+        "type": "hysteria2",
+        "tag": "manual-a",
+        "server": "manual.example.com",
+        "server_port": 443,
+        "password": "secret"
+    })];
+    let final_outbounds = vec![json!({
+        "type": "shadowsocks",
+        "tag": "sub-a",
+        "server": "sub.example.com",
+        "server_port": 8388,
+        "method": "2022-blake3-aes-128-gcm",
+        "password": "sub-secret"
+    })];
+
+    let (built, _skipped) = build_sing_box_config(
+        &config,
+        vec!["manual-a".to_string()],
+        my_outbounds,
+        vec!["sub-a".to_string()],
+        final_outbounds,
+    )
+    .unwrap();
+
+    let selector = built["outbounds"][0]["outbounds"].as_array().unwrap();
+    assert_eq!(selector.len(), 2);
+    assert_eq!(selector[0], "manual-a");
+    assert_eq!(selector[1], "sub-a");
+
+    let all_outbounds = built["outbounds"].as_array().unwrap();
+    assert_eq!(all_outbounds.len(), 4);
+    assert_eq!(all_outbounds[2]["tag"], "manual-a");
+    assert_eq!(all_outbounds[3]["tag"], "sub-a");
+
+    let rules = built["route"]["rules"].as_array().unwrap();
+    assert_eq!(rules.len(), 7);
+    assert_eq!(rules[0]["action"], "sniff");
+    assert_eq!(rules[1]["action"], "hijack-dns");
+    assert_eq!(rules[2]["domain_suffix"][0], "example.com");
+    assert_eq!(rules[3]["ip_is_private"], true);
+}
+
+#[test]
+fn build_sing_box_config_global_mode_removes_split_rules() {
+    let config = Config {
+        port: None,
+        subs: vec![],
+        nodes: vec![],
+        custom_rules: vec![
+            r#"{"domain_suffix":["example.com"],"action":"route","outbound":"direct"}"#.to_string(),
+        ],
+        route_mode: RouteMode::Global,
+        adblock: false,
+    };
+
+    let my_outbounds = vec![json!({
+        "type": "hysteria2",
+        "tag": "manual-a",
+        "server": "manual.example.com",
+        "server_port": 443,
+        "password": "secret"
+    })];
+
+    let (built, _skipped) = build_sing_box_config(
+        &config,
+        vec!["manual-a".to_string()],
+        my_outbounds,
+        vec![],
+        vec![],
+    )
+    .unwrap();
+
+    let rules = built["route"]["rules"].as_array().unwrap();
+    // 内置分流规则被裁掉,但自定义规则在全局模式下仍然生效
+    assert_eq!(rules.len(), 3);
+    assert_eq!(rules[0]["action"], "sniff");
+    assert_eq!(rules[1]["action"], "hijack-dns");
+    assert_eq!(rules[2]["domain_suffix"], json!(["example.com"]));
+    assert_eq!(rules[2]["outbound"], "direct");
+    assert!(rules[..2].iter().all(|rule| rule.get("outbound").is_none()));
+
+    let dns_rules = built["dns"]["rules"].as_array().unwrap();
+    assert!(dns_rules.is_empty());
+    assert_eq!(built["route"]["final"], "proxy");
+}
+
+#[test]
+fn config_change_clears_runtime_when_last_source_is_removed() {
+    let config = Config::default();
+
+    assert_eq!(config_apply_mode(&config, true), ConfigApplyMode::Clear);
+    assert_eq!(config_apply_mode(&config, false), ConfigApplyMode::Clear);
+}
+
+#[test]
+fn unusable_node_warning_distinguishes_manual_and_subscription_configs() {
+    let manual = Config {
+        nodes: vec!["invalid-node".to_string()],
+        ..Config::default()
+    };
+    let subscription = Config {
+        subs: vec!["https://example.com/sub".to_string()],
+        ..Config::default()
+    };
+
+    assert!(no_usable_nodes_warning(&manual).contains("手动节点"));
+    assert!(no_usable_nodes_warning(&subscription).contains("订阅"));
+}
+
+#[tokio::test]
+async fn unusable_config_is_persisted_and_stale_runtime_files_are_removed() {
+    let state = app_state(Config::default());
+    let temp_dir =
+        std::env::temp_dir().join(format!("miao-unusable-config-{}", std::process::id()));
+    let runtime_path = temp_dir.join("config.json");
+    let cache_path = temp_dir.join("config.json.cache");
+    tokio::fs::create_dir_all(&temp_dir).await.unwrap();
+    tokio::fs::write(&runtime_path, "stale").await.unwrap();
+    tokio::fs::write(&cache_path, "stale").await.unwrap();
+
+    let subscription_url = "https://example.com/broken".to_string();
+    state.sub_status.lock().await.insert(
+        subscription_url.clone(),
+        SubStatus {
+            url: subscription_url.clone(),
+            success: false,
+            node_count: 0,
+            error: Some("fetch failed".to_string()),
+        },
+    );
+    let config = Config {
+        subs: vec![subscription_url.clone()],
+        ..Config::default()
+    };
+
+    persist_config_without_usable_nodes_at(&state, config, &runtime_path, &cache_path)
+        .await
+        .unwrap();
+
+    assert!(!runtime_path.exists());
+    assert!(!cache_path.exists());
+    assert_eq!(
+        state.config.read().await.subs,
+        vec![subscription_url.clone()]
+    );
+    assert!(state.config_warning.lock().await.is_some());
+    assert!(state
+        .sub_status
+        .lock()
+        .await
+        .contains_key(&subscription_url));
+    let persisted = tokio::fs::read_to_string(&state.config_path).await.unwrap();
+    assert!(persisted.contains(&subscription_url));
+
+    let _ = tokio::fs::remove_file(&state.config_path).await;
+    let _ = tokio::fs::remove_dir_all(temp_dir).await;
+}
+
+#[test]
+fn config_change_preserves_explicitly_stopped_service() {
+    let config = Config {
+        nodes: vec![r#"{"type":"hysteria2"}"#.to_string()],
+        ..Config::default()
+    };
+
+    assert_eq!(
+        config_apply_mode(&config, false),
+        ConfigApplyMode::RegenerateOnly
+    );
+}
+
+#[test]
+fn config_change_restarts_service_when_it_is_desired() {
+    let config = Config {
+        subs: vec!["https://example.com/sub".to_string()],
+        ..Config::default()
+    };
+
+    assert_eq!(config_apply_mode(&config, true), ConfigApplyMode::Restart);
+}
+
+#[test]
+fn config_with_route_override_defaults_to_rule_mode() {
+    let config = Config {
+        port: None,
+        subs: vec![],
+        nodes: vec![],
+        custom_rules: vec![],
+        route_mode: RouteMode::Global,
+        adblock: false,
+    };
+
+    let runtime_config = config_with_route_override(&config, None);
+
+    assert_eq!(runtime_config.route_mode, RouteMode::Rule);
+}
+
+#[test]
+fn build_sing_box_config_renames_duplicate_outbound_tags() {
+    let config = Config {
+        port: None,
+        subs: vec![],
+        nodes: vec![],
+        custom_rules: vec![],
+        route_mode: Default::default(),
+        adblock: false,
+    };
+
+    let my_outbounds = vec![json!({
+        "type": "hysteria2",
+        "tag": "dup",
+        "server": "manual.example.com",
+        "server_port": 443,
+        "password": "manual-secret"
+    })];
+    let final_outbounds = vec![
+        json!({
+            "type": "hysteria2",
+            "tag": "dup",
+            "server": "sub1.example.com",
+            "server_port": 443,
+            "password": "sub-secret-1"
+        }),
+        json!({
+            "type": "shadowsocks",
+            "tag": "dup",
+            "server": "sub2.example.com",
+            "server_port": 8388,
+            "method": "2022-blake3-aes-128-gcm",
+            "password": "sub-secret-2"
+        }),
+    ];
+
+    let (built, _skipped) = build_sing_box_config(
+        &config,
+        vec!["dup".to_string()],
+        my_outbounds,
+        vec!["dup".to_string(), "dup".to_string()],
+        final_outbounds,
+    )
+    .unwrap();
+
+    let selector = built["outbounds"][0]["outbounds"].as_array().unwrap();
+    let selector_tags: Vec<_> = selector
+        .iter()
+        .map(|value| value.as_str().unwrap())
+        .collect();
+    assert_eq!(selector_tags, vec!["dup", "dup (2)", "dup (3)"]);
+
+    let all_outbounds = built["outbounds"].as_array().unwrap();
+    assert_eq!(all_outbounds[2]["tag"], "dup");
+    assert_eq!(all_outbounds[3]["tag"], "dup (2)");
+    assert_eq!(all_outbounds[4]["tag"], "dup (3)");
+}
+
+#[test]
+fn build_sing_box_config_renames_tags_reserved_by_template() {
+    let config = Config {
+        port: None,
+        subs: vec![],
+        nodes: vec![],
+        custom_rules: vec![],
+        route_mode: Default::default(),
+        adblock: false,
+    };
+
+    let my_outbounds = vec![
+        json!({
+            "type": "hysteria2",
+            "tag": "proxy",
+            "server": "proxy.example.com",
+            "server_port": 443,
+            "password": "proxy-secret"
+        }),
+        json!({
+            "type": "hysteria2",
+            "tag": "direct",
+            "server": "direct.example.com",
+            "server_port": 443,
+            "password": "direct-secret"
+        }),
+    ];
+
+    let (built, _skipped) = build_sing_box_config(
+        &config,
+        vec!["proxy".to_string(), "direct".to_string()],
+        my_outbounds,
+        vec![],
+        vec![],
+    )
+    .unwrap();
+
+    let selector = built["outbounds"][0]["outbounds"].as_array().unwrap();
+    let selector_tags: Vec<_> = selector
+        .iter()
+        .map(|value| value.as_str().unwrap())
+        .collect();
+    assert_eq!(selector_tags, vec!["proxy (2)", "direct (2)"]);
+
+    let all_outbounds = built["outbounds"].as_array().unwrap();
+    assert_eq!(all_outbounds[0]["tag"], "proxy");
+    assert_eq!(all_outbounds[1]["tag"], "direct");
+    assert_eq!(all_outbounds[2]["tag"], "proxy (2)");
+    assert_eq!(all_outbounds[3]["tag"], "direct (2)");
+}
+
+#[test]
+fn build_sing_box_config_errors_when_no_nodes_available() {
+    let config = Config {
+        port: None,
+        subs: vec![],
+        nodes: vec![],
+        custom_rules: vec![],
+        route_mode: Default::default(),
+        adblock: false,
+    };
+
+    let err = build_sing_box_config(&config, vec![], vec![], vec![], vec![]).unwrap_err();
+
+    assert!(err.is_no_usable_nodes());
+    assert!(err
+        .to_string()
+        .contains("No usable nodes available: subscriptions failed or manual nodes were invalid"));
+}
+
+#[test]
+fn collect_manual_outbounds_handles_empty_nodes() {
+    let config = Config {
+        port: None,
+        subs: vec![],
+        nodes: vec![],
+        custom_rules: vec![],
+        route_mode: Default::default(),
+        adblock: false,
+    };
+
+    let (outbounds, names) = collect_manual_outbounds(&config);
+
+    assert!(outbounds.is_empty());
+    assert!(names.is_empty());
+}
+
+#[test]
+fn collect_manual_outbounds_handles_all_invalid_nodes() {
+    let config = Config {
+        port: None,
+        subs: vec![],
+        nodes: vec![
+            "not-json".to_string(),
+            r#"{}"#.to_string(),                   // Valid JSON but no tag
+            r#"{"type":"hysteria2"}"#.to_string(), // Valid JSON but no tag
+        ],
+        custom_rules: vec![],
+        route_mode: Default::default(),
+        adblock: false,
+    };
+
+    let (outbounds, names) = collect_manual_outbounds(&config);
+
+    // All nodes fail validation (missing required fields)
+    assert!(outbounds.is_empty());
+    assert!(names.is_empty());
+}
+
+#[test]
+fn build_sing_box_config_preserves_node_order() {
+    let config = Config {
+        port: None,
+        subs: vec![],
+        nodes: vec![],
+        custom_rules: vec![],
+        route_mode: Default::default(),
+        adblock: false,
+    };
+
+    let my_outbounds = vec![
+        json!({"type": "hysteria2", "tag": "node-1", "server": "s1.example.com", "server_port": 443, "password": "p1"}),
+        json!({"type": "hysteria2", "tag": "node-2", "server": "s2.example.com", "server_port": 443, "password": "p2"}),
+        json!({"type": "hysteria2", "tag": "node-3", "server": "s3.example.com", "server_port": 443, "password": "p3"}),
+    ];
+
+    let (built, _skipped) = build_sing_box_config(
+        &config,
+        vec![
+            "node-1".to_string(),
+            "node-2".to_string(),
+            "node-3".to_string(),
+        ],
+        my_outbounds,
+        vec![],
+        vec![],
+    )
+    .unwrap();
+
+    let selector = built["outbounds"][0]["outbounds"].as_array().unwrap();
+    assert_eq!(selector.len(), 3);
+    assert_eq!(selector[0], "node-1");
+    assert_eq!(selector[1], "node-2");
+    assert_eq!(selector[2], "node-3");
+}
+
+#[test]
+fn build_sing_box_config_handles_no_custom_rules() {
+    let config = Config {
+        port: None,
+        subs: vec![],
+        nodes: vec![],
+        custom_rules: vec![],
+        route_mode: Default::default(),
+        adblock: false,
+    };
+
+    let my_outbounds = vec![json!({
+        "type": "hysteria2",
+        "tag": "manual-a",
+        "server": "manual.example.com",
+        "server_port": 443,
+        "password": "secret"
+    })];
+
+    let (built, _skipped) = build_sing_box_config(
+        &config,
+        vec!["manual-a".to_string()],
+        my_outbounds,
+        vec![],
+        vec![],
+    )
+    .unwrap();
+
+    let rules = built["route"]["rules"].as_array().unwrap();
+    // Should have the default direct-split rules.
+    assert_eq!(rules.len(), 6);
+}
+
+#[test]
+fn build_sing_box_config_splits_direct_route_rules() {
+    let config = Config {
+        port: None,
+        subs: vec![],
+        nodes: vec![],
+        custom_rules: vec![],
+        route_mode: Default::default(),
+        adblock: false,
+    };
+
+    let my_outbounds = vec![json!({
+        "type": "hysteria2",
+        "tag": "manual-a",
+        "server": "manual.example.com",
+        "server_port": 443,
+        "password": "secret"
+    })];
+
+    let (built, _skipped) = build_sing_box_config(
+        &config,
+        vec!["manual-a".to_string()],
+        my_outbounds,
+        vec![],
+        vec![],
+    )
+    .unwrap();
+
+    let rules = built["route"]["rules"].as_array().unwrap();
+
+    assert_eq!(rules[2]["ip_is_private"], true);
+    assert_eq!(rules[2]["outbound"], "direct");
+    assert!(rules[2].get("rule_set").is_none());
+
+    assert_eq!(rules[3]["domain_suffix"], json!(["hdslb.com"]));
+    assert_eq!(rules[3]["outbound"], "direct");
+    assert!(rules[3].get("rule_set").is_none());
+    assert!(rules[3].get("ip_is_private").is_none());
+
+    assert_eq!(rules[4]["rule_set"], json!(["chinasite"]));
+    assert_eq!(rules[4]["outbound"], "direct");
+    assert!(rules[4].get("ip_is_private").is_none());
+
+    assert_eq!(rules[5]["rule_set"], json!(["chinaip"]));
+    assert_eq!(rules[5]["outbound"], "direct");
+    assert!(rules[5].get("ip_is_private").is_none());
+
+    let dns_rules = built["dns"]["rules"].as_array().unwrap();
+    assert_eq!(dns_rules.len(), 2);
+    assert_eq!(dns_rules[0]["domain_suffix"], json!(["hdslb.com"]));
+    assert_eq!(dns_rules[0]["server"], "local");
+    assert_eq!(dns_rules[1]["rule_set"], json!(["chinasite"]));
+    assert_eq!(dns_rules[1]["server"], "local");
+
+    assert_eq!(built["dns"]["disable_cache"], false);
+    assert_eq!(built["dns"]["cache_capacity"], 4096);
+    assert_eq!(built["dns"]["optimistic"]["enabled"], true);
+    assert_eq!(built["dns"]["optimistic"]["timeout"], "8h");
+
+    let dns_servers = built["dns"]["servers"].as_array().unwrap();
+    let cfdns = dns_servers
+        .iter()
+        .find(|server| server["tag"] == "cfdns")
+        .unwrap();
+    assert_eq!(cfdns["type"], "https");
+    assert_eq!(cfdns["server"], "1.1.1.1");
+    assert_eq!(cfdns["detour"], "proxy");
+
+    assert!(dns_servers
+        .iter()
+        .all(|server| server["type"] != "fakeip" && server["tag"] != "fakeip"));
+
+    assert_eq!(built["experimental"]["cache_file"]["enabled"], true);
+    assert_eq!(built["experimental"]["cache_file"]["path"], "cache.db");
+    assert_eq!(built["experimental"]["cache_file"]["store_dns"], true);
+}
+
+#[test]
+fn build_sing_box_config_injects_adblock_rules_when_enabled() {
+    let config = Config {
+        port: None,
+        subs: vec![],
+        nodes: vec![],
+        custom_rules: vec![
+            r#"{"domain_suffix":"ads-whitelist.example.com","action":"route","outbound":"direct"}"#
+                .to_string(),
+        ],
+        route_mode: Default::default(),
+        adblock: true,
+    };
+
+    let (built, _skipped) = build_sing_box_config(
+        &config,
+        vec!["manual-a".to_string()],
+        vec![json!({
+            "type": "hysteria2",
+            "tag": "manual-a",
+            "server": "manual.example.com",
+            "server_port": 443,
+            "password": "secret"
+        })],
+        vec![],
+        vec![],
+    )
+    .unwrap();
+
+    let rule_sets = built["route"]["rule_set"].as_array().unwrap();
+    assert_eq!(rule_sets[0]["tag"], "adblock");
+    assert_eq!(rule_sets[0]["type"], "local");
+    assert_eq!(rule_sets[0]["format"], "binary");
+    assert_eq!(rule_sets[0]["path"], "./adblock_reject.srs");
+
+    let rules = built["route"]["rules"].as_array().unwrap();
+    // 自定义规则在前、广告拦截在后,用户可以放行误拦域名
+    assert_eq!(
+        rules[2]["domain_suffix"],
+        json!("ads-whitelist.example.com")
+    );
+    assert_eq!(rules[3]["rule_set"], json!(["adblock"]));
+    assert_eq!(rules[3]["action"], "reject");
+    assert_eq!(rules[4]["ip_is_private"], true);
+
+    // 广告拦截只在路由层;DNS 规则保持原样,自定义放行规则才能生效
+    let dns_rules = built["dns"]["rules"].as_array().unwrap();
+    assert_eq!(dns_rules.len(), 2);
+    assert_eq!(dns_rules[0]["domain_suffix"], json!(["hdslb.com"]));
+    assert!(dns_rules
+        .iter()
+        .all(|rule| rule.get("rule_set") != Some(&json!(["adblock"]))));
+}
+
+#[test]
+fn build_sing_box_config_keeps_adblock_in_global_mode() {
+    let config = Config {
+        port: None,
+        subs: vec![],
+        nodes: vec![],
+        custom_rules: vec![],
+        route_mode: crate::models::RouteMode::Global,
+        adblock: true,
+    };
+
+    let (built, _skipped) = build_sing_box_config(
+        &config,
+        vec!["manual-a".to_string()],
+        vec![json!({
+            "type": "hysteria2",
+            "tag": "manual-a",
+            "server": "manual.example.com",
+            "server_port": 443,
+            "password": "secret"
+        })],
+        vec![],
+        vec![],
+    )
+    .unwrap();
+
+    // 全局模式下分流规则被裁掉,广告拦截保留(仅路由层)
+    let rules = built["route"]["rules"].as_array().unwrap();
+    assert_eq!(rules.len(), 3);
+    assert_eq!(rules[0]["action"], "sniff");
+    assert_eq!(rules[1]["action"], "hijack-dns");
+    assert_eq!(rules[2]["rule_set"], json!(["adblock"]));
+    assert_eq!(rules[2]["action"], "reject");
+
+    // DNS 层不注入广告拦截
+    let dns_rules = built["dns"]["rules"].as_array().unwrap();
+    assert!(dns_rules.is_empty());
+
+    assert!(built["route"]["rule_set"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|rule_set| rule_set["tag"] == "adblock"));
+}
+
+#[test]
+fn build_sing_box_config_omits_adblock_when_disabled() {
+    let config = Config {
+        port: None,
+        subs: vec![],
+        nodes: vec![],
+        custom_rules: vec![],
+        route_mode: Default::default(),
+        adblock: false,
+    };
+
+    let (built, _skipped) = build_sing_box_config(
+        &config,
+        vec!["manual-a".to_string()],
+        vec![json!({
+            "type": "hysteria2",
+            "tag": "manual-a",
+            "server": "manual.example.com",
+            "server_port": 443,
+            "password": "secret"
+        })],
+        vec![],
+        vec![],
+    )
+    .unwrap();
+
+    assert!(built["route"]["rule_set"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|rule_set| rule_set["tag"] != "adblock"));
+    assert!(built["route"]["rules"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|rule| rule.get("rule_set") != Some(&json!(["adblock"]))));
+}
+
+#[test]
+fn build_sing_box_config_binds_clash_api_to_localhost() {
+    let config = Config {
+        port: None,
+        subs: vec![],
+        nodes: vec![],
+        custom_rules: vec![],
+        route_mode: Default::default(),
+        adblock: false,
+    };
+
+    let (built, _skipped) = build_sing_box_config(
+        &config,
+        vec!["manual-a".to_string()],
+        vec![json!({
+            "type": "hysteria2",
+            "tag": "manual-a",
+            "server": "manual.example.com",
+            "server_port": 443,
+            "password": "secret"
+        })],
+        vec![],
+        vec![],
+    )
+    .unwrap();
+
+    assert_eq!(
+        built["experimental"]["clash_api"]["external_controller"],
+        "127.0.0.1:6262"
+    );
+}
+
+#[test]
+fn build_sing_box_config_ignores_all_invalid_custom_rules() {
+    let config = Config {
+        port: None,
+        subs: vec![],
+        nodes: vec![],
+        custom_rules: vec![
+            "not-json".to_string(),
+            "{invalid".to_string(),
+            "".to_string(),
+        ],
+        route_mode: Default::default(),
+        adblock: false,
+    };
+
+    let my_outbounds = vec![json!({
+        "type": "hysteria2",
+        "tag": "manual-a",
+        "server": "manual.example.com",
+        "server_port": 443,
+        "password": "secret"
+    })];
+
+    let (built, _skipped) = build_sing_box_config(
+        &config,
+        vec!["manual-a".to_string()],
+        my_outbounds,
+        vec![],
+        vec![],
+    )
+    .unwrap();
+
+    let rules = built["route"]["rules"].as_array().unwrap();
+    // Should have only the default direct-split rules.
+    assert_eq!(rules.len(), 6);
+}
+
+#[tokio::test]
+async fn save_config_performs_atomic_write() {
+    let temp_dir = std::env::temp_dir().join(format!(
+        "miao-test-save-{}-{}",
+        std::process::id(),
+        "atomic"
+    ));
+    let config_path = temp_dir.join("nested").join("config.yaml");
+
+    let config = Config {
+        port: Some(8080),
+        subs: vec!["https://example.com/sub".to_string()],
+        nodes: vec![],
+        custom_rules: vec![],
+        route_mode: Default::default(),
+        adblock: false,
+    };
+
+    save_config_to(&config_path, &config).await.unwrap();
+
+    let content = tokio::fs::read_to_string(&config_path).await.unwrap();
+    let parsed: Config = serde_yaml::from_str(&content).unwrap();
+    assert_eq!(parsed.port, Some(8080));
+    assert_eq!(parsed.subs.len(), 1);
+
+    // 清理
+    let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+}
+
+#[tokio::test]
+async fn save_config_overwrites_existing_file() {
+    let temp_dir = std::env::temp_dir().join(format!(
+        "miao-test-save-{}-{}",
+        std::process::id(),
+        "overwrite"
+    ));
+    tokio::fs::create_dir_all(&temp_dir).await.unwrap();
+
+    let config_path = temp_dir.join("config.yaml");
+
+    // 先创建旧配置
+    tokio::fs::write(
+        &config_path,
+        "port: 9999\nsubs: []\nnodes: []\ncustom_rules: []",
+    )
+    .await
+    .unwrap();
+
+    // 使用原子写入保存新配置
+    let config = Config {
+        port: Some(7777),
+        subs: vec![],
+        nodes: vec![],
+        custom_rules: vec![],
+        route_mode: Default::default(),
+        adblock: false,
+    };
+    save_config_to(&config_path, &config).await.unwrap();
+
+    let content = tokio::fs::read_to_string(&config_path).await.unwrap();
+    let parsed: Config = serde_yaml::from_str(&content).unwrap();
+    assert_eq!(parsed.port, Some(7777));
+
+    // 清理
+    let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+}
+
+#[tokio::test]
+async fn save_config_skips_identical_content() {
+    let temp_dir =
+        std::env::temp_dir().join(format!("miao-test-save-{}-{}", std::process::id(), "skip"));
+    tokio::fs::create_dir_all(&temp_dir).await.unwrap();
+
+    let config_path = temp_dir.join("config.yaml");
+    let config = Config {
+        port: Some(6161),
+        subs: vec![],
+        nodes: vec![],
+        custom_rules: vec![],
+        route_mode: Default::default(),
+        adblock: false,
+    };
+
+    save_config_to(&config_path, &config).await.unwrap();
+    let before = tokio::fs::metadata(&config_path)
+        .await
+        .unwrap()
+        .modified()
+        .unwrap();
+    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+
+    save_config_to(&config_path, &config).await.unwrap();
+
+    let after = tokio::fs::metadata(&config_path)
+        .await
+        .unwrap()
+        .modified()
+        .unwrap();
+    assert_eq!(before, after);
+
+    let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+}

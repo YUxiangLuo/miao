@@ -1,0 +1,113 @@
+/* 移动端不要再对活跃链接区加 display:none：JS isDesktop 已经不渲染它 */
+.shell {
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    background: var(--bg);
+}
+.workspace {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    padding: 24px;
+    max-width: 1400px;
+    width: 100%;
+    margin: 0 auto;
+}
+.content-grid {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 400px;
+    gap: 16px;
+}
+.left-column,
+.right-column {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    overflow-y: auto;
+    min-height: 0;
+}
+.left-column > *,
+.right-column > * {
+    flex-shrink: 0;
+}
+/* 列内最后一张卡片生长填满列高,保证左右列卡片底边对齐 */
+.left-column > *:last-child,
+.right-column > *:last-child {
+    flex-grow: 1;
+    min-height: 0;
+}
+/* 左列节点卡片:恒等于列高(可收缩),头部与当前节点横幅固定,仅节点网格内部滚动;
+   min-height 保底 = 头部+横幅+网格最小可用高度,列高不足时退回整列滚动兜底 */
+.left-column > *:last-child {
+    flex-shrink: 1;
+    min-height: var(--node-card-min-height);
+    display: flex;
+    flex-direction: column;
+}
+.left-column > *:last-child .section-header,
+.left-column > *:last-child .current-node-banner {
+    flex-shrink: 0;
+}
+.left-column > *:last-child .panel-card-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+}
+.home-connections {
+    /* 固定高度:不随有无活跃链接/卡片数量变化,布局恒定 */
+    flex: 0 0 auto;
+    height: var(--home-connections-height);
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-top: 16px;
+}
+.home-connections-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-shrink: 0;
+    padding: 0 2px;
+}
+.home-connections-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--text);
+    font-size: 0.875rem;
+    font-weight: 600;
+}
+.home-connections-count {
+    min-width: 18px;
+    padding: 1px 6px;
+    border-radius: 999px;
+    background: var(--surface-green-soft);
+    color: var(--success);
+    font-size: 0.75rem;
+    font-weight: 700;
+    text-align: center;
+}
+.home-connections-all {
+    border: none;
+    background: none;
+    color: var(--text-muted);
+    font-size: 0.8125rem;
+    padding: 4px 2px;
+}
+.home-connections-all:hover {
+    color: var(--text);
+}
+.home-connections-grid {
+    flex: 1;
+    min-height: 0;
+}
+.home-connections-empty {
+    grid-column: 1 / -1;
+}

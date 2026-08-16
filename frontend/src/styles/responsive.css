@@ -1,0 +1,78 @@
+@media (max-width: 1180px) {
+    .content-grid {
+        grid-template-columns: 1fr;
+    }
+}
+@media (max-width: 840px) {
+    /* Switch from viewport-locked to natural page scroll */
+    html, body, #root {
+        height: auto;
+        overflow: auto;
+    }
+    .shell {
+        height: auto;
+        min-height: 100svh;
+        overflow: visible;
+    }
+    .workspace {
+        flex: none;
+        overflow: visible;
+        padding: 16px;
+    }
+    .content-grid {
+        flex: none;
+    }
+    .left-column,
+    .right-column {
+        overflow: visible;
+    }
+    .status-card-body {
+        flex-wrap: wrap;
+    }
+    .traffic-chip {
+        order: 3;
+        width: 100%;
+        justify-content: center;
+    }
+    .route-mode-segment {
+        order: 4;
+    }
+    .status-card-spacer {
+        display: none;
+    }
+    .proxy-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+@media (max-width: 560px) {
+    .topbar {
+        padding: 0 14px;
+    }
+    .workspace {
+        padding: 12px;
+    }
+    .proxy-grid,
+    .form-grid.two {
+        grid-template-columns: 1fr;
+    }
+    .subscription-add-row {
+        flex-direction: column;
+    }
+    .toast-stack {
+        left: 12px;
+        right: 12px;
+        top: 12px;
+    }
+    .toast {
+        min-width: 0;
+    }
+    .connection-stat-grid {
+        grid-template-columns: 1fr;
+    }
+    .connection-card-grid {
+        grid-template-columns: 1fr;
+    }
+    .onboarding-card {
+        margin: 0 16px;
+    }
+}

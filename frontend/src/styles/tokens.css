@@ -1,0 +1,60 @@
+:root {
+    color-scheme: dark;
+    --bg: #1a1d22;
+    --surface: #22262d;
+    --surface-soft: #1e2229;
+    --surface-blue: #1e2a3a;
+    --surface-blue-strong: #2a3f58;
+    --surface-green: #1e2a1e;
+    --surface-green-soft: #1c3028;
+    --surface-red: #2a1c1c;
+    --border: #333a47;
+    --border-soft: #2b3040;
+    --text: #cdd3da;
+    --text-strong: #eef3f8;
+    --text-muted: #7e8b9a;
+    --text-subtle: #4d5563;
+    --accent: #617fa6;
+    --accent-strong: #7b9dc4;
+    --success: #4a9e75;
+    --warning: #a07840;
+    --danger: #b05252;
+    --shadow: 0 16px 32px rgba(0, 0, 0, 0.25);
+    --radius: 8px;
+    --home-connections-height: 240px;
+    --node-card-min-height: 326px;
+}
+
+* {
+    box-sizing: border-box;
+}
+/* 全局字号基准：所有字体使用 rem，调整此值即可整体缩放字体 */
+html {
+    font-size: 16px;
+}
+html,
+body,
+#root {
+    margin: 0;
+    height: 100%;
+    overflow: hidden;
+}
+body {
+    background: var(--bg);
+    color: var(--text);
+    font-family:
+        Inter,
+        system-ui,
+        -apple-system,
+        BlinkMacSystemFont,
+        "Segoe UI",
+        sans-serif;
+}
+button,
+input,
+select {
+    font: inherit;
+}
+button {
+    cursor: pointer;
+}

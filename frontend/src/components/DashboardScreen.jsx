@@ -1,0 +1,132 @@
+import {
+  TopBar,
+  StatusCard,
+  ProxyCard,
+  NodesCard,
+  SubsCard,
+  RulesCard,
+  HomeConnections,
+  ConfirmModal,
+  ConnectionsModal,
+  NodeModal,
+  ToastStack,
+} from './index.js'
+
+export function DashboardScreen({ app }) {
+  return (
+    <div className="shell">
+      <TopBar
+        status={app.status}
+        versionInfo={app.versionInfo}
+        upgrading={app.upgrading}
+        onUpgradeClick={app.handleUpgradeClick}
+      />
+
+      <main className="workspace">
+        <StatusCard
+          status={app.status}
+          traffic={app.traffic}
+          loadingAction={app.loadingAction}
+          onToggleService={app.handleToggleService}
+          onSetRouteMode={app.handleOpenSetRouteModeConfirm}
+          onOpenConnections={app.handleOpenConnections}
+        />
+
+        <div className="content-grid">
+          <div className="left-column">
+            <ProxyCard
+              status={app.status}
+              primaryGroup={app.primaryGroup}
+              primaryGroupName={app.primaryGroupName}
+              currentNodeMeta={app.currentNodeMeta}
+              delays={app.delays}
+              testingNodes={app.testingNodes}
+              testingGroup={app.testingGroup}
+              switchingNode={app.switchingNode}
+              onTestDelay={app.handleTestDelay}
+              onTestGroupDelays={app.handleTestGroupDelays}
+              onSwitchProxy={app.handleSwitchProxy}
+              onOpenAddNode={app.openNodeModal}
+            />
+          </div>
+
+          <div className="right-column">
+            <NodesCard
+              nodes={app.nodes}
+              isInitializing={app.status.initializing}
+              onDeleteNode={app.handleOpenDeleteNodeConfirm}
+              onOpenAddNode={app.openNodeModal}
+            />
+
+            <SubsCard
+              subs={app.subs}
+              newSubUrl={app.newSubUrl}
+              setNewSubUrl={app.setNewSubUrl}
+              loadingAction={app.loadingAction}
+              onAddSub={app.handleAddSubscription}
+              onDeleteSub={app.handleOpenDeleteSubConfirm}
+              onRefreshSubs={app.handleRefreshSubscriptions}
+              isInitializing={app.status.initializing}
+            />
+
+            <RulesCard
+              rules={app.rules}
+              isInitializing={app.status.initializing}
+              loadingAction={app.loadingAction}
+              onAddRule={app.handleAddRule}
+              onDeleteRule={app.handleOpenDeleteRuleConfirm}
+              adblockEnabled={Boolean(app.status.adblock)}
+              onToggleAdblock={app.handleToggleAdblock}
+              nodeNames={app.ruleNodeNames}
+            />
+          </div>
+        </div>
+
+        {app.isDesktop && (
+          <HomeConnections
+            status={app.status}
+            data={app.connectionsInfo}
+            onOpenAll={app.handleOpenConnections}
+          />
+        )}
+      </main>
+
+      <ToastStack toasts={app.toasts} onDismiss={app.dismissToast} />
+
+      <NodeModal
+        open={app.showNodeModal}
+        nodeType={app.nodeType}
+        setNodeType={app.setNodeType}
+        form={app.nodeForm}
+        setForm={app.setNodeForm}
+        loading={app.loadingAction === 'addNode'}
+        onClose={app.closeNodeModal}
+        onSubmit={app.handleAddNode}
+        onImport={app.handleImportNodes}
+        onDeployVps={app.handleDeployVps}
+      />
+
+      <ConnectionsModal
+        open={app.showConnectionsModal}
+        status={app.status}
+        data={app.connectionsInfo}
+        loading={app.connectionsLoading}
+        error={app.connectionsError}
+        onClose={() => app.setShowConnectionsModal(false)}
+        onRefresh={app.fetchConnections}
+      />
+
+      <ConfirmModal
+        open={app.confirmState.open}
+        title={app.confirmState.title}
+        message={app.confirmState.message}
+        onCancel={app.closeConfirm}
+        onConfirm={() => {
+          const action = app.confirmState.onConfirm
+          app.closeConfirm()
+          action?.()
+        }}
+      />
+    </div>
+  )
+}
