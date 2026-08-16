@@ -114,7 +114,7 @@ pub(crate) fn delete_command() -> (String, Vec<String>) {
 
 #[cfg(test)]
 mod tests {
-    use super::{create_command, delete_command, is_enabled, query_command, set_enabled};
+    use super::{create_command, delete_command, query_command};
     use std::path::PathBuf;
 
     #[test]
@@ -132,10 +132,7 @@ mod tests {
             .map(|pair| pair[1].clone())
             .expect("/TR argument");
         // 路径含空格必须带引号，且附带 --minimized
-        assert_eq!(
-            tr,
-            format!("\"{}\" --minimized", exe.display())
-        );
+        assert_eq!(tr, format!("\"{}\" --minimized", exe.display()));
     }
 
     #[test]
@@ -154,8 +151,8 @@ mod tests {
     #[cfg(not(windows))]
     #[test]
     fn autostart_is_unsupported_off_windows() {
-        assert!(!is_enabled());
-        assert!(set_enabled(true).is_err());
-        assert!(set_enabled(false).is_err());
+        assert!(!super::is_enabled());
+        assert!(super::set_enabled(true).is_err());
+        assert!(super::set_enabled(false).is_err());
     }
 }

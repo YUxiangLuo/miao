@@ -1,4 +1,5 @@
 pub mod config;
+pub mod mcp;
 pub mod node_parser;
 #[cfg(not(windows))]
 pub mod openwrt;

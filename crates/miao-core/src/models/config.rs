@@ -22,6 +22,10 @@ pub struct Config {
     /// 不拦 DNS,自定义放行规则才能对误拦域名生效
     #[serde(default)]
     pub adblock: bool,
+    /// MCP 端点（POST /mcp，JSON-RPC 工具接口）开关。
+    /// Linux 面板绑 0.0.0.0，开启后局域网可达——默认关闭，按需显式开启。
+    #[serde(default)]
+    pub mcp: bool,
     #[serde(default, skip_serializing, skip_deserializing)]
     pub route_mode: RouteMode,
 }
@@ -55,6 +59,7 @@ nodes: []
             custom_rules: vec![],
             route_mode: super::RouteMode::Global,
             adblock: false,
+            mcp: false,
         };
 
         let yaml = serde_yaml::to_string(&config).unwrap();
@@ -71,6 +76,7 @@ nodes: []
             custom_rules: vec![],
             route_mode: Default::default(),
             adblock: false,
+            mcp: false,
         };
 
         let yaml = serde_yaml::to_string(&config).unwrap();

@@ -27,7 +27,7 @@ fn build_rule_json(req: &RuleRequest) -> JsonValue {
 }
 
 /// 把存储的 JSON 字符串还原成结构化展示;无法识别的手写规则以 raw 兜底
-fn describe_rule(index: usize, raw: &str) -> RuleInfo {
+pub(crate) fn describe_rule(index: usize, raw: &str) -> RuleInfo {
     let parsed = serde_json::from_str::<JsonValue>(raw).ok();
     let mut info = RuleInfo {
         index,

@@ -26,6 +26,7 @@ fn collect_manual_outbounds_ignores_invalid_json_nodes() {
             custom_rules: vec![],
             route_mode: Default::default(),
             adblock: false,
+            mcp: false,
         };
 
     let (outbounds, names) = collect_manual_outbounds(&config);
@@ -48,6 +49,7 @@ fn collect_manual_outbounds_preserves_hysteria2_without_default_bandwidth() {
             custom_rules: vec![],
             route_mode: Default::default(),
             adblock: false,
+            mcp: false,
         };
 
     let (outbounds, names) = collect_manual_outbounds(&config);
@@ -100,6 +102,7 @@ fn build_sing_box_config_skips_rules_with_missing_node() {
         ],
         route_mode: Default::default(),
         adblock: false,
+        mcp: false,
     };
 
     let (built, skipped) = build_sing_box_config(
@@ -154,6 +157,7 @@ fn build_sing_box_config_merges_nodes_and_valid_custom_rules() {
         ],
         route_mode: Default::default(),
         adblock: false,
+        mcp: false,
     };
 
     let my_outbounds = vec![json!({
@@ -210,6 +214,7 @@ fn build_sing_box_config_global_mode_removes_split_rules() {
         ],
         route_mode: RouteMode::Global,
         adblock: false,
+        mcp: false,
     };
 
     let my_outbounds = vec![json!({
@@ -347,6 +352,7 @@ fn config_with_route_override_defaults_to_rule_mode() {
         custom_rules: vec![],
         route_mode: RouteMode::Global,
         adblock: false,
+        mcp: false,
     };
 
     let runtime_config = config_with_route_override(&config, None);
@@ -363,6 +369,7 @@ fn build_sing_box_config_renames_duplicate_outbound_tags() {
         custom_rules: vec![],
         route_mode: Default::default(),
         adblock: false,
+        mcp: false,
     };
 
     let my_outbounds = vec![json!({
@@ -421,6 +428,7 @@ fn build_sing_box_config_renames_tags_reserved_by_template() {
         custom_rules: vec![],
         route_mode: Default::default(),
         adblock: false,
+        mcp: false,
     };
 
     let my_outbounds = vec![
@@ -472,6 +480,7 @@ fn build_sing_box_config_errors_when_no_nodes_available() {
         custom_rules: vec![],
         route_mode: Default::default(),
         adblock: false,
+        mcp: false,
     };
 
     let err = build_sing_box_config(&config, vec![], vec![], vec![], vec![]).unwrap_err();
@@ -491,6 +500,7 @@ fn collect_manual_outbounds_handles_empty_nodes() {
         custom_rules: vec![],
         route_mode: Default::default(),
         adblock: false,
+        mcp: false,
     };
 
     let (outbounds, names) = collect_manual_outbounds(&config);
@@ -512,6 +522,7 @@ fn collect_manual_outbounds_handles_all_invalid_nodes() {
         custom_rules: vec![],
         route_mode: Default::default(),
         adblock: false,
+        mcp: false,
     };
 
     let (outbounds, names) = collect_manual_outbounds(&config);
@@ -530,6 +541,7 @@ fn build_sing_box_config_preserves_node_order() {
         custom_rules: vec![],
         route_mode: Default::default(),
         adblock: false,
+        mcp: false,
     };
 
     let my_outbounds = vec![
@@ -567,6 +579,7 @@ fn build_sing_box_config_handles_no_custom_rules() {
         custom_rules: vec![],
         route_mode: Default::default(),
         adblock: false,
+        mcp: false,
     };
 
     let my_outbounds = vec![json!({
@@ -600,6 +613,7 @@ fn build_sing_box_config_splits_direct_route_rules() {
         custom_rules: vec![],
         route_mode: Default::default(),
         adblock: false,
+        mcp: false,
     };
 
     let my_outbounds = vec![json!({
@@ -680,6 +694,7 @@ fn build_sing_box_config_injects_adblock_rules_when_enabled() {
         ],
         route_mode: Default::default(),
         adblock: true,
+        mcp: false,
     };
 
     let (built, _skipped) = build_sing_box_config(
@@ -731,6 +746,7 @@ fn build_sing_box_config_keeps_adblock_in_global_mode() {
         custom_rules: vec![],
         route_mode: crate::models::RouteMode::Global,
         adblock: true,
+        mcp: false,
     };
 
     let (built, _skipped) = build_sing_box_config(
@@ -776,6 +792,7 @@ fn build_sing_box_config_omits_adblock_when_disabled() {
         custom_rules: vec![],
         route_mode: Default::default(),
         adblock: false,
+        mcp: false,
     };
 
     let (built, _skipped) = build_sing_box_config(
@@ -814,6 +831,7 @@ fn build_sing_box_config_binds_clash_api_to_localhost() {
         custom_rules: vec![],
         route_mode: Default::default(),
         adblock: false,
+        mcp: false,
     };
 
     let (built, _skipped) = build_sing_box_config(
@@ -850,6 +868,7 @@ fn build_sing_box_config_ignores_all_invalid_custom_rules() {
         ],
         route_mode: Default::default(),
         adblock: false,
+        mcp: false,
     };
 
     let my_outbounds = vec![json!({
@@ -890,6 +909,7 @@ async fn save_config_performs_atomic_write() {
         custom_rules: vec![],
         route_mode: Default::default(),
         adblock: false,
+        mcp: false,
     };
 
     save_config_to(&config_path, &config).await.unwrap();
@@ -930,6 +950,7 @@ async fn save_config_overwrites_existing_file() {
         custom_rules: vec![],
         route_mode: Default::default(),
         adblock: false,
+        mcp: false,
     };
     save_config_to(&config_path, &config).await.unwrap();
 
@@ -955,6 +976,7 @@ async fn save_config_skips_identical_content() {
         custom_rules: vec![],
         route_mode: Default::default(),
         adblock: false,
+        mcp: false,
     };
 
     save_config_to(&config_path, &config).await.unwrap();

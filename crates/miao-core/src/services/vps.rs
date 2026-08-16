@@ -678,6 +678,7 @@ mod tests {
             custom_rules: vec![],
             route_mode: Default::default(),
             adblock: false,
+            mcp: false,
         };
 
         assert_eq!(

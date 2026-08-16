@@ -101,6 +101,7 @@ mod tests {
             custom_rules: vec![],
             route_mode: Default::default(),
             adblock: false,
+            mcp: false,
         };
 
         let state = AppState::new(config.clone()).unwrap();
@@ -131,6 +132,7 @@ mod tests {
             custom_rules: vec![],
             route_mode: Default::default(),
             adblock: false,
+            mcp: false,
         };
 
         let state = AppState::new(config).unwrap();

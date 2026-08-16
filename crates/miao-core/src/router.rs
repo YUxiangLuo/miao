@@ -11,6 +11,7 @@ use crate::handlers::version::upgrade;
 use crate::handlers::vps::deploy_vps;
 use crate::handlers::{
     clash::{proxy_clash_http, proxy_clash_traffic},
+    mcp::handle_mcp,
     nodes::{add_node, delete_node, get_nodes},
     proxy::set_last_proxy,
     rules::{add_rule, delete_rule, get_rules, set_adblock},
@@ -44,7 +45,8 @@ pub fn build_router(app_state: Arc<AppState>) -> Router {
         .route("/api/rules", post(add_rule))
         .route("/api/rules", delete(delete_rule))
         .route("/api/adblock", post(set_adblock))
-        .route("/api/last-proxy", post(set_last_proxy));
+        .route("/api/last-proxy", post(set_last_proxy))
+        .route("/mcp", post(handle_mcp));
 
     #[cfg(not(windows))]
     let router = router
@@ -77,6 +79,7 @@ mod tests {
             custom_rules: vec![],
             route_mode: Default::default(),
             adblock: false,
+            mcp: false,
         })
         .await;
 
@@ -96,6 +99,7 @@ mod tests {
             custom_rules: vec![],
             route_mode: Default::default(),
             adblock: false,
+            mcp: false,
         })
         .await;
 
@@ -122,6 +126,7 @@ mod tests {
             custom_rules: vec![],
             route_mode: Default::default(),
             adblock: false,
+            mcp: false,
         })
         .await;
 
@@ -154,6 +159,7 @@ mod tests {
             custom_rules: vec![],
             route_mode: Default::default(),
             adblock: false,
+            mcp: false,
         })
         .await;
 
@@ -183,6 +189,7 @@ mod tests {
             custom_rules: vec![],
             route_mode: Default::default(),
             adblock: false,
+            mcp: false,
         })
         .await;
 
@@ -209,6 +216,7 @@ mod tests {
             custom_rules: vec![],
             route_mode: Default::default(),
             adblock: false,
+            mcp: false,
         })
         .await;
 
@@ -254,6 +262,7 @@ mod tests {
             custom_rules: vec![],
             route_mode: Default::default(),
             adblock: false,
+            mcp: false,
         })
         .await;
 
@@ -281,6 +290,7 @@ mod tests {
             custom_rules: vec![],
             route_mode: Default::default(),
             adblock: false,
+            mcp: false,
         })
         .await;
 
@@ -310,6 +320,7 @@ mod tests {
             custom_rules: vec![],
             route_mode: Default::default(),
             adblock: false,
+            mcp: false,
         })
         .await;
 
@@ -344,6 +355,7 @@ mod tests {
             custom_rules: vec![],
             route_mode: Default::default(),
             adblock: false,
+            mcp: false,
         })
         .await;
 
@@ -371,6 +383,7 @@ mod tests {
             custom_rules: vec![],
             route_mode: Default::default(),
             adblock: false,
+            mcp: false,
         })
         .await;
 
@@ -401,6 +414,7 @@ mod tests {
             custom_rules: vec![],
             route_mode: Default::default(),
             adblock: false,
+            mcp: false,
         })
         .await;
 
@@ -430,6 +444,7 @@ mod tests {
             ],
             route_mode: Default::default(),
             adblock: false,
+            mcp: false,
         })
         .await;
 
@@ -460,6 +475,7 @@ mod tests {
             ],
             route_mode: Default::default(),
             adblock: false,
+            mcp: false,
         })
         .await;
 
@@ -492,6 +508,7 @@ mod tests {
             custom_rules: vec![],
             route_mode: Default::default(),
             adblock: false,
+            mcp: false,
         })
         .await;
 
@@ -523,6 +540,7 @@ mod tests {
             custom_rules: vec![],
             route_mode: Default::default(),
             adblock: false,
+            mcp: false,
         })
         .await;
 
@@ -550,6 +568,7 @@ mod tests {
             custom_rules: vec![],
             route_mode: Default::default(),
             adblock: false,
+            mcp: false,
         })
         .await;
 
@@ -580,6 +599,7 @@ mod tests {
             custom_rules: vec![],
             route_mode: Default::default(),
             adblock: false,
+            mcp: false,
         })
         .await;
 
@@ -608,6 +628,7 @@ mod tests {
             custom_rules: vec![],
             route_mode: Default::default(),
             adblock: false,
+            mcp: false,
         })
         .await;
 
@@ -644,5 +665,47 @@ mod tests {
         let json = response_json(response).await;
         assert_eq!(json["success"], false);
         assert_eq!(json["message"], "Initialization is still in progress");
+    }
+
+    #[tokio::test]
+    async fn mcp_endpoint_is_not_found_when_disabled() {
+        let app = test_app(Config::default()).await;
+
+        let response = app
+            .oneshot(json_request(
+                "POST",
+                "/mcp",
+                json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/list" }),
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn mcp_endpoint_serves_jsonrpc_when_enabled() {
+        let app = test_app(Config {
+            mcp: true,
+            ..Default::default()
+        })
+        .await;
+
+        let response = app
+            .oneshot(json_request(
+                "POST",
+                "/mcp",
+                json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/list" }),
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers().get("MCP-Protocol-Version").unwrap(),
+            "2026-07-28"
+        );
+        let json = response_json(response).await;
+        assert!(json["result"]["tools"].is_array());
     }
 }

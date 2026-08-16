@@ -282,6 +282,7 @@ mod tests {
             custom_rules: vec![],
             route_mode: Default::default(),
             adblock: false,
+            mcp: false,
         });
 
         let axum::response::Json(response) = get_status(State(state)).await;
@@ -308,6 +309,7 @@ mod tests {
             custom_rules: vec![],
             route_mode: RouteMode::Rule,
             adblock: false,
+            mcp: false,
         });
         *state.route_mode_override.write().await = Some(RouteMode::Global);
 
@@ -327,6 +329,7 @@ mod tests {
             custom_rules: vec![],
             route_mode: RouteMode::Global,
             adblock: false,
+            mcp: false,
         });
 
         let axum::response::Json(response) = get_status(State(state)).await;
