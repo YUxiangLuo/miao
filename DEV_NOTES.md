@@ -162,7 +162,7 @@ TUN JSON：`auto_route` + `strict_route`，`interface_name` 仍是 `sing-tun`。
 
 ## CI
 
-`ci.yml` 在 `master` 的 push、以及 PR 上跑：
+`ci.yml` 在 `master`、当前的 `feat/windows-tauri` 的 push、以及 PR 上跑。合进 master 前把写死的功能分支从 `on.push.branches` 拿掉：
 
 1. Frontend quality
 2. Rust quality（default-members + `cargo check -p miao-core --target x86_64-pc-windows-gnu`）
