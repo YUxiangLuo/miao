@@ -1,12 +1,14 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 use miao_core::{
     acquire_single_instance, autostart_is_enabled, autostart_set_enabled, default_log_path,
-    focus_existing_window, is_elevated, peek_single_instance, require_privileges,
-    show_user_error, spawn_server, InstanceAcquire, InstancePeek, RuntimeOptions, ServerHandle,
-    MINIMIZED_ARG,
+    double_click_interval, focus_existing_window, is_elevated, peek_single_instance,
+    require_privileges, show_user_error, spawn_server, InstanceAcquire, InstancePeek,
+    RuntimeOptions, ServerHandle, MINIMIZED_ARG,
 };
 use tauri::menu::{CheckMenuItem, CheckMenuItemBuilder, Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
@@ -99,6 +101,16 @@ fn run_app() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+/// 托盘单击/双击判定状态。Windows 双击消息序列是 Down,Up,DoubleClick,Up——
+/// 若单击立即响应，双击会表现成「先显示、再隐藏、又被尾声 Up 重新显示」。
+/// 因此单击延迟一个系统双击时长执行（期间出现双击则作废），
+/// 双击后的那次尾声 Up 直接忽略。
+#[derive(Default)]
+struct TrayClickState {
+    generation: AtomicU64,
+    last_double_click: Mutex<Option<Instant>>,
+}
+
 fn install_tray(app: &AppHandle) -> tauri::Result<()> {
     let show = MenuItem::with_id(app, "show", "显示窗口", true, None::<&str>)?;
     let log = MenuItem::with_id(app, "log", "打开日志", true, None::<&str>)?;
@@ -109,6 +121,7 @@ fn install_tray(app: &AppHandle) -> tauri::Result<()> {
     let menu = Menu::with_items(app, &[&show, &log, &autostart, &quit])?;
 
     let autostart_for_event = autostart.clone();
+    let click_state = Arc::new(TrayClickState::default());
     let mut tray = TrayIconBuilder::new()
         .menu(&menu)
         .show_menu_on_left_click(false)
@@ -120,16 +133,43 @@ fn install_tray(app: &AppHandle) -> tauri::Result<()> {
             "quit" => app.exit(0),
             _ => {}
         })
-        .on_tray_icon_event(|tray, event| match event {
+        .on_tray_icon_event(move |tray, event| match event {
             TrayIconEvent::Click {
                 button: MouseButton::Left,
                 button_state: MouseButtonState::Up,
                 ..
-            } => show_main_window(tray.app_handle()),
+            } => {
+                // 双击尾声的 Up：忽略
+                let trailing = click_state
+                    .last_double_click
+                    .lock()
+                    .ok()
+                    .and_then(|guard| *guard)
+                    .is_some_and(|at| at.elapsed() <= double_click_interval());
+                if trailing {
+                    return;
+                }
+                let generation = click_state.generation.fetch_add(1, Ordering::Relaxed) + 1;
+                let app = tray.app_handle().clone();
+                let state = click_state.clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(double_click_interval());
+                    if state.generation.load(Ordering::Relaxed) == generation {
+                        show_main_window(&app);
+                    }
+                });
+            }
             TrayIconEvent::DoubleClick {
                 button: MouseButton::Left,
                 ..
-            } => toggle_main_window(tray.app_handle()),
+            } => {
+                // 作废挂起的单击，记录时间以吞掉随后的尾声 Up
+                click_state.generation.fetch_add(1, Ordering::Relaxed);
+                if let Ok(mut guard) = click_state.last_double_click.lock() {
+                    *guard = Some(Instant::now());
+                }
+                toggle_main_window(tray.app_handle());
+            }
             _ => {}
         });
 

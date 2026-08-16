@@ -267,6 +267,12 @@ fn windows_focus_existing() -> bool {
     true
 }
 
+/// 托盘单击/双击判定时长。Windows 默认双击间隔是 500ms；
+/// windows-sys 0.59 未导出 GetDoubleClickTime，故取系统默认值。
+pub fn double_click_interval() -> std::time::Duration {
+    std::time::Duration::from_millis(500)
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
