@@ -2,8 +2,7 @@ name: CI
 
 on:
   push:
-    # Drop feat/windows-tauri from this list before merging to master.
-    branches: [master, feat/windows-tauri]
+    branches: [feat/windows-tauri]
   pull_request:
 
 permissions:

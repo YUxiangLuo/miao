@@ -1,10 +1,10 @@
 # 开发调试笔记
 
-本机是 Arch。当前工作是：在这台 Linux 上，按 **master 的产品哲学** 做基于 Tauri 的 Windows 桌面版。命令以仓库根目录为基准。
+本机是 Arch。**`feat/windows-tauri` 是 Windows 线**，不合回 master。在这台 Linux 上按同一套产品哲学做 Tauri 桌面版。命令以仓库根目录为基准。
 
-## 要守住的哲学（master → Windows）
+## 要守住的哲学
 
-master 上的 Linux 版是：下载一个文件，`sudo` 跑，浏览器打开，TUN 接管流量，面板就是产品。Windows 只换外壳，不换产品。
+Linux 版是：下载一个文件，`sudo` 跑，浏览器打开，TUN 接管流量，面板就是产品。Windows 只换外壳，不换产品。
 
 | 守住 | 不要做成 |
 | --- | --- |
@@ -162,7 +162,7 @@ TUN JSON：`auto_route` + `strict_route`，`interface_name` 仍是 `sing-tun`。
 
 ## CI
 
-`ci.yml` 在 `master`、当前的 `feat/windows-tauri` 的 push、以及 PR 上跑。合进 master 前把写死的功能分支从 `on.push.branches` 拿掉：
+`ci.yml` 在这条分支的 push、以及 PR 上跑：
 
 1. Frontend quality
 2. Rust quality（default-members + `cargo check -p miao-core --target x86_64-pc-windows-gnu`）
