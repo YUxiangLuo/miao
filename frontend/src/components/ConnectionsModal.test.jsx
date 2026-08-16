@@ -32,7 +32,6 @@ function renderModal(connections, props = {}) {
       loading={false}
       error=""
       onClose={vi.fn()}
-      onRefresh={vi.fn()}
       {...props}
     />,
   )

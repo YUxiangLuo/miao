@@ -116,7 +116,6 @@ export function DashboardScreen({ app }) {
         loading={app.connectionsLoading}
         error={app.connectionsError}
         onClose={() => app.setShowConnectionsModal(false)}
-        onRefresh={app.fetchConnections}
       />
 
       <ConfirmModal

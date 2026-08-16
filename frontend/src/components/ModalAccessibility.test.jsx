@@ -91,7 +91,6 @@ describe('modal accessibility', () => {
         loading={false}
         error=""
         onClose={onClose}
-        onRefresh={vi.fn()}
       />,
     )
 

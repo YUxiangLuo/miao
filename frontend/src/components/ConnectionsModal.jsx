@@ -6,7 +6,6 @@ import {
   Gauge,
   Globe,
   HardDriveDownload,
-  RefreshCw,
   X,
 } from 'lucide-react'
 import { useDialog } from '../hooks/useDialog.js'
@@ -27,7 +26,6 @@ export function ConnectionsModal({
   loading,
   error,
   onClose,
-  onRefresh,
 }) {
   const titleId = useId()
   const dialogRef = useDialog(open, onClose)
@@ -80,10 +78,6 @@ export function ConnectionsModal({
             )}
           </div>
           <div className="connections-header-actions">
-            <button className="connections-tool-button" onClick={onRefresh} disabled={loading || !status.running}>
-              <RefreshCw size={14} className={loading ? 'spin' : undefined} />
-              刷新
-            </button>
             <button className="icon-button" onClick={onClose} title="关闭 (Esc)" aria-label="关闭链接统计">
               <X size={16} />
             </button>
