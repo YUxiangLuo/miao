@@ -7,7 +7,8 @@ mod persist;
 mod tests;
 
 pub use apply::{
-    apply_config_change, apply_runtime_config_change, regenerate_preserving_service_state,
+    apply_config_change, apply_runtime_config_change, refresh_subscriptions,
+    regenerate_preserving_service_state, RefreshEffect, RefreshOutcome, RefreshPolicy,
 };
 pub use generate::{gen_config, known_rule_targets};
 pub use persist::{

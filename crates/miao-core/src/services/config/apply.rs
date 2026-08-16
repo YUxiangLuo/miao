@@ -16,30 +16,106 @@ use crate::state::AppState;
 
 use super::generate::gen_config;
 use super::persist::{
-    config_cache_path, restore_config_from_cache, save_config_cache, save_config_to,
+    config_cache_path, read_config_cache, restore_config_from_cache, save_config_cache,
+    save_config_to,
 };
 
-pub(super) async fn regenerate_and_restart_runtime(
+/// 订阅刷新策略：机制（拉取 → 生成 → 校验 → 重启）只有一条，差异显式表达
+pub enum RefreshPolicy {
+    /// 手动刷新：生成+校验成功后总是重启；全部订阅失败也用现有结果继续
+    Manual,
+    /// 启动快速通道：与启动所用缓存比对无变化则不重启；
+    /// 全部订阅失败/校验失败时保留正在运行的缓存配置
+    Startup,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RefreshEffect {
+    Restarted,
+    SkippedUnchanged,
+    KeptRunningOnTotalFailure,
+    KeptRunningOnValidationFailure,
+}
+
+pub struct RefreshOutcome {
+    pub has_sub_nodes: bool,
+    pub effect: RefreshEffect,
+}
+
+/// 刷新后是否需要重启内核：与启动缓存逐字节不同才需要；读不出内容时保守重启
+pub(super) fn config_changed_after_refresh(cache: Option<&[u8]>, current: Option<&[u8]>) -> bool {
+    match (cache, current) {
+        (Some(old), Some(new)) => old != new,
+        _ => true,
+    }
+}
+
+/// 订阅刷新统一管线：拉取订阅 → 生成配置 →（策略门控）→ 校验 → 重启内核。
+/// 不包含缓存保存/节点恢复/告警文案——由调用方按 outcome 决定。
+pub async fn refresh_subscriptions(
     config: &Config,
     state: &Arc<AppState>,
-) -> AppResult<bool> {
+    policy: RefreshPolicy,
+) -> AppResult<RefreshOutcome> {
+    let cache_bytes = read_config_cache().await;
     let has_sub_nodes = gen_config(config, state)
         .await
         .map_err(|e| AppError::context("Failed to regenerate config", e))?;
     info!("Config regenerated successfully");
 
-    validate_sing_box_config()
-        .await
-        .map_err(|e| AppError::context("Config validation failed, not restarting", e))?;
+    let startup = matches!(policy, RefreshPolicy::Startup);
+
+    if startup && !has_sub_nodes && !config.subs.is_empty() {
+        return Ok(RefreshOutcome {
+            has_sub_nodes,
+            effect: RefreshEffect::KeptRunningOnTotalFailure,
+        });
+    }
+
+    if startup {
+        let current_bytes = tokio::fs::read(get_sing_box_home().join("config.json"))
+            .await
+            .ok();
+        if !config_changed_after_refresh(cache_bytes.as_deref(), current_bytes.as_deref()) {
+            info!("Subscriptions unchanged after refresh; sing-box keeps running");
+            return Ok(RefreshOutcome {
+                has_sub_nodes,
+                effect: RefreshEffect::SkippedUnchanged,
+            });
+        }
+    }
+
+    if let Err(e) = validate_sing_box_config().await {
+        if startup {
+            return Ok(RefreshOutcome {
+                has_sub_nodes,
+                effect: RefreshEffect::KeptRunningOnValidationFailure,
+            });
+        }
+        return Err(AppError::context(
+            "Config validation failed, not restarting",
+            e,
+        ));
+    }
 
     stop_sing_internal(state).await;
-
     start_sing_internal(state)
         .await
         .map_err(|e| AppError::context("Failed to restart sing-box", e))?;
     info!("sing-box restarted successfully");
 
-    Ok(has_sub_nodes)
+    Ok(RefreshOutcome {
+        has_sub_nodes,
+        effect: RefreshEffect::Restarted,
+    })
+}
+
+pub(super) async fn regenerate_and_restart_runtime(
+    config: &Config,
+    state: &Arc<AppState>,
+) -> AppResult<bool> {
+    let outcome = refresh_subscriptions(config, state, RefreshPolicy::Manual).await?;
+    Ok(outcome.has_sub_nodes)
 }
 
 pub async fn regenerate_preserving_service_state(

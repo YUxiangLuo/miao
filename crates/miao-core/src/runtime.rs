@@ -11,13 +11,12 @@ use crate::error::{AppError, AppResult};
 use crate::models::{Config, DEFAULT_PORT};
 use crate::services::{
     config::{
-        gen_config, has_config_cache, read_config_cache, restore_config_from_cache,
-        save_config_cache,
+        gen_config, has_config_cache, refresh_subscriptions, restore_config_from_cache,
+        save_config_cache, RefreshEffect, RefreshPolicy,
     },
     proxy::restore_last_proxy,
     singbox::{
-        extract_sing_box, get_sing_box_home, start_sing_internal, stop_sing_internal,
-        validate_sing_box_config,
+        extract_sing_box, start_sing_internal, stop_sing_internal, validate_sing_box_config,
     },
 };
 use crate::state::AppState;
@@ -365,67 +364,35 @@ async fn initialize_runtime(config: Config, state: Arc<AppState>) {
 }
 
 /// 后台订阅刷新（快速通道启动后调用，调用方持有 config_update 锁）：
-/// 全失败 → 保留缓存配置继续跑并告警；内容有变化 → 校验后重启内核生效；
-/// 内容没变 → 不重启，避免无意义的断流。
+/// 机制全部收敛在 services::config::refresh_subscriptions；这里只按 outcome 决定告警与收尾。
 async fn refresh_subscriptions_in_background(config: &Config, state: &Arc<AppState>) {
-    let cache_bytes = read_config_cache().await;
-
-    match gen_config(config, state).await {
-        Ok(has_sub_nodes) => {
-            if !has_sub_nodes && !config.subs.is_empty() {
+    match refresh_subscriptions(config, state, RefreshPolicy::Startup).await {
+        Ok(outcome) => match outcome.effect {
+            RefreshEffect::Restarted => {
+                info!("sing-box restarted with refreshed subscriptions");
+                save_config_cache().await;
+                let state_for_proxy = state.clone();
+                tokio::spawn(async move {
+                    restore_last_proxy(&state_for_proxy).await;
+                });
+            }
+            RefreshEffect::SkippedUnchanged => {}
+            RefreshEffect::KeptRunningOnTotalFailure => {
                 warn!("所有订阅获取失败，继续使用缓存配置运行");
                 *state.config_warning.lock().await =
                     Some("所有订阅获取失败，继续使用缓存配置运行".to_string());
-                return;
             }
-
-            let current_bytes = tokio::fs::read(get_sing_box_home().join("config.json"))
-                .await
-                .ok();
-            if !config_changed_after_refresh(cache_bytes.as_deref(), current_bytes.as_deref()) {
-                info!("Subscriptions unchanged after refresh; sing-box keeps running");
-                return;
-            }
-
-            if let Err(err) = validate_sing_box_config().await {
-                error!(error = %err, "Refreshed config failed validation");
+            RefreshEffect::KeptRunningOnValidationFailure => {
+                error!("Refreshed config failed validation; keeping cached config");
                 *state.config_warning.lock().await =
                     Some("订阅刷新后的配置校验失败，继续使用缓存配置运行".to_string());
-                return;
             }
-
-            info!("Subscription refresh changed the config, restarting sing-box");
-            stop_sing_internal(state).await;
-            match start_sing_internal(state).await {
-                Ok(()) => {
-                    info!("sing-box restarted with refreshed subscriptions");
-                    save_config_cache().await;
-                    let state_for_proxy = state.clone();
-                    tokio::spawn(async move {
-                        restore_last_proxy(&state_for_proxy).await;
-                    });
-                }
-                Err(err) => {
-                    error!(error = %err, "Failed to restart sing-box after subscription refresh");
-                    *state.config_warning.lock().await =
-                        Some("订阅刷新后重启内核失败，请查看日志".to_string());
-                }
-            }
-        }
+        },
         Err(err) => {
             warn!(error = %err, "Background subscription refresh failed");
             *state.config_warning.lock().await =
                 Some("订阅刷新失败，继续使用缓存配置运行".to_string());
         }
-    }
-}
-
-/// 刷新后是否需要重启内核：生成的配置与启动所用的缓存逐字节不同才需要；
-/// 读不出内容时保守重启，让新配置生效
-fn config_changed_after_refresh(cache: Option<&[u8]>, current: Option<&[u8]>) -> bool {
-    match (cache, current) {
-        (Some(old), Some(new)) => old != new,
-        _ => true,
     }
 }
 
@@ -650,10 +617,7 @@ fn config_declares_route_mode(content: &str) -> bool {
 mod tests {
     use std::path::PathBuf;
 
-    use super::{
-        config_changed_after_refresh, config_declares_route_mode, panel_bind_addr, spawn_server,
-        RuntimeOptions,
-    };
+    use super::{config_declares_route_mode, panel_bind_addr, spawn_server, RuntimeOptions};
 
     /// Hold a port the panel would bind. Windows needs SO_EXCLUSIVEADDRUSE so
     /// Tokio's SO_REUSEADDR cannot hijack it.
@@ -723,16 +687,6 @@ custom_rules:
     #[test]
     fn config_declares_route_mode_handles_invalid_yaml() {
         assert!(!config_declares_route_mode("route_mode: ["));
-    }
-
-    #[test]
-    fn refresh_restart_decision_compares_bytes() {
-        // 内容一致不重启，避免无意义断流
-        assert!(!config_changed_after_refresh(Some(b"same"), Some(b"same")));
-        assert!(config_changed_after_refresh(Some(b"old"), Some(b"new")));
-        // 读不出内容时保守重启
-        assert!(config_changed_after_refresh(None, Some(b"new")));
-        assert!(config_changed_after_refresh(Some(b"old"), None));
     }
 
     #[test]

@@ -1,6 +1,6 @@
 use super::apply::{
-    config_apply_mode, config_with_route_override, no_usable_nodes_warning,
-    persist_config_without_usable_nodes_at, ConfigApplyMode,
+    config_apply_mode, config_changed_after_refresh, config_with_route_override,
+    no_usable_nodes_warning, persist_config_without_usable_nodes_at, ConfigApplyMode,
 };
 use super::builder::{build_sing_box_config, filter_rules_with_missing_outbound, tun_inbound};
 use super::generate::{collect_manual_outbounds, runtime_config_node_tags};
@@ -13,6 +13,16 @@ use serde_json::json;
 use std::collections::HashSet;
 
 use crate::state::SkippedRule;
+
+#[test]
+fn refresh_restart_decision_compares_bytes() {
+    // 内容一致不重启，避免无意义断流
+    assert!(!config_changed_after_refresh(Some(b"same"), Some(b"same")));
+    assert!(config_changed_after_refresh(Some(b"old"), Some(b"new")));
+    // 读不出内容时保守重启
+    assert!(config_changed_after_refresh(None, Some(b"new")));
+    assert!(config_changed_after_refresh(Some(b"old"), None));
+}
 
 #[test]
 fn collect_manual_outbounds_ignores_invalid_json_nodes() {
