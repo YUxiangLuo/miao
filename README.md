@@ -136,6 +136,10 @@ custom_rules:              # 可选：优先于内置分流，全局模式下仍
   - '{"process_name":"qbittorrent","action":"route","outbound":"香港节点"}'
 
 adblock: true              # 可选：去广告，默认关闭
+
+mcp: true                  # 可选：开启 MCP 端点（POST /mcp，JSON-RPC 工具接口），默认关闭
+                           # 开启后 AI agent 可查状态/列节点/切节点/测速/切模式/看规则与连接
+                           # 注意：Linux 面板绑 0.0.0.0，开启后局域网可调用，请自行评估
 ```
 
 面板里的分流/全局模式是会话级状态，重启后回到规则分流，不写进配置文件。
