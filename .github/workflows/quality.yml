@@ -96,9 +96,16 @@ jobs:
   windows:
     name: Windows desktop compile
     runs-on: windows-latest
+    needs: frontend
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Download frontend artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: quality-frontend
+          path: public/
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
