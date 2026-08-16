@@ -50,17 +50,17 @@ Win10/11 x64。哲学不变：还是 TUN 透明代理、还是这块面板、还
 
 日常用法：
 
-1. 从 [Releases](https://github.com/YUxiangLuo/miao/releases/latest) 下载 `miao-windows-amd64-setup.exe`（NSIS 安装包，装到当前用户，**安装本身不要管理员**）或便携 `miao-windows-amd64.zip`
+1. 从 [Releases](https://github.com/YUxiangLuo/miao/releases/latest) 下载 `miao-windows-amd64-setup.exe`（NSIS 安装包，装到当前用户，**安装本身不要管理员**）
 2. 每次启动点一次 UAC（TUN / Wintun 要管理员；没有做成服务模式）
 3. 窗口打开即铺满工作区，不能改大小；关窗口进托盘；托盘「退出」才停内核
-4. 更新：先退出，再换安装包或 zip。面板里没有 Windows 一键升级
+4. 更新：先退出，再装新安装包。面板里没有 Windows 一键升级
 5. 出问题：托盘「打开日志」，文件在 `%LOCALAPPDATA%\io.github.yuxiangluo.miao\miao.log`
 
 系统通常已有 WebView2，没有的话安装包走 bootstrapper。未签名时 SmartScreen 可能提示「仍要运行」。卸载会尽量结束残留内核，但当前用户安装包无权处理已提权的 `sing-box` / `sing-tun`；必要时重启或在设备管理器里删网卡。日志超过 8 MB 时启动自动轮转为 `miao.log.old`。
 
 | | Linux / OpenWrt | Windows |
 | --- | --- | --- |
-| 拿到手 | 一个 musl 文件 | 安装包或便携 `miao.exe`（要 WebView2） |
+| 拿到手 | 一个 musl 文件 | NSIS 安装包（要 WebView2） |
 | 提权 | `sudo` | 每次运行 UAC |
 | 面板 | 浏览器打开 `localhost:6161`，默认听 `0.0.0.0` | 自带窗口，听 `127.0.0.1` |
 | 配置 | `/etc/miao/config.yaml` | `%LOCALAPPDATA%\io.github.yuxiangluo.miao\config.yaml` |
@@ -70,7 +70,7 @@ Win10/11 x64。哲学不变：还是 TUN 透明代理、还是这块面板、还
 | 一键升级 / VPS 部署 | 有 | 不编进桌面进程 |
 | 开机自启 | `install.sh` → systemd | 无（先每次双击） |
 
-正式发版会把三个目标钉到流水线当场解析出的同一个 sing-box 提交；手动构建默认拉默认分支，可用 `SING_BOX_REF` 覆盖（分支/tag/完整 commit sha 均可）。
+内核跟 `build-embedded.sh` 当时拉到的 sing-box 默认分支 HEAD；需要复现某版时手动设 `SING_BOX_REF`（分支/tag/完整 commit sha 均可）。
 
 ## 面板里有什么
 
@@ -163,7 +163,7 @@ cargo build -p miao-desktop            # 本机有 webkit 才能编；不要当�
 cargo check -p miao-core --target x86_64-pc-windows-gnu
 ```
 
-安装包 / zip 由 tag 上的 `windows-latest` job 出，本机 Arch 不出 NSIS。
+安装包由 tag 上的 `windows-latest` job 出，本机 Arch 不出 NSIS。
 
 开发前端：
 

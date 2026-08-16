@@ -170,10 +170,10 @@ TUN JSON：`auto_route` + `strict_route`，`interface_name` 仍是 `sing-tun`。
 2. Rust quality（default-members + `cargo check -p miao-core --target x86_64-pc-windows-gnu`）
 3. Windows（`windows-latest`：`cargo test -p miao-core`，再 `cargo build -p miao-desktop`；内核用 stub，**不跑 exe、不开 TUN**）
 
-打 `v*` tag 或手动跑 **Build Release**：quality → frontend → `kernel-ref`（解析一次 sing-box 默认分支 HEAD，三个目标钉同一提交）→ 并行编 Linux musl 矩阵（amd64/arm64，zigbuild）与 Windows 桌面（真内核 + zip/NSIS）→ tag 触发时全部产物（`miao-rust-linux-*`、`miao-windows-amd64.zip`、`miao-windows-amd64-setup.exe` 及各自 sha256）传到该 tag 的 GitHub Release；手动跑只留 Actions artifacts。本机不出安装包。
+打 `v*` tag 或手动跑 **Build Release**：quality → frontend → 并行编 Linux musl 矩阵（amd64/arm64，zigbuild）与 Windows 桌面（真内核 + NSIS 安装包）→ tag 触发时全部产物（`miao-rust-linux-*`、`miao-windows-amd64-setup.exe` 及各自 sha256）传到该 tag 的 GitHub Release；手动跑只留 Actions artifacts。本机不出安装包。
 
 ## 脚本
 
 - `install.sh` / `remove.sh` 仍是 Linux systemd 的事，提交前 `shellcheck`
 - `build-embedded.sh` 的 `MIAO_TARGET=windows-amd64` 只多编一份 Windows 内核，也会编 host 规则编译器用的 `sing-box-host`，不要拿它去抽本机正在跑的实例
-- `build-embedded.sh` 的 `SING_BOX_REF` 接受分支/tag/完整 commit sha（sha 走 init+fetch，`clone --branch` 不收 sha）；Build Release 的 `kernel-ref` 靠它把三个目标钉到同一内核提交
+- `build-embedded.sh` 的 `SING_BOX_REF` 接受分支/tag/完整 commit sha（sha 走 init+fetch，`clone --branch` 不收 sha）；仅手动钉版用，CI 不传、始终跟默认分支 HEAD

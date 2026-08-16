@@ -31,27 +31,9 @@ jobs:
           name: frontend-dist
           path: public/
 
-  # 三个目标各自克隆 sing-box；先解析一次默认分支 HEAD，保证同一次发布里
-  # Linux amd64/arm64 与 Windows 的内核是同一个提交，发布结果可复现。
-  kernel-ref:
-    runs-on: ubuntu-latest
-    needs: quality
-    outputs:
-      sha: ${{ steps.resolve.outputs.sha }}
-    steps:
-      - name: Resolve sing-box default branch HEAD
-        id: resolve
-        run: |
-          sha=$(git ls-remote https://github.com/SagerNet/sing-box.git HEAD | cut -f1)
-          test -n "$sha"
-          echo "Resolved sing-box kernel commit: $sha"
-          echo "sha=$sha" >> "$GITHUB_OUTPUT"
-
   build-linux:
     runs-on: ubuntu-latest
-    needs: [frontend, kernel-ref]
-    env:
-      SING_BOX_REF: ${{ needs.kernel-ref.outputs.sha }}
+    needs: frontend
     strategy:
       matrix:
         include:
@@ -113,9 +95,7 @@ jobs:
 
   build-windows:
     runs-on: windows-latest
-    needs: [frontend, kernel-ref]
-    env:
-      SING_BOX_REF: ${{ needs.kernel-ref.outputs.sha }}
+    needs: frontend
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -147,14 +127,6 @@ jobs:
       - name: Build desktop shell
         run: cargo build -p miao-desktop --locked --release
 
-      - name: Package portable zip
-        shell: pwsh
-        run: |
-          Copy-Item target/release/miao.exe miao.exe
-          Compress-Archive -Path miao.exe -DestinationPath miao-windows-amd64.zip
-          $hash = (Get-FileHash .\miao-windows-amd64.zip -Algorithm SHA256).Hash.ToLower()
-          Set-Content -Path miao-windows-amd64.zip.sha256 -Value "$hash  miao-windows-amd64.zip" -NoNewline
-
       - name: Install Tauri CLI
         run: npm install -g @tauri-apps/cli@2.11.4
 
@@ -175,8 +147,6 @@ jobs:
         with:
           name: miao-windows-amd64
           path: |
-            miao-windows-amd64.zip
-            miao-windows-amd64.zip.sha256
             miao-windows-amd64-setup.exe
             miao-windows-amd64-setup.exe.sha256
 
@@ -199,7 +169,5 @@ jobs:
             miao-rust-linux-amd64.sha256
             miao-rust-linux-arm64
             miao-rust-linux-arm64.sha256
-            miao-windows-amd64.zip
-            miao-windows-amd64.zip.sha256
             miao-windows-amd64-setup.exe
             miao-windows-amd64-setup.exe.sha256
