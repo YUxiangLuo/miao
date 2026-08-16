@@ -149,7 +149,7 @@ adblock: true              # 可选：去广告，默认关闭
 
 `embedded/` 下的 sing-box 与规则集不入库。fresh clone 先 `./scripts/build-embedded.sh` 或直接 `./build.sh`。内核默认拉 sing-box 仓库默认分支，可用 `SING_BOX_REF` 覆盖。
 
-编 Windows 内核（在 Linux 上交叉 Go，不跑 TUN）：
+编 Windows 内核（Go 跨平台编译，Linux/Windows 开发机均可；只编不跑 TUN）：
 
 ```bash
 MIAO_TARGET=windows-amd64 ./scripts/build-embedded.sh
@@ -159,11 +159,11 @@ MIAO_TARGET=windows-amd64 ./scripts/build-embedded.sh
 桌面壳在 workspace 里，但不是 default member（避免 Linux `cargo test` 去链 WebView）：
 
 ```bash
-cargo build -p miao-desktop            # 本机有 webkit 才能编；不要当「已验证 Windows TUN」
-cargo check -p miao-core --target x86_64-pc-windows-gnu
+cargo build -p miao-desktop            # Windows 原生可编（VS C++ 工具链）；Linux 上编要 webkit2gtk
+cargo check -p miao-core --target x86_64-pc-windows-gnu   # Linux 上的 Windows 静态门禁
 ```
 
-安装包由 tag 上的 `windows-latest` job 出，本机 Arch 不出 NSIS。
+安装包由 tag 上的 `windows-latest` job 出；Windows 开发机装了 Node + Tauri CLI 后也可本地 `tauri build --bundles nsis`。
 
 开发前端：
 

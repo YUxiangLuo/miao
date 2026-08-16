@@ -1,6 +1,6 @@
 # 开发调试笔记
 
-本机是 Arch。**master 单分支**：Linux CLI 与 Windows 桌面版都从这里出，不再分线维护（`feat/windows-tauri` 已并入）。在这台 Linux 上按同一套产品哲学做 Tauri 桌面版。命令以仓库根目录为基准。
+开发机两台：**Arch**（Linux 日常开发 + 常驻生产 miao 实例）与 **Windows**（桌面版真机，全量构建链：Rust/Go/Bun/Node + Tauri CLI）。**master 单分支**：Linux CLI 与 Windows 桌面版都从这里出，不再分线维护（`feat/windows-tauri` 已并入）。命令以仓库根目录为基准；未注明时在 Arch 上执行。
 
 ## 要守住的哲学
 
@@ -16,7 +16,7 @@ Linux 版是：下载一个文件，`sudo` 跑，浏览器打开，TUN 接管流
 | Wintun 已在 sing-box 里；内核跟默认分支走 | 旁边再塞一份 `wintun.dll` |
 | Windows 构建不编 VPS、不编换进程升级 | 把 Linux 的 `exec` 热更原样搬过去覆盖正在跑的 exe |
 
-本机 **正在跑的 systemd miao 不要停、不要重启** 来「试 Windows」。这台机器出网被它的 TUN 管着，一停 GitHub 就没了；也没有 Win10 真机验 TUN。Windows 工作用静态检查和 CI 编译代替真机。
+**Arch 上正在跑的 systemd miao 不要停、不要重启**。那台机器出网被它的 TUN 管着，一停 GitHub 就没了。Windows 真机已就位：桌面壳与 NSIS 安装包都能本地出，`miao.exe` 的启动/UAC/托盘/优雅退出已在真机验证；**TUN 分流本身尚未在真机验证**，写验收用语时注意。
 
 ## 仓库怎么切
 
@@ -81,7 +81,7 @@ cargo run -p miao-cli
 
 ## 在 Arch 上怎么「做」Windows
 
-没有真机，验收用语只能是：测试绿、clippy 过、`windows-gnu` check 过、CI 的 `windows-latest` **编过**桌面壳。不要写「已在 Windows 上验证 TUN」。
+Arch 上的验收用语：测试绿、clippy 过、`windows-gnu` check 过、CI 的 `windows-latest` **编过**桌面壳。真机验证（启动/托盘/打包）到 Windows 机器上做；TUN 分流验过之前，不要写「已在 Windows 上验证 TUN」。
 
 交叉 check 需要 MinGW：
 
@@ -103,11 +103,30 @@ Windows 构建里故意拿掉的东西（管理员进程里不该有）：
 
 Linux CLI 这些能力还在。
 
-## 本机 Linux 实例（别动它）
+## 在 Windows 真机上构建
 
-这台机器日常跑的是 **systemd 服务**：`/usr/local/bin/miao`，`WorkingDirectory=/etc/miao`，配置 `/etc/miao/config.yaml`，运行时 `/tmp/miao-sing-box`，面板 `http://localhost:6161`。做 Windows 改动时把它当「生产依赖」，不是调试对象。
+工具链已就位：Rust（rustup，msvc host）+ VS 2022 C++ 工具链、Go（免装版，`%LOCALAPPDATA%\Programs\go`）、Bun、Node（npm 全局 `@tauri-apps/cli`）。PowerShell 执行策略拦 `.ps1`，npm/tauri 一律用 `.cmd` 形态（`npm.cmd`、`tauri.cmd`）。
 
-如果以后有人要调 **Linux** 二进制（不是现在这条 Windows 任务）：
+```powershell
+bun run --cwd frontend build          # 改了前端才跑
+# Git Bash 里（PATH 先带上 Go）：
+MIAO_TARGET=windows-amd64 ./scripts/build-embedded.sh   # 真内核 + 规则集
+cargo build -p miao-desktop --locked --release          # target/release/miao.exe
+# desktop/src-tauri 下：
+tauri.cmd build --bundles nsis --ci                     # target/release/bundle/nsis/*-setup.exe
+```
+
+- **重编前先从托盘退出 miao**：运行中的 exe 被 Windows 锁定，链接报 `os error 5`
+- 只验证编译可造空 stub（`embedded/sing-box-windows-amd64.exe` + 3 个 srs），CI quality 同款手法；stub 够编译、不够当真内核
+- 本地产物落仓库根目录，已被 gitignore；仅自测用，发布以 CI 产物为准
+- `cargo test -p miao-core --locked --all-targets` 可在 Windows 上跑（CI windows job 同款）
+- 运行 `miao.exe` 会弹 UAC 并接管本机流量（TUN），调试时自己权衡
+
+## Arch 的 Linux 实例（别动它）
+
+Arch 日常跑的是 **systemd 服务**：`/usr/local/bin/miao`，`WorkingDirectory=/etc/miao`，配置 `/etc/miao/config.yaml`，运行时 `/tmp/miao-sing-box`，面板 `http://localhost:6161`。做 Windows 改动时把它当「生产依赖」，不是调试对象。
+
+如果以后有人要调 **Linux** 二进制：
 
 ```bash
 cargo build --locked --release
@@ -146,7 +165,7 @@ TUN JSON：`auto_route` + `strict_route`，`interface_name` 仍是 `sing-tun`。
 
 ## 前端调试（agent-browser）
 
-本机面板仍是那份 systemd 上的 Linux 实例，可以用来看 **共享 UI**（规则、节点、布局），不能用来验 UAC / WebView2 / WinTun。
+Arch 上的面板仍是那份 systemd Linux 实例，可以用来看 **共享 UI**（规则、节点、布局），不能用来验 UAC / WebView2 / WinTun。
 
 - `agent-browser open <url>` / `eval '<js>'` / `screenshot [--full] <path>`；`set viewport <w> <h>`
 - `eval` 跨调用保留 JS 上下文，同名 `const` 会炸，用 IIFE
@@ -170,7 +189,7 @@ TUN JSON：`auto_route` + `strict_route`，`interface_name` 仍是 `sing-tun`。
 2. Rust quality（default-members + `cargo check -p miao-core --target x86_64-pc-windows-gnu`）
 3. Windows（`windows-latest`：`cargo test -p miao-core`，再 `cargo build -p miao-desktop`；内核用 stub，**不跑 exe、不开 TUN**）
 
-打 `v*` tag 或手动跑 **Build Release**：quality → frontend → 并行编 Linux musl 矩阵（amd64/arm64，zigbuild）与 Windows 桌面（真内核 + NSIS 安装包）→ tag 触发时全部产物（`miao-rust-linux-*`、`miao-windows-amd64-setup.exe` 及各自 sha256）传到该 tag 的 GitHub Release；手动跑只留 Actions artifacts。本机不出安装包。
+打 `v*` tag 或手动跑 **Build Release**：quality → frontend → 并行编 Linux musl 矩阵（amd64/arm64，zigbuild）与 Windows 桌面（真内核 + NSIS 安装包）→ tag 触发时全部产物（`miao-rust-linux-*`、`miao-windows-amd64-setup.exe` 及各自 sha256）传到该 tag 的 GitHub Release；手动跑只留 Actions artifacts。发布产物以 CI 为准，本地产物只用于自测。
 
 ## 脚本
 
