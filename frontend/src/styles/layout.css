@@ -104,7 +104,10 @@
 .home-connections-all:hover {
     color: var(--text);
 }
-.home-connections-grid {
+/* 注意特异性：.connection-card-grid 在 connections.css 中带 overflow:auto，
+   单类选择器会被它覆盖（文件顺序在后），导致条带出现滚动条且零高隐式行重叠绘制。
+   双类选择器确保裁切生效。 */
+.home-connections .home-connections-grid {
     flex: 1;
     min-height: 0;
     /* 条带只显示一行：显式行占满网格区，隐式行高度为 0，放不下的卡片直接裁掉，不提供滚动 */
