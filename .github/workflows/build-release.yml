@@ -162,7 +162,7 @@ jobs:
           merge-multiple: true
 
       - name: Publish to GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: |
             miao-rust-linux-amd64
