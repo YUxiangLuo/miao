@@ -1905,7 +1905,7 @@ dependencies = [
 
 [[package]]
 name = "miao-cli"
-version = "0.33.3"
+version = "0.33.4"
 dependencies = [
  "miao-core",
  "tokio",
@@ -1913,7 +1913,7 @@ dependencies = [
 
 [[package]]
 name = "miao-core"
-version = "0.33.3"
+version = "0.33.4"
 dependencies = [
  "arc-swap",
  "axum",
@@ -1940,7 +1940,7 @@ dependencies = [
 
 [[package]]
 name = "miao-desktop"
-version = "0.33.3"
+version = "0.33.4"
 dependencies = [
  "miao-core",
  "tauri",
