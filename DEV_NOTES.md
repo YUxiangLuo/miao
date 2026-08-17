@@ -184,7 +184,9 @@ Arch 上的面板仍是那份 systemd Linux 实例，可以用来看 **共享 UI
 
 **后端**：只测纯函数、校验失败、读路径、不触网的 handler。成功写路径会起真实 sing-box，单测别碰。`spawn_server` 必须 `skip_extract: true`，且不要写 `/tmp/miao-sing-box`。Windows 专属路由测试用 `#[cfg(windows)]` 断言 `/api/upgrade`、`/api/vps/deploy` 是 404。
 
-配置变更链路没变：`config_update` 锁 → 改克隆 → `apply_config_change`（原子写 → 生成 → `sing-box check` → 热重启）。面板不直接碰内核，走 Clash API。`route_mode` 仍是会话级。
+配置变更链路没变：`config_update` 锁 → 改克隆 → `apply_config_change`（分层落盘 → 生成 → `sing-box check` → 热重启）。面板不直接碰内核，走 Clash API。
+
+落盘分三层（详见 docs/refactor-plan.md）：稳定层 `config.yaml`（port/subs/nodes/custom_rules/adblock/mcp），易变层 `volatile.yaml`（node_select/route_mode——unix 在 /tmp/miao-sing-box 随系统重启清空，Windows 在应用数据目录持久），状态层（config.json/.cache、sub-nodes.json、.last_proxy）。合并视图 = volatile overlay > config.yaml > 默认；`Config` 的 node_select/route_mode 只做单向 `skip_serializing`（仍反序列化，旧配置/手写启动默认值兼容），`save_config_layered` 两层各自原子写 + 跳过未变，单层变更零另一层 I/O。route_mode 已没有会话级特例：面板/MCP 切换就是普通 `apply_config_change`，`apply_runtime_config_change`/`route_mode_override` 已删除。
 
 失败回滚去网络化：apply/刷新入口先快照当前 `config.json` 字节（`snapshot_runtime_config`），回滚按 **内存快照 → `config.json.cache` → 重新拉订阅生成** 分层——前两层是纯本地文件操作，内核已死时先 `sing-box check` 再启动（挡坏材料，也兜住内核升级后旧配置不再合法）；仅本地材料全无时才重新拉订阅。cache 读写均已原子化（`write_file_atomic`），空 cache 拒绝恢复。面板「刷新订阅」（`regenerate_preserving_service_state`）失败同样走这套回滚，不再把坏配置留在磁盘上等看门狗踩。
 

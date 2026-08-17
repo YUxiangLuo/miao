@@ -105,6 +105,7 @@ mcp: true                  # 默认关闭
 | 面板 | 浏览器打开 `localhost:6161`，默认听 `0.0.0.0` | 自带窗口，听 `127.0.0.1` |
 | 配置 | `/etc/miao/config.yaml` | `%LOCALAPPDATA%\io.github.yuxiangluo.miao\config.yaml` |
 | 运行时内核 | `/tmp/miao-sing-box` | `%TEMP%\miao-sing-box` |
+| 易变配置 | `/tmp/miao-sing-box/volatile.yaml`（tmpfs） | `%LOCALAPPDATA%\io.github.yuxiangluo.miao\volatile.yaml`（持久） |
 | 一键升级 / VPS 部署 | 有 | 不编进桌面进程 |
 | 开机自启 | `install.sh` → systemd | 托盘勾选（任务计划，登录免 UAC 直进托盘） |
 
@@ -130,9 +131,11 @@ custom_rules:              # 可选：优先于内置分流，全局模式下仍
 adblock: true              # 可选：去广告（路由层拦截，默认关闭）
 
 mcp: true                  # 可选：MCP 端点（POST /mcp），默认关闭
+
+route_mode: global         # 可选：启动默认路由模式（rule 规则分流 / global 全局代理）
 ```
 
-> 面板里的分流/全局模式是会话级状态，重启后回到规则分流，不写进配置文件。
+> **数据分三层落盘**：`config.yaml` 是稳定层（订阅/节点/规则等低频配置，Linux/OpenWrt 在 `/etc/miao`）；节点选择策略与路由模式是易变层，写在 `volatile.yaml`——OpenWrt/Linux 落在 tmpfs（`/tmp/miao-sing-box`），避免切节点/切模式这类高频写入磨损路由器闪存，系统重启后回到 `config.yaml` 的启动默认值；Windows 落在应用数据目录，持久保存。面板/进程重启（如自升级）两层都保留，选择与模式不丢失。
 
 ## 从源码构建
 
