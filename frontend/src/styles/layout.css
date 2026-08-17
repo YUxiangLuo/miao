@@ -107,13 +107,16 @@
 /* 注意特异性：.connection-card-grid 在 connections.css 中带 overflow:auto，
    单类选择器会被它覆盖（文件顺序在后），导致条带出现滚动条且零高隐式行重叠绘制。
    双类选择器确保裁切生效。 */
+/* 裁切的几何：padding:0 + row-gap:0 让显式行(1fr)恒等于整个网格区高度，
+   隐式行起点永远精确落在裁切线上——第二行不可能漏出，与字体渲染差异无关。 */
 .home-connections .home-connections-grid {
     flex: 1;
     min-height: 0;
-    /* 条带只显示一行：显式行占满网格区，隐式行高度为 0，放不下的卡片直接裁掉，不提供滚动 */
     overflow: hidden;
+    padding: 0;
     grid-template-rows: minmax(0, 1fr);
     grid-auto-rows: 0;
+    row-gap: 0;
 }
 .home-connections-empty {
     grid-column: 1 / -1;
