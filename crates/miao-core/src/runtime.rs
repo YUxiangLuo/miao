@@ -13,7 +13,7 @@ use crate::services::{
     config::{
         gen_config, has_config_cache, persist_effective_node_select, refresh_subscriptions,
         restore_config_from_cache, runtime_config_matches_node_select, save_config_cache,
-        RefreshEffect, RefreshPolicy,
+        RefreshEffect, RefreshPolicy, SubFetchRetry,
     },
     proxy::restore_last_proxy,
     singbox::{
@@ -323,7 +323,7 @@ async fn initialize_runtime(config: Config, state: Arc<AppState>) {
 
     info!("Generating initial config...");
     let mut all_subs_failed = false;
-    match gen_config(&config, &state).await {
+    match gen_config(&config, &state, SubFetchRetry::Startup).await {
         Ok(outcome) => {
             if let Err(err) = persist_effective_node_select(&state, outcome.node_select).await {
                 warn!(error = %err, "Failed to persist effective node_select after generate");

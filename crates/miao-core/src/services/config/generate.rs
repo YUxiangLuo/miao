@@ -18,8 +18,89 @@ pub struct GenConfigOutcome {
 }
 
 const MAX_CONCURRENT_SUBS: usize = 5;
-/// 拉取订阅并写出 sing-box 配置。返回是否拿到订阅节点，以及实际生效的 node_select。
-pub async fn gen_config(config: &Config, state: &Arc<AppState>) -> AppResult<GenConfigOutcome> {
+
+/// 订阅全失败时的退避重试预算。
+/// 开机竞速（miao 先于默认路由/DHCP 就绪启动）时订阅请求会全部秒败；
+/// 预算内的退避重试可以跨过这个窗口。手动刷新传 None：用户在场，失败即报。
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum SubFetchRetry {
+    /// 不重试
+    #[default]
+    None,
+    /// 启动路径预算：见 STARTUP_RETRY_SCHEDULE
+    Startup,
+}
+
+/// Startup 预算的退避序列：总等待 50s，与 install.sh ExecStartPre 的 60s 路由等待对齐
+const STARTUP_RETRY_SCHEDULE: &[Duration] = &[
+    Duration::from_secs(5),
+    Duration::from_secs(15),
+    Duration::from_secs(30),
+];
+
+/// 测试里缩短以保持用例快速（与 singbox.rs 的 KERNEL_WATCH_INTERVAL 同款手法）
+#[cfg(test)]
+const STARTUP_RETRY_SCHEDULE_TEST: &[Duration] =
+    &[Duration::from_millis(50), Duration::from_millis(100)];
+
+#[cfg(not(test))]
+fn startup_retry_schedule() -> &'static [Duration] {
+    STARTUP_RETRY_SCHEDULE
+}
+
+#[cfg(test)]
+fn startup_retry_schedule() -> &'static [Duration] {
+    STARTUP_RETRY_SCHEDULE_TEST
+}
+
+impl SubFetchRetry {
+    fn schedule(self) -> &'static [Duration] {
+        match self {
+            Self::None => &[],
+            Self::Startup => startup_retry_schedule(),
+        }
+    }
+}
+
+/// 是否值得为这次结果退避重试：配置了订阅却一个订阅节点都没拿到才算
+/// （全部秒败是网络未就绪的典型瞬态）；部分成功/其他错误更像订阅本身坏了，直接返回
+fn should_retry_sub_fetch(result: &AppResult<GenConfigOutcome>, subs_configured: bool) -> bool {
+    if !subs_configured {
+        return false;
+    }
+    match result {
+        Ok(outcome) => !outcome.has_sub_nodes,
+        Err(err) => err.is_no_usable_nodes(),
+    }
+}
+
+/// 拉取订阅并写出 sing-box 配置；订阅全失败时按 retry 预算退避重试。
+/// 返回是否拿到订阅节点，以及实际生效的 node_select。
+pub async fn gen_config(
+    config: &Config,
+    state: &Arc<AppState>,
+    retry: SubFetchRetry,
+) -> AppResult<GenConfigOutcome> {
+    let schedule = retry.schedule();
+    let mut attempt = 0usize;
+    loop {
+        let result = gen_config_once(config, state).await;
+        if !should_retry_sub_fetch(&result, !config.subs.is_empty()) {
+            return result;
+        }
+        let Some(delay) = schedule.get(attempt) else {
+            return result;
+        };
+        attempt += 1;
+        info!(
+            delay_ms = delay.as_millis(),
+            attempt, "All subscriptions failed; retrying after backoff"
+        );
+        tokio::time::sleep(*delay).await;
+    }
+}
+
+async fn gen_config_once(config: &Config, state: &Arc<AppState>) -> AppResult<GenConfigOutcome> {
     let (my_outbounds, my_names) = collect_manual_outbounds(config);
     let mut final_outbounds: Vec<serde_json::Value> = vec![];
     let mut final_node_names: Vec<String> = vec![];
@@ -218,4 +299,84 @@ pub async fn known_rule_targets(config: &Config) -> Vec<String> {
     }
 
     tags
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{should_retry_sub_fetch, GenConfigOutcome, SubFetchRetry, STARTUP_RETRY_SCHEDULE};
+    use crate::error::AppError;
+    use crate::models::{Config, NodeSelect};
+    use std::time::Instant;
+    use tokio::time::Duration;
+
+    fn outcome(has_sub_nodes: bool) -> GenConfigOutcome {
+        GenConfigOutcome {
+            has_sub_nodes,
+            node_select: NodeSelect::Manual,
+        }
+    }
+
+    #[test]
+    fn startup_retry_schedule_is_bounded_under_a_minute() {
+        assert_eq!(
+            STARTUP_RETRY_SCHEDULE,
+            &[
+                Duration::from_secs(5),
+                Duration::from_secs(15),
+                Duration::from_secs(30)
+            ]
+        );
+    }
+
+    #[test]
+    fn retry_only_applies_to_total_subscription_failure() {
+        assert!(should_retry_sub_fetch(&Ok(outcome(false)), true));
+        assert!(!should_retry_sub_fetch(&Ok(outcome(true)), true));
+        assert!(should_retry_sub_fetch(&Err(AppError::NoUsableNodes), true));
+        assert!(!should_retry_sub_fetch(
+            &Err(AppError::message("boom")),
+            true
+        ));
+        // 未配置订阅时「全失败」不是瞬态，重试无意义
+        assert!(!should_retry_sub_fetch(&Ok(outcome(false)), false));
+    }
+
+    #[tokio::test]
+    async fn startup_retry_waits_out_total_failure() {
+        // 拒绝连接的 loopback 订阅：不触外网、立即失败；无手动节点时
+        // gen_config_once 在写盘前返回 NoUsableNodes，不触碰 /tmp/miao-sing-box
+        let config = Config {
+            subs: vec!["http://127.0.0.1:1/sub".to_string()],
+            ..Config::default()
+        };
+        let state = crate::test_support::app_state(config.clone());
+
+        let started = Instant::now();
+        let err = match super::gen_config(&config, &state, SubFetchRetry::Startup).await {
+            Ok(_) => panic!("unroutable subscription must fail"),
+            Err(err) => err,
+        };
+
+        assert!(err.is_no_usable_nodes());
+        // 测试调度 50ms + 100ms 两段退避都已耗尽
+        assert!(started.elapsed() >= Duration::from_millis(140));
+    }
+
+    #[tokio::test]
+    async fn no_retry_returns_immediately() {
+        let config = Config {
+            subs: vec!["http://127.0.0.1:1/sub".to_string()],
+            ..Config::default()
+        };
+        let state = crate::test_support::app_state(config.clone());
+
+        let started = Instant::now();
+        let err = match super::gen_config(&config, &state, SubFetchRetry::None).await {
+            Ok(_) => panic!("unroutable subscription must fail"),
+            Err(err) => err,
+        };
+
+        assert!(err.is_no_usable_nodes());
+        assert!(started.elapsed() < Duration::from_millis(50));
+    }
 }

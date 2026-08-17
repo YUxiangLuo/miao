@@ -14,7 +14,7 @@ use crate::services::{
 };
 use crate::state::AppState;
 
-use super::generate::{gen_config, GenConfigOutcome};
+use super::generate::{gen_config, GenConfigOutcome, SubFetchRetry};
 use super::persist::{
     config_cache_path, persist_effective_node_select, read_config_cache, restore_config_from_cache,
     save_config_cache, save_config_to,
@@ -72,13 +72,20 @@ pub async fn refresh_subscriptions(
     state: &Arc<AppState>,
     policy: RefreshPolicy,
 ) -> AppResult<RefreshOutcome> {
+    let startup = matches!(policy, RefreshPolicy::Startup);
+    // 启动路径的订阅全失败多为「先于路由/DHCP 就绪」的瞬态，给退避预算；
+    // 手动刷新用户在场，失败即报，不重试
+    let retry = if startup {
+        SubFetchRetry::Startup
+    } else {
+        SubFetchRetry::None
+    };
+
     let cache_bytes = read_config_cache().await;
-    let generated = gen_config(config, state)
+    let generated = gen_config(config, state, retry)
         .await
         .map_err(|e| AppError::context("Failed to regenerate config", e))?;
     info!("Config regenerated successfully");
-
-    let startup = matches!(policy, RefreshPolicy::Startup);
 
     if startup && !generated.has_sub_nodes && !config.subs.is_empty() {
         restore_cache_over_generated_config().await;
@@ -210,7 +217,7 @@ pub(super) async fn regenerate_without_restart_runtime(
     config: &Config,
     state: &Arc<AppState>,
 ) -> AppResult<GenConfigOutcome> {
-    let outcome = gen_config(config, state)
+    let outcome = gen_config(config, state, SubFetchRetry::None)
         .await
         .map_err(|e| AppError::context("Failed to regenerate config", e))?;
     info!("Config regenerated successfully");
