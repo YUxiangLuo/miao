@@ -8,8 +8,8 @@ mod region;
 mod tests;
 
 pub use apply::{
-    apply_config_change, apply_runtime_config_change, refresh_subscriptions,
-    regenerate_preserving_service_state, RefreshEffect, RefreshPolicy, SubSource,
+    apply_config_change, refresh_subscriptions, regenerate_preserving_service_state, RefreshEffect,
+    RefreshPolicy, SubSource,
 };
 pub use generate::{
     gen_config, known_rule_targets, record_fresh_snapshot, GenConfigOutcome, SubFetchRetry,

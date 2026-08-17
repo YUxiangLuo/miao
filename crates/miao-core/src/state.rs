@@ -6,13 +6,12 @@ use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::{Mutex, RwLock};
 
-use crate::models::{Config, GitHubRelease, RouteMode, SubStatus};
+use crate::models::{Config, GitHubRelease, SubStatus};
 
 /// 应用状态容器 - 包含所有运行时状态
 /// 通过依赖注入传递，避免全局静态变量
 pub struct AppState {
     pub config: RwLock<Config>, // 使用 RwLock 支持并发读
-    pub route_mode_override: RwLock<Option<RouteMode>>,
     pub config_path: PathBuf,
     /// 易变层配置（node_select/route_mode）的落盘位置，与 config_path 分层。
     pub volatile_path: PathBuf,
@@ -57,7 +56,6 @@ impl AppState {
 
         Ok(Self {
             config: RwLock::new(config),
-            route_mode_override: RwLock::new(None),
             config_path,
             volatile_path,
             config_update: Mutex::new(()),

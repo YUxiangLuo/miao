@@ -13,7 +13,7 @@ use serde_json::{json, Value as JsonValue};
 
 use crate::error::AppResult;
 use crate::models::{LastProxy, RouteMode};
-use crate::services::config::apply_runtime_config_change;
+use crate::services::config::apply_config_change;
 use crate::state::AppState;
 use crate::VERSION;
 
@@ -146,7 +146,7 @@ fn tools_catalog() -> JsonValue {
         },
         {
             "name": "set_route_mode",
-            "description": "切换路由模式：rule=规则分流（国内直连/国外代理），global=全局代理。会话级，不写配置文件。注意：会热重启内核，所有连接（可能包括你自己的）秒级中断，操作前请先向用户确认",
+            "description": "切换路由模式：rule=规则分流（国内直连/国外代理），global=全局代理。写入易变层配置，OpenWrt/Linux 系统重启后回到 config.yaml 的启动默认值。注意：会热重启内核，所有连接（可能包括你自己的）秒级中断，操作前请先向用户确认",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -282,12 +282,8 @@ async fn tool_get_status(state: &Arc<AppState>) -> Result<JsonValue, String> {
         }
     };
 
-    let route_mode = state
-        .route_mode_override
-        .read()
-        .await
-        .unwrap_or(RouteMode::default());
     let config = state.config.read().await.clone();
+    let route_mode = config.route_mode;
 
     let mut warnings: Vec<String> = Vec::new();
     if let Some(warning) = state.config_warning.lock().await.clone() {
@@ -519,26 +515,19 @@ async fn tool_set_route_mode(state: &Arc<AppState>, args: &JsonValue) -> Result<
         return Err("初始化进行中，稍后再试".to_string());
     }
 
-    // 与面板 set_route_mode 同一条链路：配置事务 + 运行时热应用
+    // 与面板 set_route_mode 同一条链路：配置事务 + 运行时热应用（易变层落盘）
     let _config_update = state.config_update.lock().await;
     let was_running = sing_box_is_running(state).await;
     let old_config = state.config.read().await.clone();
-    let current = state
-        .route_mode_override
-        .read()
-        .await
-        .unwrap_or(RouteMode::default());
 
-    if current == requested {
+    if old_config.route_mode == requested {
         return Ok(json!({ "route_mode": mode, "changed": false }));
     }
 
-    let mut old_runtime_config = old_config.clone();
-    old_runtime_config.route_mode = current;
-    let mut new_runtime_config = old_config.clone();
-    new_runtime_config.route_mode = requested;
+    let mut new_config = old_config.clone();
+    new_config.route_mode = requested;
 
-    apply_runtime_config_change(state, &old_runtime_config, &new_runtime_config, was_running)
+    apply_config_change(state, &old_config, &new_config)
         .await
         .map_err(|e| format!("切换路由模式失败: {e}"))?;
 
@@ -546,7 +535,7 @@ async fn tool_set_route_mode(state: &Arc<AppState>, args: &JsonValue) -> Result<
         "route_mode": mode,
         "changed": true,
         "restarted": was_running,
-        "note": "会话级状态，不写配置文件；重启后回到规则分流",
+        "note": "已写入易变层配置；OpenWrt/Linux 系统重启后回到 config.yaml 的启动默认值（未设置则规则分流）",
     }))
 }
 

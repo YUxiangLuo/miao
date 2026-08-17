@@ -1,6 +1,6 @@
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum RouteMode {
     #[default]
@@ -11,6 +11,17 @@ pub enum RouteMode {
 impl RouteMode {
     fn serde_is_rule(mode: &Self) -> bool {
         matches!(mode, Self::Rule)
+    }
+}
+
+impl<'de> Deserialize<'de> for RouteMode {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let raw = String::deserialize(deserializer)?;
+        // 配置文件容错：未知值当规则分流，避免手写 yaml 导致启动失败
+        Ok(match raw.trim().to_ascii_lowercase().as_str() {
+            "global" => Self::Global,
+            _ => Self::Rule,
+        })
     }
 }
 
@@ -109,7 +120,9 @@ pub struct Config {
     /// 但不再写入稳定层；运行值落 volatile.yaml。
     #[serde(default, skip_serializing)]
     pub node_select: NodeSelect,
-    #[serde(default, skip_serializing, skip_deserializing)]
+    /// 路由模式：易变层字段——config.yaml 里的值是启动默认值（volatile 缺失时生效），
+    /// 运行值落 volatile.yaml，稳定层保存不再携带。
+    #[serde(default, skip_serializing)]
     pub route_mode: RouteMode,
 }
 
@@ -203,17 +216,20 @@ nodes: []
     }
 
     #[test]
-    fn config_ignores_route_mode_when_deserializing() {
+    fn config_reads_route_mode_as_boot_default() {
+        // config.yaml 的 route_mode 是启动默认值（volatile 缺失时生效）
         let yaml = r#"
 port: 6161
-route_mode: definitely-not-valid
+route_mode: global
 subs: []
 nodes: []
 custom_rules: []
 "#;
-
         let config: Config = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(config.route_mode, super::RouteMode::Global);
 
+        // 未知值回落规则分流，不让手写 yaml 启动失败
+        let config: Config = serde_yaml::from_str("route_mode: definitely-not-valid").unwrap();
         assert_eq!(config.route_mode, super::RouteMode::Rule);
     }
 

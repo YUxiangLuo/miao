@@ -1,7 +1,6 @@
 use super::apply::{
-    config_apply_mode, config_changed_after_refresh, config_with_route_override,
-    no_usable_nodes_warning, persist_config_without_usable_nodes_at, sub_source_for,
-    ConfigApplyMode, SubSource,
+    config_apply_mode, config_changed_after_refresh, no_usable_nodes_warning,
+    persist_config_without_usable_nodes_at, sub_source_for, ConfigApplyMode, SubSource,
 };
 use super::builder::{build_sing_box_config, filter_rules_with_missing_outbound, tun_inbound};
 use super::generate::{collect_manual_outbounds, runtime_config_node_tags};
@@ -394,24 +393,6 @@ fn config_change_restarts_service_when_it_is_desired() {
     };
 
     assert_eq!(config_apply_mode(&config, true), ConfigApplyMode::Restart);
-}
-
-#[test]
-fn config_with_route_override_defaults_to_rule_mode() {
-    let config = Config {
-        port: None,
-        subs: vec![],
-        nodes: vec![],
-        custom_rules: vec![],
-        route_mode: RouteMode::Global,
-        adblock: false,
-        mcp: false,
-        node_select: Default::default(),
-    };
-
-    let runtime_config = config_with_route_override(&config, None);
-
-    assert_eq!(runtime_config.route_mode, RouteMode::Rule);
 }
 
 #[test]

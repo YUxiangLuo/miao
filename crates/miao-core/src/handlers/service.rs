@@ -8,12 +8,11 @@ use tokio::time::Duration;
 
 use crate::error::AppError;
 use crate::models::{
-    ApiResponse, ConnectivityResult, NodeSelect, NodeSelectRequest, RouteMode, RouteModeRequest,
-    StatusData,
+    ApiResponse, ConnectivityResult, NodeSelect, NodeSelectRequest, RouteModeRequest, StatusData,
 };
 use crate::responses::{status_error, success, success_no_data, HandlerResult};
 use crate::services::{
-    config::apply_runtime_config_change,
+    config::apply_config_change,
     proxy::restore_last_proxy,
     singbox::{start_sing_internal, stop_sing_internal},
 };
@@ -66,14 +65,14 @@ pub async fn get_status(State(state): State<Arc<AppState>>) -> Json<ApiResponse<
     } else {
         Some(warnings.join(";"))
     };
-    let route_mode = state
-        .route_mode_override
-        .read()
-        .await
-        .unwrap_or(RouteMode::default());
-    let (adblock, mcp, node_select) = {
+    let (route_mode, adblock, mcp, node_select) = {
         let config = state.config.read().await;
-        (config.adblock, config.mcp, config.node_select)
+        (
+            config.route_mode,
+            config.adblock,
+            config.mcp,
+            config.node_select,
+        )
     };
 
     success(
@@ -150,22 +149,6 @@ pub async fn stop_service(State(state): State<Arc<AppState>>) -> HandlerResult {
     Ok(success_no_data("sing-box stopped"))
 }
 
-async fn sing_box_is_running(state: &Arc<AppState>) -> bool {
-    let mut lock = state.sing_process.lock().await;
-
-    match &mut *lock {
-        Some(proc) => match proc.child.try_wait() {
-            Ok(Some(_)) => {
-                *lock = None;
-                false
-            }
-            Ok(None) => true,
-            Err(_) => false,
-        },
-        None => false,
-    }
-}
-
 pub async fn set_route_mode(
     State(state): State<Arc<AppState>>,
     Json(req): Json<RouteModeRequest>,
@@ -178,36 +161,19 @@ pub async fn set_route_mode(
     }
 
     let _config_update = state.config_update.lock().await;
-    let was_running = sing_box_is_running(&state).await;
     let old_config = state.config.read().await.clone();
-    let current_route_mode = state
-        .route_mode_override
-        .read()
-        .await
-        .unwrap_or(RouteMode::default());
 
-    if current_route_mode == req.route_mode {
+    if old_config.route_mode == req.route_mode {
         return Ok(success_no_data("Route mode unchanged"));
     }
 
-    let mut old_runtime_config = old_config.clone();
-    old_runtime_config.route_mode = current_route_mode;
-    let mut new_runtime_config = old_config.clone();
-    new_runtime_config.route_mode = req.route_mode;
+    let mut new_config = old_config.clone();
+    new_config.route_mode = req.route_mode;
 
-    let result = apply_runtime_config_change(
-        &state,
-        &old_runtime_config,
-        &new_runtime_config,
-        was_running,
-    )
-    .await;
-
-    match result {
-        Ok(_) if was_running => Ok(success_no_data(
-            "Route mode updated for current session and sing-box restarted",
-        )),
-        Ok(_) => Ok(success_no_data("Route mode updated for current session")),
+    // route_mode 是易变层字段：走普通配置事务（纯本地语义变更，快照零网络重建），
+    // 分层落盘只写 volatile.yaml
+    match apply_config_change(&state, &old_config, &new_config).await {
+        Ok(_) => Ok(success_no_data("Route mode updated")),
         Err(e) => Err(status_error(StatusCode::INTERNAL_SERVER_ERROR, e)),
     }
 }
@@ -350,28 +316,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn get_status_reports_route_mode_override_without_mutating_config() {
-        let state = app_state(Config {
-            port: None,
-            subs: vec![],
-            nodes: vec![],
-            custom_rules: vec![],
-            route_mode: RouteMode::Rule,
-            adblock: false,
-            mcp: false,
-            node_select: Default::default(),
-        });
-        *state.route_mode_override.write().await = Some(RouteMode::Global);
-
-        let axum::response::Json(response) = get_status(State(state.clone())).await;
-
-        let data = response.data.unwrap();
-        assert_eq!(data.route_mode, RouteMode::Global);
-        assert_eq!(state.config.read().await.route_mode, RouteMode::Rule);
-    }
-
-    #[tokio::test]
-    async fn get_status_ignores_persisted_route_mode_without_override() {
+    async fn get_status_reports_route_mode_from_config() {
         let state = app_state(Config {
             port: None,
             subs: vec![],
@@ -386,6 +331,6 @@ mod tests {
         let axum::response::Json(response) = get_status(State(state)).await;
 
         let data = response.data.unwrap();
-        assert_eq!(data.route_mode, RouteMode::Rule);
+        assert_eq!(data.route_mode, RouteMode::Global);
     }
 }

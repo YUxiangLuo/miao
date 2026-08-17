@@ -146,18 +146,7 @@ pub async fn spawn_server(options: RuntimeOptions) -> AppResult<ServerHandle> {
     };
 
     let config: Config = match tokio::fs::read_to_string(&config_path).await {
-        Ok(content) => {
-            let route_mode_declared = config_declares_route_mode(&content);
-            let mut config: Config = serde_yaml::from_str(&content)?;
-            if route_mode_declared {
-                info!(
-                    config_path = ?config_path,
-                    "Ignoring route_mode from configuration file; route mode is session-only"
-                );
-                config.route_mode = Default::default();
-            }
-            config
-        }
+        Ok(content) => serde_yaml::from_str(&content)?,
         Err(e) if e.kind() == io::ErrorKind::NotFound => {
             info!(
                 config_path = ?config_path,
@@ -648,21 +637,11 @@ async fn open_onboarding_browser(url: String) {
     }
 }
 
-fn config_declares_route_mode(content: &str) -> bool {
-    let Ok(value) = serde_yaml::from_str::<serde_yaml::Value>(content) else {
-        return false;
-    };
-
-    value
-        .as_mapping()
-        .is_some_and(|mapping| mapping.contains_key("route_mode"))
-}
-
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
 
-    use super::{config_declares_route_mode, panel_bind_addr, spawn_server, RuntimeOptions};
+    use super::{panel_bind_addr, spawn_server, RuntimeOptions};
 
     /// Hold a port the panel would bind. Windows needs SO_EXCLUSIVEADDRUSE so
     /// Tokio's SO_REUSEADDR cannot hijack it.
@@ -706,32 +685,6 @@ mod tests {
             let listener = std::net::TcpListener::bind(panel_bind_addr(port)).expect("occupy port");
             (listener, port)
         }
-    }
-
-    #[test]
-    fn config_declares_route_mode_when_top_level_key_exists() {
-        let yaml = r#"
-port: 6161
-route_mode: global
-subs: []
-"#;
-
-        assert!(config_declares_route_mode(yaml));
-    }
-
-    #[test]
-    fn config_declares_route_mode_ignores_nested_key() {
-        let yaml = r#"
-custom_rules:
-  - '{"route_mode":"global"}'
-"#;
-
-        assert!(!config_declares_route_mode(yaml));
-    }
-
-    #[test]
-    fn config_declares_route_mode_handles_invalid_yaml() {
-        assert!(!config_declares_route_mode("route_mode: ["));
     }
 
     #[test]

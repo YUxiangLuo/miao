@@ -5,7 +5,7 @@ use std::{
 use tracing::{error, info, warn};
 
 use crate::error::{AppError, AppResult};
-use crate::models::{Config, NodeSelect, RouteMode};
+use crate::models::{Config, NodeSelect};
 use crate::services::{
     proxy::restore_last_proxy,
     singbox::{
@@ -192,11 +192,9 @@ pub async fn regenerate_preserving_service_state(
     config: &Config,
     state: &Arc<AppState>,
 ) -> AppResult<bool> {
-    let route_override = *state.route_mode_override.read().await;
-    let runtime_config = config_with_route_override(config, route_override);
     let should_run = state.service_should_run.load(Ordering::Relaxed);
 
-    if config_apply_mode(&runtime_config, should_run) == ConfigApplyMode::Clear {
+    if config_apply_mode(config, should_run) == ConfigApplyMode::Clear {
         stop_sing_internal(state).await;
         clear_runtime_config(state).await;
         return Ok(false);
@@ -206,24 +204,18 @@ pub async fn regenerate_preserving_service_state(
     let snapshot = snapshot_runtime_config().await;
 
     if should_run {
-        match regenerate_and_restart_runtime(
-            &runtime_config,
-            state,
-            RefreshPolicy::Manual,
-            SubSource::Fetch,
-        )
-        .await
+        match regenerate_and_restart_runtime(config, state, RefreshPolicy::Manual, SubSource::Fetch)
+            .await
         {
             Ok(outcome) => {
-                finalize_started_config(&runtime_config, state, outcome.has_sub_nodes).await;
+                finalize_started_config(config, state, outcome.has_sub_nodes).await;
             }
             Err(err) => {
                 // 校验失败时磁盘已是未通过校验的新配置而内核还在跑旧配置；
                 // 重启失败时内核已停。先把运行时恢复到刷新前状态，再上报原错误。
                 error!(error = %err, "Failed to refresh subscriptions, restoring previous runtime state");
                 let restore =
-                    restore_previous_running_config(&runtime_config, state, snapshot.as_deref())
-                        .await;
+                    restore_previous_running_config(config, state, snapshot.as_deref()).await;
                 return match restore {
                     Ok(()) => Err(err),
                     Err(restore_err) => Err(AppError::message(format!(
@@ -234,16 +226,14 @@ pub async fn regenerate_preserving_service_state(
             }
         }
     } else {
-        match regenerate_without_restart_runtime(&runtime_config, state, SubSource::Fetch).await {
+        match regenerate_without_restart_runtime(config, state, SubSource::Fetch).await {
             Ok(outcome) => {
                 persist_effective_node_select(state, outcome.node_select).await?;
-                update_config_warning(&runtime_config, state, outcome.has_sub_nodes).await;
+                update_config_warning(config, state, outcome.has_sub_nodes).await;
             }
             Err(err) => {
                 error!(error = %err, "Failed to regenerate config, restoring previous runtime config");
-                let _ =
-                    restore_previous_stopped_config(&runtime_config, state, snapshot.as_deref())
-                        .await;
+                let _ = restore_previous_stopped_config(config, state, snapshot.as_deref()).await;
                 return Err(err);
             }
         }
@@ -300,12 +290,6 @@ pub(super) async fn regenerate_without_restart_runtime(
     record_fresh_snapshot(config, &outcome).await;
 
     Ok(outcome)
-}
-
-pub(super) fn config_with_route_override(config: &Config, route_mode: Option<RouteMode>) -> Config {
-    let mut config = config.clone();
-    config.route_mode = route_mode.unwrap_or_default();
-    config
 }
 
 fn has_configured_sources(config: &Config) -> bool {
@@ -420,63 +404,54 @@ pub async fn apply_config_change(
     old_config: &Config,
     new_config: &Config,
 ) -> AppResult<()> {
-    let route_override = *state.route_mode_override.read().await;
-    let runtime_old_config = config_with_route_override(old_config, route_override);
-    let runtime_new_config = config_with_route_override(new_config, route_override);
-    let persisted_new_config = config_with_route_override(new_config, None);
     let should_run = state.service_should_run.load(Ordering::Relaxed);
-    let apply_mode = config_apply_mode(&runtime_new_config, should_run);
+    let apply_mode = config_apply_mode(new_config, should_run);
 
     if apply_mode == ConfigApplyMode::Clear {
-        save_config_layered(state, &persisted_new_config).await?;
+        save_config_layered(state, new_config).await?;
         stop_sing_internal(state).await;
         clear_runtime_config(state).await;
-        *state.config.write().await = persisted_new_config;
+        *state.config.write().await = new_config.clone();
         *state.skipped_rules.lock().await = Vec::new();
         return Ok(());
     }
 
     // 回滚 tier 1 材料：变更前正在运行/最近可用的运行时配置字节（config.json）
     let snapshot = snapshot_runtime_config().await;
-    // 订阅列表没变就是本地语义变更（节点选择/规则/去广告/手动节点），走快照零网络重建
+    // 订阅列表没变就是本地语义变更（节点选择/路由模式/规则/去广告/手动节点），走快照零网络重建
     let source = sub_source_for(old_config, new_config);
 
     let apply_result = match apply_mode {
         ConfigApplyMode::Restart => {
-            regenerate_and_restart_runtime(
-                &runtime_new_config,
-                state,
-                RefreshPolicy::ManualInApply,
-                source,
-            )
-            .await
+            regenerate_and_restart_runtime(new_config, state, RefreshPolicy::ManualInApply, source)
+                .await
         }
         ConfigApplyMode::RegenerateOnly => {
-            regenerate_without_restart_runtime(&runtime_new_config, state, source).await
+            regenerate_without_restart_runtime(new_config, state, source).await
         }
         ConfigApplyMode::Clear => unreachable!("clear mode handled above"),
     };
 
     match apply_result {
         Ok(outcome) => {
-            let mut persisted_new_config = persisted_new_config;
-            persisted_new_config.node_select = outcome.node_select;
+            let persisted_new_config = Config {
+                node_select: outcome.node_select,
+                ..new_config.clone()
+            };
             match save_config_layered(state, &persisted_new_config).await {
                 Ok(()) => {
                     *state.config.write().await = persisted_new_config;
                     if should_run {
-                        finalize_started_config(&runtime_new_config, state, outcome.has_sub_nodes)
-                            .await;
+                        finalize_started_config(new_config, state, outcome.has_sub_nodes).await;
                     } else {
-                        update_config_warning(&runtime_new_config, state, outcome.has_sub_nodes)
-                            .await;
+                        update_config_warning(new_config, state, outcome.has_sub_nodes).await;
                     }
                     Ok(())
                 }
                 Err(save_err) => {
                     error!(error = %save_err, "Runtime config applied but persistent config write failed, attempting runtime rollback");
                     match restore_previous_config(
-                        &runtime_old_config,
+                        old_config,
                         state,
                         should_run,
                         snapshot.as_deref(),
@@ -500,13 +475,8 @@ pub async fn apply_config_change(
             // 回滚到变更前状态，把订阅故障作为普通变更失败报给用户
             if snapshot.is_some() || has_config_cache() || has_sub_nodes_snapshot() {
                 warn!(error = %apply_err, "All subscriptions failed during config change; keeping previous runtime state");
-                match restore_previous_config(
-                    &runtime_old_config,
-                    state,
-                    should_run,
-                    snapshot.as_deref(),
-                )
-                .await
+                match restore_previous_config(old_config, state, should_run, snapshot.as_deref())
+                    .await
                 {
                     Ok(()) => Err(AppError::context(
                         "所有订阅获取失败，已保留当前运行配置",
@@ -520,18 +490,12 @@ pub async fn apply_config_change(
             } else {
                 // 本地没有任何可用材料（新装/清场后）：没有可回退的状态，维持落盘+停核
                 warn!(error = %apply_err, "Config change left no usable nodes; persisting it and stopping sing-box");
-                persist_config_without_usable_nodes(state, persisted_new_config).await
+                persist_config_without_usable_nodes(state, new_config.clone()).await
             }
         }
         Err(apply_err) => {
             error!(error = %apply_err, "Failed to apply runtime config change, attempting runtime rollback");
-            match restore_previous_config(
-                &runtime_old_config,
-                state,
-                should_run,
-                snapshot.as_deref(),
-            )
-            .await
+            match restore_previous_config(old_config, state, should_run, snapshot.as_deref()).await
             {
                 Ok(()) => Err(AppError::context(
                     "Failed to apply config change; restored previous runtime config",
@@ -541,67 +505,6 @@ pub async fn apply_config_change(
                     "Failed to apply config change: {}. Runtime rollback failed: {}",
                     apply_err, rollback_err
                 ))),
-            }
-        }
-    }
-}
-
-pub async fn apply_runtime_config_change(
-    state: &Arc<AppState>,
-    old_config: &Config,
-    new_config: &Config,
-    restart: bool,
-) -> AppResult<()> {
-    // 回滚 tier 1 材料：变更前正在运行/最近可用的运行时配置字节
-    let snapshot = snapshot_runtime_config().await;
-    // route_mode 切换是纯本地语义变更：恒走快照零网络重建
-    if restart {
-        match regenerate_and_restart_runtime(
-            new_config,
-            state,
-            RefreshPolicy::Manual,
-            SubSource::SnapshotOrFetch,
-        )
-        .await
-        {
-            Ok(outcome) => {
-                *state.route_mode_override.write().await = Some(new_config.route_mode);
-                finalize_started_config(new_config, state, outcome.has_sub_nodes).await;
-                Ok(())
-            }
-            Err(apply_err) => {
-                error!(error = %apply_err, "Failed to apply runtime-only config change, attempting runtime rollback");
-                match restore_previous_running_config(old_config, state, snapshot.as_deref())
-                    .await
-                {
-                    Ok(()) => Err(AppError::context(
-                        "Failed to apply runtime-only config change; restored previous runtime config",
-                        apply_err,
-                    )),
-                    Err(rollback_err) => Err(AppError::message(format!(
-                        "Failed to apply runtime-only config change: {}. Runtime rollback failed: {}",
-                        apply_err, rollback_err
-                    ))),
-                }
-            }
-        }
-    } else {
-        match regenerate_without_restart_runtime(new_config, state, SubSource::SnapshotOrFetch)
-            .await
-        {
-            Ok(outcome) => {
-                *state.route_mode_override.write().await = Some(new_config.route_mode);
-                persist_effective_node_select(state, outcome.node_select).await?;
-                update_config_warning(new_config, state, outcome.has_sub_nodes).await;
-                Ok(())
-            }
-            Err(apply_err) => {
-                let _ =
-                    restore_previous_stopped_config(old_config, state, snapshot.as_deref()).await;
-                Err(AppError::context(
-                    "Failed to apply runtime-only config change",
-                    apply_err,
-                ))
             }
         }
     }
