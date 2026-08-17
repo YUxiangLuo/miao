@@ -377,6 +377,7 @@ mod tests {
         };
 
         assert!(err.is_no_usable_nodes());
-        assert!(started.elapsed() < Duration::from_millis(50));
+        // Windows CI 上 loopback 拒连可能耗时数百 ms；阈值远小于生产退避（首段 5s）即可
+        assert!(started.elapsed() < Duration::from_secs(2));
     }
 }
