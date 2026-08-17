@@ -140,12 +140,57 @@ async fn restore_runtime_config_bytes_at(path: &Path, bytes: &[u8]) -> AppResult
     write_file_atomic(path, bytes).await
 }
 
+/// 订阅节点集快照：上次真拉取拿到的节点，供本地语义变更（节点选择/路由模式/
+/// 规则/去广告/手动节点）零网络重建配置。`subs` 是一致性护栏：与当前配置的
+/// 订阅列表不一致时快照作废（订阅增删后必须真拉取一次重建快照）。
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct SubNodesSnapshot {
+    pub subs: Vec<String>,
+    pub node_names: Vec<String>,
+    pub outbounds: Vec<serde_json::Value>,
+}
+
+impl SubNodesSnapshot {
+    /// 快照能否服务于当前订阅列表
+    pub fn matches_subs(&self, subs: &[String]) -> bool {
+        self.subs == subs
+    }
+}
+
+pub fn sub_nodes_snapshot_path() -> PathBuf {
+    get_sing_box_home().join("sub-nodes.json")
+}
+
+pub fn has_sub_nodes_snapshot() -> bool {
+    sub_nodes_snapshot_path().exists()
+}
+
+pub async fn save_sub_nodes_snapshot(snapshot: &SubNodesSnapshot) -> AppResult<()> {
+    save_sub_nodes_snapshot_at(&sub_nodes_snapshot_path(), snapshot).await
+}
+
+async fn save_sub_nodes_snapshot_at(path: &Path, snapshot: &SubNodesSnapshot) -> AppResult<()> {
+    let bytes = serde_json::to_vec(snapshot)?;
+    write_file_atomic(path, &bytes).await
+}
+
+/// 读取快照；文件缺失、读不出、内容损坏都视为没有快照（调用方退化到拉取路径）
+pub async fn read_sub_nodes_snapshot() -> Option<SubNodesSnapshot> {
+    read_sub_nodes_snapshot_at(&sub_nodes_snapshot_path()).await
+}
+
+async fn read_sub_nodes_snapshot_at(path: &Path) -> Option<SubNodesSnapshot> {
+    let bytes = tokio::fs::read(path).await.ok()?;
+    serde_json::from_slice(&bytes).ok()
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         config_cache_path, get_sing_box_home, persist_effective_node_select,
-        restore_config_from_cache_at, restore_runtime_config_bytes_at, save_config_cache_at,
-        snapshot_runtime_config_at,
+        read_sub_nodes_snapshot_at, restore_config_from_cache_at, restore_runtime_config_bytes_at,
+        save_config_cache_at, save_sub_nodes_snapshot_at, snapshot_runtime_config_at,
+        SubNodesSnapshot,
     };
 
     #[test]
@@ -218,6 +263,37 @@ mod tests {
         assert!(restore_config_from_cache_at(&cache_path, &config_path)
             .await
             .is_err());
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn sub_nodes_snapshot_roundtrip_and_guards() {
+        let temp_dir =
+            std::env::temp_dir().join(format!("miao-sub-snapshot-{}", std::process::id()));
+        let snapshot_path = temp_dir.join("sub-nodes.json");
+        tokio::fs::create_dir_all(&temp_dir).await.unwrap();
+
+        // 缺失/损坏都读不出
+        assert!(read_sub_nodes_snapshot_at(&snapshot_path).await.is_none());
+        tokio::fs::write(&snapshot_path, b"not-json").await.unwrap();
+        assert!(read_sub_nodes_snapshot_at(&snapshot_path).await.is_none());
+
+        let snapshot = SubNodesSnapshot {
+            subs: vec!["https://a.example.com".to_string()],
+            node_names: vec!["香港 01".to_string()],
+            outbounds: vec![serde_json::json!({"type": "trojan", "tag": "香港 01"})],
+        };
+        save_sub_nodes_snapshot_at(&snapshot_path, &snapshot)
+            .await
+            .unwrap();
+        assert!(!temp_dir.join("sub-nodes.tmp").exists());
+
+        let loaded = read_sub_nodes_snapshot_at(&snapshot_path).await.unwrap();
+        assert!(loaded.matches_subs(&["https://a.example.com".to_string()]));
+        assert!(!loaded.matches_subs(&["https://b.example.com".to_string()]));
+        assert!(!loaded.matches_subs(&[]));
+        assert_eq!(loaded.node_names, vec!["香港 01".to_string()]);
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }

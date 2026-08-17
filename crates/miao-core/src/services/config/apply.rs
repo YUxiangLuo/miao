@@ -14,11 +14,13 @@ use crate::services::{
 };
 use crate::state::AppState;
 
-use super::generate::{gen_config, GenConfigOutcome, SubFetchRetry};
+use super::generate::{
+    gen_config, gen_config_from_snapshot, record_fresh_snapshot, GenConfigOutcome, SubFetchRetry,
+};
 use super::persist::{
-    config_cache_path, has_config_cache, persist_effective_node_select, read_config_cache,
-    restore_config_from_cache, restore_runtime_config_bytes, save_config_cache, save_config_to,
-    snapshot_runtime_config,
+    config_cache_path, has_config_cache, has_sub_nodes_snapshot, persist_effective_node_select,
+    read_config_cache, restore_config_from_cache, restore_runtime_config_bytes, save_config_cache,
+    save_config_to, snapshot_runtime_config,
 };
 
 /// 订阅刷新策略：机制（拉取 → 生成 → 校验 → 重启）只有一条，差异显式表达
@@ -48,6 +50,25 @@ pub struct RefreshOutcome {
     pub node_select: NodeSelect,
 }
 
+/// 生成配置时订阅节点集的来源：真拉取，或优先用上次拉取的快照零网络重建。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SubSource {
+    /// 真拉取（增删订阅/手动刷新/启动）
+    Fetch,
+    /// 快照优先，缺失或与当前订阅列表不匹配时退化到真拉取
+    /// （本地语义变更：节点选择/路由模式/规则/去广告/手动节点——切换不是刷新）
+    SnapshotOrFetch,
+}
+
+/// 订阅列表没变就是本地语义变更，走快照重建；变了才需要真拉取
+pub(super) fn sub_source_for(old_config: &Config, new_config: &Config) -> SubSource {
+    if old_config.subs == new_config.subs {
+        SubSource::SnapshotOrFetch
+    } else {
+        SubSource::Fetch
+    }
+}
+
 /// 刷新后是否需要重启内核：与启动缓存逐字节不同才需要；读不出内容时保守重启
 pub(super) fn config_changed_after_refresh(cache: Option<&[u8]>, current: Option<&[u8]>) -> bool {
     match (cache, current) {
@@ -66,12 +87,13 @@ async fn restore_cache_over_generated_config() {
     }
 }
 
-/// 订阅刷新统一管线：拉取订阅 → 生成配置 →（策略门控）→ 校验 → 重启内核。
+/// 订阅刷新统一管线：获取节点集（source 决定真拉取还是快照重建）→ 生成配置 →（策略门控）→ 校验 → 重启内核。
 /// 不包含缓存保存/节点恢复/告警文案——由调用方按 outcome 决定。
 pub async fn refresh_subscriptions(
     config: &Config,
     state: &Arc<AppState>,
     policy: RefreshPolicy,
+    source: SubSource,
 ) -> AppResult<RefreshOutcome> {
     let startup = matches!(policy, RefreshPolicy::Startup);
     // 启动路径的订阅全失败多为「先于路由/DHCP 就绪」的瞬态，给退避预算；
@@ -83,9 +105,11 @@ pub async fn refresh_subscriptions(
     };
 
     let cache_bytes = read_config_cache().await;
-    let generated = gen_config(config, state, retry)
-        .await
-        .map_err(|e| AppError::context("Failed to regenerate config", e))?;
+    let generated = match source {
+        SubSource::Fetch => gen_config(config, state, retry).await,
+        SubSource::SnapshotOrFetch => gen_config_from_snapshot(config, state).await,
+    }
+    .map_err(|e| AppError::context("Failed to regenerate config", e))?;
     info!("Config regenerated successfully");
 
     if startup && !generated.has_sub_nodes && !config.subs.is_empty() {
@@ -103,6 +127,8 @@ pub async fn refresh_subscriptions(
             .ok();
         if !config_changed_after_refresh(cache_bytes.as_deref(), current_bytes.as_deref()) {
             info!("Subscriptions unchanged after refresh; sing-box keeps running");
+            // 内容无变化等价于缓存那份（已通过校验）：顺带补齐快照
+            record_fresh_snapshot(config, &generated).await;
             persist_effective_node_select(state, generated.node_select).await?;
             return Ok(RefreshOutcome {
                 has_sub_nodes: generated.has_sub_nodes,
@@ -126,6 +152,8 @@ pub async fn refresh_subscriptions(
             e,
         ));
     }
+    // 校验通过才落快照：防止未通过校验的节点污染快照、拖累后续快照重建
+    record_fresh_snapshot(config, &generated).await;
 
     stop_sing_internal(state).await;
     start_sing_internal(state)
@@ -150,11 +178,13 @@ pub(super) async fn regenerate_and_restart_runtime(
     config: &Config,
     state: &Arc<AppState>,
     policy: RefreshPolicy,
+    source: SubSource,
 ) -> AppResult<GenConfigOutcome> {
-    let outcome = refresh_subscriptions(config, state, policy).await?;
+    let outcome = refresh_subscriptions(config, state, policy, source).await?;
     Ok(GenConfigOutcome {
         has_sub_nodes: outcome.has_sub_nodes,
         node_select: outcome.node_select,
+        fresh_sub_nodes: None,
     })
 }
 
@@ -176,7 +206,14 @@ pub async fn regenerate_preserving_service_state(
     let snapshot = snapshot_runtime_config().await;
 
     if should_run {
-        match regenerate_and_restart_runtime(&runtime_config, state, RefreshPolicy::Manual).await {
+        match regenerate_and_restart_runtime(
+            &runtime_config,
+            state,
+            RefreshPolicy::Manual,
+            SubSource::Fetch,
+        )
+        .await
+        {
             Ok(outcome) => {
                 finalize_started_config(&runtime_config, state, outcome.has_sub_nodes).await;
             }
@@ -197,7 +234,7 @@ pub async fn regenerate_preserving_service_state(
             }
         }
     } else {
-        match regenerate_without_restart_runtime(&runtime_config, state).await {
+        match regenerate_without_restart_runtime(&runtime_config, state, SubSource::Fetch).await {
             Ok(outcome) => {
                 persist_effective_node_select(state, outcome.node_select).await?;
                 update_config_warning(&runtime_config, state, outcome.has_sub_nodes).await;
@@ -247,15 +284,20 @@ async fn update_config_warning(config: &Config, state: &Arc<AppState>, has_sub_n
 pub(super) async fn regenerate_without_restart_runtime(
     config: &Config,
     state: &Arc<AppState>,
+    source: SubSource,
 ) -> AppResult<GenConfigOutcome> {
-    let outcome = gen_config(config, state, SubFetchRetry::None)
-        .await
-        .map_err(|e| AppError::context("Failed to regenerate config", e))?;
+    let outcome = match source {
+        SubSource::Fetch => gen_config(config, state, SubFetchRetry::None).await,
+        SubSource::SnapshotOrFetch => gen_config_from_snapshot(config, state).await,
+    }
+    .map_err(|e| AppError::context("Failed to regenerate config", e))?;
     info!("Config regenerated successfully");
 
     validate_sing_box_config()
         .await
         .map_err(|e| AppError::context("Config validation failed", e))?;
+    // 校验通过才落快照（快照重建时 fresh 为 None，是 no-op）
+    record_fresh_snapshot(config, &outcome).await;
 
     Ok(outcome)
 }
@@ -287,8 +329,12 @@ pub(super) fn config_apply_mode(config: &Config, should_run: bool) -> ConfigAppl
     }
 }
 
-async fn remove_runtime_config_files_at(runtime_config_path: &Path, cache_path: &Path) {
-    for path in [runtime_config_path, cache_path] {
+async fn remove_runtime_config_files_at(
+    runtime_config_path: &Path,
+    cache_path: &Path,
+    sub_nodes_path: &Path,
+) {
+    for path in [runtime_config_path, cache_path, sub_nodes_path] {
         if let Err(err) = tokio::fs::remove_file(path).await {
             if err.kind() != std::io::ErrorKind::NotFound {
                 warn!(path = ?path, error = %err, "Failed to remove stale runtime config");
@@ -300,7 +346,8 @@ async fn remove_runtime_config_files_at(runtime_config_path: &Path, cache_path: 
 async fn remove_runtime_config_files() {
     let runtime_config_path = get_sing_box_home().join("config.json");
     let cache_path = config_cache_path();
-    remove_runtime_config_files_at(&runtime_config_path, &cache_path).await;
+    let sub_nodes_path = super::persist::sub_nodes_snapshot_path();
+    remove_runtime_config_files_at(&runtime_config_path, &cache_path, &sub_nodes_path).await;
 }
 
 async fn clear_runtime_config(state: &Arc<AppState>) {
@@ -322,10 +369,11 @@ pub(super) async fn persist_config_without_usable_nodes_at(
     persisted_config: Config,
     runtime_config_path: &Path,
     cache_path: &Path,
+    sub_nodes_path: &Path,
 ) -> AppResult<()> {
     save_config_to(&state.config_path, &persisted_config).await?;
     stop_sing_internal(state).await;
-    remove_runtime_config_files_at(runtime_config_path, cache_path).await;
+    remove_runtime_config_files_at(runtime_config_path, cache_path, sub_nodes_path).await;
     *state.config.write().await = persisted_config.clone();
     *state.config_warning.lock().await = Some(no_usable_nodes_warning(&persisted_config));
     Ok(())
@@ -337,11 +385,13 @@ async fn persist_config_without_usable_nodes(
 ) -> AppResult<()> {
     let runtime_config_path = get_sing_box_home().join("config.json");
     let cache_path = config_cache_path();
+    let sub_nodes_path = super::persist::sub_nodes_snapshot_path();
     persist_config_without_usable_nodes_at(
         state,
         persisted_config,
         &runtime_config_path,
         &cache_path,
+        &sub_nodes_path,
     )
     .await
 }
@@ -388,14 +438,21 @@ pub async fn apply_config_change(
 
     // 回滚 tier 1 材料：变更前正在运行/最近可用的运行时配置字节（config.json）
     let snapshot = snapshot_runtime_config().await;
+    // 订阅列表没变就是本地语义变更（节点选择/规则/去广告/手动节点），走快照零网络重建
+    let source = sub_source_for(old_config, new_config);
 
     let apply_result = match apply_mode {
         ConfigApplyMode::Restart => {
-            regenerate_and_restart_runtime(&runtime_new_config, state, RefreshPolicy::ManualInApply)
-                .await
+            regenerate_and_restart_runtime(
+                &runtime_new_config,
+                state,
+                RefreshPolicy::ManualInApply,
+                source,
+            )
+            .await
         }
         ConfigApplyMode::RegenerateOnly => {
-            regenerate_without_restart_runtime(&runtime_new_config, state).await
+            regenerate_without_restart_runtime(&runtime_new_config, state, source).await
         }
         ConfigApplyMode::Clear => unreachable!("clear mode handled above"),
     };
@@ -439,8 +496,32 @@ pub async fn apply_config_change(
             }
         }
         Err(apply_err) if apply_err.is_no_usable_nodes() => {
-            warn!(error = %apply_err, "Config change left no usable nodes; persisting it and stopping sing-box");
-            persist_config_without_usable_nodes(state, persisted_new_config).await
+            // 有本地可用材料（运行时快照/cache/节点集快照）时，订阅全失败不再停核清场：
+            // 回滚到变更前状态，把订阅故障作为普通变更失败报给用户
+            if snapshot.is_some() || has_config_cache() || has_sub_nodes_snapshot() {
+                warn!(error = %apply_err, "All subscriptions failed during config change; keeping previous runtime state");
+                match restore_previous_config(
+                    &runtime_old_config,
+                    state,
+                    should_run,
+                    snapshot.as_deref(),
+                )
+                .await
+                {
+                    Ok(()) => Err(AppError::context(
+                        "所有订阅获取失败，已保留当前运行配置",
+                        apply_err,
+                    )),
+                    Err(rollback_err) => Err(AppError::message(format!(
+                        "所有订阅获取失败: {}. 恢复先前运行状态失败: {}",
+                        apply_err, rollback_err
+                    ))),
+                }
+            } else {
+                // 本地没有任何可用材料（新装/清场后）：没有可回退的状态，维持落盘+停核
+                warn!(error = %apply_err, "Config change left no usable nodes; persisting it and stopping sing-box");
+                persist_config_without_usable_nodes(state, persisted_new_config).await
+            }
         }
         Err(apply_err) => {
             error!(error = %apply_err, "Failed to apply runtime config change, attempting runtime rollback");
@@ -473,8 +554,16 @@ pub async fn apply_runtime_config_change(
 ) -> AppResult<()> {
     // 回滚 tier 1 材料：变更前正在运行/最近可用的运行时配置字节
     let snapshot = snapshot_runtime_config().await;
+    // route_mode 切换是纯本地语义变更：恒走快照零网络重建
     if restart {
-        match regenerate_and_restart_runtime(new_config, state, RefreshPolicy::Manual).await {
+        match regenerate_and_restart_runtime(
+            new_config,
+            state,
+            RefreshPolicy::Manual,
+            SubSource::SnapshotOrFetch,
+        )
+        .await
+        {
             Ok(outcome) => {
                 *state.route_mode_override.write().await = Some(new_config.route_mode);
                 finalize_started_config(new_config, state, outcome.has_sub_nodes).await;
@@ -497,7 +586,9 @@ pub async fn apply_runtime_config_change(
             }
         }
     } else {
-        match regenerate_without_restart_runtime(new_config, state).await {
+        match regenerate_without_restart_runtime(new_config, state, SubSource::SnapshotOrFetch)
+            .await
+        {
             Ok(outcome) => {
                 *state.route_mode_override.write().await = Some(new_config.route_mode);
                 persist_effective_node_select(state, outcome.node_select).await?;
@@ -571,7 +662,8 @@ async fn restore_previous_running_config(
             Ok(true) => return Ok(()),
             Ok(false) => {
                 // 本地没有任何材料（新装/清场后）：才退化到重新生成（网络）
-                let outcome = regenerate_without_restart_runtime(old_config, state).await?;
+                let outcome =
+                    regenerate_without_restart_runtime(old_config, state, SubSource::Fetch).await?;
                 update_config_warning(old_config, state, outcome.has_sub_nodes).await;
                 return Ok(());
             }
@@ -616,7 +708,7 @@ async fn restart_with_previous_config(
     }
 
     // 本地材料全部不可用/失败，才退化到重新生成（网络）
-    let outcome = regenerate_without_restart_runtime(old_config, state).await?;
+    let outcome = regenerate_without_restart_runtime(old_config, state, SubSource::Fetch).await?;
     start_sing_internal(state)
         .await
         .map_err(|e| AppError::context("Failed to restart sing-box with previous config", e))?;
@@ -639,7 +731,8 @@ async fn restore_previous_stopped_config(
     match restore_disk_config(snapshot).await {
         Ok(true) => Ok(()),
         Ok(false) => {
-            let outcome = regenerate_without_restart_runtime(old_config, state).await?;
+            let outcome =
+                regenerate_without_restart_runtime(old_config, state, SubSource::Fetch).await?;
             update_config_warning(old_config, state, outcome.has_sub_nodes).await;
             Ok(())
         }

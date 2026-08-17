@@ -188,7 +188,9 @@ Arch 上的面板仍是那份 systemd Linux 实例，可以用来看 **共享 UI
 
 失败回滚去网络化：apply/刷新入口先快照当前 `config.json` 字节（`snapshot_runtime_config`），回滚按 **内存快照 → `config.json.cache` → 重新拉订阅生成** 分层——前两层是纯本地文件操作，内核已死时先 `sing-box check` 再启动（挡坏材料，也兜住内核升级后旧配置不再合法）；仅本地材料全无时才重新拉订阅。cache 读写均已原子化（`write_file_atomic`），空 cache 拒绝恢复。面板「刷新订阅」（`regenerate_preserving_service_state`）失败同样走这套回滚，不再把坏配置留在磁盘上等看门狗踩。
 
-订阅刷新的机制只有一条管线：`services::config::refresh_subscriptions`（拉取 → 生成 → 校验 → 重启），策略由 `RefreshPolicy` 显式表达——`Manual`（面板「刷新订阅」等独立路径：总是重启，全失败用残血配置，重启后由管线持久化生效的 node_select）、`ManualInApply`（`apply_config_change` 事务内：机制同上，但 node_select 随外层事务一并提交，管线不提前写盘，避免「旧配置 + 新选择」中间快照）与 `Startup`（启动快速通道：全失败/校验失败保留运行中的缓存并把 cache 拷回 config.json——看门狗与手动停/启直接用磁盘 config.json 起进程、字节比对无变化不重启）。`regenerate_and_restart_runtime` 接收策略参数。订阅拉取层（`gen_config`）按调用方区分退避预算 `SubFetchRetry`：启动同步路径与 `Startup` 在订阅全失败时按 5s/15s/30s 退避重试（开机先于路由/DHCP 就绪的瞬态；测试里缩短），`Manual` 传 `None`——用户在场，失败即报。调用方按 `RefreshOutcome` 决定告警与收尾（存缓存/恢复节点）。
+订阅刷新的机制只有一条管线：`services::config::refresh_subscriptions`（获取节点集 → 生成 → 校验 → 重启），策略由 `RefreshPolicy` 显式表达——`Manual`（面板「刷新订阅」等独立路径：总是重启，全失败用残血配置，重启后由管线持久化生效的 node_select）、`ManualInApply`（`apply_config_change` 事务内：机制同上，但 node_select 随外层事务一并提交，管线不提前写盘，避免「旧配置 + 新选择」中间快照）与 `Startup`（启动快速通道：全失败/校验失败保留运行中的缓存并把 cache 拷回 config.json——看门狗与手动停/启直接用磁盘 config.json 起进程、字节比对无变化不重启）。`regenerate_and_restart_runtime` 接收策略参数。订阅拉取层（`gen_config`）按调用方区分退避预算 `SubFetchRetry`：启动同步路径与 `Startup` 在订阅全失败时按 5s/15s/30s 退避重试（开机先于路由/DHCP 就绪的瞬态；测试里缩短），`Manual` 传 `None`——用户在场，失败即报。调用方按 `RefreshOutcome` 决定告警与收尾（存缓存/恢复节点）。
+
+节点集来源由 `SubSource` 分流：`old.subs == new.subs`（节点选择/route_mode/规则/去广告/手动节点等本地语义变更）→ `SnapshotOrFetch`，用 `sub-nodes.json` 快照零网络重建（`gen_config_from_snapshot`，快照缺失或 subs 护栏不匹配才退化拉取）；增删订阅/手动刷新/启动 → `Fetch` 真拉取。快照只在校验通过（或启动成功、字节无变化）后由 `record_fresh_snapshot` 落盘，全失败时不用空结果覆盖好快照。快照重建不动 `sub_status`（面板订阅状态=上次真拉取结果）。订阅全失败触发 `NoUsableNodes` 时，有本地材料（运行时快照/cache/sub-nodes.json 任一）则回滚并报错保留现状，不再停核清场；三者全无才落盘+停核。
 
 启动是两条路：`config.json.cache` 存在且通过 `sing-box check` → 直接起内核（秒开），随后以 `Startup` 策略后台刷新（仍持 `config_update` 锁，与面板编辑互斥；随初始化任务一同被关停取消）；无缓存/缓存失效 → 原同步拉取路径。
 

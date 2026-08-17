@@ -1,6 +1,7 @@
 use super::apply::{
     config_apply_mode, config_changed_after_refresh, config_with_route_override,
-    no_usable_nodes_warning, persist_config_without_usable_nodes_at, ConfigApplyMode,
+    no_usable_nodes_warning, persist_config_without_usable_nodes_at, sub_source_for,
+    ConfigApplyMode, SubSource,
 };
 use super::builder::{build_sing_box_config, filter_rules_with_missing_outbound, tun_inbound};
 use super::generate::{collect_manual_outbounds, runtime_config_node_tags};
@@ -272,6 +273,34 @@ fn config_change_clears_runtime_when_last_source_is_removed() {
 }
 
 #[test]
+fn sub_source_is_snapshot_when_subs_unchanged() {
+    let old = Config {
+        subs: vec!["https://a.example.com".to_string()],
+        ..Config::default()
+    };
+    // 节点选择/规则/去广告等本地语义变更不动 subs → 快照重建
+    let mut new = old.clone();
+    new.adblock = true;
+    assert_eq!(sub_source_for(&old, &new), SubSource::SnapshotOrFetch);
+
+    let mut new = old.clone();
+    new.nodes.push("manual-node".to_string());
+    assert_eq!(sub_source_for(&old, &new), SubSource::SnapshotOrFetch);
+
+    // 增删订阅 → 必须真拉取
+    let mut new = old.clone();
+    new.subs.push("https://b.example.com".to_string());
+    assert_eq!(sub_source_for(&old, &new), SubSource::Fetch);
+
+    let new = Config {
+        subs: vec![],
+        nodes: vec!["manual-node".to_string()],
+        ..Config::default()
+    };
+    assert_eq!(sub_source_for(&old, &new), SubSource::Fetch);
+}
+
+#[test]
 fn unusable_node_warning_distinguishes_manual_and_subscription_configs() {
     let manual = Config {
         nodes: vec!["invalid-node".to_string()],
@@ -293,9 +322,11 @@ async fn unusable_config_is_persisted_and_stale_runtime_files_are_removed() {
         std::env::temp_dir().join(format!("miao-unusable-config-{}", std::process::id()));
     let runtime_path = temp_dir.join("config.json");
     let cache_path = temp_dir.join("config.json.cache");
+    let sub_nodes_path = temp_dir.join("sub-nodes.json");
     tokio::fs::create_dir_all(&temp_dir).await.unwrap();
     tokio::fs::write(&runtime_path, "stale").await.unwrap();
     tokio::fs::write(&cache_path, "stale").await.unwrap();
+    tokio::fs::write(&sub_nodes_path, "stale").await.unwrap();
 
     let subscription_url = "https://example.com/broken".to_string();
     state.sub_status.lock().await.insert(
@@ -312,12 +343,19 @@ async fn unusable_config_is_persisted_and_stale_runtime_files_are_removed() {
         ..Config::default()
     };
 
-    persist_config_without_usable_nodes_at(&state, config, &runtime_path, &cache_path)
-        .await
-        .unwrap();
+    persist_config_without_usable_nodes_at(
+        &state,
+        config,
+        &runtime_path,
+        &cache_path,
+        &sub_nodes_path,
+    )
+    .await
+    .unwrap();
 
     assert!(!runtime_path.exists());
     assert!(!cache_path.exists());
+    assert!(!sub_nodes_path.exists());
     assert_eq!(
         state.config.read().await.subs,
         vec![subscription_url.clone()]

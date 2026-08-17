@@ -10,11 +10,16 @@ use crate::services::subscription::fetch_sub;
 use crate::state::AppState;
 
 use super::builder::build_sing_box_config;
-use super::persist::write_file_atomic;
+use super::persist::{
+    read_sub_nodes_snapshot, save_sub_nodes_snapshot, write_file_atomic, SubNodesSnapshot,
+};
 
 pub struct GenConfigOutcome {
     pub has_sub_nodes: bool,
     pub node_select: NodeSelect,
+    /// 本次真拉取拿到的订阅节点集（非空才 Some）；快照重建为 None。
+    /// 校验通过/启动成功后由 record_fresh_snapshot 落盘，供本地语义变更零网络重建。
+    pub fresh_sub_nodes: Option<(Vec<String>, Vec<serde_json::Value>)>,
 }
 
 const MAX_CONCURRENT_SUBS: usize = 5;
@@ -101,7 +106,51 @@ pub async fn gen_config(
 }
 
 async fn gen_config_once(config: &Config, state: &Arc<AppState>) -> AppResult<GenConfigOutcome> {
-    let (my_outbounds, my_names) = collect_manual_outbounds(config);
+    let (node_names, outbounds) = fetch_all_subs(config, state).await;
+    let fresh = (!node_names.is_empty()).then(|| (node_names.clone(), outbounds.clone()));
+    let mut outcome = build_write_and_record(config, state, node_names, outbounds).await?;
+    outcome.fresh_sub_nodes = fresh;
+    Ok(outcome)
+}
+
+/// 用订阅节点集快照零网络重建配置；快照缺失或与当前订阅列表不匹配时退化到真拉取。
+/// 本地语义变更（节点选择/路由模式/规则/去广告/手动节点）走这里：
+/// 切换不是刷新，不该被订阅网络故障拖累。
+pub async fn gen_config_from_snapshot(
+    config: &Config,
+    state: &Arc<AppState>,
+) -> AppResult<GenConfigOutcome> {
+    if let Some(snapshot) = read_sub_nodes_snapshot().await {
+        if snapshot.matches_subs(&config.subs) {
+            info!("Rebuilding config from subscription node snapshot (no network)");
+            return build_write_and_record(config, state, snapshot.node_names, snapshot.outbounds)
+                .await;
+        }
+        warn!("Subscription list changed since snapshot; fetching subscriptions");
+    }
+    gen_config(config, state, SubFetchRetry::None).await
+}
+
+/// 校验通过/启动成功后调用：把本次真拉取的节点集落成快照（best-effort，写失败只告警）。
+pub async fn record_fresh_snapshot(config: &Config, outcome: &GenConfigOutcome) {
+    let Some((node_names, outbounds)) = &outcome.fresh_sub_nodes else {
+        return;
+    };
+    let snapshot = SubNodesSnapshot {
+        subs: config.subs.clone(),
+        node_names: node_names.clone(),
+        outbounds: outbounds.clone(),
+    };
+    if let Err(err) = save_sub_nodes_snapshot(&snapshot).await {
+        warn!(error = %err, "Failed to save subscription nodes snapshot");
+    }
+}
+
+/// 并发拉取全部订阅并逐条更新 sub_status；返回合并后的节点名与 outbounds。
+async fn fetch_all_subs(
+    config: &Config,
+    state: &Arc<AppState>,
+) -> (Vec<String>, Vec<serde_json::Value>) {
     let mut final_outbounds: Vec<serde_json::Value> = vec![];
     let mut final_node_names: Vec<String> = vec![];
 
@@ -210,6 +259,17 @@ async fn gen_config_once(config: &Config, state: &Arc<AppState>) -> AppResult<Ge
         state.sub_status.lock().await.insert(url, status);
     }
 
+    (final_node_names, final_outbounds)
+}
+
+/// 用给定的订阅节点集构建 sing-box 配置并原子写盘；skipped_rules 同步进状态。
+async fn build_write_and_record(
+    config: &Config,
+    state: &Arc<AppState>,
+    final_node_names: Vec<String>,
+    final_outbounds: Vec<serde_json::Value>,
+) -> AppResult<GenConfigOutcome> {
+    let (my_outbounds, my_names) = collect_manual_outbounds(config);
     let has_sub_nodes = !final_node_names.is_empty();
 
     let (sing_box_config, skipped_rules, node_select) = build_sing_box_config(
@@ -229,6 +289,7 @@ async fn gen_config_once(config: &Config, state: &Arc<AppState>) -> AppResult<Ge
     Ok(GenConfigOutcome {
         has_sub_nodes,
         node_select,
+        fresh_sub_nodes: None,
     })
 }
 
@@ -310,6 +371,7 @@ mod tests {
         GenConfigOutcome {
             has_sub_nodes,
             node_select: NodeSelect::Manual,
+            fresh_sub_nodes: None,
         }
     }
 

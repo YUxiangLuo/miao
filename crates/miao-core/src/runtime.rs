@@ -11,9 +11,10 @@ use crate::error::{AppError, AppResult};
 use crate::models::{Config, DEFAULT_PORT};
 use crate::services::{
     config::{
-        gen_config, has_config_cache, persist_effective_node_select, refresh_subscriptions,
-        restore_config_from_cache, runtime_config_matches_node_select, save_config_cache,
-        RefreshEffect, RefreshPolicy, SubFetchRetry,
+        gen_config, has_config_cache, persist_effective_node_select, record_fresh_snapshot,
+        refresh_subscriptions, restore_config_from_cache, runtime_config_matches_node_select,
+        save_config_cache, GenConfigOutcome, RefreshEffect, RefreshPolicy, SubFetchRetry,
+        SubSource,
     },
     proxy::restore_last_proxy,
     singbox::{
@@ -323,6 +324,7 @@ async fn initialize_runtime(config: Config, state: Arc<AppState>) {
 
     info!("Generating initial config...");
     let mut all_subs_failed = false;
+    let mut fresh_gen: Option<GenConfigOutcome> = None;
     match gen_config(&config, &state, SubFetchRetry::Startup).await {
         Ok(outcome) => {
             if let Err(err) = persist_effective_node_select(&state, outcome.node_select).await {
@@ -335,6 +337,7 @@ async fn initialize_runtime(config: Config, state: Arc<AppState>) {
             if !outcome.has_sub_nodes && !config.subs.is_empty() {
                 all_subs_failed = true;
             }
+            fresh_gen = Some(outcome);
         }
         Err(e) => {
             error!(error = %e, "Failed to generate config");
@@ -368,6 +371,10 @@ async fn initialize_runtime(config: Config, state: Arc<AppState>) {
         Ok(_) => {
             info!("sing-box started successfully");
             save_config_cache().await;
+            // 启动成功等价于配置可用：把本次拉取的节点集落成快照，供本地语义变更零网络重建
+            if let Some(outcome) = &fresh_gen {
+                record_fresh_snapshot(&config, outcome).await;
+            }
             if all_subs_failed && state.config_warning.lock().await.is_none() {
                 warn!("所有订阅获取失败，请检查当前订阅");
                 *state.config_warning.lock().await =
@@ -388,7 +395,7 @@ async fn initialize_runtime(config: Config, state: Arc<AppState>) {
 /// 后台订阅刷新（快速通道启动后调用，调用方持有 config_update 锁）：
 /// 机制全部收敛在 services::config::refresh_subscriptions；这里只按 outcome 决定告警与收尾。
 async fn refresh_subscriptions_in_background(config: &Config, state: &Arc<AppState>) {
-    match refresh_subscriptions(config, state, RefreshPolicy::Startup).await {
+    match refresh_subscriptions(config, state, RefreshPolicy::Startup, SubSource::Fetch).await {
         Ok(outcome) => match outcome.effect {
             RefreshEffect::Restarted => {
                 info!("sing-box restarted with refreshed subscriptions");
