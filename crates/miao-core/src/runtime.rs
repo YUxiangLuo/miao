@@ -11,10 +11,10 @@ use crate::error::{AppError, AppResult};
 use crate::models::{Config, DEFAULT_PORT};
 use crate::services::{
     config::{
-        gen_config, has_config_cache, persist_effective_node_select, record_fresh_snapshot,
-        refresh_subscriptions, restore_config_from_cache, runtime_config_matches_node_select,
-        save_config_cache, GenConfigOutcome, RefreshEffect, RefreshPolicy, SubFetchRetry,
-        SubSource,
+        gen_config, has_config_cache, load_volatile_config, persist_effective_node_select,
+        record_fresh_snapshot, refresh_subscriptions, restore_config_from_cache,
+        runtime_config_matches_node_select, save_config_cache, GenConfigOutcome, RefreshEffect,
+        RefreshPolicy, SubFetchRetry, SubSource,
     },
     proxy::restore_last_proxy,
     singbox::{
@@ -167,6 +167,9 @@ pub async fn spawn_server(options: RuntimeOptions) -> AppResult<ServerHandle> {
         }
         Err(e) => return Err(e.into()),
     };
+    // 易变层 overlay：node_select/route_mode 的运行值覆盖 config.yaml 解析结果；
+    // volatile 文件缺失/损坏时保留 config.yaml 里的同名字段（旧版配置兼容）
+    let config = config.overlay(load_volatile_config().await);
     let requested_port = options.bind_port.or(config.port).unwrap_or(DEFAULT_PORT);
     let subs_count = config.subs.len();
     let nodes_count = config.nodes.len();
@@ -183,8 +186,12 @@ pub async fn spawn_server(options: RuntimeOptions) -> AppResult<ServerHandle> {
     }
 
     let app_state = Arc::new(
-        AppState::with_config_path(config.clone(), config_path)
-            .map_err(|e| AppError::context("Failed to create HTTP client", e))?,
+        AppState::with_config_path(
+            config.clone(),
+            config_path,
+            crate::services::config::volatile_config_path(),
+        )
+        .map_err(|e| AppError::context("Failed to create HTTP client", e))?,
     );
     let state_for_init = app_state.clone();
 

@@ -14,6 +14,8 @@ pub struct AppState {
     pub config: RwLock<Config>, // 使用 RwLock 支持并发读
     pub route_mode_override: RwLock<Option<RouteMode>>,
     pub config_path: PathBuf,
+    /// 易变层配置（node_select/route_mode）的落盘位置，与 config_path 分层。
+    pub volatile_path: PathBuf,
     pub config_update: Mutex<()>,
     pub sing_process: Mutex<Option<SingBoxProcess>>,
     /// 每次有意启动/停止 sing-box 都会递增。崩溃看门狗以此识别自己监护的
@@ -37,10 +39,18 @@ impl AppState {
     /// 创建新的应用状态实例
     #[cfg(test)]
     pub fn new(config: Config) -> Result<Self, reqwest::Error> {
-        Self::with_config_path(config, PathBuf::from("config.yaml"))
+        Self::with_config_path(
+            config,
+            PathBuf::from("config.yaml"),
+            PathBuf::from("volatile.yaml"),
+        )
     }
 
-    pub fn with_config_path(config: Config, config_path: PathBuf) -> Result<Self, reqwest::Error> {
+    pub fn with_config_path(
+        config: Config,
+        config_path: PathBuf,
+        volatile_path: PathBuf,
+    ) -> Result<Self, reqwest::Error> {
         let http_client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(30))
             .build()?;
@@ -49,6 +59,7 @@ impl AppState {
             config: RwLock::new(config),
             route_mode_override: RwLock::new(None),
             config_path,
+            volatile_path,
             config_update: Mutex::new(()),
             sing_process: Mutex::new(None),
             sing_generation: AtomicU64::new(0),

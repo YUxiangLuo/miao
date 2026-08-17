@@ -23,13 +23,16 @@ fn safe_test_path_component(raw: &str) -> String {
 }
 
 pub fn app_state(config: Config) -> Arc<AppState> {
-    let config_path = std::env::temp_dir().join(format!(
-        "miao-test-config-{}-{}.yaml",
+    let unique = format!(
+        "{}-{}",
         std::process::id(),
         safe_test_path_component(std::thread::current().name().unwrap_or("unnamed"))
-    ));
+    );
+    let config_path = std::env::temp_dir().join(format!("miao-test-config-{unique}.yaml"));
+    let volatile_path = std::env::temp_dir().join(format!("miao-test-volatile-{unique}.yaml"));
     Arc::new(
-        AppState::with_config_path(config, config_path).expect("Failed to create AppState in test"),
+        AppState::with_config_path(config, config_path, volatile_path)
+            .expect("Failed to create AppState in test"),
     )
 }
 

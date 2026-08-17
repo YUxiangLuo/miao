@@ -4,12 +4,22 @@ use tracing::{error, info};
 use std::sync::Arc;
 
 use crate::error::{AppError, AppResult};
-use crate::models::{Config, NodeSelect};
+use crate::models::{Config, NodeSelect, VolatileConfig};
 use crate::services::singbox::get_sing_box_home;
 use crate::state::AppState;
 
 pub(super) fn config_cache_path() -> PathBuf {
     get_sing_box_home().join("config.json.cache")
+}
+
+/// 易变层配置文件位置：unix 放运行时目录（tmpfs，系统重启即回默认）；
+/// Windows 放应用数据目录（持久，桌面用户预期设置粘滞）。
+pub fn volatile_config_path() -> PathBuf {
+    if cfg!(windows) {
+        crate::paths::platform_data_dir().join("volatile.yaml")
+    } else {
+        get_sing_box_home().join("volatile.yaml")
+    }
 }
 
 /// 原子写入文件：先写入临时文件，再重命名为目标文件
@@ -38,11 +48,11 @@ pub(super) async fn write_file_atomic(path: &Path, content: &[u8]) -> AppResult<
     Ok(())
 }
 
-pub async fn save_config_to(path: &Path, config: &Config) -> AppResult<()> {
-    let yaml = serde_yaml::to_string(config)?;
+async fn save_yaml_to(path: &Path, value: &impl serde::Serialize) -> AppResult<()> {
+    let yaml = serde_yaml::to_string(value)?;
     if let Ok(existing) = tokio::fs::read_to_string(path).await {
         if existing == yaml {
-            info!(config_path = ?path, "Config file already up to date, skipping write");
+            info!(path = ?path, "File already up to date, skipping write");
             return Ok(());
         }
     }
@@ -50,7 +60,35 @@ pub async fn save_config_to(path: &Path, config: &Config) -> AppResult<()> {
     write_file_atomic(path, yaml.as_bytes()).await
 }
 
-/// 筛空地区后把 yaml / 内存里的 node_select 写回 manual。
+pub async fn save_config_to(path: &Path, config: &Config) -> AppResult<()> {
+    save_yaml_to(path, config).await
+}
+
+/// 读取易变层配置；文件缺失、读不出、内容损坏都返回 `None`
+/// （调用方保留 config.yaml 的解析结果，见 `Config::overlay`）。
+pub async fn load_volatile_config() -> Option<VolatileConfig> {
+    load_volatile_config_at(&volatile_config_path()).await
+}
+
+async fn load_volatile_config_at(path: &Path) -> Option<VolatileConfig> {
+    let content = tokio::fs::read_to_string(path).await.ok()?;
+    serde_yaml::from_str(&content).ok()
+}
+
+pub async fn save_volatile_to(path: &Path, volatile: &VolatileConfig) -> AppResult<()> {
+    save_yaml_to(path, volatile).await
+}
+
+/// 配置分层落盘：稳定层（config.yaml）+ 易变层（volatile.yaml）。
+/// 两层各自原子写并按内容跳过未变写入——单一层面的变更只产生一层的 I/O。
+pub async fn save_config_layered(state: &Arc<AppState>, config: &Config) -> AppResult<()> {
+    save_config_to(&state.config_path, config).await?;
+    save_volatile_to(&state.volatile_path, &VolatileConfig::from(config)).await
+}
+
+/// 筛空地区后把内存里的 node_select 写回 manual。
+/// node_select 是易变层字段：稳定层 YAML 序列化时天然不含它，
+/// 这里走分层落盘（稳定层内容未变会被跳过，实际只写易变层）。
 pub async fn persist_effective_node_select(
     state: &Arc<AppState>,
     node_select: NodeSelect,
@@ -60,7 +98,7 @@ pub async fn persist_effective_node_select(
         return Ok(());
     }
     config.node_select = node_select;
-    save_config_to(&state.config_path, &config).await?;
+    save_config_layered(state, &config).await?;
     *state.config.write().await = config;
     Ok(())
 }
@@ -187,10 +225,10 @@ async fn read_sub_nodes_snapshot_at(path: &Path) -> Option<SubNodesSnapshot> {
 #[cfg(test)]
 mod tests {
     use super::{
-        config_cache_path, get_sing_box_home, persist_effective_node_select,
-        read_sub_nodes_snapshot_at, restore_config_from_cache_at, restore_runtime_config_bytes_at,
-        save_config_cache_at, save_sub_nodes_snapshot_at, snapshot_runtime_config_at,
-        SubNodesSnapshot,
+        config_cache_path, get_sing_box_home, load_volatile_config_at,
+        persist_effective_node_select, read_sub_nodes_snapshot_at, restore_config_from_cache_at,
+        restore_runtime_config_bytes_at, save_config_cache_at, save_sub_nodes_snapshot_at,
+        save_volatile_to, snapshot_runtime_config_at, volatile_config_path, SubNodesSnapshot,
     };
 
     #[test]
@@ -199,6 +237,55 @@ mod tests {
             config_cache_path(),
             get_sing_box_home().join("config.json.cache")
         );
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn volatile_config_lives_under_sing_box_home_on_unix() {
+        assert_eq!(
+            volatile_config_path(),
+            get_sing_box_home().join("volatile.yaml")
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn volatile_config_lives_in_data_dir_on_windows() {
+        assert_eq!(
+            volatile_config_path(),
+            crate::paths::platform_data_dir().join("volatile.yaml")
+        );
+    }
+
+    #[tokio::test]
+    async fn volatile_config_roundtrip_and_fallbacks() {
+        use crate::models::{NodeSelect, Region, RouteMode, VolatileConfig};
+
+        let temp_dir = std::env::temp_dir().join(format!("miao-volatile-{}", std::process::id()));
+        let path = temp_dir.join("volatile.yaml");
+        tokio::fs::create_dir_all(&temp_dir).await.unwrap();
+
+        // 缺失 / 损坏都读不出（None = 不覆盖 config.yaml）
+        assert!(load_volatile_config_at(&path).await.is_none());
+        tokio::fs::write(&path, b"route_mode: [not-a-mode]")
+            .await
+            .unwrap();
+        assert!(load_volatile_config_at(&path).await.is_none());
+
+        let volatile = VolatileConfig {
+            node_select: NodeSelect::Fastest(Region::Sg),
+            route_mode: RouteMode::Global,
+        };
+        save_volatile_to(&path, &volatile).await.unwrap();
+        assert!(!temp_dir.join("volatile.tmp").exists());
+        let loaded = load_volatile_config_at(&path).await.unwrap();
+        assert_eq!(loaded, volatile);
+
+        // 未变化时跳过写入：内容不变且不产生临时文件
+        save_volatile_to(&path, &volatile).await.unwrap();
+        assert!(!temp_dir.join("volatile.tmp").exists());
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }
 
     #[tokio::test]
@@ -299,7 +386,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn persist_effective_node_select_writes_manual_fallback() {
+    async fn persist_effective_node_select_writes_volatile_layer() {
         use crate::models::{Config, NodeSelect, Region};
         use crate::test_support::app_state;
 
@@ -312,8 +399,25 @@ mod tests {
             .unwrap();
 
         assert_eq!(state.config.read().await.node_select, NodeSelect::Manual);
+        // 稳定层不含 node_select（已迁入易变层）
         let yaml = tokio::fs::read_to_string(&state.config_path).await.unwrap();
         assert!(!yaml.contains("node_select"));
+        // 易变层落盘且可读回（manual 为默认覆盖）
+        let loaded = load_volatile_config_at(&state.volatile_path)
+            .await
+            .expect("volatile file should exist");
+        assert_eq!(loaded.node_select, NodeSelect::Manual);
+
+        // 再写入非默认值，易变层显式记录
+        persist_effective_node_select(&state, NodeSelect::Fastest(Region::Jp))
+            .await
+            .unwrap();
+        let content = tokio::fs::read_to_string(&state.volatile_path)
+            .await
+            .unwrap();
+        assert!(content.contains("node_select: fastest_jp"));
+
         let _ = tokio::fs::remove_file(&state.config_path).await;
+        let _ = tokio::fs::remove_file(&state.volatile_path).await;
     }
 }

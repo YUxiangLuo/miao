@@ -20,7 +20,7 @@ use super::generate::{
 use super::persist::{
     config_cache_path, has_config_cache, has_sub_nodes_snapshot, persist_effective_node_select,
     read_config_cache, restore_config_from_cache, restore_runtime_config_bytes, save_config_cache,
-    save_config_to, snapshot_runtime_config,
+    save_config_layered, snapshot_runtime_config,
 };
 
 /// 订阅刷新策略：机制（拉取 → 生成 → 校验 → 重启）只有一条，差异显式表达
@@ -371,7 +371,7 @@ pub(super) async fn persist_config_without_usable_nodes_at(
     cache_path: &Path,
     sub_nodes_path: &Path,
 ) -> AppResult<()> {
-    save_config_to(&state.config_path, &persisted_config).await?;
+    save_config_layered(state, &persisted_config).await?;
     stop_sing_internal(state).await;
     remove_runtime_config_files_at(runtime_config_path, cache_path, sub_nodes_path).await;
     *state.config.write().await = persisted_config.clone();
@@ -428,7 +428,7 @@ pub async fn apply_config_change(
     let apply_mode = config_apply_mode(&runtime_new_config, should_run);
 
     if apply_mode == ConfigApplyMode::Clear {
-        save_config_to(&state.config_path, &persisted_new_config).await?;
+        save_config_layered(state, &persisted_new_config).await?;
         stop_sing_internal(state).await;
         clear_runtime_config(state).await;
         *state.config.write().await = persisted_new_config;
@@ -461,7 +461,7 @@ pub async fn apply_config_change(
         Ok(outcome) => {
             let mut persisted_new_config = persisted_new_config;
             persisted_new_config.node_select = outcome.node_select;
-            match save_config_to(&state.config_path, &persisted_new_config).await {
+            match save_config_layered(state, &persisted_new_config).await {
                 Ok(()) => {
                     *state.config.write().await = persisted_new_config;
                     if should_run {

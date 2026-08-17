@@ -98,8 +98,11 @@ mod tests {
     #[tokio::test]
     async fn set_mcp_persists_without_touching_the_kernel() {
         let config_path = temp_config_path("persist");
-        let state =
-            Arc::new(AppState::with_config_path(Config::default(), config_path.clone()).unwrap());
+        let volatile_path = temp_config_path("persist-volatile");
+        let state = Arc::new(
+            AppState::with_config_path(Config::default(), config_path.clone(), volatile_path)
+                .unwrap(),
+        );
         state
             .initializing
             .store(false, std::sync::atomic::Ordering::Relaxed);
