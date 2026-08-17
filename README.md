@@ -40,7 +40,7 @@ sudo bash remove.sh             # 卸载（-y 跳过确认）
 
 ### Windows 桌面版
 
-Win10/11 x64。从 [Releases](https://github.com/YUxiangLuo/miao/releases/latest) 下载 `miao-windows-amd64-setup.exe`：
+Win10/11 x64。透明代理走 TUN（`auto_route` + `strict_route`，Wintun 已编进内核），已在真机跑通。从 [Releases](https://github.com/YUxiangLuo/miao/releases/latest) 下载 `miao-windows-amd64-setup.exe`：
 
 1. 安装到当前用户，**安装本身不要管理员**（系统通常已有 WebView2，没有的话安装包自动引导下载）
 2. 每次启动点一次 UAC（TUN/Wintun 要管理员）；想要免 UAC 开机自启：托盘菜单勾选「开机自启」（任务计划实现，登录后直接进托盘）

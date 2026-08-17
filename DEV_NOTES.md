@@ -16,7 +16,7 @@ Linux 版是：下载一个文件，`sudo` 跑，浏览器打开，TUN 接管流
 | Wintun 已在 sing-box 里；内核跟默认分支走 | 旁边再塞一份 `wintun.dll` |
 | Windows 构建不编 VPS、不编换进程升级 | 把 Linux 的 `exec` 热更原样搬过去覆盖正在跑的 exe |
 
-**Arch 上正在跑的 systemd miao 不要停、不要重启**。那台机器出网被它的 TUN 管着，一停 GitHub 就没了。Windows 真机已就位：桌面壳与 NSIS 安装包都能本地出，`miao.exe` 的启动/UAC/托盘/优雅退出已在真机验证；**TUN 分流本身尚未在真机验证**，写验收用语时注意。
+**Arch 上正在跑的 systemd miao 不要停、不要重启**。那台机器出网被它的 TUN 管着，一停 GitHub 就没了。Windows 真机已就位：桌面壳、NSIS 安装包、UAC、托盘、优雅退出以及 **TUN 分流（`auto_route` + `strict_route` / Wintun）** 都已在 Win10/11 真机跑通。
 
 ## 仓库怎么切
 
@@ -81,7 +81,7 @@ cargo run -p miao-cli
 
 ## 在 Arch 上怎么「做」Windows
 
-Arch 上的验收用语：测试绿、clippy 过、`windows-gnu` check 过、CI 的 `windows-latest` **编过**桌面壳。真机验证（启动/托盘/打包）到 Windows 机器上做；TUN 分流验过之前，不要写「已在 Windows 上验证 TUN」。
+Arch 上的验收用语：测试绿、clippy 过、`windows-gnu` check 过、CI 的 `windows-latest` **编过**桌面壳。启动/UAC/托盘/TUN 分流的行为验收到 Windows 真机上做（已有基线：日常安装包路径已通）。
 
 交叉 check 需要 MinGW：
 
@@ -120,7 +120,7 @@ tauri.cmd build --bundles nsis --ci                     # target/release/bundle/
 - 只验证编译可造空 stub（`embedded/sing-box-windows-amd64.exe` + 3 个 srs），CI quality 同款手法；stub 够编译、不够当真内核
 - 本地产物落仓库根目录，已被 gitignore；仅自测用，发布以 CI 产物为准
 - `cargo test -p miao-core --locked --all-targets` 可在 Windows 上跑（CI windows job 同款）
-- 运行 `miao.exe` 会弹 UAC 并接管本机流量（TUN），调试时自己权衡
+- 运行 `miao.exe` 会弹 UAC 并用 TUN 接管本机流量（真机已验）；调试时自己权衡，别在还要出网的会话里乱杀进程
 
 ## Arch 的 Linux 实例（别动它）
 
@@ -154,7 +154,7 @@ sudo bash install.sh ./target/release/miao-rust
 | 内核运行时 | `%TEMP%\miao-sing-box` |
 | 面板绑定 | `127.0.0.1` |
 | 单实例 | 命名 mutex 优先 `Global\io.github.yuxiangluo.miao`（跨会话，防快速用户切换双开抢 TUN），无权时退 `Local\`；未提权先 `OpenMutexW`，已有实例不再 UAC；已有实例的窗口按标题 + 进程镜像（miao.exe）双重确认 |
-| 停核 | `CREATE_NEW_PROCESS_GROUP` + `CTRL_BREAK`；超时再杀并只清 `sing-tun`（本机/CI 不要真执行） |
+| 停核 | `CREATE_NEW_PROCESS_GROUP` + `CTRL_BREAK`；超时再杀并只清 `sing-tun`（Arch / Linux CI 不要真执行这句 PowerShell） |
 | 提权 | 确认无实例后再 `ShellExecuteW runas`；取消则 MessageBox |
 | 端口 | `port_fallback`：6161 被占时桌面壳改绑随机端口，不再直接退出 |
 | 内核看门狗 | 崩溃自动拉起（2s 巡检、1–16s 退避、最多 5 次），放弃时写 `config_warning`；有意启动/停核先递增 `sing_generation`，spawn 不覆盖仍活着的子进程 |
