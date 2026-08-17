@@ -222,11 +222,7 @@ async fn gen_config_once(config: &Config, state: &Arc<AppState>) -> AppResult<Ge
 
     let sing_box_home = get_sing_box_home();
     let config_output_loc = sing_box_home.join("config.json");
-    write_file_atomic(
-        &config_output_loc,
-        &serde_json::to_string(&sing_box_config)?,
-    )
-    .await?;
+    write_file_atomic(&config_output_loc, &serde_json::to_vec(&sing_box_config)?).await?;
 
     *state.skipped_rules.lock().await = skipped_rules;
 

@@ -16,8 +16,9 @@ use crate::state::AppState;
 
 use super::generate::{gen_config, GenConfigOutcome, SubFetchRetry};
 use super::persist::{
-    config_cache_path, persist_effective_node_select, read_config_cache, restore_config_from_cache,
-    save_config_cache, save_config_to,
+    config_cache_path, has_config_cache, persist_effective_node_select, read_config_cache,
+    restore_config_from_cache, restore_runtime_config_bytes, save_config_cache, save_config_to,
+    snapshot_runtime_config,
 };
 
 /// 订阅刷新策略：机制（拉取 → 生成 → 校验 → 重启）只有一条，差异显式表达
@@ -171,14 +172,44 @@ pub async fn regenerate_preserving_service_state(
         return Ok(false);
     }
 
+    // 回滚 tier 1 材料：刷新前正在运行/最近可用的运行时配置字节
+    let snapshot = snapshot_runtime_config().await;
+
     if should_run {
-        let outcome =
-            regenerate_and_restart_runtime(&runtime_config, state, RefreshPolicy::Manual).await?;
-        finalize_started_config(&runtime_config, state, outcome.has_sub_nodes).await;
+        match regenerate_and_restart_runtime(&runtime_config, state, RefreshPolicy::Manual).await {
+            Ok(outcome) => {
+                finalize_started_config(&runtime_config, state, outcome.has_sub_nodes).await;
+            }
+            Err(err) => {
+                // 校验失败时磁盘已是未通过校验的新配置而内核还在跑旧配置；
+                // 重启失败时内核已停。先把运行时恢复到刷新前状态，再上报原错误。
+                error!(error = %err, "Failed to refresh subscriptions, restoring previous runtime state");
+                let restore =
+                    restore_previous_running_config(&runtime_config, state, snapshot.as_deref())
+                        .await;
+                return match restore {
+                    Ok(()) => Err(err),
+                    Err(restore_err) => Err(AppError::message(format!(
+                        "Failed to refresh subscriptions: {}. Runtime rollback failed: {}",
+                        err, restore_err
+                    ))),
+                };
+            }
+        }
     } else {
-        let outcome = regenerate_without_restart_runtime(&runtime_config, state).await?;
-        persist_effective_node_select(state, outcome.node_select).await?;
-        update_config_warning(&runtime_config, state, outcome.has_sub_nodes).await;
+        match regenerate_without_restart_runtime(&runtime_config, state).await {
+            Ok(outcome) => {
+                persist_effective_node_select(state, outcome.node_select).await?;
+                update_config_warning(&runtime_config, state, outcome.has_sub_nodes).await;
+            }
+            Err(err) => {
+                error!(error = %err, "Failed to regenerate config, restoring previous runtime config");
+                let _ =
+                    restore_previous_stopped_config(&runtime_config, state, snapshot.as_deref())
+                        .await;
+                return Err(err);
+            }
+        }
     }
 
     Ok(should_run)
@@ -319,6 +350,7 @@ async fn restore_previous_config(
     old_config: &Config,
     state: &Arc<AppState>,
     should_run: bool,
+    snapshot: Option<&[u8]>,
 ) -> AppResult<()> {
     if !has_configured_sources(old_config) {
         stop_sing_internal(state).await;
@@ -327,9 +359,9 @@ async fn restore_previous_config(
     }
 
     if should_run {
-        restore_previous_running_config(old_config, state).await
+        restore_previous_running_config(old_config, state, snapshot).await
     } else {
-        restore_previous_stopped_config(old_config, state).await
+        restore_previous_stopped_config(old_config, state, snapshot).await
     }
 }
 
@@ -353,6 +385,9 @@ pub async fn apply_config_change(
         *state.skipped_rules.lock().await = Vec::new();
         return Ok(());
     }
+
+    // 回滚 tier 1 材料：变更前正在运行/最近可用的运行时配置字节（config.json）
+    let snapshot = snapshot_runtime_config().await;
 
     let apply_result = match apply_mode {
         ConfigApplyMode::Restart => {
@@ -383,7 +418,14 @@ pub async fn apply_config_change(
                 }
                 Err(save_err) => {
                     error!(error = %save_err, "Runtime config applied but persistent config write failed, attempting runtime rollback");
-                    match restore_previous_config(&runtime_old_config, state, should_run).await {
+                    match restore_previous_config(
+                        &runtime_old_config,
+                        state,
+                        should_run,
+                        snapshot.as_deref(),
+                    )
+                    .await
+                    {
                         Ok(()) => Err(AppError::context(
                             "Failed to persist config change; restored previous runtime config",
                             save_err,
@@ -402,7 +444,14 @@ pub async fn apply_config_change(
         }
         Err(apply_err) => {
             error!(error = %apply_err, "Failed to apply runtime config change, attempting runtime rollback");
-            match restore_previous_config(&runtime_old_config, state, should_run).await {
+            match restore_previous_config(
+                &runtime_old_config,
+                state,
+                should_run,
+                snapshot.as_deref(),
+            )
+            .await
+            {
                 Ok(()) => Err(AppError::context(
                     "Failed to apply config change; restored previous runtime config",
                     apply_err,
@@ -422,6 +471,8 @@ pub async fn apply_runtime_config_change(
     new_config: &Config,
     restart: bool,
 ) -> AppResult<()> {
+    // 回滚 tier 1 材料：变更前正在运行/最近可用的运行时配置字节
+    let snapshot = snapshot_runtime_config().await;
     if restart {
         match regenerate_and_restart_runtime(new_config, state, RefreshPolicy::Manual).await {
             Ok(outcome) => {
@@ -431,7 +482,9 @@ pub async fn apply_runtime_config_change(
             }
             Err(apply_err) => {
                 error!(error = %apply_err, "Failed to apply runtime-only config change, attempting runtime rollback");
-                match restore_previous_running_config(old_config, state).await {
+                match restore_previous_running_config(old_config, state, snapshot.as_deref())
+                    .await
+                {
                     Ok(()) => Err(AppError::context(
                         "Failed to apply runtime-only config change; restored previous runtime config",
                         apply_err,
@@ -452,7 +505,8 @@ pub async fn apply_runtime_config_change(
                 Ok(())
             }
             Err(apply_err) => {
-                let _ = restore_previous_stopped_config(old_config, state).await;
+                let _ =
+                    restore_previous_stopped_config(old_config, state, snapshot.as_deref()).await;
                 Err(AppError::context(
                     "Failed to apply runtime-only config change",
                     apply_err,
@@ -477,42 +531,91 @@ async fn sing_box_is_running(state: &Arc<AppState>) -> bool {
     }
 }
 
+/// 只用本地材料把磁盘 config.json 恢复到变更前状态：优先内存快照，其次缓存。
+/// Ok(true)=已恢复；Ok(false)=本地无材料；Err=有材料但写回失败（磁盘 I/O 故障，
+/// 此时重新生成同样会卡在写盘，调用方直接上报即可）。
+async fn restore_disk_config(snapshot: Option<&[u8]>) -> AppResult<bool> {
+    let mut last_err = None;
+    if let Some(bytes) = snapshot {
+        match restore_runtime_config_bytes(bytes).await {
+            Ok(()) => return Ok(true),
+            Err(err) => {
+                warn!(error = %err, "Failed to restore runtime config from snapshot, trying cache");
+                last_err = Some(err);
+            }
+        }
+    }
+    if has_config_cache() {
+        match restore_config_from_cache().await {
+            Ok(()) => return Ok(true),
+            Err(err) => {
+                warn!(error = %err, "Failed to restore runtime config from cache");
+                last_err = Some(err);
+            }
+        }
+    }
+    match last_err {
+        Some(err) => Err(err),
+        None => Ok(false),
+    }
+}
+
 async fn restore_previous_running_config(
     old_config: &Config,
     state: &Arc<AppState>,
+    snapshot: Option<&[u8]>,
 ) -> AppResult<()> {
     if sing_box_is_running(state).await {
-        match restore_config_from_cache().await {
-            Ok(()) => {}
-            Err(cache_err) => {
-                warn!(error = %cache_err, "Failed to restore runtime config from cache while previous sing-box process is still running");
+        // 内核还在跑变更前配置：回滚只是让磁盘重新等于运行中的状态，纯本地操作
+        match restore_disk_config(snapshot).await {
+            Ok(true) => return Ok(()),
+            Ok(false) => {
+                // 本地没有任何材料（新装/清场后）：才退化到重新生成（网络）
                 let outcome = regenerate_without_restart_runtime(old_config, state).await?;
                 update_config_warning(old_config, state, outcome.has_sub_nodes).await;
+                return Ok(());
             }
+            Err(err) => return Err(err),
         }
-        return Ok(());
     }
 
-    restart_with_previous_config(old_config, state).await
+    restart_with_previous_config(old_config, state, snapshot).await
 }
 
-async fn restart_with_previous_config(old_config: &Config, state: &Arc<AppState>) -> AppResult<()> {
+async fn restart_with_previous_config(
+    old_config: &Config,
+    state: &Arc<AppState>,
+    snapshot: Option<&[u8]>,
+) -> AppResult<()> {
     stop_sing_internal(state).await;
 
-    if let Err(cache_err) = restore_config_from_cache().await {
-        warn!(error = %cache_err, "Failed to restore runtime config from cache for rollback; regenerating previous config");
-    } else {
+    // 本地材料分层（快照 → 缓存）：写回 → 校验 → 启动，全程不碰网络。
+    // 校验挡掉损坏的材料，也兜住内核升级后旧配置不再合法的情况（落到下一层/重新生成）。
+    let cache = read_config_cache().await;
+    for (source, bytes) in [("snapshot", snapshot), ("cache", cache.as_deref())]
+        .into_iter()
+        .filter_map(|(source, bytes)| bytes.map(|b| (source, b)))
+    {
+        if let Err(err) = restore_runtime_config_bytes(bytes).await {
+            warn!(error = %err, source = source, "Failed to write back runtime config, trying next source");
+            continue;
+        }
+        if let Err(err) = validate_sing_box_config().await {
+            warn!(error = %err, source = source, "Restored runtime config failed validation, trying next source");
+            continue;
+        }
         match start_sing_internal(state).await {
             Ok(()) => {
                 finalize_started_config(old_config, state, true).await;
                 return Ok(());
             }
-            Err(start_err) => {
-                warn!(error = %start_err, "Failed to restart sing-box from cached config; regenerating previous config");
+            Err(err) => {
+                warn!(error = %err, source = source, "Failed to start sing-box from restored config, trying next source");
             }
         }
     }
 
+    // 本地材料全部不可用/失败，才退化到重新生成（网络）
     let outcome = regenerate_without_restart_runtime(old_config, state).await?;
     start_sing_internal(state)
         .await
@@ -524,13 +627,22 @@ async fn restart_with_previous_config(old_config: &Config, state: &Arc<AppState>
 async fn restore_previous_stopped_config(
     old_config: &Config,
     state: &Arc<AppState>,
+    snapshot: Option<&[u8]>,
 ) -> AppResult<()> {
     if !has_configured_sources(old_config) {
         clear_runtime_config(state).await;
         return Ok(());
     }
 
-    let outcome = regenerate_without_restart_runtime(old_config, state).await?;
-    update_config_warning(old_config, state, outcome.has_sub_nodes).await;
-    Ok(())
+    // 服务本就处于停止态：只需把磁盘修回变更前配置，不起进程；
+    // 本地无材料才退化到重新生成（网络）
+    match restore_disk_config(snapshot).await {
+        Ok(true) => Ok(()),
+        Ok(false) => {
+            let outcome = regenerate_without_restart_runtime(old_config, state).await?;
+            update_config_warning(old_config, state, outcome.has_sub_nodes).await;
+            Ok(())
+        }
+        Err(err) => Err(err),
+    }
 }
