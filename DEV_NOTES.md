@@ -162,6 +162,7 @@ sudo bash install.sh ./target/release/miao-rust
 | 进程规则文案 | `/api/status` 的 `platform` 决定 placeholder（`qbittorrent.exe`） |
 | 托盘 | 左键单击唤出窗口，左键双击唤出/收回；右键菜单：显示窗口/打开日志/开机自启/退出 |
 | 开机自启 | 托盘 CheckMenuItem → 任务计划 `Miao`（ONLOGON + HIGHEST + `--minimized`），勾选状态即任务存在性、不落配置，切换后回读校验；卸载钩子 best-effort `schtasks /Delete` |
+| 安装/卸载守卫 | `NSIS_HOOK_PREINSTALL/PREUNINSTALL` 里 tasklist 查 miao.exe，在跑则弹「先托盘退出」（重试/取消）；提权进程安装包杀不掉，只能拦。卸载段只能 Call `un.*` 函数，注意 |
 
 TUN JSON：`auto_route` + `strict_route`，`interface_name` 仍是 `sing-tun`。`cfg(target_os = "linux")` 才写 `auto_redirect`。
 

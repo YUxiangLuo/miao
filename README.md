@@ -45,7 +45,7 @@ Win10/11 x64。从 [Releases](https://github.com/YUxiangLuo/miao/releases/latest
 1. 安装到当前用户，**安装本身不要管理员**（系统通常已有 WebView2，没有的话安装包自动引导下载）
 2. 每次启动点一次 UAC（TUN/Wintun 要管理员）；想要免 UAC 开机自启：托盘菜单勾选「开机自启」（任务计划实现，登录后直接进托盘）
 3. 窗口打开即铺满工作区；关窗口进托盘，单击托盘唤出、双击唤出/收回，托盘「退出」才停内核
-4. 更新：先退出，再装新安装包。面板内没有 Windows 一键升级
+4. 更新：先退出，再装新安装包（安装器检测到运行中的 miao 会提示你先退出——它杀不掉提权进程，不退出就装会留下旧文件）。面板内没有 Windows 一键升级
 5. 出问题：托盘「打开日志」，日志在 `%LOCALAPPDATA%\io.github.yuxiangluo.miao\miao.log`（超 8 MB 自动轮转）
 
 ## 面板里有什么
