@@ -81,7 +81,8 @@ function parseSs(line) {
   // 旧版: ss://base64(method:password@host:port)
   if (!main.includes('@')) {
     const queryIndex = main.indexOf('?')
-    const encoded = queryIndex >= 0 ? main.slice(0, queryIndex) : main
+    // base64 段后允许带 / 再跟 query(ss://.../?plugin=...),剥掉再解码
+    const encoded = (queryIndex >= 0 ? main.slice(0, queryIndex) : main).replace(/\/+$/, '')
     const params = new URLSearchParams(queryIndex >= 0 ? main.slice(queryIndex + 1) : '')
     let decoded
     try {
@@ -89,7 +90,7 @@ function parseSs(line) {
     } catch {
       throw new Error('SS 链接 base64 解码失败')
     }
-    return parseSsUserinfo(decoded, tag, params)
+    return parseSsUserinfo(decoded, tag, params, false)
   }
 
   // SIP002: ss://base64(method:password)@host:port?...#name
@@ -102,29 +103,35 @@ function parseSs(line) {
 
   let credentials = userinfo
   // userinfo 可能是 base64(method:password),也可能是明文 method:password
+  // base64 解码出的密码是字面量;只有明文 userinfo 里的密码才是 percent-encoded
+  let passwordEncoded = true
   if (!userinfo.includes(':')) {
     try {
       credentials = decodeBase64(userinfo)
+      passwordEncoded = false
     } catch {
       throw new Error('SS 链接用户信息解码失败')
     }
   }
-  return parseSsUserinfo(`${credentials}@${hostport}`, tag, params)
+  return parseSsUserinfo(`${credentials}@${hostport}`, tag, params, passwordEncoded)
 }
 
-function parseSsUserinfo(combined, tag, params) {
+function parseSsUserinfo(combined, tag, params, passwordEncoded) {
   // combined: method:password@host:port(密码可能含 @,取最后一个 @)
   const atIndex = combined.lastIndexOf('@')
   if (atIndex < 0) throw new Error('SS 链接缺少 @')
   const userinfo = combined.slice(0, atIndex)
-  const hostport = combined.slice(atIndex + 1)
+  // 端口后允许带 /(ss://...@host:8388/#name 或 /?query)
+  const hostport = combined.slice(atIndex + 1).replace(/\/+$/, '')
   const colonIndex = userinfo.indexOf(':')
   if (colonIndex < 0) throw new Error('SS 链接缺少加密方式')
   const method = userinfo.slice(0, colonIndex)
-  const password = decodeURIComponent(userinfo.slice(colonIndex + 1))
+  const rawPassword = userinfo.slice(colonIndex + 1)
+  const password = passwordEncoded ? decodeURIComponent(rawPassword) : rawPassword
   const portMatch = hostport.match(/:(\d+)$/)
   if (!portMatch) throw new Error('SS 链接缺少端口')
-  const server = hostport.slice(0, hostport.length - portMatch[0].length)
+  // 与其他协议一致,剥掉 IPv6 方括号
+  const server = hostport.slice(0, hostport.length - portMatch[0].length).replace(/^\[|\]$/g, '')
   if (!server) throw new Error('SS 链接缺少服务器地址')
   if (params.get('plugin')) throw new Error('暂不支持带插件的 SS 节点')
 

@@ -303,8 +303,8 @@ pub async fn add_node(
     let old_config = state.config.read().await.clone();
     let mut new_config = old_config.clone();
 
-    // 检查标签唯一性（大小写不敏感）
-    let req_tag_lower = req.tag.to_lowercase();
+    // 检查标签唯一性（大小写不敏感）；存储时会 trim(base_outbound),比较前同样 trim
+    let req_tag_lower = req.tag.trim().to_lowercase();
     for node_str in &new_config.nodes {
         if let Ok(v) = serde_json::from_str::<serde_json::Value>(node_str) {
             if let Some(existing_tag) = v.get("tag").and_then(|t| t.as_str()) {

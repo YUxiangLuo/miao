@@ -192,6 +192,9 @@ impl Validator {
     }
 
     pub fn node_tag(tag: &str) -> Result<(), String> {
+        // 存储时会 trim(见 handlers::nodes::base_outbound),这里先 trim 再判空,
+        // 否则纯空白名称能通过校验、落盘成空串,UI 不可见也无法删除
+        let tag = tag.trim();
         if tag.is_empty() {
             return Err("节点名称不能为空".to_string());
         }
@@ -202,6 +205,13 @@ impl Validator {
 
         if !VALID_TAG_REGEX.is_match(tag) {
             return Err("节点名称只能包含字母、数字、空格、下划线和连字符".to_string());
+        }
+
+        // 与内置出站/规则动作同名会让运行时的实际指向与面板显示不一致:
+        // proxy/direct 是模板内置出站(builder.rs),reject 是拦截动作
+        const RESERVED_TAGS: &[&str] = &["proxy", "direct", "reject"];
+        if RESERVED_TAGS.contains(&tag.to_lowercase().as_str()) {
+            return Err("节点名称不能使用保留字 proxy / direct / reject".to_string());
         }
 
         Ok(())
@@ -651,14 +661,32 @@ mod tests {
         assert!(Validator::node_tag("香港节点").is_ok());
         assert!(Validator::node_tag("日本サーバー").is_ok());
         assert!(Validator::node_tag("节点 01-日本").is_ok());
+        // 首尾空白允许(存储时会 trim),仅纯空白拒绝
+        assert!(Validator::node_tag(" my-node ").is_ok());
     }
 
     #[test]
     fn test_invalid_node_tags() {
         assert!(Validator::node_tag("").is_err());
+        // 纯空白(trim 后为空)同样拒绝,否则会落盘成空串节点
+        assert!(Validator::node_tag("   ").is_err());
+        assert!(Validator::node_tag(" \t ").is_err());
         assert!(Validator::node_tag(&"a".repeat(65)).is_err());
         assert!(Validator::node_tag(&"节".repeat(65)).is_err());
         assert!(Validator::node_tag("node<script>").is_err());
+        // 保留字(内置出站 proxy/direct、拦截动作 reject),大小写与首尾空白不敏感
+        assert!(Validator::node_tag("proxy").is_err());
+        assert!(Validator::node_tag("direct").is_err());
+        assert!(Validator::node_tag("reject").is_err());
+        assert!(Validator::node_tag("Proxy").is_err());
+        assert!(Validator::node_tag(" DIRECT ").is_err());
+    }
+
+    #[test]
+    fn test_node_tags_allow_reserved_substrings() {
+        assert!(Validator::node_tag("my-proxy").is_ok());
+        assert!(Validator::node_tag("proxy-01").is_ok());
+        assert!(Validator::node_tag("director").is_ok());
     }
 
     #[test]

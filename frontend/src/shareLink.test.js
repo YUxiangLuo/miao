@@ -83,6 +83,43 @@ describe('parseShareLink', () => {
     expect(() => parseShareLink(`ss://${body}?plugin=obfs-local#x`)).toThrow('暂不支持带插件')
   })
 
+  it('keeps literal percent signs in base64-encoded ss passwords', () => {
+    // base64 userinfo 里的密码是字面量,再做 percent-decoding 会抛 URIError 或改错密码
+    const userinfo = encodeBase64('aes-128-gcm:100%secret')
+    const parsed = parseShareLink(`ss://${userinfo}@ss.example.com:8388`)
+
+    expect(parsed.formPatch).toMatchObject({ cipher: 'aes-128-gcm', password: '100%secret' })
+  })
+
+  it('does not double-decode percent escapes in legacy ss passwords', () => {
+    const body = encodeBase64('aes-128-gcm:a%2Fb%2Fcdef@ss.example.com:8388')
+    const parsed = parseShareLink(`ss://${body}`)
+
+    expect(parsed.formPatch.password).toBe('a%2Fb%2Fcdef')
+  })
+
+  it('decodes percent-encoded passwords in plaintext ss userinfo', () => {
+    const parsed = parseShareLink('ss://aes-128-gcm:a%2Fb%2Fcdef@ss.example.com:8388')
+
+    expect(parsed.formPatch.password).toBe('a/b/cdef')
+  })
+
+  it('parses ss links with a slash before the query or hash', () => {
+    const userinfo = encodeBase64('aes-128-gcm:pass123')
+    const withQuery = parseShareLink(`ss://${userinfo}@ss.example.com:8388/?unused=1#ss`)
+    const withHash = parseShareLink(`ss://${userinfo}@ss.example.com:8388/#ss`)
+
+    expect(withQuery.formPatch).toMatchObject({ server: 'ss.example.com', server_port: 8388 })
+    expect(withHash.formPatch).toMatchObject({ server: 'ss.example.com', server_port: 8388 })
+  })
+
+  it('strips IPv6 brackets from ss servers', () => {
+    const userinfo = encodeBase64('aes-128-gcm:pass123')
+    const parsed = parseShareLink(`ss://${userinfo}@[2001:db8::1]:8388`)
+
+    expect(parsed.formPatch).toMatchObject({ server: '2001:db8::1', server_port: 8388 })
+  })
+
   it('parses vmess links from base64 JSON', () => {
     const json = JSON.stringify({
       ps: 'vmess 节点',
