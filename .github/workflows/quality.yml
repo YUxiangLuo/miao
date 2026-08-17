@@ -33,7 +33,7 @@ jobs:
         run: bun run --cwd frontend build
 
       - name: Upload frontend artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: quality-frontend
           path: public/
