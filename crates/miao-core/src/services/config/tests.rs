@@ -210,7 +210,7 @@ fn build_sing_box_config_merges_nodes_and_valid_custom_rules() {
     assert_eq!(all_outbounds[3]["tag"], "sub-a");
 
     let rules = built["route"]["rules"].as_array().unwrap();
-    assert_eq!(rules.len(), 7);
+    assert_eq!(rules.len(), 6);
     assert_eq!(rules[0]["action"], "sniff");
     assert_eq!(rules[1]["action"], "hijack-dns");
     assert_eq!(rules[2]["domain_suffix"][0], "example.com");
@@ -624,7 +624,7 @@ fn build_sing_box_config_handles_no_custom_rules() {
 
     let rules = built["route"]["rules"].as_array().unwrap();
     // Should have the default direct-split rules.
-    assert_eq!(rules.len(), 6);
+    assert_eq!(rules.len(), 5);
 }
 
 #[test]
@@ -663,25 +663,18 @@ fn build_sing_box_config_splits_direct_route_rules() {
     assert_eq!(rules[2]["outbound"], "direct");
     assert!(rules[2].get("rule_set").is_none());
 
-    assert_eq!(rules[3]["domain_suffix"], json!(["hdslb.com"]));
+    assert_eq!(rules[3]["rule_set"], json!(["chinasite"]));
     assert_eq!(rules[3]["outbound"], "direct");
-    assert!(rules[3].get("rule_set").is_none());
     assert!(rules[3].get("ip_is_private").is_none());
 
-    assert_eq!(rules[4]["rule_set"], json!(["chinasite"]));
+    assert_eq!(rules[4]["rule_set"], json!(["chinaip"]));
     assert_eq!(rules[4]["outbound"], "direct");
     assert!(rules[4].get("ip_is_private").is_none());
 
-    assert_eq!(rules[5]["rule_set"], json!(["chinaip"]));
-    assert_eq!(rules[5]["outbound"], "direct");
-    assert!(rules[5].get("ip_is_private").is_none());
-
     let dns_rules = built["dns"]["rules"].as_array().unwrap();
-    assert_eq!(dns_rules.len(), 2);
-    assert_eq!(dns_rules[0]["domain_suffix"], json!(["hdslb.com"]));
+    assert_eq!(dns_rules.len(), 1);
+    assert_eq!(dns_rules[0]["rule_set"], json!(["chinasite"]));
     assert_eq!(dns_rules[0]["server"], "local");
-    assert_eq!(dns_rules[1]["rule_set"], json!(["chinasite"]));
-    assert_eq!(dns_rules[1]["server"], "local");
 
     assert_eq!(built["dns"]["disable_cache"], false);
     assert_eq!(built["dns"]["cache_capacity"], 4096);
@@ -755,8 +748,7 @@ fn build_sing_box_config_injects_adblock_rules_when_enabled() {
 
     // 广告拦截只在路由层;DNS 规则保持原样,自定义放行规则才能生效
     let dns_rules = built["dns"]["rules"].as_array().unwrap();
-    assert_eq!(dns_rules.len(), 2);
-    assert_eq!(dns_rules[0]["domain_suffix"], json!(["hdslb.com"]));
+    assert_eq!(dns_rules.len(), 1);
     assert!(dns_rules
         .iter()
         .all(|rule| rule.get("rule_set") != Some(&json!(["adblock"]))));
@@ -919,7 +911,7 @@ fn build_sing_box_config_ignores_all_invalid_custom_rules() {
 
     let rules = built["route"]["rules"].as_array().unwrap();
     // Should have only the default direct-split rules.
-    assert_eq!(rules.len(), 6);
+    assert_eq!(rules.len(), 5);
 }
 
 #[tokio::test]
@@ -1095,6 +1087,9 @@ fn build_sing_box_config_uses_urltest_for_region_fastest() {
     assert_eq!(built["outbounds"][0]["type"], "urltest");
     assert_eq!(built["outbounds"][0]["tag"], "proxy");
     assert_eq!(built["outbounds"][0]["outbounds"], json!(["日本-订阅"]));
+    assert_eq!(built["outbounds"][0]["interval"], "2m");
+    assert_eq!(built["outbounds"][0]["tolerance"], 30);
+    assert_eq!(built["outbounds"][0]["interrupt_exist_connections"], false);
     let tags: Vec<&str> = built["outbounds"]
         .as_array()
         .unwrap()

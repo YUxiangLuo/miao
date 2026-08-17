@@ -215,9 +215,10 @@ fn apply_proxy_group(
             "tag": "proxy",
             "outbounds": member_values,
             "url": "http://www.gstatic.com/generate_204",
-            "interval": "3m",
-            "tolerance": 50,
-            "interrupt_exist_connections": true
+            "interval": "2m",
+            "tolerance": 30,
+            // 自动切换不打断已有连接：旧连接留在原节点自然结束，新连接走当前最快
+            "interrupt_exist_connections": false
         })
     };
 }
@@ -321,8 +322,6 @@ fn get_config_template() -> serde_json::Value {
                 {"tag": "local", "type": "udp", "server": "223.5.5.5"}
             ],
             "rules": [
-                // hdslb.com 是 B 站视频 CDN:强制走国内 DNS,避免解析结果被代理带偏导致视频卡顿
-                {"domain_suffix": ["hdslb.com"], "action": "route", "server": "local"},
                 {"rule_set": ["chinasite"], "action": "route", "server": "local"}
             ]
         },
@@ -339,8 +338,6 @@ fn get_config_template() -> serde_json::Value {
                 {"action": "sniff"},
                 {"protocol": "dns", "action": "hijack-dns"},
                 {"ip_is_private": true, "action": "route", "outbound": "direct"},
-                // 与上面的 DNS 规则配套:B 站视频 CDN 流量强制直连
-                {"domain_suffix": ["hdslb.com"], "action": "route", "outbound": "direct"},
                 {"rule_set": ["chinasite"], "action": "route", "outbound": "direct"},
                 {"rule_set": ["chinaip"], "action": "route", "outbound": "direct"}
             ],
