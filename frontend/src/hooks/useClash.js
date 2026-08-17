@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useWebSocket } from './useWebSocket.js'
 
+export function isClashProxyGroup(type) {
+  return type === 'Selector' || type === 'URLTest'
+}
+
 export function useProxies(status) {
   const [proxies, setProxies] = useState({})
   const clashApiBase = useMemo(() => '/api/clash', [])
@@ -18,7 +22,7 @@ export function useProxies(status) {
   const selectorGroups = useMemo(() => {
     const groups = {}
     Object.entries(proxies || {}).forEach(([name, proxy]) => {
-      if (proxy?.type === 'Selector') groups[name] = proxy
+      if (isClashProxyGroup(proxy?.type)) groups[name] = proxy
     })
     return groups
   }, [proxies])

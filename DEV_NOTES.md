@@ -186,7 +186,7 @@ Arch 上的面板仍是那份 systemd Linux 实例，可以用来看 **共享 UI
 
 配置变更链路没变：`config_update` 锁 → 改克隆 → `apply_config_change`（原子写 → 生成 → `sing-box check` → 热重启）。面板不直接碰内核，走 Clash API。`route_mode` 仍是会话级。
 
-订阅刷新的机制只有一条管线：`services::config::refresh_subscriptions`（拉取 → 生成 → 校验 → 重启），策略由 `RefreshPolicy` 显式表达——`Manual`（面板「刷新订阅」：总是重启，全失败用残血配置）与 `Startup`（启动快速通道：全失败/校验失败保留运行中的缓存、字节比对无变化不重启）。`regenerate_and_restart_runtime` 已委托给 `Manual`。调用方按 `RefreshOutcome` 决定告警与收尾（存缓存/恢复节点）。
+订阅刷新的机制只有一条管线：`services::config::refresh_subscriptions`（拉取 → 生成 → 校验 → 重启），策略由 `RefreshPolicy` 显式表达——`Manual`（面板「刷新订阅」等独立路径：总是重启，全失败用残血配置，重启后由管线持久化生效的 node_select）、`ManualInApply`（`apply_config_change` 事务内：机制同上，但 node_select 随外层事务一并提交，管线不提前写盘，避免「旧配置 + 新选择」中间快照）与 `Startup`（启动快速通道：全失败/校验失败保留运行中的缓存并把 cache 拷回 config.json——看门狗与手动停/启直接用磁盘 config.json 起进程、字节比对无变化不重启）。`regenerate_and_restart_runtime` 接收策略参数。调用方按 `RefreshOutcome` 决定告警与收尾（存缓存/恢复节点）。
 
 启动是两条路：`config.json.cache` 存在且通过 `sing-box check` → 直接起内核（秒开），随后以 `Startup` 策略后台刷新（仍持 `config_update` 锁，与面板编辑互斥；随初始化任务一同被关停取消）；无缓存/缓存失效 → 原同步拉取路径。
 

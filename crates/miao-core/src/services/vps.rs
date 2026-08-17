@@ -679,6 +679,7 @@ mod tests {
             route_mode: Default::default(),
             adblock: false,
             mcp: false,
+            node_select: Default::default(),
         };
 
         assert_eq!(

@@ -108,6 +108,11 @@ async fn load_last_proxy() -> Option<LastProxy> {
 }
 
 pub async fn restore_last_proxy(state: &Arc<AppState>) {
+    if !state.config.read().await.node_select.is_manual() {
+        info!("Skipping last-proxy restore while urltest node_select is active");
+        return;
+    }
+
     let proxy = match load_last_proxy().await {
         Some(p) => p,
         None => return,

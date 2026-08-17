@@ -7,7 +7,10 @@ use std::{
 use tokio::time::Duration;
 
 use crate::error::AppError;
-use crate::models::{ApiResponse, ConnectivityResult, RouteMode, RouteModeRequest, StatusData};
+use crate::models::{
+    ApiResponse, ConnectivityResult, NodeSelect, NodeSelectRequest, RouteMode, RouteModeRequest,
+    StatusData,
+};
 use crate::responses::{status_error, success, success_no_data, HandlerResult};
 use crate::services::{
     config::apply_runtime_config_change,
@@ -68,9 +71,9 @@ pub async fn get_status(State(state): State<Arc<AppState>>) -> Json<ApiResponse<
         .read()
         .await
         .unwrap_or(RouteMode::default());
-    let (adblock, mcp) = {
+    let (adblock, mcp, node_select) = {
         let config = state.config.read().await;
-        (config.adblock, config.mcp)
+        (config.adblock, config.mcp, config.node_select)
     };
 
     success(
@@ -79,6 +82,7 @@ pub async fn get_status(State(state): State<Arc<AppState>>) -> Json<ApiResponse<
             running,
             initializing,
             route_mode,
+            node_select,
             adblock,
             pid,
             uptime_secs,
@@ -208,6 +212,46 @@ pub async fn set_route_mode(
     }
 }
 
+pub async fn set_node_select(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<NodeSelectRequest>,
+) -> HandlerResult {
+    if state.initializing.load(Ordering::Relaxed) {
+        return Err(status_error(
+            StatusCode::CONFLICT,
+            "Initialization is still in progress",
+        ));
+    }
+
+    let node_select = NodeSelect::parse(&req.node_select).ok_or_else(|| {
+        status_error(
+            StatusCode::BAD_REQUEST,
+            "不支持的节点选择，可选: manual / fastest_hk / fastest_jp / fastest_tw / fastest_sg / fastest_us",
+        )
+    })?;
+
+    let _config_update = state.config_update.lock().await;
+    let old_config = state.config.read().await.clone();
+    if old_config.node_select == node_select {
+        return Ok(success_no_data("Node select unchanged"));
+    }
+
+    let mut new_config = old_config.clone();
+    new_config.node_select = node_select;
+
+    match crate::services::config::apply_config_change(&state, &old_config, &new_config).await {
+        Ok(_) => {
+            let effective = state.config.read().await.node_select;
+            if !node_select.is_manual() && effective.is_manual() {
+                Ok(success_no_data("该地区没有可用节点，已切回手动选择"))
+            } else {
+                Ok(success_no_data("Node select updated"))
+            }
+        }
+        Err(e) => Err(status_error(StatusCode::INTERNAL_SERVER_ERROR, e)),
+    }
+}
+
 #[derive(Deserialize)]
 pub(crate) struct ConnectivityRequest {
     url: String,
@@ -287,6 +331,7 @@ mod tests {
             route_mode: Default::default(),
             adblock: false,
             mcp: false,
+            node_select: Default::default(),
         });
 
         let axum::response::Json(response) = get_status(State(state)).await;
@@ -314,6 +359,7 @@ mod tests {
             route_mode: RouteMode::Rule,
             adblock: false,
             mcp: false,
+            node_select: Default::default(),
         });
         *state.route_mode_override.write().await = Some(RouteMode::Global);
 
@@ -334,6 +380,7 @@ mod tests {
             route_mode: RouteMode::Global,
             adblock: false,
             mcp: false,
+            node_select: Default::default(),
         });
 
         let axum::response::Json(response) = get_status(State(state)).await;

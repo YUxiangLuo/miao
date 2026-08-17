@@ -1,9 +1,12 @@
 use std::path::{Path, PathBuf};
 use tracing::{error, info};
 
+use std::sync::Arc;
+
 use crate::error::{AppError, AppResult};
-use crate::models::Config;
+use crate::models::{Config, NodeSelect};
 use crate::services::singbox::get_sing_box_home;
+use crate::state::AppState;
 
 pub(super) fn config_cache_path() -> PathBuf {
     get_sing_box_home().join("config.json.cache")
@@ -45,6 +48,21 @@ pub async fn save_config_to(path: &Path, config: &Config) -> AppResult<()> {
     }
 
     write_file_atomic(path, &yaml).await
+}
+
+/// 筛空地区后把 yaml / 内存里的 node_select 写回 manual。
+pub async fn persist_effective_node_select(
+    state: &Arc<AppState>,
+    node_select: NodeSelect,
+) -> AppResult<()> {
+    let mut config = state.config.read().await.clone();
+    if config.node_select == node_select {
+        return Ok(());
+    }
+    config.node_select = node_select;
+    save_config_to(&state.config_path, &config).await?;
+    *state.config.write().await = config;
+    Ok(())
 }
 
 pub async fn save_config_cache() {
@@ -89,7 +107,7 @@ pub async fn restore_config_from_cache() -> AppResult<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{config_cache_path, get_sing_box_home};
+    use super::{config_cache_path, get_sing_box_home, persist_effective_node_select};
 
     #[test]
     fn config_cache_lives_under_sing_box_home() {
@@ -97,5 +115,24 @@ mod tests {
             config_cache_path(),
             get_sing_box_home().join("config.json.cache")
         );
+    }
+
+    #[tokio::test]
+    async fn persist_effective_node_select_writes_manual_fallback() {
+        use crate::models::{Config, NodeSelect, Region};
+        use crate::test_support::app_state;
+
+        let state = app_state(Config {
+            node_select: NodeSelect::Fastest(Region::Hk),
+            ..Config::default()
+        });
+        persist_effective_node_select(&state, NodeSelect::Manual)
+            .await
+            .unwrap();
+
+        assert_eq!(state.config.read().await.node_select, NodeSelect::Manual);
+        let yaml = tokio::fs::read_to_string(&state.config_path).await.unwrap();
+        assert!(!yaml.contains("node_select"));
+        let _ = tokio::fs::remove_file(&state.config_path).await;
     }
 }

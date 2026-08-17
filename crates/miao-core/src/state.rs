@@ -102,6 +102,7 @@ mod tests {
             route_mode: Default::default(),
             adblock: false,
             mcp: false,
+            node_select: Default::default(),
         };
 
         let state = AppState::new(config.clone()).unwrap();
@@ -133,6 +134,7 @@ mod tests {
             route_mode: Default::default(),
             adblock: false,
             mcp: false,
+            node_select: Default::default(),
         };
 
         let state = AppState::new(config).unwrap();

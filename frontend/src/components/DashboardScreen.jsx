@@ -43,9 +43,11 @@ export function DashboardScreen({ app }) {
               testingNodes={app.testingNodes}
               testingGroup={app.testingGroup}
               switchingNode={app.switchingNode}
+              nodeSelectPending={app.loadingAction === 'nodeSelect'}
               onTestDelay={app.handleTestDelay}
               onTestGroupDelays={app.handleTestGroupDelays}
               onSwitchProxy={app.handleSwitchProxy}
+              onSetNodeSelect={app.handleSetNodeSelect}
               onOpenAddNode={app.openNodeModal}
             />
           </div>

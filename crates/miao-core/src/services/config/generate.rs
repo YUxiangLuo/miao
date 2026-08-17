@@ -4,7 +4,7 @@ use tokio::time::Duration;
 use tracing::{error, info, warn};
 
 use crate::error::AppResult;
-use crate::models::{Config, SubStatus};
+use crate::models::{Config, NodeSelect, SubStatus};
 use crate::services::singbox::get_sing_box_home;
 use crate::services::subscription::fetch_sub;
 use crate::state::AppState;
@@ -12,9 +12,14 @@ use crate::state::AppState;
 use super::builder::build_sing_box_config;
 use super::persist::write_file_atomic;
 
+pub struct GenConfigOutcome {
+    pub has_sub_nodes: bool,
+    pub node_select: NodeSelect,
+}
+
 const MAX_CONCURRENT_SUBS: usize = 5;
-/// Returns `true` if at least one subscription node was fetched successfully.
-pub async fn gen_config(config: &Config, state: &Arc<AppState>) -> AppResult<bool> {
+/// 拉取订阅并写出 sing-box 配置。返回是否拿到订阅节点，以及实际生效的 node_select。
+pub async fn gen_config(config: &Config, state: &Arc<AppState>) -> AppResult<GenConfigOutcome> {
     let (my_outbounds, my_names) = collect_manual_outbounds(config);
     let mut final_outbounds: Vec<serde_json::Value> = vec![];
     let mut final_node_names: Vec<String> = vec![];
@@ -126,7 +131,7 @@ pub async fn gen_config(config: &Config, state: &Arc<AppState>) -> AppResult<boo
 
     let has_sub_nodes = !final_node_names.is_empty();
 
-    let (sing_box_config, skipped_rules) = build_sing_box_config(
+    let (sing_box_config, skipped_rules, node_select) = build_sing_box_config(
         config,
         my_names,
         my_outbounds,
@@ -144,7 +149,10 @@ pub async fn gen_config(config: &Config, state: &Arc<AppState>) -> AppResult<boo
 
     *state.skipped_rules.lock().await = skipped_rules;
 
-    Ok(has_sub_nodes)
+    Ok(GenConfigOutcome {
+        has_sub_nodes,
+        node_select,
+    })
 }
 
 pub(super) fn collect_manual_outbounds(config: &Config) -> (Vec<serde_json::Value>, Vec<String>) {

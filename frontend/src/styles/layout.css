@@ -53,6 +53,9 @@
 .left-column > *:last-child .current-node-banner {
     flex-shrink: 0;
 }
+.left-column > *:last-child .section-header {
+    flex-wrap: wrap;
+}
 .left-column > *:last-child .panel-card-body {
     flex: 1 1 auto;
     min-height: 0;

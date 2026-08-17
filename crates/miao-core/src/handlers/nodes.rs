@@ -394,6 +394,7 @@ mod tests {
             route_mode: Default::default(),
             adblock: false,
             mcp: false,
+            node_select: Default::default(),
         });
 
         let Json(response) = get_nodes(State(state)).await;
@@ -475,6 +476,7 @@ mod tests {
             route_mode: Default::default(),
             adblock: false,
             mcp: false,
+            node_select: Default::default(),
         });
 
         let Json(response) = get_nodes(State(state)).await;
@@ -506,6 +508,7 @@ mod tests {
             route_mode: Default::default(),
             adblock: false,
             mcp: false,
+            node_select: Default::default(),
         });
 
         let Json(response) = get_nodes(State(state)).await;
@@ -526,6 +529,7 @@ mod tests {
             route_mode: Default::default(),
             adblock: false,
             mcp: false,
+            node_select: Default::default(),
         });
 
         let Json(response) = get_nodes(State(state)).await;
@@ -550,6 +554,7 @@ mod tests {
             route_mode: Default::default(),
             adblock: false,
             mcp: false,
+            node_select: Default::default(),
         });
 
         let Json(response) = get_nodes(State(state)).await;
@@ -573,6 +578,7 @@ mod tests {
             route_mode: Default::default(),
             adblock: false,
             mcp: false,
+            node_select: Default::default(),
         });
 
         let Json(response) = get_nodes(State(state)).await;
@@ -601,6 +607,7 @@ mod tests {
             route_mode: Default::default(),
             adblock: false,
             mcp: false,
+            node_select: Default::default(),
         });
 
         let Json(response) = get_nodes(State(state)).await;
@@ -626,6 +633,7 @@ mod tests {
             route_mode: Default::default(),
             adblock: false,
             mcp: false,
+            node_select: Default::default(),
         });
 
         let Json(response) = get_nodes(State(state)).await;
@@ -650,6 +658,7 @@ mod tests {
             route_mode: Default::default(),
             adblock: false,
             mcp: false,
+            node_select: Default::default(),
         });
 
         let Json(response) = get_nodes(State(state)).await;

@@ -7,6 +7,7 @@ export function useStatus() {
     uptime_secs: null,
     initializing: false,
     route_mode: 'rule',
+    node_select: 'manual',
     adblock: false
   })
 

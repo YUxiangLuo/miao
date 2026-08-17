@@ -11,8 +11,9 @@ use crate::error::{AppError, AppResult};
 use crate::models::{Config, DEFAULT_PORT};
 use crate::services::{
     config::{
-        gen_config, has_config_cache, refresh_subscriptions, restore_config_from_cache,
-        save_config_cache, RefreshEffect, RefreshPolicy,
+        gen_config, has_config_cache, persist_effective_node_select, refresh_subscriptions,
+        restore_config_from_cache, runtime_config_matches_node_select, save_config_cache,
+        RefreshEffect, RefreshPolicy,
     },
     proxy::restore_last_proxy,
     singbox::{
@@ -273,34 +274,48 @@ async fn initialize_runtime(config: Config, state: Arc<AppState>) {
         };
 
         if cache_usable {
-            #[cfg(not(windows))]
+            let cache_matches_select = match tokio::fs::read_to_string(
+                crate::services::singbox::get_sing_box_home().join("config.json"),
+            )
+            .await
             {
-                info!("Checking dependencies...");
-                if let Err(e) =
-                    crate::services::openwrt::check_and_install_openwrt_dependencies().await
+                Ok(content) => serde_json::from_str(&content).ok().is_some_and(|json| {
+                    runtime_config_matches_node_select(&json, config.node_select)
+                }),
+                Err(_) => false,
+            };
+            if !cache_matches_select {
+                warn!("Cached config does not match node_select; regenerating");
+            } else {
+                #[cfg(not(windows))]
                 {
-                    error!("Failed to check or install OpenWrt dependencies: {}", e);
+                    info!("Checking dependencies...");
+                    if let Err(e) =
+                        crate::services::openwrt::check_and_install_openwrt_dependencies().await
+                    {
+                        error!("Failed to check or install OpenWrt dependencies: {}", e);
+                    }
                 }
-            }
 
-            match start_sing_internal(&state).await {
-                Ok(()) => {
-                    info!("sing-box started from cached config");
-                    let state_for_proxy = state.clone();
-                    tokio::spawn(async move {
-                        restore_last_proxy(&state_for_proxy).await;
-                    });
-                    state
-                        .initializing
-                        .store(false, std::sync::atomic::Ordering::Relaxed);
+                match start_sing_internal(&state).await {
+                    Ok(()) => {
+                        info!("sing-box started from cached config");
+                        let state_for_proxy = state.clone();
+                        tokio::spawn(async move {
+                            restore_last_proxy(&state_for_proxy).await;
+                        });
+                        state
+                            .initializing
+                            .store(false, std::sync::atomic::Ordering::Relaxed);
 
-                    // 内核已在跑，初始化结束；订阅刷新在后台进行（仍持 config_update
-                    // 锁，与面板的配置变更互斥；随初始化任务一同被关停取消）
-                    refresh_subscriptions_in_background(&config, &state).await;
-                    return;
-                }
-                Err(err) => {
-                    error!(error = %err, "Failed to start sing-box from cache, fetching subscriptions");
+                        // 内核已在跑，初始化结束；订阅刷新在后台进行（仍持 config_update
+                        // 锁，与面板的配置变更互斥；随初始化任务一同被关停取消）
+                        refresh_subscriptions_in_background(&config, &state).await;
+                        return;
+                    }
+                    Err(err) => {
+                        error!(error = %err, "Failed to start sing-box from cache, fetching subscriptions");
+                    }
                 }
             }
         }
@@ -309,8 +324,15 @@ async fn initialize_runtime(config: Config, state: Arc<AppState>) {
     info!("Generating initial config...");
     let mut all_subs_failed = false;
     match gen_config(&config, &state).await {
-        Ok(has_sub_nodes) => {
-            if !has_sub_nodes && !config.subs.is_empty() {
+        Ok(outcome) => {
+            if let Err(err) = persist_effective_node_select(&state, outcome.node_select).await {
+                warn!(error = %err, "Failed to persist effective node_select after generate");
+            }
+            if !config.node_select.is_manual() && outcome.node_select.is_manual() {
+                *state.config_warning.lock().await =
+                    Some("该地区没有可用节点，已切回手动选择".to_string());
+            }
+            if !outcome.has_sub_nodes && !config.subs.is_empty() {
                 all_subs_failed = true;
             }
         }
@@ -346,7 +368,7 @@ async fn initialize_runtime(config: Config, state: Arc<AppState>) {
         Ok(_) => {
             info!("sing-box started successfully");
             save_config_cache().await;
-            if all_subs_failed {
+            if all_subs_failed && state.config_warning.lock().await.is_none() {
                 warn!("所有订阅获取失败，请检查当前订阅");
                 *state.config_warning.lock().await =
                     Some("所有订阅获取失败，请检查当前订阅".to_string());
@@ -371,12 +393,21 @@ async fn refresh_subscriptions_in_background(config: &Config, state: &Arc<AppSta
             RefreshEffect::Restarted => {
                 info!("sing-box restarted with refreshed subscriptions");
                 save_config_cache().await;
+                if !config.node_select.is_manual() && outcome.node_select.is_manual() {
+                    *state.config_warning.lock().await =
+                        Some("该地区没有可用节点，已切回手动选择".to_string());
+                }
                 let state_for_proxy = state.clone();
                 tokio::spawn(async move {
                     restore_last_proxy(&state_for_proxy).await;
                 });
             }
-            RefreshEffect::SkippedUnchanged => {}
+            RefreshEffect::SkippedUnchanged => {
+                if !config.node_select.is_manual() && outcome.node_select.is_manual() {
+                    *state.config_warning.lock().await =
+                        Some("该地区没有可用节点，已切回手动选择".to_string());
+                }
+            }
             RefreshEffect::KeptRunningOnTotalFailure => {
                 warn!("所有订阅获取失败，继续使用缓存配置运行");
                 *state.config_warning.lock().await =

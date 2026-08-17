@@ -6,7 +6,7 @@ use super::builder::{build_sing_box_config, filter_rules_with_missing_outbound, 
 use super::generate::{collect_manual_outbounds, runtime_config_node_tags};
 use super::persist::save_config_to;
 use crate::{
-    models::{Config, RouteMode, SubStatus},
+    models::{Config, NodeSelect, Region, RouteMode, SubStatus},
     test_support::app_state,
 };
 use serde_json::json;
@@ -37,6 +37,7 @@ fn collect_manual_outbounds_ignores_invalid_json_nodes() {
             route_mode: Default::default(),
             adblock: false,
             mcp: false,
+            node_select: Default::default(),
         };
 
     let (outbounds, names) = collect_manual_outbounds(&config);
@@ -60,6 +61,7 @@ fn collect_manual_outbounds_preserves_hysteria2_without_default_bandwidth() {
             route_mode: Default::default(),
             adblock: false,
             mcp: false,
+            node_select: Default::default(),
         };
 
     let (outbounds, names) = collect_manual_outbounds(&config);
@@ -113,9 +115,10 @@ fn build_sing_box_config_skips_rules_with_missing_node() {
         route_mode: Default::default(),
         adblock: false,
         mcp: false,
+        node_select: Default::default(),
     };
 
-    let (built, skipped) = build_sing_box_config(
+    let (built, skipped, _) = build_sing_box_config(
             &config,
             vec!["manual-a".to_string()],
             vec![json!({"type":"hysteria2","tag":"manual-a","server":"a.example.com","server_port":443,"password":"p","tls":{"enabled":true}})],
@@ -168,6 +171,7 @@ fn build_sing_box_config_merges_nodes_and_valid_custom_rules() {
         route_mode: Default::default(),
         adblock: false,
         mcp: false,
+        node_select: Default::default(),
     };
 
     let my_outbounds = vec![json!({
@@ -186,7 +190,7 @@ fn build_sing_box_config_merges_nodes_and_valid_custom_rules() {
         "password": "sub-secret"
     })];
 
-    let (built, _skipped) = build_sing_box_config(
+    let (built, _skipped, _) = build_sing_box_config(
         &config,
         vec!["manual-a".to_string()],
         my_outbounds,
@@ -225,6 +229,7 @@ fn build_sing_box_config_global_mode_removes_split_rules() {
         route_mode: RouteMode::Global,
         adblock: false,
         mcp: false,
+        node_select: Default::default(),
     };
 
     let my_outbounds = vec![json!({
@@ -235,7 +240,7 @@ fn build_sing_box_config_global_mode_removes_split_rules() {
         "password": "secret"
     })];
 
-    let (built, _skipped) = build_sing_box_config(
+    let (built, _skipped, _) = build_sing_box_config(
         &config,
         vec!["manual-a".to_string()],
         my_outbounds,
@@ -363,6 +368,7 @@ fn config_with_route_override_defaults_to_rule_mode() {
         route_mode: RouteMode::Global,
         adblock: false,
         mcp: false,
+        node_select: Default::default(),
     };
 
     let runtime_config = config_with_route_override(&config, None);
@@ -380,6 +386,7 @@ fn build_sing_box_config_renames_duplicate_outbound_tags() {
         route_mode: Default::default(),
         adblock: false,
         mcp: false,
+        node_select: Default::default(),
     };
 
     let my_outbounds = vec![json!({
@@ -407,7 +414,7 @@ fn build_sing_box_config_renames_duplicate_outbound_tags() {
         }),
     ];
 
-    let (built, _skipped) = build_sing_box_config(
+    let (built, _skipped, _) = build_sing_box_config(
         &config,
         vec!["dup".to_string()],
         my_outbounds,
@@ -439,6 +446,7 @@ fn build_sing_box_config_renames_tags_reserved_by_template() {
         route_mode: Default::default(),
         adblock: false,
         mcp: false,
+        node_select: Default::default(),
     };
 
     let my_outbounds = vec![
@@ -458,7 +466,7 @@ fn build_sing_box_config_renames_tags_reserved_by_template() {
         }),
     ];
 
-    let (built, _skipped) = build_sing_box_config(
+    let (built, _skipped, _) = build_sing_box_config(
         &config,
         vec!["proxy".to_string(), "direct".to_string()],
         my_outbounds,
@@ -491,6 +499,7 @@ fn build_sing_box_config_errors_when_no_nodes_available() {
         route_mode: Default::default(),
         adblock: false,
         mcp: false,
+        node_select: Default::default(),
     };
 
     let err = build_sing_box_config(&config, vec![], vec![], vec![], vec![]).unwrap_err();
@@ -511,6 +520,7 @@ fn collect_manual_outbounds_handles_empty_nodes() {
         route_mode: Default::default(),
         adblock: false,
         mcp: false,
+        node_select: Default::default(),
     };
 
     let (outbounds, names) = collect_manual_outbounds(&config);
@@ -533,6 +543,7 @@ fn collect_manual_outbounds_handles_all_invalid_nodes() {
         route_mode: Default::default(),
         adblock: false,
         mcp: false,
+        node_select: Default::default(),
     };
 
     let (outbounds, names) = collect_manual_outbounds(&config);
@@ -552,6 +563,7 @@ fn build_sing_box_config_preserves_node_order() {
         route_mode: Default::default(),
         adblock: false,
         mcp: false,
+        node_select: Default::default(),
     };
 
     let my_outbounds = vec![
@@ -560,7 +572,7 @@ fn build_sing_box_config_preserves_node_order() {
         json!({"type": "hysteria2", "tag": "node-3", "server": "s3.example.com", "server_port": 443, "password": "p3"}),
     ];
 
-    let (built, _skipped) = build_sing_box_config(
+    let (built, _skipped, _) = build_sing_box_config(
         &config,
         vec![
             "node-1".to_string(),
@@ -590,6 +602,7 @@ fn build_sing_box_config_handles_no_custom_rules() {
         route_mode: Default::default(),
         adblock: false,
         mcp: false,
+        node_select: Default::default(),
     };
 
     let my_outbounds = vec![json!({
@@ -600,7 +613,7 @@ fn build_sing_box_config_handles_no_custom_rules() {
         "password": "secret"
     })];
 
-    let (built, _skipped) = build_sing_box_config(
+    let (built, _skipped, _) = build_sing_box_config(
         &config,
         vec!["manual-a".to_string()],
         my_outbounds,
@@ -624,6 +637,7 @@ fn build_sing_box_config_splits_direct_route_rules() {
         route_mode: Default::default(),
         adblock: false,
         mcp: false,
+        node_select: Default::default(),
     };
 
     let my_outbounds = vec![json!({
@@ -634,7 +648,7 @@ fn build_sing_box_config_splits_direct_route_rules() {
         "password": "secret"
     })];
 
-    let (built, _skipped) = build_sing_box_config(
+    let (built, _skipped, _) = build_sing_box_config(
         &config,
         vec!["manual-a".to_string()],
         my_outbounds,
@@ -705,9 +719,10 @@ fn build_sing_box_config_injects_adblock_rules_when_enabled() {
         route_mode: Default::default(),
         adblock: true,
         mcp: false,
+        node_select: Default::default(),
     };
 
-    let (built, _skipped) = build_sing_box_config(
+    let (built, _skipped, _) = build_sing_box_config(
         &config,
         vec!["manual-a".to_string()],
         vec![json!({
@@ -757,9 +772,10 @@ fn build_sing_box_config_keeps_adblock_in_global_mode() {
         route_mode: crate::models::RouteMode::Global,
         adblock: true,
         mcp: false,
+        node_select: Default::default(),
     };
 
-    let (built, _skipped) = build_sing_box_config(
+    let (built, _skipped, _) = build_sing_box_config(
         &config,
         vec!["manual-a".to_string()],
         vec![json!({
@@ -803,9 +819,10 @@ fn build_sing_box_config_omits_adblock_when_disabled() {
         route_mode: Default::default(),
         adblock: false,
         mcp: false,
+        node_select: Default::default(),
     };
 
-    let (built, _skipped) = build_sing_box_config(
+    let (built, _skipped, _) = build_sing_box_config(
         &config,
         vec!["manual-a".to_string()],
         vec![json!({
@@ -842,9 +859,10 @@ fn build_sing_box_config_binds_clash_api_to_localhost() {
         route_mode: Default::default(),
         adblock: false,
         mcp: false,
+        node_select: Default::default(),
     };
 
-    let (built, _skipped) = build_sing_box_config(
+    let (built, _skipped, _) = build_sing_box_config(
         &config,
         vec!["manual-a".to_string()],
         vec![json!({
@@ -879,6 +897,7 @@ fn build_sing_box_config_ignores_all_invalid_custom_rules() {
         route_mode: Default::default(),
         adblock: false,
         mcp: false,
+        node_select: Default::default(),
     };
 
     let my_outbounds = vec![json!({
@@ -889,7 +908,7 @@ fn build_sing_box_config_ignores_all_invalid_custom_rules() {
         "password": "secret"
     })];
 
-    let (built, _skipped) = build_sing_box_config(
+    let (built, _skipped, _) = build_sing_box_config(
         &config,
         vec!["manual-a".to_string()],
         my_outbounds,
@@ -920,6 +939,7 @@ async fn save_config_performs_atomic_write() {
         route_mode: Default::default(),
         adblock: false,
         mcp: false,
+        node_select: Default::default(),
     };
 
     save_config_to(&config_path, &config).await.unwrap();
@@ -961,6 +981,7 @@ async fn save_config_overwrites_existing_file() {
         route_mode: Default::default(),
         adblock: false,
         mcp: false,
+        node_select: Default::default(),
     };
     save_config_to(&config_path, &config).await.unwrap();
 
@@ -987,6 +1008,7 @@ async fn save_config_skips_identical_content() {
         route_mode: Default::default(),
         adblock: false,
         mcp: false,
+        node_select: Default::default(),
     };
 
     save_config_to(&config_path, &config).await.unwrap();
@@ -1020,4 +1042,83 @@ fn tun_inbound_enables_auto_redirect_only_on_linux() {
     } else {
         assert!(inbound.get("auto_redirect").is_none());
     }
+}
+
+fn sample_nodes() -> (
+    Vec<String>,
+    Vec<serde_json::Value>,
+    Vec<String>,
+    Vec<serde_json::Value>,
+) {
+    (
+        vec!["香港-手动".to_string()],
+        vec![json!({
+            "type": "hysteria2",
+            "tag": "香港-手动",
+            "server": "hk.example.com",
+            "server_port": 443,
+            "password": "secret"
+        })],
+        vec!["日本-订阅".to_string(), "新加坡-订阅".to_string()],
+        vec![
+            json!({
+                "type": "shadowsocks",
+                "tag": "日本-订阅",
+                "server": "jp.example.com",
+                "server_port": 8388,
+                "method": "aes-128-gcm",
+                "password": "secret"
+            }),
+            json!({
+                "type": "shadowsocks",
+                "tag": "新加坡-订阅",
+                "server": "sg.example.com",
+                "server_port": 8388,
+                "method": "aes-128-gcm",
+                "password": "secret"
+            }),
+        ],
+    )
+}
+
+#[test]
+fn build_sing_box_config_uses_urltest_for_region_fastest() {
+    let config = Config {
+        node_select: NodeSelect::Fastest(Region::Jp),
+        ..Config::default()
+    };
+    let (my_names, my_outbounds, sub_names, sub_outbounds) = sample_nodes();
+    let (built, _skipped, effective) =
+        build_sing_box_config(&config, my_names, my_outbounds, sub_names, sub_outbounds).unwrap();
+
+    assert_eq!(effective, NodeSelect::Fastest(Region::Jp));
+    assert_eq!(built["outbounds"][0]["type"], "urltest");
+    assert_eq!(built["outbounds"][0]["tag"], "proxy");
+    assert_eq!(built["outbounds"][0]["outbounds"], json!(["日本-订阅"]));
+    let tags: Vec<&str> = built["outbounds"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|item| item.get("tag").and_then(|tag| tag.as_str()))
+        .collect();
+    assert!(tags.contains(&"香港-手动"));
+    assert!(tags.contains(&"新加坡-订阅"));
+}
+
+#[test]
+fn build_sing_box_config_falls_back_to_selector_when_region_empty() {
+    let config = Config {
+        node_select: NodeSelect::Fastest(Region::Us),
+        ..Config::default()
+    };
+    let (my_names, my_outbounds, sub_names, sub_outbounds) = sample_nodes();
+    let (built, _skipped, effective) =
+        build_sing_box_config(&config, my_names, my_outbounds, sub_names, sub_outbounds).unwrap();
+
+    assert_eq!(effective, NodeSelect::Manual);
+    assert_eq!(built["outbounds"][0]["type"], "selector");
+    assert_eq!(
+        built["outbounds"][0]["outbounds"].as_array().unwrap().len(),
+        3
+    );
 }

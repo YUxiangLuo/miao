@@ -1,4 +1,4 @@
-import { memo } from 'react'
+import { memo, useState } from 'react'
 import { Server, Waypoints, Zap, LoaderCircle, Plus } from 'lucide-react'
 import { Button, SectionCard } from './ui.jsx'
 import { 
@@ -7,6 +7,15 @@ import {
   getDelayTone,
   protocolLabel 
 } from '../utils.js'
+
+const NODE_SELECT_OPTIONS = [
+  { value: 'manual', label: '手动选择' },
+  { value: 'fastest_hk', label: '香港最快' },
+  { value: 'fastest_jp', label: '日本最快' },
+  { value: 'fastest_tw', label: '台湾最快' },
+  { value: 'fastest_sg', label: '新加坡最快' },
+  { value: 'fastest_us', label: '美国最快' },
+]
 
 const ProxyTile = memo(function ProxyTile({ nodeName, delay, isActive, isTesting, isSwitching, switchDisabled, onSwitchProxy, onTestDelay, group }) {
   return (
@@ -53,13 +62,20 @@ export function ProxyCard({
   testingNodes, 
   testingGroup,
   switchingNode,
+  nodeSelectPending,
   onTestDelay, 
   onTestGroupDelays, 
   onSwitchProxy,
+  onSetNodeSelect,
   onOpenAddNode
 }) {
   const currentNodeDelay = primaryGroup?.now ? delays[primaryGroup.now] : undefined
   const isTestingCurrent = primaryGroup?.now ? testingNodes[primaryGroup.now] : false
+  const nodeSelect = status.node_select || 'manual'
+  const isFastest = nodeSelect.startsWith('fastest_')
+  // 受控 select 在 apply 期间停在用户选择上:status.node_select 要等热重启后的
+  // fetchStatus 才更新,直接受控会弹回旧值;处理器结束(成功或失败)后回到服务端真值
+  const [pendingSelect, setPendingSelect] = useState('')
 
   return (
     <SectionCard
@@ -69,6 +85,23 @@ export function ProxyCard({
           <div className="section-title-wrap">
             <Waypoints size={14} className="section-icon" />
             <span>节点列表</span>
+            <label className="node-select">
+              <span className="node-select-label">节点选择</span>
+              <select
+                aria-label="节点选择"
+                value={pendingSelect || nodeSelect}
+                disabled={status.initializing || nodeSelectPending}
+                onChange={(event) => {
+                  const next = event.target.value
+                  setPendingSelect(next)
+                  Promise.resolve(onSetNodeSelect?.(next)).finally(() => setPendingSelect(''))
+                }}
+              >
+                {NODE_SELECT_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+            </label>
           </div>
           <Button 
             tone="secondary" 
@@ -124,7 +157,7 @@ export function ProxyCard({
                 isActive={primaryGroup.now === nodeName}
                 isTesting={Boolean(testingNodes[nodeName])}
                 isSwitching={switchingNode === nodeName}
-                switchDisabled={Boolean(switchingNode)}
+                switchDisabled={Boolean(switchingNode) || isFastest}
                 group={primaryGroupName}
                 onSwitchProxy={onSwitchProxy}
                 onTestDelay={onTestDelay}

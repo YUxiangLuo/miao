@@ -2,8 +2,10 @@ use std::collections::HashSet;
 use tracing::warn;
 
 use crate::error::{AppError, AppResult};
-use crate::models::{Config, RouteMode};
+use crate::models::{Config, NodeSelect, RouteMode};
 use crate::state::SkippedRule;
+
+use super::region::{group_member_names, resolve_node_select};
 
 fn make_unique_tag(tag: &str, used: &mut HashSet<String>) -> String {
     let base = if tag.trim().is_empty() { "node" } else { tag };
@@ -154,7 +156,7 @@ pub(super) fn build_sing_box_config(
     my_outbounds: Vec<serde_json::Value>,
     final_node_names: Vec<String>,
     final_outbounds: Vec<serde_json::Value>,
-) -> AppResult<(serde_json::Value, Vec<SkippedRule>)> {
+) -> AppResult<(serde_json::Value, Vec<SkippedRule>, NodeSelect)> {
     let total_nodes = my_outbounds.len() + final_outbounds.len();
     if total_nodes == 0 {
         return Err(AppError::NoUsableNodes);
@@ -165,6 +167,9 @@ pub(super) fn build_sing_box_config(
         my_outbounds.into_iter().chain(final_outbounds).collect(),
     );
 
+    let effective_select = resolve_node_select(config.node_select, &node_names);
+    let group_names = group_member_names(effective_select, &node_names);
+
     // 规则引用不存在的节点会让 sing-box check 失败;生成时跳过这些规则并留痕告警
     let mut available_outbounds: HashSet<String> = node_names.iter().cloned().collect();
     available_outbounds.insert("proxy".to_string());
@@ -173,11 +178,7 @@ pub(super) fn build_sing_box_config(
         filter_rules_with_missing_outbound(&config.custom_rules, &available_outbounds);
 
     let mut sing_box_config = get_config_template();
-    if let Some(selector_outbounds) = sing_box_config["outbounds"][0].get_mut("outbounds") {
-        if let Some(arr) = selector_outbounds.as_array_mut() {
-            arr.extend(node_names.into_iter().map(serde_json::Value::String));
-        }
-    }
+    apply_proxy_group(&mut sing_box_config, effective_select, &group_names);
     if let Some(arr) = sing_box_config["outbounds"].as_array_mut() {
         arr.extend(outbounds);
     }
@@ -189,7 +190,36 @@ pub(super) fn build_sing_box_config(
         config.adblock,
     );
 
-    Ok((sing_box_config, skipped_rules))
+    Ok((sing_box_config, skipped_rules, effective_select))
+}
+
+fn apply_proxy_group(
+    sing_box_config: &mut serde_json::Value,
+    select: NodeSelect,
+    members: &[String],
+) {
+    let member_values: Vec<serde_json::Value> = members
+        .iter()
+        .cloned()
+        .map(serde_json::Value::String)
+        .collect();
+    sing_box_config["outbounds"][0] = if select.is_manual() {
+        serde_json::json!({
+            "type": "selector",
+            "tag": "proxy",
+            "outbounds": member_values
+        })
+    } else {
+        serde_json::json!({
+            "type": "urltest",
+            "tag": "proxy",
+            "outbounds": member_values,
+            "url": "http://www.gstatic.com/generate_204",
+            "interval": "3m",
+            "tolerance": 50,
+            "interrupt_exist_connections": true
+        })
+    };
 }
 
 fn parse_custom_rules(custom_rules: &[String]) -> Vec<serde_json::Value> {

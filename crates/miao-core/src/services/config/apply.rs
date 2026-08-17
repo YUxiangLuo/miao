@@ -5,7 +5,7 @@ use std::{
 use tracing::{error, info, warn};
 
 use crate::error::{AppError, AppResult};
-use crate::models::{Config, RouteMode};
+use crate::models::{Config, NodeSelect, RouteMode};
 use crate::services::{
     proxy::restore_last_proxy,
     singbox::{
@@ -14,16 +14,20 @@ use crate::services::{
 };
 use crate::state::AppState;
 
-use super::generate::gen_config;
+use super::generate::{gen_config, GenConfigOutcome};
 use super::persist::{
-    config_cache_path, read_config_cache, restore_config_from_cache, save_config_cache,
-    save_config_to,
+    config_cache_path, persist_effective_node_select, read_config_cache, restore_config_from_cache,
+    save_config_cache, save_config_to,
 };
 
 /// 订阅刷新策略：机制（拉取 → 生成 → 校验 → 重启）只有一条，差异显式表达
 pub enum RefreshPolicy {
-    /// 手动刷新：生成+校验成功后总是重启；全部订阅失败也用现有结果继续
+    /// 手动刷新（面板「刷新订阅」等独立路径）：生成+校验成功后总是重启；
+    /// 全部订阅失败也用现有结果继续；重启后由本管线持久化生效的 node_select
     Manual,
+    /// apply_config_change 事务内的刷新：机制同 Manual，但 node_select 由外层
+    /// 事务随新配置一并提交，本管线不提前写盘——避免「旧配置 + 新选择」的中间快照
+    ManualInApply,
     /// 启动快速通道：与启动所用缓存比对无变化则不重启；
     /// 全部订阅失败/校验失败时保留正在运行的缓存配置
     Startup,
@@ -40,6 +44,7 @@ pub enum RefreshEffect {
 pub struct RefreshOutcome {
     pub has_sub_nodes: bool,
     pub effect: RefreshEffect,
+    pub node_select: NodeSelect,
 }
 
 /// 刷新后是否需要重启内核：与启动缓存逐字节不同才需要；读不出内容时保守重启
@@ -47,6 +52,16 @@ pub(super) fn config_changed_after_refresh(cache: Option<&[u8]>, current: Option
     match (cache, current) {
         (Some(old), Some(new)) => old != new,
         _ => true,
+    }
+}
+
+/// Startup 策略决定「保留运行中的缓存配置」时，gen_config 已把新配置写进
+/// config.json（可能是地区筛空后的降级 selector，或未通过校验的版本）。运行中的
+/// 内核不受影响，但崩溃看门狗与手动停/启都直接用磁盘 config.json 起进程——
+/// 把缓存拷回，让磁盘文件与正在运行的内核保持一致。
+async fn restore_cache_over_generated_config() {
+    if let Err(err) = restore_config_from_cache().await {
+        warn!(error = %err, "Failed to restore config.json from cache while keeping the running config");
     }
 }
 
@@ -58,17 +73,19 @@ pub async fn refresh_subscriptions(
     policy: RefreshPolicy,
 ) -> AppResult<RefreshOutcome> {
     let cache_bytes = read_config_cache().await;
-    let has_sub_nodes = gen_config(config, state)
+    let generated = gen_config(config, state)
         .await
         .map_err(|e| AppError::context("Failed to regenerate config", e))?;
     info!("Config regenerated successfully");
 
     let startup = matches!(policy, RefreshPolicy::Startup);
 
-    if startup && !has_sub_nodes && !config.subs.is_empty() {
+    if startup && !generated.has_sub_nodes && !config.subs.is_empty() {
+        restore_cache_over_generated_config().await;
         return Ok(RefreshOutcome {
-            has_sub_nodes,
+            has_sub_nodes: generated.has_sub_nodes,
             effect: RefreshEffect::KeptRunningOnTotalFailure,
+            node_select: generated.node_select,
         });
     }
 
@@ -78,18 +95,22 @@ pub async fn refresh_subscriptions(
             .ok();
         if !config_changed_after_refresh(cache_bytes.as_deref(), current_bytes.as_deref()) {
             info!("Subscriptions unchanged after refresh; sing-box keeps running");
+            persist_effective_node_select(state, generated.node_select).await?;
             return Ok(RefreshOutcome {
-                has_sub_nodes,
+                has_sub_nodes: generated.has_sub_nodes,
                 effect: RefreshEffect::SkippedUnchanged,
+                node_select: generated.node_select,
             });
         }
     }
 
     if let Err(e) = validate_sing_box_config().await {
         if startup {
+            restore_cache_over_generated_config().await;
             return Ok(RefreshOutcome {
-                has_sub_nodes,
+                has_sub_nodes: generated.has_sub_nodes,
                 effect: RefreshEffect::KeptRunningOnValidationFailure,
+                node_select: generated.node_select,
             });
         }
         return Err(AppError::context(
@@ -103,19 +124,30 @@ pub async fn refresh_subscriptions(
         .await
         .map_err(|e| AppError::context("Failed to restart sing-box", e))?;
     info!("sing-box restarted successfully");
+    // ManualInApply 的 node_select 由外层 apply_config_change 事务一并提交
+    if !matches!(policy, RefreshPolicy::ManualInApply) {
+        if let Err(err) = persist_effective_node_select(state, generated.node_select).await {
+            warn!(error = %err, "Failed to persist effective node_select after restart");
+        }
+    }
 
     Ok(RefreshOutcome {
-        has_sub_nodes,
+        has_sub_nodes: generated.has_sub_nodes,
         effect: RefreshEffect::Restarted,
+        node_select: generated.node_select,
     })
 }
 
 pub(super) async fn regenerate_and_restart_runtime(
     config: &Config,
     state: &Arc<AppState>,
-) -> AppResult<bool> {
-    let outcome = refresh_subscriptions(config, state, RefreshPolicy::Manual).await?;
-    Ok(outcome.has_sub_nodes)
+    policy: RefreshPolicy,
+) -> AppResult<GenConfigOutcome> {
+    let outcome = refresh_subscriptions(config, state, policy).await?;
+    Ok(GenConfigOutcome {
+        has_sub_nodes: outcome.has_sub_nodes,
+        node_select: outcome.node_select,
+    })
 }
 
 pub async fn regenerate_preserving_service_state(
@@ -133,11 +165,13 @@ pub async fn regenerate_preserving_service_state(
     }
 
     if should_run {
-        let has_sub_nodes = regenerate_and_restart_runtime(&runtime_config, state).await?;
-        finalize_started_config(&runtime_config, state, has_sub_nodes).await;
+        let outcome =
+            regenerate_and_restart_runtime(&runtime_config, state, RefreshPolicy::Manual).await?;
+        finalize_started_config(&runtime_config, state, outcome.has_sub_nodes).await;
     } else {
-        let has_sub_nodes = regenerate_without_restart_runtime(&runtime_config, state).await?;
-        update_config_warning(&runtime_config, state, has_sub_nodes).await;
+        let outcome = regenerate_without_restart_runtime(&runtime_config, state).await?;
+        persist_effective_node_select(state, outcome.node_select).await?;
+        update_config_warning(&runtime_config, state, outcome.has_sub_nodes).await;
     }
 
     Ok(should_run)
@@ -159,20 +193,24 @@ pub(super) async fn finalize_started_config(
 async fn update_config_warning(config: &Config, state: &Arc<AppState>, has_sub_nodes: bool) {
     save_config_cache().await;
 
-    if has_sub_nodes {
-        *state.config_warning.lock().await = None;
+    let effective = state.config.read().await.node_select;
+    *state.config_warning.lock().await = if !config.node_select.is_manual() && effective.is_manual()
+    {
+        Some("该地区没有可用节点，已切回手动选择".to_string())
+    } else if has_sub_nodes {
+        None
     } else if !config.subs.is_empty() {
-        *state.config_warning.lock().await = Some("所有订阅获取失败，请检查当前订阅".to_string());
+        Some("所有订阅获取失败，请检查当前订阅".to_string())
     } else {
-        *state.config_warning.lock().await = None;
-    }
+        None
+    };
 }
 
 pub(super) async fn regenerate_without_restart_runtime(
     config: &Config,
     state: &Arc<AppState>,
-) -> AppResult<bool> {
-    let has_sub_nodes = gen_config(config, state)
+) -> AppResult<GenConfigOutcome> {
+    let outcome = gen_config(config, state)
         .await
         .map_err(|e| AppError::context("Failed to regenerate config", e))?;
     info!("Config regenerated successfully");
@@ -181,7 +219,7 @@ pub(super) async fn regenerate_without_restart_runtime(
         .await
         .map_err(|e| AppError::context("Config validation failed", e))?;
 
-    Ok(has_sub_nodes)
+    Ok(outcome)
 }
 
 pub(super) fn config_with_route_override(config: &Config, route_mode: Option<RouteMode>) -> Config {
@@ -311,7 +349,8 @@ pub async fn apply_config_change(
 
     let apply_result = match apply_mode {
         ConfigApplyMode::Restart => {
-            regenerate_and_restart_runtime(&runtime_new_config, state).await
+            regenerate_and_restart_runtime(&runtime_new_config, state, RefreshPolicy::ManualInApply)
+                .await
         }
         ConfigApplyMode::RegenerateOnly => {
             regenerate_without_restart_runtime(&runtime_new_config, state).await
@@ -320,14 +359,18 @@ pub async fn apply_config_change(
     };
 
     match apply_result {
-        Ok(has_sub_nodes) => {
+        Ok(outcome) => {
+            let mut persisted_new_config = persisted_new_config;
+            persisted_new_config.node_select = outcome.node_select;
             match save_config_to(&state.config_path, &persisted_new_config).await {
                 Ok(()) => {
                     *state.config.write().await = persisted_new_config;
                     if should_run {
-                        finalize_started_config(&runtime_new_config, state, has_sub_nodes).await;
+                        finalize_started_config(&runtime_new_config, state, outcome.has_sub_nodes)
+                            .await;
                     } else {
-                        update_config_warning(&runtime_new_config, state, has_sub_nodes).await;
+                        update_config_warning(&runtime_new_config, state, outcome.has_sub_nodes)
+                            .await;
                     }
                     Ok(())
                 }
@@ -373,10 +416,10 @@ pub async fn apply_runtime_config_change(
     restart: bool,
 ) -> AppResult<()> {
     if restart {
-        match regenerate_and_restart_runtime(new_config, state).await {
-            Ok(has_sub_nodes) => {
+        match regenerate_and_restart_runtime(new_config, state, RefreshPolicy::Manual).await {
+            Ok(outcome) => {
                 *state.route_mode_override.write().await = Some(new_config.route_mode);
-                finalize_started_config(new_config, state, has_sub_nodes).await;
+                finalize_started_config(new_config, state, outcome.has_sub_nodes).await;
                 Ok(())
             }
             Err(apply_err) => {
@@ -395,9 +438,10 @@ pub async fn apply_runtime_config_change(
         }
     } else {
         match regenerate_without_restart_runtime(new_config, state).await {
-            Ok(has_sub_nodes) => {
+            Ok(outcome) => {
                 *state.route_mode_override.write().await = Some(new_config.route_mode);
-                update_config_warning(new_config, state, has_sub_nodes).await;
+                persist_effective_node_select(state, outcome.node_select).await?;
+                update_config_warning(new_config, state, outcome.has_sub_nodes).await;
                 Ok(())
             }
             Err(apply_err) => {
@@ -435,8 +479,8 @@ async fn restore_previous_running_config(
             Ok(()) => {}
             Err(cache_err) => {
                 warn!(error = %cache_err, "Failed to restore runtime config from cache while previous sing-box process is still running");
-                let has_sub_nodes = regenerate_without_restart_runtime(old_config, state).await?;
-                update_config_warning(old_config, state, has_sub_nodes).await;
+                let outcome = regenerate_without_restart_runtime(old_config, state).await?;
+                update_config_warning(old_config, state, outcome.has_sub_nodes).await;
             }
         }
         return Ok(());
@@ -462,11 +506,11 @@ async fn restart_with_previous_config(old_config: &Config, state: &Arc<AppState>
         }
     }
 
-    let has_sub_nodes = regenerate_without_restart_runtime(old_config, state).await?;
+    let outcome = regenerate_without_restart_runtime(old_config, state).await?;
     start_sing_internal(state)
         .await
         .map_err(|e| AppError::context("Failed to restart sing-box with previous config", e))?;
-    finalize_started_config(old_config, state, has_sub_nodes).await;
+    finalize_started_config(old_config, state, outcome.has_sub_nodes).await;
     Ok(())
 }
 
@@ -479,7 +523,7 @@ async fn restore_previous_stopped_config(
         return Ok(());
     }
 
-    let has_sub_nodes = regenerate_without_restart_runtime(old_config, state).await?;
-    update_config_warning(old_config, state, has_sub_nodes).await;
+    let outcome = regenerate_without_restart_runtime(old_config, state).await?;
+    update_config_warning(old_config, state, outcome.has_sub_nodes).await;
     Ok(())
 }

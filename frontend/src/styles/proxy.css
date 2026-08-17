@@ -1,3 +1,33 @@
+.node-select {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    margin-left: 4px;
+    color: var(--text-muted);
+    font-size: 0.75rem;
+    font-weight: 500;
+}
+.node-select-label {
+    white-space: nowrap;
+}
+.node-select select {
+    max-width: 8.75rem;
+    min-height: 26px;
+    padding: 2px 6px;
+    border-radius: 5px;
+    border: 1px solid var(--border);
+    background: var(--surface-soft);
+    color: var(--text);
+    outline: none;
+}
+.node-select select:focus {
+    border-color: var(--accent);
+}
+.node-select select:disabled {
+    opacity: 0.6;
+    cursor: default;
+}
 .current-node-banner {
     display: flex;
     align-items: center;

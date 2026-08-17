@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useToast, useApi } from './useApi.js'
 import { useStatus, useSubs, useNodes, useRules, useVersion } from './useResources.js'
-import { useProxies, useTraffic, useConnections, useDelays } from './useClash.js'
+import { useProxies, useTraffic, useConnections, useDelays, isClashProxyGroup } from './useClash.js'
 import { usePolling } from './usePolling.js'
 import { useDesktopLayout } from './useDesktopLayout.js'
 import { EMPTY_NODE_FORM, nodeTypeDefaults, POLL_INTERVAL, POLL_INTERVAL_STARTUP } from '../utils.js'
@@ -27,14 +27,19 @@ export function useAppData() {
   const { subs, fetchSubs } = useSubs()
   const { nodes, fetchNodes } = useNodes()
   const { rules, fetchRules } = useRules()
-  const { primaryGroupName, primaryGroup, fetchProxies } = useProxies(status)
+  const { proxies, primaryGroupName, primaryGroup, fetchProxies } = useProxies(status)
 
-  // 规则「指定节点」下拉的候选:手动节点(服务停止时也在) ∪ 运行时分组节点
+  // 规则「指定节点」下拉的候选:手动节点(服务停止时也在) ∪ 运行时全部 outbound
+  // 与后端 known_rule_targets 同口径(排除内置 proxy/direct 与分组项),不随 fastest_* 地区过滤收缩
   const ruleNodeNames = useMemo(() => {
     const names = new Set(nodes.map((node) => node.tag))
-    ;(primaryGroup?.all || []).forEach((name) => names.add(name))
+    Object.entries(proxies || {}).forEach(([name, proxy]) => {
+      if (name !== 'proxy' && name !== 'direct' && !isClashProxyGroup(proxy?.type)) {
+        names.add(name)
+      }
+    })
     return [...names]
-  }, [nodes, primaryGroup])
+  }, [nodes, proxies])
   const { traffic, closeSockets } = useTraffic(status)
   const {
     connectionsInfo,

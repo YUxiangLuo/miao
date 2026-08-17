@@ -96,7 +96,35 @@ export function useAppActions(data) {
     )
   }, [status.route_mode, openConfirm, handleSetRouteMode])
 
+  const handleSetNodeSelect = useCallback(async (nextSelect) => {
+    if (nextSelect === (status.node_select || 'manual')) return
+
+    try {
+      const payload = await apiCall(
+        'node-select',
+        { method: 'POST', body: JSON.stringify({ node_select: nextSelect }) },
+        'nodeSelect'
+      )
+      clearDelays()
+      await fetchStatus()
+      await fetchProxies()
+      if (payload.message !== '该地区没有可用节点，已切回手动选择') {
+        showToast('节点选择已更新', 'success')
+      }
+    } catch (error) {
+      showToast(error.message, 'error')
+    }
+  }, [
+    status.node_select,
+    apiCall,
+    clearDelays,
+    fetchStatus,
+    fetchProxies,
+    showToast
+  ])
+
   const handleSwitchProxy = useCallback(async (groupName, nodeName) => {
+    if ((status.node_select || 'manual') !== 'manual') return
     if (switchingNode) return
     setSwitchingNode(nodeName)
     try {
@@ -121,7 +149,7 @@ export function useAppActions(data) {
     } finally {
       setSwitchingNode('')
     }
-  }, [clashApiBase, fetchProxies, showToast, switchingNode, setSwitchingNode])
+  }, [status.node_select, clashApiBase, fetchProxies, showToast, switchingNode, setSwitchingNode])
 
   const handleAddSubscription = useCallback(async () => {
     const error = validateSubscriptionUrl(newSubUrl.trim())
@@ -385,6 +413,7 @@ export function useAppActions(data) {
     openNodeModal,
     closeNodeModal,
     handleOpenSetRouteModeConfirm,
+    handleSetNodeSelect,
     handleSwitchProxy,
     handleAddSubscription,
     handleOnboardingAddSub,

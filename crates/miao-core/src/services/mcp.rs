@@ -242,6 +242,28 @@ fn selector_view(proxies: &JsonValue) -> Option<(Vec<String>, Option<String>)> {
     Some((all, now))
 }
 
+/// 平铺节点池：全部运行时 outbound，排除内置 proxy/direct 与分组项。
+/// 与 generate::known_rule_targets 同口径——不随 node_select 的地区过滤收缩
+fn flat_node_pool(proxies: &JsonValue) -> Vec<String> {
+    let Some(map) = proxies.as_object() else {
+        return Vec::new();
+    };
+    let mut names: Vec<String> = map
+        .iter()
+        .filter(|(name, node)| {
+            name.as_str() != SELECTOR_TAG
+                && name.as_str() != "direct"
+                && !matches!(
+                    node.get("type").and_then(JsonValue::as_str),
+                    Some("Selector") | Some("URLTest")
+                )
+        })
+        .map(|(name, _)| name.clone())
+        .collect();
+    names.sort();
+    names
+}
+
 // ── 工具实现 ─────────────────────────────────────────────────────────────
 
 async fn tool_get_status(state: &Arc<AppState>) -> Result<JsonValue, String> {
@@ -276,13 +298,17 @@ async fn tool_get_status(state: &Arc<AppState>) -> Result<JsonValue, String> {
         warnings.push(format!("{skipped} 条自定义规则因出口节点不存在已跳过"));
     }
 
-    // 当前节点与节点数：仅在运行时问 Clash，失败静默降级
+    // 当前节点与节点数：仅在运行时问 Clash，失败静默降级；
+    // 节点数按平铺节点池计（不随 fastest_* 地区过滤收缩）
     let mut current_node = JsonValue::Null;
     let mut node_count = config.nodes.len();
     if running {
         if let Ok(proxies) = fetch_proxies(state).await {
-            if let Some((all, now)) = selector_view(&proxies) {
-                node_count = all.len();
+            let pool = flat_node_pool(&proxies);
+            if !pool.is_empty() {
+                node_count = pool.len();
+            }
+            if let Some((_, now)) = selector_view(&proxies) {
                 current_node = now.map(JsonValue::from).unwrap_or(JsonValue::Null);
             }
         }
@@ -293,6 +319,7 @@ async fn tool_get_status(state: &Arc<AppState>) -> Result<JsonValue, String> {
         "initializing": state.initializing.load(Ordering::Relaxed),
         "route_mode": route_mode,
         "adblock": config.adblock,
+        "node_select": config.node_select,
         "current_node": current_node,
         "node_count": node_count,
         "uptime_secs": uptime_secs,
@@ -319,8 +346,11 @@ async fn tool_list_nodes(state: &Arc<AppState>) -> Result<JsonValue, String> {
     let running = sing_box_is_running(state).await;
     if running {
         if let Ok(proxies) = fetch_proxies(state).await {
-            if let Some((all, now)) = selector_view(&proxies) {
-                let nodes: Vec<JsonValue> = all
+            // 平铺节点池：不随 fastest_* 地区过滤收缩（地区外节点仍是合法 outbound）
+            let pool = flat_node_pool(&proxies);
+            if !pool.is_empty() {
+                let now = selector_view(&proxies).and_then(|(_, now)| now);
+                let nodes: Vec<JsonValue> = pool
                     .iter()
                     .map(|name| {
                         let node_type = proxies
@@ -368,6 +398,9 @@ async fn tool_switch_node(state: &Arc<AppState>, args: &JsonValue) -> Result<Jso
 
     if state.initializing.load(Ordering::Relaxed) {
         return Err("初始化进行中，稍后再试".to_string());
+    }
+    if !state.config.read().await.node_select.is_manual() {
+        return Err("当前是地区最快模式，由内核自动选节点；先切回手动选择再指定节点".to_string());
     }
     if !sing_box_is_running(state).await {
         return Err("服务未运行，无法切换节点".to_string());
@@ -427,7 +460,11 @@ async fn tool_test_delay(state: &Arc<AppState>, args: &JsonValue) -> Result<Json
     let proxies = fetch_proxies(state)
         .await
         .map_err(|_| "Clash API 不可达".to_string())?;
-    let (all, _) = selector_view(&proxies).ok_or("节点池为空".to_string())?;
+    // 平铺节点池：与 list_nodes 同口径，fastest_* 地区外的节点也可测
+    let all = flat_node_pool(&proxies);
+    if all.is_empty() {
+        return Err("节点池为空".to_string());
+    }
 
     // 与前端批量测速一致：并发受限，避免大订阅瞬间发出数百个请求
     let results: Vec<(String, i64)> = stream::iter(all)
@@ -620,6 +657,21 @@ mod tests {
             .expect("request must produce a response")
     }
 
+    #[test]
+    fn flat_node_pool_covers_outbounds_beyond_group_members() {
+        let proxies = json!({
+            "proxy": { "type": "URLTest", "all": ["香港 01"], "now": "香港 01" },
+            "direct": { "type": "Direct" },
+            "香港 01": { "type": "Trojan" },
+            "德国 01": { "type": "Vmess" },
+            "手动A": { "type": "Hysteria2" }
+        });
+
+        let pool = super::flat_node_pool(&proxies);
+
+        assert_eq!(pool, vec!["德国 01", "手动A", "香港 01"]);
+    }
+
     #[tokio::test]
     async fn parse_error_returns_32700() {
         let response = handle(&state(Config::default()), b"not json".as_slice())
@@ -755,6 +807,27 @@ mod tests {
         assert_eq!(nodes[0]["name"], "手动节点A");
         assert_eq!(nodes[0]["source"], "manual");
         assert_eq!(nodes[0]["is_current"], false);
+    }
+
+    #[tokio::test]
+    async fn switch_node_rejects_fastest_mode() {
+        let config = Config {
+            node_select: crate::models::NodeSelect::Fastest(crate::models::Region::Hk),
+            ..Default::default()
+        };
+        let response = call(
+            &state(config),
+            json!({
+                "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                "params": { "name": "switch_node", "arguments": { "name": "香港-01" } },
+            }),
+        )
+        .await;
+        assert_eq!(response["result"]["isError"], true);
+        assert!(response["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("最快模式"));
     }
 
     #[tokio::test]

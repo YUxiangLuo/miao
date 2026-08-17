@@ -15,7 +15,9 @@ use crate::handlers::{
     nodes::{add_node, delete_node, get_nodes},
     proxy::set_last_proxy,
     rules::{add_rule, delete_rule, get_rules, set_adblock},
-    service::{get_status, set_route_mode, start_service, stop_service, test_connectivity},
+    service::{
+        get_status, set_node_select, set_route_mode, start_service, stop_service, test_connectivity,
+    },
     static_assets::{serve_favicon, serve_index},
     subs::{add_sub, delete_sub, get_subs, refresh_subs},
     version::get_version,
@@ -30,6 +32,7 @@ pub fn build_router(app_state: Arc<AppState>) -> Router {
         .route("/api/service/start", post(start_service))
         .route("/api/service/stop", post(stop_service))
         .route("/api/route-mode", post(set_route_mode))
+        .route("/api/node-select", post(set_node_select))
         .route("/api/connectivity", post(test_connectivity))
         .route("/api/clash/traffic", get(proxy_clash_traffic))
         .route("/api/clash/{*path}", any(proxy_clash_http))
@@ -81,6 +84,7 @@ mod tests {
             route_mode: Default::default(),
             adblock: false,
             mcp: false,
+            node_select: Default::default(),
         })
         .await;
 
@@ -101,6 +105,7 @@ mod tests {
             route_mode: Default::default(),
             adblock: false,
             mcp: false,
+            node_select: Default::default(),
         })
         .await;
 
@@ -128,6 +133,7 @@ mod tests {
             route_mode: Default::default(),
             adblock: false,
             mcp: false,
+            node_select: Default::default(),
         })
         .await;
 
@@ -161,6 +167,7 @@ mod tests {
             route_mode: Default::default(),
             adblock: false,
             mcp: false,
+            node_select: Default::default(),
         })
         .await;
 
@@ -191,6 +198,7 @@ mod tests {
             route_mode: Default::default(),
             adblock: false,
             mcp: false,
+            node_select: Default::default(),
         })
         .await;
 
@@ -218,6 +226,7 @@ mod tests {
             route_mode: Default::default(),
             adblock: false,
             mcp: false,
+            node_select: Default::default(),
         })
         .await;
 
@@ -264,6 +273,7 @@ mod tests {
             route_mode: Default::default(),
             adblock: false,
             mcp: false,
+            node_select: Default::default(),
         })
         .await;
 
@@ -292,6 +302,7 @@ mod tests {
             route_mode: Default::default(),
             adblock: false,
             mcp: false,
+            node_select: Default::default(),
         })
         .await;
 
@@ -322,6 +333,7 @@ mod tests {
             route_mode: Default::default(),
             adblock: false,
             mcp: false,
+            node_select: Default::default(),
         })
         .await;
 
@@ -357,6 +369,7 @@ mod tests {
             route_mode: Default::default(),
             adblock: false,
             mcp: false,
+            node_select: Default::default(),
         })
         .await;
 
@@ -385,6 +398,7 @@ mod tests {
             route_mode: Default::default(),
             adblock: false,
             mcp: false,
+            node_select: Default::default(),
         })
         .await;
 
@@ -416,6 +430,7 @@ mod tests {
             route_mode: Default::default(),
             adblock: false,
             mcp: false,
+            node_select: Default::default(),
         })
         .await;
 
@@ -446,6 +461,7 @@ mod tests {
             route_mode: Default::default(),
             adblock: false,
             mcp: false,
+            node_select: Default::default(),
         })
         .await;
 
@@ -477,6 +493,7 @@ mod tests {
             route_mode: Default::default(),
             adblock: false,
             mcp: false,
+            node_select: Default::default(),
         })
         .await;
 
@@ -510,6 +527,7 @@ mod tests {
             route_mode: Default::default(),
             adblock: false,
             mcp: false,
+            node_select: Default::default(),
         })
         .await;
 
@@ -542,6 +560,7 @@ mod tests {
             route_mode: Default::default(),
             adblock: false,
             mcp: false,
+            node_select: Default::default(),
         })
         .await;
 
@@ -570,6 +589,7 @@ mod tests {
             route_mode: Default::default(),
             adblock: false,
             mcp: false,
+            node_select: Default::default(),
         })
         .await;
 
@@ -601,6 +621,7 @@ mod tests {
             route_mode: Default::default(),
             adblock: false,
             mcp: false,
+            node_select: Default::default(),
         })
         .await;
 
@@ -630,6 +651,7 @@ mod tests {
             route_mode: Default::default(),
             adblock: false,
             mcp: false,
+            node_select: Default::default(),
         })
         .await;
 
@@ -669,6 +691,69 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn router_returns_manual_node_select_by_default() {
+        let app = test_app(Config::default()).await;
+        let response = app
+            .oneshot(empty_request("GET", "/api/status"))
+            .await
+            .unwrap();
+        let json = response_json(response).await;
+        assert_eq!(json["data"]["node_select"], "manual");
+    }
+
+    #[tokio::test]
+    async fn router_node_select_is_idempotent_when_state_matches() {
+        let app = test_app(Config::default()).await;
+        let response = app
+            .oneshot(json_request(
+                "POST",
+                "/api/node-select",
+                json!({ "node_select": "manual" }),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let json = response_json(response).await;
+        assert_eq!(json["success"], true);
+        assert_eq!(json["message"], "Node select unchanged");
+    }
+
+    #[tokio::test]
+    async fn router_rejects_unknown_node_select() {
+        let app = test_app(Config::default()).await;
+        let response = app
+            .oneshot(json_request(
+                "POST",
+                "/api/node-select",
+                json!({ "node_select": "fastest_kr" }),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let json = response_json(response).await;
+        assert_eq!(json["success"], false);
+        assert!(json["message"]
+            .as_str()
+            .unwrap()
+            .contains("不支持的节点选择"));
+    }
+
+    #[tokio::test]
+    async fn router_rejects_node_select_during_initialization() {
+        let state = app_state(Config::default());
+        let app = build_router(state);
+        let response = app
+            .oneshot(json_request(
+                "POST",
+                "/api/node-select",
+                json!({ "node_select": "fastest_hk" }),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+    }
+
+    #[tokio::test]
     async fn mcp_endpoint_is_not_found_when_disabled() {
         let app = test_app(Config::default()).await;
 
@@ -688,6 +773,7 @@ mod tests {
     async fn mcp_endpoint_serves_jsonrpc_when_enabled() {
         let app = test_app(Config {
             mcp: true,
+            node_select: Default::default(),
             ..Default::default()
         })
         .await;
