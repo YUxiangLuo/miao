@@ -306,7 +306,8 @@ mod tests {
     use super::{should_retry_sub_fetch, GenConfigOutcome, SubFetchRetry, STARTUP_RETRY_SCHEDULE};
     use crate::error::AppError;
     use crate::models::{Config, NodeSelect};
-    use std::time::Instant;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
     use tokio::time::Duration;
 
     fn outcome(has_sub_nodes: bool) -> GenConfigOutcome {
@@ -341,43 +342,72 @@ mod tests {
         assert!(!should_retry_sub_fetch(&Ok(outcome(false)), false));
     }
 
-    #[tokio::test]
-    async fn startup_retry_waits_out_total_failure() {
-        // 拒绝连接的 loopback 订阅：不触外网、立即失败；无手动节点时
-        // gen_config_once 在写盘前返回 NoUsableNodes，不触碰 /tmp/miao-sing-box
-        let config = Config {
-            subs: vec!["http://127.0.0.1:1/sub".to_string()],
-            ..Config::default()
-        };
-        let state = crate::test_support::app_state(config.clone());
-
-        let started = Instant::now();
-        let err = match super::gen_config(&config, &state, SubFetchRetry::Startup).await {
-            Ok(_) => panic!("unroutable subscription must fail"),
-            Err(err) => err,
-        };
-
-        assert!(err.is_no_usable_nodes());
-        // 测试调度 50ms + 100ms 两段退避都已耗尽
-        assert!(started.elapsed() >= Duration::from_millis(140));
+    /// 本地「计数拒答」订阅服务器：每接受一个 TCP 连接就计数并立即挂断，
+    /// 让 fetch 以连接错误快速失败。用拉取次数而非耗时断言重试行为，
+    /// 跨平台无时间敏感（Windows CI 上 loopback 拒连耗时不稳定）
+    async fn counting_sub_server(attempts: Arc<AtomicUsize>) -> String {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind counting server");
+        let port = listener.local_addr().expect("local addr").port();
+        tokio::spawn(async move {
+            while let Ok((socket, _)) = listener.accept().await {
+                attempts.fetch_add(1, Ordering::Relaxed);
+                drop(socket);
+            }
+        });
+        format!("http://127.0.0.1:{port}/sub")
     }
 
     #[tokio::test]
-    async fn no_retry_returns_immediately() {
+    async fn startup_retries_total_failure_until_budget_exhausted() {
+        let attempts = Arc::new(AtomicUsize::new(0));
+        let url = counting_sub_server(attempts.clone()).await;
         let config = Config {
-            subs: vec!["http://127.0.0.1:1/sub".to_string()],
+            subs: vec![url],
             ..Config::default()
         };
         let state = crate::test_support::app_state(config.clone());
 
-        let started = Instant::now();
-        let err = match super::gen_config(&config, &state, SubFetchRetry::None).await {
-            Ok(_) => panic!("unroutable subscription must fail"),
-            Err(err) => err,
+        // 无手动节点时 gen_config_once 在写盘前返回 NoUsableNodes，不触碰 /tmp/miao-sing-box
+        let err = match tokio::time::timeout(
+            Duration::from_secs(5),
+            super::gen_config(&config, &state, SubFetchRetry::Startup),
+        )
+        .await
+        {
+            Ok(Ok(_)) => panic!("failing subscription must fail"),
+            Ok(Err(err)) => err,
+            Err(_) => panic!("gen_config exceeded 5s with the shortened test schedule"),
         };
 
         assert!(err.is_no_usable_nodes());
-        // Windows CI 上 loopback 拒连可能耗时数百 ms；阈值远小于生产退避（首段 5s）即可
-        assert!(started.elapsed() < Duration::from_secs(2));
+        // 初次 + 测试调度（50ms/100ms）的两段退避 = 恰好 3 次拉取
+        assert_eq!(attempts.load(Ordering::Relaxed), 3);
+    }
+
+    #[tokio::test]
+    async fn no_retry_returns_after_a_single_attempt() {
+        let attempts = Arc::new(AtomicUsize::new(0));
+        let url = counting_sub_server(attempts.clone()).await;
+        let config = Config {
+            subs: vec![url],
+            ..Config::default()
+        };
+        let state = crate::test_support::app_state(config.clone());
+
+        let err = match tokio::time::timeout(
+            Duration::from_secs(5),
+            super::gen_config(&config, &state, SubFetchRetry::None),
+        )
+        .await
+        {
+            Ok(Ok(_)) => panic!("failing subscription must fail"),
+            Ok(Err(err)) => err,
+            Err(_) => panic!("gen_config exceeded 5s without any retry budget"),
+        };
+
+        assert!(err.is_no_usable_nodes());
+        assert_eq!(attempts.load(Ordering::Relaxed), 1);
     }
 }
