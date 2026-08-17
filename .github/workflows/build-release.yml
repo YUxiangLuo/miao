@@ -46,7 +46,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Download frontend artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: frontend-dist
           path: public/
@@ -101,7 +101,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Download frontend artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: frontend-dist
           path: public/
@@ -156,7 +156,7 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/')
     steps:
       - name: Download all release artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: miao-*
           merge-multiple: true
