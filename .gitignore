@@ -7,8 +7,8 @@ node_modules
 # output
 out
 dist
-public/index.html
-public/icon.svg
+# vite 构建产物（被 include_str!/include_bytes! 嵌进 core，CI 以 frontend artifact 传递）
+/public/
 *.tgz
 
 # code coverage

@@ -5,7 +5,19 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Miao 控制面板</title>
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <meta name="theme-color" content="#1a1d22" />
+    <link rel="apple-touch-icon" href="/icon-192.png" />
     <script type="module" src="/src/main.jsx"></script>
+    <script>
+      // PWA：注册 SW 使面板可被安装为桌面应用。dev 服务器下 /sw.js 不存在，
+      // 注册失败静默忽略，不影响开发。
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('/sw.js').catch(() => {})
+        })
+      }
+    </script>
   </head>
   <body>
     <div id="root"></div>

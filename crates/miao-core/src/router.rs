@@ -18,7 +18,10 @@ use crate::handlers::{
     service::{
         get_status, set_node_select, set_route_mode, start_service, stop_service, test_connectivity,
     },
-    static_assets::{serve_favicon, serve_index},
+    static_assets::{
+        serve_favicon, serve_icon_192, serve_icon_512, serve_icon_maskable_512, serve_index,
+        serve_manifest, serve_service_worker,
+    },
     subs::{add_sub, delete_sub, get_subs, refresh_subs},
     version::get_version,
 };
@@ -28,6 +31,11 @@ pub fn build_router(app_state: Arc<AppState>) -> Router {
     let router = Router::new()
         .route("/", get(serve_index))
         .route("/favicon.svg", get(serve_favicon))
+        .route("/manifest.webmanifest", get(serve_manifest))
+        .route("/sw.js", get(serve_service_worker))
+        .route("/icon-192.png", get(serve_icon_192))
+        .route("/icon-512.png", get(serve_icon_512))
+        .route("/icon-maskable-512.png", get(serve_icon_maskable_512))
         .route("/api/status", get(get_status))
         .route("/api/service/start", post(start_service))
         .route("/api/service/stop", post(stop_service))

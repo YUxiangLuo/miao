@@ -78,6 +78,8 @@ cargo run -p miao-cli
 
 **前端改动只跑 `cargo build` 不会生效**：`include_str!` 嵌的是 `public/index.html`。改 JSX/CSS 后先 `./scripts/build-frontend.sh`。
 
+**PWA**：面板可被 Chrome/Edge 安装为桌面应用。`frontend/public/` 里的 `manifest.webmanifest` / `sw.js` / `icon-*.png` 会被 vite 拷进 `public/`，再由 `handlers/static_assets.rs` 经 `include_str!`/`include_bytes!` 嵌入——新增静态资源必须同时在 `router.rs` 注册路由。SW 只是 Chrome 安装门槛的门票：只给导航请求做 network-first 兜底，**永远别缓存 `/api` 或改成离线优先**——面板离开后端就是死页面，单文件 HTML 每版都变，激进缓存只会让旧面板滞留。`/`、`/sw.js`、`/manifest.webmanifest` 都带 `Cache-Control: no-cache` 保证发版后即时更新。新增/替换图标时 PNG 由 `rsvg-convert` 从 `icon.svg` 导出（192/512 为可安装硬性要求，另有 maskable 512）。Windows 桌面壳的 WebView2 也会注册这份 SW，无害。
+
 **fresh clone**：`embedded/` 不入库，`include_bytes!` 引用它们。先 `./scripts/build-embedded.sh` 或 `./build.sh`。CI quality 用 stub 文件绕过，本地别学。Windows `include_bytes!` 走 `embedded/sing-box-windows-amd64.exe`；没有这份文件时，交叉 `check` 也会挂。本机若只有 stub，够编译、不够当真内核。
 
 ## 在 Arch 上怎么「做」Windows
