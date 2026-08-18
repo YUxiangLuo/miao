@@ -16,7 +16,8 @@ mod test_support;
 mod validation;
 
 pub use autostart::{
-    is_enabled as autostart_is_enabled, set_enabled as autostart_set_enabled, MINIMIZED_ARG,
+    is_enabled as autostart_is_enabled, repair_if_stale as autostart_repair_if_stale,
+    set_enabled as autostart_set_enabled, MINIMIZED_ARG,
 };
 pub use error::{AppError, AppResult};
 pub use instance::{

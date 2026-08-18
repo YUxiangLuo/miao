@@ -72,6 +72,16 @@ fn run_hidden(program: &str, args: &[String]) -> std::io::Result<std::process::E
         .status()
 }
 
+#[cfg(windows)]
+fn run_hidden_output(program: &str, args: &[String]) -> std::io::Result<std::process::Output> {
+    use std::os::windows::process::CommandExt;
+    std::process::Command::new(program)
+        .args(args)
+        .creation_flags(CREATE_NO_WINDOW)
+        .stderr(std::process::Stdio::null())
+        .output()
+}
+
 #[cfg(any(windows, test))]
 pub(crate) fn query_command() -> (String, Vec<String>) {
     (
@@ -110,6 +120,90 @@ pub(crate) fn delete_command() -> (String, Vec<String>) {
             "/F".into(),
         ],
     )
+}
+
+#[cfg(windows)]
+fn query_xml_command() -> (String, Vec<String>) {
+    (
+        "schtasks.exe".into(),
+        vec![
+            "/Query".into(),
+            "/TN".into(),
+            AUTOSTART_TASK_NAME.into(),
+            "/XML".into(),
+        ],
+    )
+}
+
+/// schtasks /XML 重定向输出为 UTF-16LE（带 BOM）；兼容无 BOM 的情况。
+#[cfg(any(windows, test))]
+fn decode_task_xml(bytes: &[u8]) -> String {
+    if bytes.starts_with(&[0xFF, 0xFE]) {
+        let units: Vec<u16> = bytes[2..]
+            .chunks_exact(2)
+            .map(|c| u16::from_le_bytes([c[0], c[1]]))
+            .collect();
+        String::from_utf16_lossy(&units)
+    } else {
+        String::from_utf8_lossy(bytes).into_owned()
+    }
+}
+
+/// 从任务 XML 提取 <Command>（exe 路径）。走 /XML 而不是 /V /FO LIST：
+/// 后者列名随系统语言变化，XML 结构与locale无关。
+#[cfg(any(windows, test))]
+fn extract_task_command(xml: &str) -> Option<String> {
+    let start = xml.find("<Command>")? + "<Command>".len();
+    let end = xml[start..].find("</Command>")? + start;
+    let command = xml[start..end].trim();
+    if command.is_empty() {
+        None
+    } else {
+        Some(command.to_string())
+    }
+}
+
+#[cfg(any(windows, test))]
+fn same_exe_path(a: &str, b: &str) -> bool {
+    let norm = |p: &str| p.replace('/', "\\").trim_matches('"').to_lowercase();
+    norm(a) == norm(b)
+}
+
+/// 自修复：任务存在但指向的 exe 与当前进程不一致时（升级/迁移后旧任务残留，
+/// 会把旧版本拉起来），用当前路径重注册。每次启动调用，幂等。
+pub fn repair_if_stale() {
+    #[cfg(windows)]
+    {
+        if !is_enabled() {
+            return;
+        }
+        let current = match std::env::current_exe() {
+            Ok(path) => path,
+            Err(_) => return,
+        };
+        let (program, args) = query_xml_command();
+        let output = match run_hidden_output(&program, &args) {
+            Ok(output) if output.status.success() => output,
+            _ => {
+                tracing::warn!("autostart task XML query failed, skipping path check");
+                return;
+            }
+        };
+        match extract_task_command(&decode_task_xml(&output.stdout)) {
+            Some(task_exe) if same_exe_path(&task_exe, &current.to_string_lossy()) => {}
+            Some(task_exe) => {
+                tracing::info!(
+                    task_exe,
+                    current = %current.display(),
+                    "autostart task points at a stale exe, re-registering with current path"
+                );
+                if let Err(err) = set_enabled(true) {
+                    tracing::warn!(error = %err, "autostart task repair failed");
+                }
+            }
+            None => tracing::warn!("autostart task XML has no <Command>, skipping path check"),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -154,5 +248,49 @@ mod tests {
         assert!(!super::is_enabled());
         assert!(super::set_enabled(true).is_err());
         assert!(super::set_enabled(false).is_err());
+    }
+
+    #[test]
+    fn decode_task_xml_handles_utf16le_bom() {
+        let text = "<?xml version=\"1.0\"?><Task></Task>";
+        let mut bytes = vec![0xFF, 0xFE];
+        for unit in text.encode_utf16() {
+            bytes.extend_from_slice(&unit.to_le_bytes());
+        }
+        assert_eq!(super::decode_task_xml(&bytes), text);
+        // 无 BOM 时按 UTF-8 兜底
+        assert_eq!(super::decode_task_xml(text.as_bytes()), text);
+    }
+
+    #[test]
+    fn extract_task_command_reads_command_element() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-16"?>
+<Task><Actions><Exec><Command>C:\Users\Jane\AppData\Local\Miao\miao.exe</Command><Arguments>--minimized</Arguments></Exec></Actions></Task>"#;
+        assert_eq!(
+            super::extract_task_command(xml).as_deref(),
+            Some(r"C:\Users\Jane\AppData\Local\Miao\miao.exe")
+        );
+        assert_eq!(super::extract_task_command("<Task/>"), None);
+        assert_eq!(super::extract_task_command("<Command></Command>"), None);
+    }
+
+    #[test]
+    fn same_exe_path_is_case_and_slash_insensitive() {
+        assert!(super::same_exe_path(
+            r"C:\Users\Jane\Miao\miao.exe",
+            r"c:\users\jane\miao\miao.exe"
+        ));
+        assert!(super::same_exe_path(
+            "C:/Users/Jane/Miao/miao.exe",
+            r"C:\Users\Jane\Miao\miao.exe"
+        ));
+        assert!(super::same_exe_path(
+            r#""C:\Program Files\Miao\miao.exe""#,
+            r"C:\Program Files\Miao\miao.exe"
+        ));
+        assert!(!super::same_exe_path(
+            r"C:\old\miao.exe",
+            r"C:\new\miao.exe"
+        ));
     }
 }

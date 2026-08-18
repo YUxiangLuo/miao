@@ -5,10 +5,10 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use miao_core::{
-    acquire_single_instance, autostart_is_enabled, autostart_set_enabled, default_log_path,
-    double_click_interval, focus_existing_window, is_elevated, peek_single_instance,
-    require_privileges, show_user_error, spawn_server, InstanceAcquire, InstancePeek,
-    RuntimeOptions, ServerHandle, MINIMIZED_ARG,
+    acquire_single_instance, autostart_is_enabled, autostart_repair_if_stale,
+    autostart_set_enabled, default_log_path, double_click_interval, focus_existing_window,
+    is_elevated, peek_single_instance, require_privileges, show_user_error, spawn_server,
+    InstanceAcquire, InstancePeek, RuntimeOptions, ServerHandle, MINIMIZED_ARG,
 };
 use tauri::menu::{CheckMenuItem, CheckMenuItemBuilder, Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
@@ -60,6 +60,9 @@ fn main() {
             std::mem::forget(guard);
         }
     }
+
+    // 自启任务若指向旧 exe（升级/迁移残留），用当前路径重注册
+    autostart_repair_if_stale();
 
     if let Err(err) = run_app() {
         show_user_error(

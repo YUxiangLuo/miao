@@ -130,7 +130,7 @@ systemd 服务：`/usr/local/bin/miao`，配置 `/etc/miao/config.yaml`，运行
 | 内核看门狗 | 崩溃自动拉起（2s 巡检、1–16s 退避、最多 5 次），放弃时写 `config_warning`；有意启停先递增 `sing_generation` |
 | 日志轮转 | `miao.log` 超 8 MB 启动改名 `.old`（单份滚动） |
 | 托盘 | 单击唤出、双击唤出/收回；菜单：显示窗口/打开日志/开机自启/退出 |
-| 开机自启 | 任务计划 `Miao`（ONLOGON + HIGHEST + `--minimized`），勾选状态即任务存在性、不落配置，切换后回读校验 |
+| 开机自启 | 任务计划 `Miao`（ONLOGON + HIGHEST + `--minimized`），勾选状态即任务存在性、不落配置，切换后回读校验；每次启动校验任务指向的 exe 路径与当前进程一致，不一致（升级/迁移后旧任务残留拉起旧版本）自动用当前路径重注册 |
 | NSIS | 自定义模板 `nsis/installer.nsi`：安装/卸载前查 miao.exe 在跑则拦（提权进程杀不掉，只能拦）。升 tauri-cli 版本要重套这两处 |
 
 TUN JSON：`auto_route` + `strict_route`，`interface_name` 仍是 `sing-tun`。`cfg(target_os = "linux")` 才写 `auto_redirect`。

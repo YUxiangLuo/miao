@@ -27,7 +27,7 @@ GitHub 不可达？用镜像站：<https://miao.vesein.dev/dl/>
 
 ### Windows
 
-从 [Releases](https://github.com/YUxiangLuo/miao/releases/latest) 下载 `miao-windows-amd64-setup.exe`（Win10/11 x64，需 WebView2）。每次启动点一次 UAC；关窗进托盘；托盘勾选「开机自启」免 UAC 自启。
+从 [Releases](https://github.com/YUxiangLuo/miao/releases/latest) 下载 `miao-windows-amd64-setup.exe`（Win10/11 x64，需 WebView2）。每次启动点一次 UAC；关窗进托盘；托盘勾选「开机自启」免 UAC 自启（每次启动自动校验自启任务指向的 exe 路径，升级后指向旧版会自修复）。
 
 ## 文档
 
