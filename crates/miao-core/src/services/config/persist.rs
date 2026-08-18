@@ -225,6 +225,13 @@ pub async fn save_sub_nodes_snapshot(snapshot: &SubNodesSnapshot) -> AppResult<(
 
 async fn save_sub_nodes_snapshot_at(path: &Path, snapshot: &SubNodesSnapshot) -> AppResult<()> {
     let bytes = serde_json::to_vec(snapshot)?;
+    // 秒开 + 订阅无变化的启动也会触发记录：内容一致就跳过，
+    // 避免每次开机把可能 MB 级的快照白写一遍
+    if let Ok(existing) = tokio::fs::read(path).await {
+        if existing == bytes {
+            return Ok(());
+        }
+    }
     write_file_atomic(path, &bytes).await
 }
 
@@ -504,6 +511,34 @@ mod tests {
         assert!(!loaded.matches_subs(&["https://b.example.com".to_string()]));
         assert!(!loaded.matches_subs(&[]));
         assert_eq!(loaded.node_names, vec!["香港 01".to_string()]);
+
+        // 内容一致时跳过重写（mtime 不变）；内容变化才真正落盘
+        let mtime_before = std::fs::metadata(&snapshot_path)
+            .unwrap()
+            .modified()
+            .unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        save_sub_nodes_snapshot_at(&snapshot_path, &snapshot)
+            .await
+            .unwrap();
+        let mtime_after = std::fs::metadata(&snapshot_path)
+            .unwrap()
+            .modified()
+            .unwrap();
+        assert_eq!(
+            mtime_before, mtime_after,
+            "unchanged snapshot must not be rewritten"
+        );
+
+        let changed = SubNodesSnapshot {
+            node_names: vec!["香港 01".to_string(), "日本 02".to_string()],
+            ..snapshot.clone()
+        };
+        save_sub_nodes_snapshot_at(&snapshot_path, &changed)
+            .await
+            .unwrap();
+        let reloaded = read_sub_nodes_snapshot_at(&snapshot_path).await.unwrap();
+        assert_eq!(reloaded.node_names.len(), 2);
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }
