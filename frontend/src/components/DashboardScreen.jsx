@@ -1,6 +1,5 @@
 import {
   TopBar,
-  StatusCard,
   ProxyCard,
   NodesCard,
   SubsCard,
@@ -16,17 +15,13 @@ import {
 export function DashboardScreen({ app }) {
   return (
     <div className="shell">
-      <TopBar
-        status={app.status}
-        versionInfo={app.versionInfo}
-        upgrading={app.upgrading}
-        onUpgradeClick={app.handleUpgradeClick}
-      />
-
       <main className="workspace">
-        <StatusCard
+        <TopBar
           status={app.status}
           traffic={app.traffic}
+          versionInfo={app.versionInfo}
+          upgrading={app.upgrading}
+          onUpgradeClick={app.handleUpgradeClick}
           loadingAction={app.loadingAction}
           onSetRouteMode={app.handleOpenSetRouteModeConfirm}
           onOpenConnections={app.handleOpenConnections}

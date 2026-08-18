@@ -1,14 +1,22 @@
-.topbar {
-    display: flex;
-    align-items: center;
+/* 顶栏 = 融合品牌/状态/速率/模式/版本的唯一卡片条（.status-card.topbar），
+   位于 workspace 内与内容同宽对齐（宽屏不再两端悬空） */
+.topbar .status-card-body {
     gap: 16px;
-    height: 60px;
-    padding: 0 24px;
+}
+.topbar-divider {
+    width: 1px;
+    height: 32px;
+    background: var(--border);
+    flex-shrink: 0;
+}
+.topbar .version-chip {
+    flex-shrink: 0;
 }
 .brand {
     display: flex;
     align-items: center;
     gap: 8px;
+    flex-shrink: 0;
 }
 .brand-icon {
     color: var(--accent);
@@ -25,36 +33,10 @@
     }
 }
 .brand-name {
-    color: var(--text);
-    font-size: 1.1875rem;
+    color: var(--text-strong);
+    font-size: 1.125rem;
     font-weight: 600;
     letter-spacing: 0.5px;
-}
-.topbar-spacer {
-    flex: 1;
-}
-.run-badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 5px 10px;
-    border-radius: 4px;
-    font-size: 0.875rem;
-    font-weight: 500;
-}
-.run-badge.running {
-    background: var(--surface-green-soft);
-    color: var(--success);
-}
-.run-badge.stopped {
-    background: var(--surface-red);
-    color: var(--danger);
-}
-.run-dot {
-    width: 6px;
-    height: 6px;
-    border-radius: 999px;
-    background: currentColor;
 }
 .version-chip {
     display: inline-flex;
