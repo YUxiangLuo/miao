@@ -22,9 +22,11 @@
     --shadow: 0 16px 32px rgba(0, 0, 0, 0.25);
     --radius: 8px;
     --home-connections-height: 184px;
-    /* 桌面双列（>1180px）内容网格固定高度：状态卡 76 + 网格 + 条带 184，
-       整页需求 ≈ 网格高 + 392px；窗口偏矮时列内滚动兜底，偏高时底部留白 */
-    --home-grid-height: 630px;
+    /* 桌面双列（>1180px）内容网格高度：630px 保底，高视口吃掉全部剩余垂直空间。
+       404 = topbar 60 + 工作区上下 padding 48 + 状态卡 76 + 状态卡 margin-bottom 20
+             + 条带 margin-top 16 + 条带 184；
+       视口偏矮时网格 flex 收缩、列内滚动兜底（与既有行为一致） */
+    --home-grid-height: max(630px, calc(100vh - 404px));
     --node-card-min-height: 326px;
 }
 
