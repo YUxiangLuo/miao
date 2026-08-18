@@ -2,6 +2,9 @@
    位于 workspace 内与内容同宽对齐（宽屏不再两端悬空） */
 .topbar .status-card-body {
     gap: var(--space-3);
+    /* 64px logo + 2×6px = 76px 顶栏高度不变 */
+    padding-top: 6px;
+    padding-bottom: 6px;
 }
 .topbar-divider {
     width: 1px;
@@ -31,12 +34,6 @@
     50% {
         filter: drop-shadow(0 0 8px rgba(167, 139, 250, 0.7));
     }
-}
-.brand-name {
-    color: var(--text-strong);
-    font-size: var(--fs-xl);
-    font-weight: 600;
-    letter-spacing: 0.5px;
 }
 .version-chip {
     display: inline-flex;

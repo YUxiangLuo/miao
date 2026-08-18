@@ -1,14 +1,12 @@
 import {
   ArrowUp,
   ArrowDown,
-  Activity,
   Globe2,
   LoaderCircle,
-  PowerOff,
   Route,
 } from 'lucide-react'
 import { SectionCard, LogoIcon } from './ui.jsx'
-import { classNames, formatUptime, formatSpeed } from '../utils.js'
+import { classNames, formatSpeed } from '../utils.js'
 
 export function TopBar({
   status,
@@ -25,36 +23,15 @@ export function TopBar({
   const isGlobalMode = status.route_mode === 'global'
   const modeSwitching = loadingAction === 'routeMode'
   const modeControlDisabled = modeSwitching || status.initializing
-  const serviceTone = status.initializing ? 'initializing' : status.running ? 'running' : 'stopped'
-  const StatusIcon = status.initializing ? LoaderCircle : status.running ? Activity : PowerOff
 
   return (
     <SectionCard className="status-card topbar" bodyClassName="status-card-body" header={null}>
       <div className="brand">
-        <LogoIcon size={30} />
-        <span className="brand-name">Miao</span>
+        <LogoIcon size={64} />
       </div>
       <div className="topbar-divider" />
 
       <div className="status-cluster">
-        <div className="status-left-wrap">
-          <div className={classNames('status-pill-icon', serviceTone)}>
-            <StatusIcon size={18} className={classNames('status-pill-glyph', status.initializing && 'spin')} />
-          </div>
-          <div className="status-copy">
-            <div className="status-title">
-              Sing-box {status.initializing ? '初始化中' : status.running ? '运行中' : '已停止'}
-            </div>
-            <div className="status-subtitle num">
-              {status.running
-                ? `PID: ${status.pid ?? '--'} · 运行时长: ${formatUptime(status.uptime_secs)}`
-                : status.initializing
-                  ? '正在获取订阅并启动服务…'
-                  : '等待启动服务'}
-            </div>
-          </div>
-        </div>
-
         <button
           type="button"
           className="traffic-chip"

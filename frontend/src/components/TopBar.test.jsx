@@ -21,14 +21,16 @@ function renderTopBar(overrides = {}) {
 }
 
 describe('TopBar merged layout', () => {
-  it('融合了品牌、状态、速率、模式与版本号，且无独立的运行中徽章', () => {
+  it('融合了品牌 logo、速率、模式与版本号；品牌文字与状态块已移除', () => {
     const { container } = renderTopBar()
 
-    // 品牌
-    expect(screen.getByText('Miao')).toBeInTheDocument()
-    expect(container.querySelector('.brand-icon')).toBeInTheDocument()
-    // 状态文案只出现一次（原 header 的 run-badge 已删除）
-    expect(screen.getByText(/Sing-box 运行中/)).toBeInTheDocument()
+    // 品牌：仅 64px logo，无品牌文字、无状态块
+    const logo = container.querySelector('.brand-icon')
+    expect(logo).toBeInTheDocument()
+    expect(logo).toHaveAttribute('width', '64')
+    expect(screen.queryByText('Miao')).not.toBeInTheDocument()
+    expect(screen.queryByText(/Sing-box/)).not.toBeInTheDocument()
+    expect(container.querySelector('.status-left-wrap')).not.toBeInTheDocument()
     expect(container.querySelector('.run-badge')).not.toBeInTheDocument()
     // 速率、模式、版本号都在
     expect(screen.getByTitle('查看链接统计')).toBeInTheDocument()
