@@ -74,6 +74,12 @@ pub fn extract_sing_box() -> AppResult<PathBuf> {
         fs::create_dir_all(&sing_box_home)
             .map_err(|e| AppError::context("Failed to create sing-box home directory", e))?;
     }
+    // 运行时目录含订阅凭证（config.json / sub-nodes.json / cache.db）：仅属主可进，
+    // 避免同机其他用户读取。每次启动都执行，顺带修正旧版本留下的宽松权限；
+    // 失败只告警——可用性优先，不给异常文件系统添启动故障
+    if let Err(err) = restrict_to_owner(&sing_box_home) {
+        warn!(error = %err, path = ?sing_box_home, "Failed to restrict sing-box home permissions");
+    }
 
     let sing_box_path = sing_box_home.join(sing_box_file_name());
 
@@ -390,6 +396,21 @@ async fn watch_sing_box(state: Arc<AppState>, generation: u64) {
     }
 }
 
+/// unix：运行时目录设为 0700（内含订阅凭证，仅属主可入）。
+/// 其他平台无需处理：Windows 的 %TEMP% 本就是用户私有目录。
+fn restrict_to_owner(path: &std::path::Path) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(path, fs::Permissions::from_mode(0o700))
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = path;
+        Ok(())
+    }
+}
+
 fn set_executable(path: &std::path::Path) -> std::io::Result<()> {
     #[cfg(unix)]
     {
@@ -617,6 +638,22 @@ fn cleanup_stale_tun_adapter() {
 mod tests {
     use super::{restart_backoff, tun_adapter_cleanup_command, TUN_ADAPTER_NAME};
     use tokio::time::Duration;
+
+    #[cfg(unix)]
+    #[test]
+    fn restrict_to_owner_sets_private_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = std::env::temp_dir().join(format!("miao-perms-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        super::restrict_to_owner(&dir).unwrap();
+
+        let mode = std::fs::metadata(&dir).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o700);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn restart_backoff_grows_exponentially_and_caps() {
