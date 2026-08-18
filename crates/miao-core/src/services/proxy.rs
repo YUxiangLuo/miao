@@ -107,12 +107,45 @@ async fn load_last_proxy() -> Option<LastProxy> {
     }
 }
 
-pub async fn restore_last_proxy(state: &Arc<AppState>) {
+/// 内核（重）启动后调用：捕获当前 sing_generation 并派生恢复任务。
+/// 连续两次热重启会各派生一个任务；旧任务在落地前发现自己监护的启动
+/// 已被取代即放弃，避免陈旧的 PUT 覆盖更新那次启动的选择。
+pub fn spawn_restore_last_proxy(state: &Arc<AppState>) {
+    let generation = state
+        .sing_generation
+        .load(std::sync::atomic::Ordering::Relaxed);
+    let state = state.clone();
+    tokio::spawn(async move {
+        restore_last_proxy(&state, generation).await;
+    });
+}
+
+fn is_superseded(state: &AppState, generation: u64) -> bool {
+    state
+        .sing_generation
+        .load(std::sync::atomic::Ordering::Relaxed)
+        != generation
+}
+
+async fn restore_last_proxy(state: &Arc<AppState>, generation: u64) {
+    if is_superseded(state, generation) {
+        return;
+    }
+
+    // 等内核与 Clash API 就绪（启发式）
+    sleep(Duration::from_secs(1)).await;
+
+    if is_superseded(state, generation) {
+        info!("Skipping last-proxy restore: superseded by a newer sing-box start");
+        return;
+    }
+
     if !state.config.read().await.node_select.is_manual() {
         info!("Skipping last-proxy restore while urltest node_select is active");
         return;
     }
 
+    // 等待期间用户可能已切换节点：落地前才读取，避免把旧选择 PUT 回去
     let proxy = match load_last_proxy().await {
         Some(p) => p,
         None => return,
@@ -122,8 +155,6 @@ pub async fn restore_last_proxy(state: &Arc<AppState>) {
         "Attempting to restore last proxy: {} -> {}",
         proxy.group, proxy.name
     );
-
-    sleep(Duration::from_secs(1)).await;
 
     let url = format!(
         "http://127.0.0.1:6262/proxies/{}",
@@ -154,6 +185,11 @@ pub async fn restore_last_proxy(state: &Arc<AppState>) {
             return;
         }
     } else {
+        return;
+    }
+
+    // GET 往返可能耗时数秒：PUT 前最后确认一次这次启动仍是最新的
+    if is_superseded(state, generation) {
         return;
     }
 
@@ -279,6 +315,21 @@ mod tests {
         assert!(!os_release_looks_like_openwrt(
             "ID=ubuntu\nVERSION_ID=24.04\n"
         ));
+    }
+
+    #[tokio::test]
+    async fn restore_aborts_immediately_when_start_is_superseded() {
+        let state = crate::test_support::app_state(crate::models::Config::default());
+        // 任务监护的 generation=0 已被 generation=1 取代：应立即返回，
+        // 不睡 1s、不读 .last_proxy、不碰网络
+        state
+            .sing_generation
+            .store(1, std::sync::atomic::Ordering::Relaxed);
+
+        let start = std::time::Instant::now();
+        super::restore_last_proxy(&state, 0).await;
+
+        assert!(start.elapsed() < std::time::Duration::from_secs(1));
     }
 
     #[tokio::test]

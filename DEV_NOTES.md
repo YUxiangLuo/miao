@@ -195,7 +195,9 @@ Arch 上的面板仍是那份 systemd Linux 实例，可以用来看 **共享 UI
 
 节点集来源由 `SubSource` 分流：`old.subs == new.subs`（节点选择/route_mode/规则/去广告/手动节点等本地语义变更）→ `SnapshotOrFetch`，用 `sub-nodes.json` 快照零网络重建（`gen_config_from_snapshot`，快照缺失或 subs 护栏不匹配才退化拉取）；增删订阅/手动刷新/启动 → `Fetch` 真拉取。快照只在校验通过（或启动成功、字节无变化）后由 `record_fresh_snapshot` 落盘，全失败时不用空结果覆盖好快照。快照重建不动 `sub_status`（面板订阅状态=上次真拉取结果）。订阅全失败触发 `NoUsableNodes` 时，有本地材料（运行时快照/cache/sub-nodes.json 任一）则回滚并报错保留现状，不再停核清场；三者全无才落盘+停核。
 
-启动是两条路：`config.json.cache` 存在且通过 `sing-box check` → 直接起内核（秒开），随后以 `Startup` 策略后台刷新（仍持 `config_update` 锁，与面板编辑互斥；随初始化任务一同被关停取消）；无缓存/缓存失效 → 原同步拉取路径。
+启动是两条路：`config.json.cache` 存在且通过 `sing-box check` → 直接起内核（秒开），随后以 `Startup` 策略后台刷新（拉取阶段不持 `config_update` 锁——网络退避不再阻塞面板写操作；落地阶段持锁复用预拉取结果（`SubSource::Prefetched`），期间订阅列表被改（面板编辑已自行应用）或服务被显式停止则放弃本次刷新；随初始化任务一同被关停取消）；无缓存/缓存失效 → 原同步拉取路径。
+
+依赖与供应链杂项：YAML 用 `yaml_serde`（serde_yaml 已弃用归档；官方 YAML 组织维护的分支，API 兼容，后端是纯 Rust 的 libyaml-rs）；`AppState.http_client` 显式 `no_proxy()`——本进程自己就是代理，订阅拉取与 Clash API 不应被 root 环境变量代理劫持；VPS 部署与启动后台刷新都不在 `config_update` 锁内做网络等待；VPS 的 Hysteria2 安装钉版 + 官方 `hashes.txt` 校验和验证（替代 curl|bash 的 get.hy2.sh，升级靠人工 bump 脚本内 `HYSTERIA_VERSION`），节点凭据经 stdin 变量前缀注入远端脚本、不进远端进程 argv，SSH 主机密钥 `accept-new`（TOFU：首连信任并记录到 root 的 known_hosts，之后变更被拒）。
 
 ## MCP 端点
 

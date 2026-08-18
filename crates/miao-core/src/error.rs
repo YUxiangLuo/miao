@@ -10,7 +10,7 @@ pub enum AppError {
     NoUsableNodes,
     Io(std::io::Error),
     Json(serde_json::Error),
-    Yaml(serde_yaml::Error),
+    Yaml(yaml_serde::Error),
     Http(reqwest::Error),
     Context {
         context: String,
@@ -96,8 +96,8 @@ impl From<serde_json::Error> for AppError {
     }
 }
 
-impl From<serde_yaml::Error> for AppError {
-    fn from(value: serde_yaml::Error) -> Self {
+impl From<yaml_serde::Error> for AppError {
+    fn from(value: yaml_serde::Error) -> Self {
         Self::Yaml(value)
     }
 }

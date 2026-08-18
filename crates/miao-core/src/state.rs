@@ -50,8 +50,12 @@ impl AppState {
         config_path: PathBuf,
         volatile_path: PathBuf,
     ) -> Result<Self, reqwest::Error> {
+        // reqwest 默认会读 HTTP_PROXY/HTTPS_PROXY 等环境变量代理。本进程自己
+        // 就是代理：订阅拉取、Clash API（127.0.0.1）都不该被 root 环境里的
+        // 代理变量劫持，显式禁用。
         let http_client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(30))
+            .no_proxy()
             .build()?;
 
         Ok(Self {

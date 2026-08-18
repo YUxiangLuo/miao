@@ -67,18 +67,6 @@ impl SubFetchRetry {
     }
 }
 
-/// 是否值得为这次结果退避重试：配置了订阅却一个订阅节点都没拿到才算
-/// （全部秒败是网络未就绪的典型瞬态）；部分成功/其他错误更像订阅本身坏了，直接返回
-fn should_retry_sub_fetch(result: &AppResult<GenConfigOutcome>, subs_configured: bool) -> bool {
-    if !subs_configured {
-        return false;
-    }
-    match result {
-        Ok(outcome) => !outcome.has_sub_nodes,
-        Err(err) => err.is_no_usable_nodes(),
-    }
-}
-
 /// 拉取订阅并写出 sing-box 配置；订阅全失败时按 retry 预算退避重试。
 /// 返回是否拿到订阅节点，以及实际生效的 node_select。
 pub async fn gen_config(
@@ -86,15 +74,28 @@ pub async fn gen_config(
     state: &Arc<AppState>,
     retry: SubFetchRetry,
 ) -> AppResult<GenConfigOutcome> {
+    let (node_names, outbounds) = fetch_sub_nodes(config, state, retry).await;
+    gen_config_from_nodes(config, state, node_names, outbounds).await
+}
+
+/// 只拉取订阅节点集（不写盘）：订阅全失败时按 retry 预算退避重试。
+/// 供「先拉取、后持锁落地」的调用方（启动后台刷新）把网络等待移出配置锁。
+pub async fn fetch_sub_nodes(
+    config: &Config,
+    state: &Arc<AppState>,
+    retry: SubFetchRetry,
+) -> (Vec<String>, Vec<serde_json::Value>) {
     let schedule = retry.schedule();
     let mut attempt = 0usize;
     loop {
-        let result = gen_config_once(config, state).await;
-        if !should_retry_sub_fetch(&result, !config.subs.is_empty()) {
-            return result;
+        let (node_names, outbounds) = fetch_all_subs(config, state).await;
+        // 是否值得退避重试：配置了订阅却一个订阅节点都没拿到才算
+        // （全部秒败是网络未就绪的典型瞬态）；部分成功/其他错误更像订阅本身坏了
+        if !node_names.is_empty() || config.subs.is_empty() {
+            return (node_names, outbounds);
         }
         let Some(delay) = schedule.get(attempt) else {
-            return result;
+            return (node_names, outbounds);
         };
         attempt += 1;
         info!(
@@ -105,8 +106,13 @@ pub async fn gen_config(
     }
 }
 
-async fn gen_config_once(config: &Config, state: &Arc<AppState>) -> AppResult<GenConfigOutcome> {
-    let (node_names, outbounds) = fetch_all_subs(config, state).await;
+/// 用已获取的订阅节点集构建并写出配置：gen_config 与预拉取（Prefetched）共用。
+pub(super) async fn gen_config_from_nodes(
+    config: &Config,
+    state: &Arc<AppState>,
+    node_names: Vec<String>,
+    outbounds: Vec<serde_json::Value>,
+) -> AppResult<GenConfigOutcome> {
     let fresh = (!node_names.is_empty()).then(|| (node_names.clone(), outbounds.clone()));
     let mut outcome = build_write_and_record(config, state, node_names, outbounds).await?;
     outcome.fresh_sub_nodes = fresh;
@@ -360,20 +366,11 @@ pub async fn known_rule_targets(config: &Config) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{should_retry_sub_fetch, GenConfigOutcome, SubFetchRetry, STARTUP_RETRY_SCHEDULE};
-    use crate::error::AppError;
-    use crate::models::{Config, NodeSelect};
+    use super::{SubFetchRetry, STARTUP_RETRY_SCHEDULE};
+    use crate::models::Config;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
     use tokio::time::Duration;
-
-    fn outcome(has_sub_nodes: bool) -> GenConfigOutcome {
-        GenConfigOutcome {
-            has_sub_nodes,
-            node_select: NodeSelect::Manual,
-            fresh_sub_nodes: None,
-        }
-    }
 
     #[test]
     fn startup_retry_schedule_is_bounded_under_a_minute() {
@@ -385,19 +382,6 @@ mod tests {
                 Duration::from_secs(30)
             ]
         );
-    }
-
-    #[test]
-    fn retry_only_applies_to_total_subscription_failure() {
-        assert!(should_retry_sub_fetch(&Ok(outcome(false)), true));
-        assert!(!should_retry_sub_fetch(&Ok(outcome(true)), true));
-        assert!(should_retry_sub_fetch(&Err(AppError::NoUsableNodes), true));
-        assert!(!should_retry_sub_fetch(
-            &Err(AppError::message("boom")),
-            true
-        ));
-        // 未配置订阅时「全失败」不是瞬态，重试无意义
-        assert!(!should_retry_sub_fetch(&Ok(outcome(false)), false));
     }
 
     /// 本地「计数拒答」订阅服务器：每接受一个 TCP 连接就计数并立即挂断，

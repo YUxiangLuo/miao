@@ -1,5 +1,5 @@
 use serde_json::{json, Value as JsonValue};
-use serde_yaml::Value;
+use yaml_serde::Value;
 
 use super::transport::{
     build_required_tls, build_tls, build_v2ray_transport, parse_hysteria2_obfs,

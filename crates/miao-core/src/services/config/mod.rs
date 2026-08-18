@@ -12,7 +12,8 @@ pub use apply::{
     RefreshPolicy, SubSource,
 };
 pub use generate::{
-    gen_config, known_rule_targets, record_fresh_snapshot, GenConfigOutcome, SubFetchRetry,
+    fetch_sub_nodes, gen_config, known_rule_targets, record_fresh_snapshot, GenConfigOutcome,
+    SubFetchRetry,
 };
 pub use persist::{
     has_config_cache, load_volatile_config_at, persist_effective_node_select,

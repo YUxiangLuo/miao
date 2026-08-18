@@ -1,5 +1,5 @@
 use serde_json::{json, Map, Value as JsonValue};
-use serde_yaml::Value;
+use yaml_serde::Value;
 
 use super::validate::validate_client_fingerprint;
 use super::yaml::{

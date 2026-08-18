@@ -8,7 +8,6 @@ use tracing::{info, warn};
 
 use crate::error::{AppError, AppResult};
 use crate::models::{Config, Hysteria2, Hysteria2Obfs, Tls};
-use crate::services::config::save_config_to;
 use crate::services::node_parser::parse_node_json;
 use crate::validation::Validator;
 
@@ -81,7 +80,26 @@ impl Drop for AskpassFiles {
     }
 }
 
-/// 构建 ssh 命令;密码认证通过 env 注入 askpass,密码不进 argv
+/// 把敏感参数作为 shell 变量赋值前缀拼进 stdin 脚本,而不是放在远端进程
+/// argv(/proc/<pid>/cmdline 对 VPS 上所有用户可读;stdin 不可见)。
+/// 值都是本地生成的 hex 字符串,单引号包裹无注入面。
+fn with_shell_vars(script: &str, vars: &[(&str, &str)]) -> String {
+    let mut out = String::with_capacity(script.len() + 64);
+    for (key, value) in vars {
+        out.push_str(key);
+        out.push_str("='");
+        out.push_str(value);
+        out.push_str("'\n");
+    }
+    out.push_str(script);
+    out
+}
+
+/// 构建 ssh 命令;密码认证通过 env 注入 askpass,密码不进 argv。
+/// StrictHostKeyChecking=accept-new 是 TOFU:首次连接信任并记录主机密钥到
+/// root 的 known_hosts(install.sh 的 systemd 单元无 ProtectHome,可写),
+/// 之后同一主机密钥变更会被拒绝。首连存在 MITM 窗口——
+/// 密码认证且没有预共享指纹时的固有取舍。
 fn build_ssh_command(
     vps_ip: &str,
     askpass: &AskpassFiles,
@@ -133,23 +151,14 @@ pub fn node_tag_for_vps(config: &Config, vps_ip: &str) -> Option<String> {
     })
 }
 
-/// 通过 root 密码 SSH 在 VPS 上部署(或取回已有)Hysteria2 节点并写回配置。
-/// 密码只用于本次部署,不会被持久化。
-pub async fn deploy_vps_node(
-    config: &mut Config,
-    config_path: &Path,
-    vps_ip: &str,
-    root_password: &str,
-) -> AppResult<bool> {
+/// 通过 root 密码 SSH 在 VPS 上部署(或取回已有)Hysteria2 节点,返回节点 JSON。
+/// 密码只用于本次部署,不会被持久化。本函数只做 SSH 供给、不读写配置——
+/// 节点由调用方在配置事务内追加并落盘,因此供给期间不需要持有配置锁。
+pub async fn provision_vps_node(vps_ip: &str, root_password: &str) -> AppResult<String> {
     let vps_ip = vps_ip.trim().to_string();
 
     Validator::server_address(&vps_ip)
         .map_err(|e| AppError::message(format!("Invalid VPS address '{}': {}", vps_ip, e)))?;
-
-    if node_tag_for_vps(config, &vps_ip).is_some() {
-        info!(vps_ip = %vps_ip, "Manual node for VPS already exists, skipping provisioning");
-        return Ok(false);
-    }
 
     let fallback_obfs_password = random_password()?;
     let credentials = match probe_remote_hysteria_credentials(
@@ -185,15 +194,10 @@ pub async fn deploy_vps_node(
         Err(e) => return Err(e),
     };
 
-    config.nodes.push(build_hysteria_node_json(
-        &vps_ip,
-        &credentials.password,
-        &credentials.obfs_password,
-    )?);
-    save_config_to(config_path, config).await?;
-    info!(vps_ip = %vps_ip, port = HYSTERIA_PORT, config_path = ?config_path, "Added provisioned VPS Hysteria2 node to config");
-
-    Ok(true)
+    let node_json =
+        build_hysteria_node_json(&vps_ip, &credentials.password, &credentials.obfs_password)?;
+    info!(vps_ip = %vps_ip, port = HYSTERIA_PORT, "Provisioned VPS Hysteria2 node");
+    Ok(node_json)
 }
 
 fn build_hysteria_node_json(
@@ -265,20 +269,20 @@ async fn probe_remote_hysteria_credentials(
     root_password: &str,
 ) -> AppResult<RemoteHysteriaState> {
     let askpass = AskpassFiles::new(root_password)?;
-    let mut child = build_ssh_command(
-        vps_ip,
-        &askpass,
-        &["bash", "-s", "--", fallback_obfs_password],
-    )
-    .stdin(Stdio::piped())
-    .stdout(Stdio::piped())
-    .stderr(Stdio::piped())
-    .spawn()
-    .map_err(|e| AppError::context("Failed to start ssh for VPS config probe", e))?;
+    let mut child = build_ssh_command(vps_ip, &askpass, &["bash", "-s"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| AppError::context("Failed to start ssh for VPS config probe", e))?;
 
     if let Some(mut stdin) = child.stdin.take() {
+        let script = with_shell_vars(
+            remote_hysteria_probe_script(),
+            &[("FALLBACK_OBFS_PASSWORD", fallback_obfs_password)],
+        );
         stdin
-            .write_all(remote_hysteria_probe_script().as_bytes())
+            .write_all(script.as_bytes())
             .await
             .map_err(|e| AppError::context("Failed to send VPS config probe script over ssh", e))?;
     }
@@ -388,26 +392,23 @@ async fn provision_remote_hysteria(
     root_password: &str,
 ) -> AppResult<()> {
     let askpass = AskpassFiles::new(root_password)?;
-    let mut child = build_ssh_command(
-        vps_ip,
-        &askpass,
-        &[
-            "bash",
-            "-s",
-            "--",
-            &credentials.password,
-            &credentials.obfs_password,
-        ],
-    )
-    .stdin(Stdio::piped())
-    .stdout(Stdio::inherit())
-    .stderr(Stdio::inherit())
-    .spawn()
-    .map_err(|e| AppError::context("Failed to start ssh for VPS provisioning", e))?;
+    let mut child = build_ssh_command(vps_ip, &askpass, &["bash", "-s"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit())
+        .spawn()
+        .map_err(|e| AppError::context("Failed to start ssh for VPS provisioning", e))?;
 
     if let Some(mut stdin) = child.stdin.take() {
+        let script = with_shell_vars(
+            remote_hysteria_script(),
+            &[
+                ("PASSWORD", &credentials.password),
+                ("OBFS_PASSWORD", &credentials.obfs_password),
+            ],
+        );
         stdin
-            .write_all(remote_hysteria_script().as_bytes())
+            .write_all(script.as_bytes())
             .await
             .map_err(|e| AppError::context("Failed to send VPS provisioning script over ssh", e))?;
     }
@@ -437,7 +438,7 @@ async fn provision_remote_hysteria(
 
 fn remote_hysteria_probe_script() -> &'static str {
     r#"set -euo pipefail
-FALLBACK_OBFS_PASSWORD="$1"
+# FALLBACK_OBFS_PASSWORD 由调用方以变量前缀形式经 stdin 注入(不进远端 argv)
 CONFIG="/etc/hysteria/config.yaml"
 SERVICE="hysteria-server.service"
 
@@ -571,8 +572,7 @@ printf '%s\n' "$GECKO_PASSWORD"
 
 fn remote_hysteria_script() -> &'static str {
     r#"set -euo pipefail
-PASSWORD="$1"
-OBFS_PASSWORD="$2"
+# PASSWORD / OBFS_PASSWORD 由调用方以变量前缀形式经 stdin 注入(不进远端 argv)
 SERVICE="hysteria-server.service"
 
 if [ "$(id -u)" -ne 0 ]; then
@@ -580,7 +580,7 @@ if [ "$(id -u)" -ne 0 ]; then
   exit 1
 fi
 
-for cmd in bash curl systemctl openssl; do
+for cmd in bash curl systemctl openssl sha256sum awk mktemp; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
     echo "Missing required command: $cmd" >&2
     exit 1
@@ -595,7 +595,34 @@ pkill -x hysteria >/dev/null 2>&1 || true
 rm -rf /etc/hysteria
 rm -f /usr/local/bin/hysteria
 
-HYSTERIA_USER=root bash <(curl -fsSL https://get.hy2.sh/)
+# 安装 Hysteria2:钉版 + 官方 release 校验和验证,替代 curl|bash 第三方
+# 安装脚本(不在远端执行下载的脚本,部署结果可复现)。升级方式:
+# 人工核对 changelog 后 bump HYSTERIA_VERSION。
+HYSTERIA_VERSION="v2.12.1"
+case "$(uname -m)" in
+  x86_64) HYSTERIA_ARCH="amd64" ;;
+  aarch64|arm64) HYSTERIA_ARCH="arm64" ;;
+  *) echo "Unsupported architecture: $(uname -m)" >&2; exit 1 ;;
+esac
+HYSTERIA_ASSET="hysteria-linux-${HYSTERIA_ARCH}"
+HYSTERIA_BASE_URL="https://github.com/apernet/hysteria/releases/download/app/${HYSTERIA_VERSION}"
+
+HYSTERIA_TMP="$(mktemp)"
+trap 'rm -f "$HYSTERIA_TMP"' EXIT
+curl -fsSLo "$HYSTERIA_TMP" "${HYSTERIA_BASE_URL}/${HYSTERIA_ASSET}"
+EXPECTED_SUM="$(curl -fsSL "${HYSTERIA_BASE_URL}/hashes.txt" | awk -v f="build/${HYSTERIA_ASSET}" '$2 == f {print $1}')"
+if [ -z "$EXPECTED_SUM" ]; then
+  echo "Failed to resolve checksum for ${HYSTERIA_ASSET}" >&2
+  exit 1
+fi
+ACTUAL_SUM="$(sha256sum "$HYSTERIA_TMP" | awk '{print $1}')"
+if [ "$ACTUAL_SUM" != "$EXPECTED_SUM" ]; then
+  echo "Hysteria2 binary checksum mismatch" >&2
+  exit 1
+fi
+install -m 755 "$HYSTERIA_TMP" /usr/local/bin/hysteria
+rm -f "$HYSTERIA_TMP"
+trap - EXIT
 
 install -d -m 700 /etc/hysteria
 openssl req -x509 -nodes -newkey rsa:2048 -sha256 -days 3650 \
@@ -625,6 +652,24 @@ masquerade:
 EOF
 chmod 600 /etc/hysteria/config.yaml
 
+cat > /etc/systemd/system/hysteria-server.service <<'UNIT'
+[Unit]
+Description=Hysteria Server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/hysteria server -c /etc/hysteria/config.yaml
+Restart=on-failure
+RestartSec=5
+User=root
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+systemctl daemon-reload
+
 systemctl enable "$SERVICE"
 systemctl restart "$SERVICE"
 systemctl is-active --quiet "$SERVICE"
@@ -635,8 +680,8 @@ systemctl is-active --quiet "$SERVICE"
 mod tests {
     use super::{
         build_hysteria_node_json, build_ssh_command, node_tag_for_vps, parse_probe_credentials,
-        remote_hysteria_probe_script, remote_hysteria_script, vps_node_tag, AskpassFiles,
-        HYSTERIA_PORT,
+        remote_hysteria_probe_script, remote_hysteria_script, vps_node_tag, with_shell_vars,
+        AskpassFiles, HYSTERIA_PORT,
     };
     use crate::models::Config;
     use std::ffi::OsStr;
@@ -768,5 +813,43 @@ mod tests {
         assert!(script.contains("rm -rf /etc/hysteria"));
         assert!(script.contains("rm -f /usr/local/bin/hysteria"));
         assert!(script.contains("-subj \"/CN=miao-hysteria\""));
+    }
+
+    #[test]
+    fn provision_script_installs_pinned_verified_hysteria_binary() {
+        let script = remote_hysteria_script();
+
+        // 不再 curl|bash 第三方安装脚本;钉版 + 官方校验和验证 + 自带 systemd 单元
+        assert!(!script.contains("get.hy2.sh"));
+        assert!(script.contains("HYSTERIA_VERSION=\"v"));
+        assert!(script.contains("hysteria-linux-${HYSTERIA_ARCH}"));
+        assert!(script.contains("hashes.txt"));
+        assert!(script.contains("sha256sum"));
+        assert!(script.contains("checksum mismatch"));
+        assert!(script.contains("/etc/systemd/system/hysteria-server.service"));
+        assert!(script.contains("systemctl daemon-reload"));
+        // 凭据不再作为远端进程 argv($1/$2)读取,由 stdin 变量前缀注入
+        assert!(!script.contains("PASSWORD=\"$1\""));
+        assert!(!script.contains("OBFS_PASSWORD=\"$2\""));
+    }
+
+    #[test]
+    fn probe_script_takes_fallback_obfs_from_stdin_vars_not_argv() {
+        let script = remote_hysteria_probe_script();
+
+        assert!(!script.contains("FALLBACK_OBFS_PASSWORD=\"$1\""));
+        // 脚本体仍消费该变量(由 stdin 前缀注入)
+        assert!(script.contains("$FALLBACK_OBFS_PASSWORD"));
+    }
+
+    #[test]
+    fn shell_vars_prefix_quotes_hex_values() {
+        let script = with_shell_vars(
+            "set -euo pipefail\nbody",
+            &[("PASSWORD", "deadbeef"), ("OBFS_PASSWORD", "cafe")],
+        );
+
+        assert!(script.starts_with("PASSWORD='deadbeef'\nOBFS_PASSWORD='cafe'\n"));
+        assert!(script.ends_with("set -euo pipefail\nbody"));
     }
 }

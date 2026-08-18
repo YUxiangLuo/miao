@@ -49,7 +49,7 @@ pub(super) async fn write_file_atomic(path: &Path, content: &[u8]) -> AppResult<
 }
 
 async fn save_yaml_to(path: &Path, value: &impl serde::Serialize) -> AppResult<()> {
-    let yaml = serde_yaml::to_string(value)?;
+    let yaml = yaml_serde::to_string(value)?;
     if let Ok(existing) = tokio::fs::read_to_string(path).await {
         if existing == yaml {
             info!(path = ?path, "File already up to date, skipping write");
@@ -68,7 +68,7 @@ pub async fn save_config_to(path: &Path, config: &Config) -> AppResult<()> {
 /// （调用方保留 config.yaml 的解析结果，见 `Config::overlay`）。
 pub async fn load_volatile_config_at(path: &Path) -> Option<VolatileConfig> {
     let content = tokio::fs::read_to_string(path).await.ok()?;
-    serde_yaml::from_str(&content).ok()
+    yaml_serde::from_str(&content).ok()
 }
 
 pub async fn save_volatile_to(path: &Path, volatile: &VolatileConfig) -> AppResult<()> {

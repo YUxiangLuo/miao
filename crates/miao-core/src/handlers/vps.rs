@@ -4,7 +4,7 @@ use std::sync::{atomic::Ordering, Arc};
 use crate::models::{VpsDeployRequest, VpsDeployResponse};
 use crate::responses::{status_error, success, HandlerResult};
 use crate::services::config::apply_config_change;
-use crate::services::vps::{deploy_vps_node, node_tag_for_vps};
+use crate::services::vps::{node_tag_for_vps, provision_vps_node};
 use crate::state::AppState;
 use crate::validation::Validator;
 
@@ -35,21 +35,36 @@ pub async fn deploy_vps(
         return Err(status_error(StatusCode::BAD_REQUEST, "root 密码过长"));
     }
 
+    // 该 VPS 的节点已存在时不重复部署（部署前的快速检查，不持锁）
+    {
+        let config = state.config.read().await;
+        if let Some(tag) = node_tag_for_vps(&config, ip) {
+            return Ok(success(
+                format!("该 VPS 的节点已存在: {tag}"),
+                VpsDeployResponse { tag },
+            ));
+        }
+    }
+
+    // SSH 供给可能耗时数分钟：不持 config_update 锁，避免阻塞所有配置变更。
+    // 供给只产出节点 JSON、不触碰配置；节点在下面的锁内随事务提交落盘。
+    let node_json = provision_vps_node(ip, &req.password)
+        .await
+        .map_err(|e| status_error(StatusCode::BAD_GATEWAY, format!("VPS 部署失败: {e}")))?;
+
     let _config_update = state.config_update.lock().await;
     let old_config = state.config.read().await.clone();
-    let mut new_config = old_config.clone();
 
-    // 该 VPS 的节点已存在时不重复部署
-    if let Some(tag) = node_tag_for_vps(&new_config, ip) {
+    // 供给期间其他变更可能已添加同一 VPS 的节点
+    if let Some(tag) = node_tag_for_vps(&old_config, ip) {
         return Ok(success(
             format!("该 VPS 的节点已存在: {tag}"),
             VpsDeployResponse { tag },
         ));
     }
 
-    deploy_vps_node(&mut new_config, &state.config_path, ip, &req.password)
-        .await
-        .map_err(|e| status_error(StatusCode::BAD_GATEWAY, format!("VPS 部署失败: {e}")))?;
+    let mut new_config = old_config.clone();
+    new_config.nodes.push(node_json);
 
     apply_config_change(&state, &old_config, &new_config)
         .await

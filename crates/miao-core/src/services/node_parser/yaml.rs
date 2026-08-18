@@ -1,5 +1,5 @@
 use serde_json::{json, Map, Value as JsonValue};
-use serde_yaml::{Mapping, Value};
+use yaml_serde::{Mapping, Value};
 
 pub(super) fn get_str<'a>(node: &'a Value, key: &str) -> Option<&'a str> {
     node.get(key)

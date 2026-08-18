@@ -22,15 +22,6 @@ pub async fn upgrade(State(state): State<Arc<AppState>>) -> Json<ApiResponse<Str
             format!("Upgrade to {} complete, restarting...", version),
             version,
         ),
-        Err(e) => {
-            let error_msg = e.to_string();
-            // 检查是否包含回退相关的信息
-            let final_msg = if error_msg.contains("restored") || error_msg.contains("rollback") {
-                format!("{} (System rolled back to previous version)", error_msg)
-            } else {
-                error_msg
-            };
-            error(final_msg)
-        }
+        Err(e) => error(e.to_string()),
     }
 }

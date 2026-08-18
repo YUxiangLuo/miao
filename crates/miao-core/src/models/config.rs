@@ -174,8 +174,8 @@ vps_ip: 203.0.113.10
 subs: []
 nodes: []
 "#;
-        let config: Config = serde_yaml::from_str(yaml).unwrap();
-        let out = serde_yaml::to_string(&config).unwrap();
+        let config: Config = yaml_serde::from_str(yaml).unwrap();
+        let out = yaml_serde::to_string(&config).unwrap();
         assert!(!out.contains("vps_ip"));
     }
 
@@ -192,7 +192,7 @@ nodes: []
             node_select: Default::default(),
         };
 
-        let yaml = serde_yaml::to_string(&config).unwrap();
+        let yaml = yaml_serde::to_string(&config).unwrap();
 
         assert!(!yaml.contains("route_mode"));
     }
@@ -210,7 +210,7 @@ nodes: []
             node_select: Default::default(),
         };
 
-        let yaml = serde_yaml::to_string(&config).unwrap();
+        let yaml = yaml_serde::to_string(&config).unwrap();
 
         assert!(!yaml.contains("route_mode"));
     }
@@ -225,18 +225,18 @@ subs: []
 nodes: []
 custom_rules: []
 "#;
-        let config: Config = serde_yaml::from_str(yaml).unwrap();
+        let config: Config = yaml_serde::from_str(yaml).unwrap();
         assert_eq!(config.route_mode, super::RouteMode::Global);
 
         // 未知值回落规则分流，不让手写 yaml 启动失败
-        let config: Config = serde_yaml::from_str("route_mode: definitely-not-valid").unwrap();
+        let config: Config = yaml_serde::from_str("route_mode: definitely-not-valid").unwrap();
         assert_eq!(config.route_mode, super::RouteMode::Rule);
     }
 
     #[test]
     fn config_omits_default_manual_node_select() {
         let config = Config::default();
-        let yaml = serde_yaml::to_string(&config).unwrap();
+        let yaml = yaml_serde::to_string(&config).unwrap();
         assert!(!yaml.contains("node_select"));
     }
 
@@ -249,14 +249,14 @@ node_select: fastest_hk
 subs: []
 nodes: []
 "#;
-        let loaded: Config = serde_yaml::from_str(yaml).unwrap();
+        let loaded: Config = yaml_serde::from_str(yaml).unwrap();
         assert_eq!(
             loaded.node_select,
             super::NodeSelect::Fastest(super::Region::Hk)
         );
 
         // 但稳定层保存不再携带 node_select（已迁入易变层）
-        let out = serde_yaml::to_string(&loaded).unwrap();
+        let out = yaml_serde::to_string(&loaded).unwrap();
         assert!(!out.contains("node_select"));
     }
 
@@ -268,7 +268,7 @@ node_select: fastest_kr
 subs: []
 nodes: []
 "#;
-        let config: Config = serde_yaml::from_str(yaml).unwrap();
+        let config: Config = yaml_serde::from_str(yaml).unwrap();
         assert_eq!(config.node_select, super::NodeSelect::Manual);
     }
 
@@ -280,11 +280,11 @@ nodes: []
             node_select: NodeSelect::Fastest(Region::Jp),
             route_mode: RouteMode::Global,
         };
-        let yaml = serde_yaml::to_string(&volatile).unwrap();
+        let yaml = yaml_serde::to_string(&volatile).unwrap();
         assert!(yaml.contains("node_select: fastest_jp"));
         assert!(yaml.contains("route_mode: global"));
 
-        let loaded: VolatileConfig = serde_yaml::from_str(&yaml).unwrap();
+        let loaded: VolatileConfig = yaml_serde::from_str(&yaml).unwrap();
         assert_eq!(loaded, volatile);
     }
 
@@ -292,12 +292,12 @@ nodes: []
     fn volatile_config_omits_defaults() {
         use super::VolatileConfig;
 
-        let yaml = serde_yaml::to_string(&VolatileConfig::default()).unwrap();
+        let yaml = yaml_serde::to_string(&VolatileConfig::default()).unwrap();
         assert!(!yaml.contains("node_select"));
         assert!(!yaml.contains("route_mode"));
 
         // 全默认（含空文件 `{}`）也能正常解析
-        let loaded: VolatileConfig = serde_yaml::from_str("{}").unwrap();
+        let loaded: VolatileConfig = yaml_serde::from_str("{}").unwrap();
         assert_eq!(loaded, VolatileConfig::default());
     }
 

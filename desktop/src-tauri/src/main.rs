@@ -16,12 +16,23 @@ use tauri::{AppHandle, Manager, RunEvent, WebviewUrl, WebviewWindowBuilder, Wind
 
 struct Panel(Mutex<Option<ServerHandle>>);
 
+/// 后到实例聚焦先到者的窗口。先到者的窗口在提权后的 setup 阶段才创建，
+/// 快速双击时后到者拿到「已在运行」信号可能早于窗口创建——有限轮询等它
+/// 出现（最长约 10s），避免误报。
+fn focus_existing_window_or_error() {
+    for _ in 0..20 {
+        if focus_existing_window() {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(500));
+    }
+    show_user_error("Miao", "Miao 已在运行");
+}
+
 fn main() {
     match peek_single_instance() {
         InstancePeek::AlreadyRunning => {
-            if !focus_existing_window() {
-                show_user_error("Miao", "Miao 已在运行");
-            }
+            focus_existing_window_or_error();
             return;
         }
         InstancePeek::Failed => {
@@ -37,9 +48,7 @@ fn main() {
 
     match acquire_single_instance() {
         InstanceAcquire::AlreadyRunning => {
-            if !focus_existing_window() {
-                show_user_error("Miao", "Miao 已在运行");
-            }
+            focus_existing_window_or_error();
             return;
         }
         InstanceAcquire::Failed => {

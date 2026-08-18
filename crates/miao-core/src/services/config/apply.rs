@@ -7,7 +7,7 @@ use tracing::{error, info, warn};
 use crate::error::{AppError, AppResult};
 use crate::models::{Config, NodeSelect};
 use crate::services::{
-    proxy::restore_last_proxy,
+    proxy::spawn_restore_last_proxy,
     singbox::{
         get_sing_box_home, start_sing_internal, stop_sing_internal, validate_sing_box_config,
     },
@@ -15,7 +15,8 @@ use crate::services::{
 use crate::state::AppState;
 
 use super::generate::{
-    gen_config, gen_config_from_snapshot, record_fresh_snapshot, GenConfigOutcome, SubFetchRetry,
+    gen_config, gen_config_from_nodes, gen_config_from_snapshot, record_fresh_snapshot,
+    GenConfigOutcome, SubFetchRetry,
 };
 use super::persist::{
     config_cache_path, has_config_cache, has_sub_nodes_snapshot, persist_effective_node_select,
@@ -51,13 +52,16 @@ pub struct RefreshOutcome {
 }
 
 /// 生成配置时订阅节点集的来源：真拉取，或优先用上次拉取的快照零网络重建。
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum SubSource {
     /// 真拉取（增删订阅/手动刷新/启动）
     Fetch,
     /// 快照优先，缺失或与当前订阅列表不匹配时退化到真拉取
     /// （本地语义变更：节点选择/路由模式/规则/去广告/手动节点——切换不是刷新）
     SnapshotOrFetch,
+    /// 已预拉取的订阅节点集（启动后台刷新：网络等待在配置锁外完成，
+    /// 持锁落地阶段只复用结果，不再碰网络）
+    Prefetched(Vec<String>, Vec<serde_json::Value>),
 }
 
 /// 订阅列表没变就是本地语义变更，走快照重建；变了才需要真拉取
@@ -108,6 +112,9 @@ pub async fn refresh_subscriptions(
     let generated = match source {
         SubSource::Fetch => gen_config(config, state, retry).await,
         SubSource::SnapshotOrFetch => gen_config_from_snapshot(config, state).await,
+        SubSource::Prefetched(node_names, outbounds) => {
+            gen_config_from_nodes(config, state, node_names, outbounds).await
+        }
     }
     .map_err(|e| AppError::context("Failed to regenerate config", e))?;
     info!("Config regenerated successfully");
@@ -249,10 +256,7 @@ pub(super) async fn finalize_started_config(
 ) {
     update_config_warning(config, state, has_sub_nodes).await;
 
-    let state_for_proxy = state.clone();
-    tokio::spawn(async move {
-        restore_last_proxy(&state_for_proxy).await;
-    });
+    spawn_restore_last_proxy(state);
 }
 
 async fn update_config_warning(config: &Config, state: &Arc<AppState>, has_sub_nodes: bool) {
@@ -279,6 +283,9 @@ pub(super) async fn regenerate_without_restart_runtime(
     let outcome = match source {
         SubSource::Fetch => gen_config(config, state, SubFetchRetry::None).await,
         SubSource::SnapshotOrFetch => gen_config_from_snapshot(config, state).await,
+        SubSource::Prefetched(node_names, outbounds) => {
+            gen_config_from_nodes(config, state, node_names, outbounds).await
+        }
     }
     .map_err(|e| AppError::context("Failed to regenerate config", e))?;
     info!("Config regenerated successfully");

@@ -1,5 +1,5 @@
 use serde_json::Value as JsonValue;
-use serde_yaml::Value;
+use yaml_serde::Value;
 
 use crate::error::{AppError, AppResult};
 
@@ -15,7 +15,7 @@ pub struct ParseResult {
 
 /// 从 Clash 配置中解析节点，跳过无效节点并记录错误
 pub fn parse_clash_proxies(clash_yaml: &str) -> AppResult<ParseResult> {
-    let clash_obj: Value = serde_yaml::from_str(clash_yaml)
+    let clash_obj: Value = yaml_serde::from_str(clash_yaml)
         .map_err(|e| AppError::context("Failed to parse subscription YAML", e))?;
 
     let proxies = clash_obj

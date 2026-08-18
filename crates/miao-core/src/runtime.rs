@@ -11,12 +11,12 @@ use crate::error::{AppError, AppResult};
 use crate::models::{Config, DEFAULT_PORT};
 use crate::services::{
     config::{
-        gen_config, has_config_cache, load_volatile_config_at, persist_effective_node_select,
-        record_fresh_snapshot, refresh_subscriptions, restore_config_from_cache,
-        runtime_config_matches_node_select, save_config_cache, GenConfigOutcome, RefreshEffect,
-        RefreshPolicy, SubFetchRetry, SubSource,
+        fetch_sub_nodes, gen_config, has_config_cache, load_volatile_config_at,
+        persist_effective_node_select, record_fresh_snapshot, refresh_subscriptions,
+        restore_config_from_cache, runtime_config_matches_node_select, save_config_cache,
+        GenConfigOutcome, RefreshEffect, RefreshPolicy, SubFetchRetry, SubSource,
     },
-    proxy::restore_last_proxy,
+    proxy::spawn_restore_last_proxy,
     singbox::{
         extract_sing_box, start_sing_internal, stop_sing_internal, validate_sing_box_config,
     },
@@ -150,7 +150,7 @@ pub async fn spawn_server(options: RuntimeOptions) -> AppResult<ServerHandle> {
     };
 
     let config: Config = match tokio::fs::read_to_string(&config_path).await {
-        Ok(content) => serde_yaml::from_str(&content)?,
+        Ok(content) => yaml_serde::from_str(&content)?,
         Err(e) if e.kind() == io::ErrorKind::NotFound => {
             info!(
                 config_path = ?config_path,
@@ -247,14 +247,27 @@ pub async fn spawn_server(options: RuntimeOptions) -> AppResult<ServerHandle> {
 }
 
 async fn initialize_runtime(config: Config, state: Arc<AppState>) {
-    let _config_update = state.config_update.lock().await;
+    // config_update 锁只覆盖「起内核」的本地操作；快速通道成功后的订阅后台刷新
+    // 移出锁外拉取（见 refresh_subscriptions_in_background），网络退避不再阻塞面板写操作
+    let started_from_cache = {
+        let _config_update = state.config_update.lock().await;
+        initialize_runtime_locked(&config, &state).await
+    };
 
+    if started_from_cache {
+        refresh_subscriptions_in_background(&config, &state).await;
+    }
+}
+
+/// 持锁执行的初始化。返回 true = 内核已用缓存配置秒开（快速通道），订阅需改为
+/// 后台刷新；false = 无需后台刷新（无配置/已走同步拉取路径）。
+async fn initialize_runtime_locked(config: &Config, state: &Arc<AppState>) -> bool {
     if config.subs.is_empty() && config.nodes.is_empty() {
         info!("No subscriptions or nodes configured, waiting for onboarding");
         state
             .initializing
             .store(false, std::sync::atomic::Ordering::Relaxed);
-        return;
+        return false;
     }
 
     // 快速通道：存在上次成功运行的缓存配置 → 先起内核（秒开），订阅改为后台刷新。
@@ -298,21 +311,14 @@ async fn initialize_runtime(config: Config, state: Arc<AppState>) {
                     }
                 }
 
-                match start_sing_internal(&state).await {
+                match start_sing_internal(state).await {
                     Ok(()) => {
                         info!("sing-box started from cached config");
-                        let state_for_proxy = state.clone();
-                        tokio::spawn(async move {
-                            restore_last_proxy(&state_for_proxy).await;
-                        });
+                        spawn_restore_last_proxy(state);
                         state
                             .initializing
                             .store(false, std::sync::atomic::Ordering::Relaxed);
-
-                        // 内核已在跑，初始化结束；订阅刷新在后台进行（仍持 config_update
-                        // 锁，与面板的配置变更互斥；随初始化任务一同被关停取消）
-                        refresh_subscriptions_in_background(&config, &state).await;
-                        return;
+                        return true;
                     }
                     Err(err) => {
                         error!(error = %err, "Failed to start sing-box from cache, fetching subscriptions");
@@ -325,9 +331,9 @@ async fn initialize_runtime(config: Config, state: Arc<AppState>) {
     info!("Generating initial config...");
     let mut all_subs_failed = false;
     let mut fresh_gen: Option<GenConfigOutcome> = None;
-    match gen_config(&config, &state, SubFetchRetry::Startup).await {
+    match gen_config(config, state, SubFetchRetry::Startup).await {
         Ok(outcome) => {
-            if let Err(err) = persist_effective_node_select(&state, outcome.node_select).await {
+            if let Err(err) = persist_effective_node_select(state, outcome.node_select).await {
                 warn!(error = %err, "Failed to persist effective node_select after generate");
             }
             if !config.node_select.is_manual() && outcome.node_select.is_manual() {
@@ -353,7 +359,7 @@ async fn initialize_runtime(config: Config, state: Arc<AppState>) {
                     state
                         .initializing
                         .store(false, std::sync::atomic::Ordering::Relaxed);
-                    return;
+                    return false;
                 }
             }
         }
@@ -367,50 +373,73 @@ async fn initialize_runtime(config: Config, state: Arc<AppState>) {
         }
     }
 
-    match start_sing_internal(&state).await {
+    match start_sing_internal(state).await {
         Ok(_) => {
             info!("sing-box started successfully");
             save_config_cache().await;
             // 启动成功等价于配置可用：把本次拉取的节点集落成快照，供本地语义变更零网络重建
             if let Some(outcome) = &fresh_gen {
-                record_fresh_snapshot(&config, outcome).await;
+                record_fresh_snapshot(config, outcome).await;
             }
             if all_subs_failed && state.config_warning.lock().await.is_none() {
                 warn!("所有订阅获取失败，请检查当前订阅");
                 *state.config_warning.lock().await =
                     Some("所有订阅获取失败，请检查当前订阅".to_string());
             }
-            let state_for_proxy = state.clone();
-            tokio::spawn(async move {
-                restore_last_proxy(&state_for_proxy).await;
-            });
+            spawn_restore_last_proxy(state);
         }
         Err(e) => error!("Failed to start sing-box: {}", e),
     }
     state
         .initializing
         .store(false, std::sync::atomic::Ordering::Relaxed);
+    false
 }
 
-/// 后台订阅刷新（快速通道启动后调用，调用方持有 config_update 锁）：
+/// 后台订阅刷新（快速通道启动后调用）。
+/// 阶段 1 不持锁拉取订阅节点集：网络退避（最长约 50s）不再阻塞面板写操作；
+/// 阶段 2 持锁落地：拉取期间订阅列表被改过（面板编辑已按新配置自行应用）
+/// 或服务被显式停止，则放弃本次刷新。
 /// 机制全部收敛在 services::config::refresh_subscriptions；这里只按 outcome 决定告警与收尾。
 async fn refresh_subscriptions_in_background(config: &Config, state: &Arc<AppState>) {
-    match refresh_subscriptions(config, state, RefreshPolicy::Startup, SubSource::Fetch).await {
+    let (node_names, outbounds) = fetch_sub_nodes(config, state, SubFetchRetry::Startup).await;
+
+    let _config_update = state.config_update.lock().await;
+    let current = state.config.read().await.clone();
+    if current.subs != config.subs {
+        info!(
+            "Subscriptions changed during background refresh; skipping (panel edit already applied)"
+        );
+        return;
+    }
+    if !state
+        .service_should_run
+        .load(std::sync::atomic::Ordering::Relaxed)
+    {
+        info!("Service stopped during background refresh; skipping");
+        return;
+    }
+
+    match refresh_subscriptions(
+        &current,
+        state,
+        RefreshPolicy::Startup,
+        SubSource::Prefetched(node_names, outbounds),
+    )
+    .await
+    {
         Ok(outcome) => match outcome.effect {
             RefreshEffect::Restarted => {
                 info!("sing-box restarted with refreshed subscriptions");
                 save_config_cache().await;
-                if !config.node_select.is_manual() && outcome.node_select.is_manual() {
+                if !current.node_select.is_manual() && outcome.node_select.is_manual() {
                     *state.config_warning.lock().await =
                         Some("该地区没有可用节点，已切回手动选择".to_string());
                 }
-                let state_for_proxy = state.clone();
-                tokio::spawn(async move {
-                    restore_last_proxy(&state_for_proxy).await;
-                });
+                spawn_restore_last_proxy(state);
             }
             RefreshEffect::SkippedUnchanged => {
-                if !config.node_select.is_manual() && outcome.node_select.is_manual() {
+                if !current.node_select.is_manual() && outcome.node_select.is_manual() {
                     *state.config_warning.lock().await =
                         Some("该地区没有可用节点，已切回手动选择".to_string());
                 }

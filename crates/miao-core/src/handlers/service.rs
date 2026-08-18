@@ -13,7 +13,7 @@ use crate::models::{
 use crate::responses::{status_error, success, success_no_data, HandlerResult};
 use crate::services::{
     config::apply_config_change,
-    proxy::restore_last_proxy,
+    proxy::spawn_restore_last_proxy,
     singbox::{start_sing_internal, stop_sing_internal},
 };
 use crate::state::AppState;
@@ -118,10 +118,7 @@ pub async fn start_service(State(state): State<Arc<AppState>>) -> HandlerResult 
 
     match start_sing_internal(&state).await {
         Ok(_) => {
-            let state_for_proxy = state.clone();
-            tokio::spawn(async move {
-                restore_last_proxy(&state_for_proxy).await;
-            });
+            spawn_restore_last_proxy(&state);
             Ok(success_no_data("sing-box started successfully"))
         }
         Err(AppError::AlreadyRunning) => Err(status_error(

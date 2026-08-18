@@ -956,7 +956,7 @@ async fn save_config_performs_atomic_write() {
     save_config_to(&config_path, &config).await.unwrap();
 
     let content = tokio::fs::read_to_string(&config_path).await.unwrap();
-    let parsed: Config = serde_yaml::from_str(&content).unwrap();
+    let parsed: Config = yaml_serde::from_str(&content).unwrap();
     assert_eq!(parsed.port, Some(8080));
     assert_eq!(parsed.subs.len(), 1);
 
@@ -997,7 +997,7 @@ async fn save_config_overwrites_existing_file() {
     save_config_to(&config_path, &config).await.unwrap();
 
     let content = tokio::fs::read_to_string(&config_path).await.unwrap();
-    let parsed: Config = serde_yaml::from_str(&content).unwrap();
+    let parsed: Config = yaml_serde::from_str(&content).unwrap();
     assert_eq!(parsed.port, Some(7777));
 
     // 清理
