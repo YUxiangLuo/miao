@@ -37,11 +37,11 @@
     /* 活数字（速率/延迟/流量/PID）等宽，位数变化不再移位 */
     --font-numeric: tabular-nums;
     --home-connections-height: 184px;
-    /* 桌面双列（>1180px）内容网格高度：630px 保底，高视口吃掉全部剩余垂直空间。
-       344 = 工作区上下 padding 48 + 顶栏 76 + 顶栏 margin-bottom 20
+    /* 桌面双列（>1180px）内容网格高度：582px 保底（原 630 − 留白增量 48），高视口吃掉全部剩余垂直空间。
+       388 = 工作区上下 padding 96（各 48，上下留白一致）+ 顶栏 76 + 顶栏 margin-bottom 16
              + 条带 margin-top 16 + 条带 184；
        视口偏矮时网格 flex 收缩、列内滚动兜底（与既有行为一致） */
-    --home-grid-height: max(630px, calc(100vh - 344px));
+    --home-grid-height: max(582px, calc(100vh - 388px));
     --node-card-min-height: 326px;
 }
 

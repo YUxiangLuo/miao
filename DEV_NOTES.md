@@ -172,7 +172,7 @@ TUN JSON：`auto_route` + `strict_route`，`interface_name` 仍是 `sing-tun`。
 
 ## 前端调试（agent-browser）
 
-**设计 token（CRAP 重构后）**：间距只用 `--space-1..4`（6/10/16/24），圆角只用 `--radius-sm/radius/radius-lg/radius-pill`（6/8/12/999，卡片内嵌块 8、独立块 12、小控件 6），字号只用 `--fs-xs..xl`（0.75/0.8125/0.875/1/1.1875rem，更大标题除外）。徽标统一 `.badge` 基类 + info/success/warning/danger/neutral 变体，语义类名（counter-pill/rule-target-badge 等）保留但只带配色；写新徽标时组合使用，不要新写基元。活数字（速率/延迟/流量/PID）必须带 `.num`（tabular-nums）。按钮：ghost=取消类（透明无边框），secondary=确认级次要操作，primary=主提交。图标尺寸只有 12/14/16/18 四档。
+**设计 token（CRAP 重构后）**：间距只用 `--space-1..4`（6/10/16/24），圆角只用 `--radius-sm/radius/radius-lg/radius-pill`（6/8/12/999，卡片内嵌块 8、独立块 12、小控件 6），字号只用 `--fs-xs..xl`（0.75/0.8125/0.875/1/1.1875rem，更大标题除外）。徽标统一 `.badge` 基类 + info/success/warning/danger/neutral 变体，语义类名（counter-pill/rule-target-badge 等）保留但只带配色；写新徽标时组合使用，不要新写基元。徽标与相邻文本字号不同时（如规则行 fs-xs chip + fs-md 数值），容器必须 flex 中线对齐（`.list-row-title.structured`），靠默认基线对齐 chip 会视觉上浮。活数字（速率/延迟/流量/PID）必须带 `.num`（tabular-nums）。位数/单位变化引起宽度跳动的地方用定宽右对齐：顶栏速率 `.traffic-item .num` 宽 5.5rem（实测最宽 "1023 MB/s" ≈ 79px，88px 留字体度量余量，极端溢出向左吃空隙不动外部布局），新增同类展示沿用该模式。卡片标题栏统一「标题左、控件右」：`.section-title-wrap` 用 `flex: 1 1 auto` 占满剩余宽度把控件推到右缘，头部控件（.btn-sm/.icon-button/select）同高 30px。链接统计工具栏：筛选组居左成簇、搜索框居右限宽（`flex: 0 1 16rem`，不占满空白），排序固定按速度（无选择器）。按钮：ghost=取消类（透明无边框），secondary=确认级次要操作，primary=主提交。图标尺寸只有 12/14/16/18 四档。
 
 Arch 上的面板仍是那份 systemd Linux 实例，可以用来看 **共享 UI**（规则、节点、布局），不能用来验 UAC / WebView2 / WinTun。
 
@@ -180,7 +180,7 @@ Arch 上的面板仍是那份 systemd Linux 实例，可以用来看 **共享 UI
 - `eval` 跨调用保留 JS 上下文，同名 `const` 会炸，用 IIFE
 - React 受控组件要走原生 setter + `input`/`change` 事件
 - 首页固定高度，左右列内部滚；活跃链接区恒高且始终渲染，只显示一行、放不下直接裁切不滚动，条带卡片不可展开（明细走「查看全部」）
-- **桌面双列（>1180px）位置钉死、高度随视口伸缩**：融合顶栏 76（品牌/状态/速率/模式/版本一条卡片，与内容同宽对齐；原全宽 header 与状态卡已合并，「运行中」徽章去重）/ 内容网格 `max(630, 100vh−344)`（344=工作区 padding 48+顶栏 76+20+条带 16+184）/ 条带 184；右列三卡按 156:196:246 等比分配（630 设计高度时恰为 156/196/246），min-height 钉住设计值——高视口零留白，偏矮时收缩失效退回列内滚动兜底。右列固定卡的滚动在 `.panel-card-body` 内部（header 固定）。841–1180px 单列堆叠带保持弹性
+- **桌面双列（>1180px）位置钉死、高度随视口伸缩**：融合顶栏 76（品牌/状态/速率/模式/版本一条卡片，与内容同宽对齐；原全宽 header 与状态卡已合并，「运行中」徽章去重）/ 内容网格 `max(582, 100vh−388)`（388=工作区上下 padding 96（各 48，上下留白一致）+顶栏 76+16+条带 16+184）/ 条带 184；右列三卡按 156:196:246 等比分配（630 设计高度时恰为 156/196/246），min-height 钉住设计值，网格低于 630 时整列内部滚动兜底。右列固定卡的滚动在 `.panel-card-body` 内部（header 固定）。841–1180px 单列堆叠带保持弹性
 - 移动端 ≤840px 由 `isDesktop` 门控，不要再加 CSS `display:none`
 
 ## 写测试
