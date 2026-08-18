@@ -183,6 +183,8 @@ TUN 透明代理要创建虚拟网卡并接管整机路由，这是内核级权�
 **能把面板安装成桌面应用吗？**
 可以，面板是 PWA。Chrome/Edge 打开 `localhost:6161` 后地址栏右侧会出现「安装」图标（或菜单 → 安装 Miao），装完有独立窗口和启动器图标，没有浏览器边框。安装入口只在本机 `localhost` 下可用——局域网 IP 访问不是安全上下文，浏览器不允许安装。不想安装的话浏览器书签照旧用。
 
+如果启动器里 PWA 图标不显示（Hyprland 的 hyprlauncher 等）：浏览器安装 PWA 时只往 `~/.local/share/icons/hicolor/<size>/apps/` 丢 PNG，不创建 `index.theme`，而部分启动器会跳过没有 `index.theme` 的图标主题目录。给 `~/.local/share/icons/hicolor/` 补一个声明了各 size 目录的 `index.theme` 即可（修复后所有浏览器 PWA 图标都会出现），重启启动器生效。
+
 **面板有鉴权吗？**
 没有。Linux 监听 `0.0.0.0:6161`，请在可信局域网使用、勿暴露公网，需要暴露时套一层带鉴权的反向代理。Windows 只听 `127.0.0.1`。
 
