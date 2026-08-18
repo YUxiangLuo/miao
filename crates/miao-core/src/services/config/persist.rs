@@ -64,13 +64,9 @@ pub async fn save_config_to(path: &Path, config: &Config) -> AppResult<()> {
     save_yaml_to(path, config).await
 }
 
-/// 读取易变层配置；文件缺失、读不出、内容损坏都返回 `None`
+/// 读取指定路径的易变层配置；文件缺失、读不出、内容损坏都返回 `None`
 /// （调用方保留 config.yaml 的解析结果，见 `Config::overlay`）。
-pub async fn load_volatile_config() -> Option<VolatileConfig> {
-    load_volatile_config_at(&volatile_config_path()).await
-}
-
-async fn load_volatile_config_at(path: &Path) -> Option<VolatileConfig> {
+pub async fn load_volatile_config_at(path: &Path) -> Option<VolatileConfig> {
     let content = tokio::fs::read_to_string(path).await.ok()?;
     serde_yaml::from_str(&content).ok()
 }
@@ -81,9 +77,29 @@ pub async fn save_volatile_to(path: &Path, volatile: &VolatileConfig) -> AppResu
 
 /// 配置分层落盘：稳定层（config.yaml）+ 易变层（volatile.yaml）。
 /// 两层各自原子写并按内容跳过未变写入——单一层面的变更只产生一层的 I/O。
+/// 跨文件无原子性：稳定层写成功而易变层失败时，把稳定层回写旧内容
+/// （best-effort 补偿），避免磁盘上留下从未在内存存在过的两层组合。
 pub async fn save_config_layered(state: &Arc<AppState>, config: &Config) -> AppResult<()> {
+    // 补偿材料：稳定层旧字节（None = 文件原本不存在）
+    let old_stable = tokio::fs::read(&state.config_path).await.ok();
+
     save_config_to(&state.config_path, config).await?;
-    save_volatile_to(&state.volatile_path, &VolatileConfig::from(config)).await
+    if let Err(err) = save_volatile_to(&state.volatile_path, &VolatileConfig::from(config)).await {
+        let restore = match &old_stable {
+            Some(bytes) => write_file_atomic(&state.config_path, bytes).await,
+            None => match tokio::fs::remove_file(&state.config_path).await {
+                Ok(()) => Ok(()),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+                Err(e) => Err(AppError::context("Failed to remove stable config", e)),
+            },
+        };
+        if let Err(restore_err) = restore {
+            // 磁盘 I/O 故障下没有更好的选择：运行态已被调用方回滚，撕裂留待下次成功保存自愈
+            error!(error = %restore_err, "Failed to roll back stable config after volatile write failure");
+        }
+        return Err(err);
+    }
+    Ok(())
 }
 
 /// 筛空地区后把内存里的 node_select 写回 manual。
@@ -227,8 +243,9 @@ mod tests {
     use super::{
         config_cache_path, get_sing_box_home, load_volatile_config_at,
         persist_effective_node_select, read_sub_nodes_snapshot_at, restore_config_from_cache_at,
-        restore_runtime_config_bytes_at, save_config_cache_at, save_sub_nodes_snapshot_at,
-        save_volatile_to, snapshot_runtime_config_at, volatile_config_path, SubNodesSnapshot,
+        restore_runtime_config_bytes_at, save_config_cache_at, save_config_layered,
+        save_sub_nodes_snapshot_at, save_volatile_to, snapshot_runtime_config_at,
+        volatile_config_path, SubNodesSnapshot,
     };
 
     #[test]
@@ -286,6 +303,112 @@ mod tests {
         assert!(!temp_dir.join("volatile.tmp").exists());
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn save_config_layered_rolls_back_stable_on_volatile_failure() {
+        use crate::models::{Config, NodeSelect, Region};
+        use crate::state::AppState;
+
+        let base = std::env::temp_dir().join(format!(
+            "miao-layered-fail-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        tokio::fs::create_dir_all(&base).await.unwrap();
+        let config_path = base.join("config.yaml");
+        let volatile_path = base.join("volatile.yaml");
+        // 故障注入：volatile_path 是目录，写入必失败
+        tokio::fs::create_dir_all(&volatile_path).await.unwrap();
+
+        let make_state = || {
+            std::sync::Arc::new(
+                AppState::with_config_path(
+                    Config::default(),
+                    config_path.clone(),
+                    volatile_path.clone(),
+                )
+                .unwrap(),
+            )
+        };
+        let new_config = Config {
+            subs: vec!["https://a.example.com".to_string()],
+            node_select: NodeSelect::Fastest(Region::Hk),
+            ..Config::default()
+        };
+
+        // 情形 1：稳定层原本不存在 → 失败后仍不存在
+        let state = make_state();
+        assert!(save_config_layered(&state, &new_config).await.is_err());
+        assert!(
+            !config_path.exists(),
+            "stable layer should be rolled back (removed)"
+        );
+
+        // 情形 2：稳定层有旧内容 → 失败后旧内容逐字节保留
+        let old_yaml = "subs:\n- https://old.example.com\n";
+        tokio::fs::write(&config_path, old_yaml).await.unwrap();
+        let state = make_state();
+        assert!(save_config_layered(&state, &new_config).await.is_err());
+        let after = tokio::fs::read_to_string(&config_path).await.unwrap();
+        assert_eq!(after, old_yaml, "stable layer should keep old bytes");
+
+        let _ = tokio::fs::remove_dir_all(&base).await;
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn save_config_layered_skips_unchanged_stable_layer() {
+        use crate::models::{Config, NodeSelect, Region};
+        use crate::state::AppState;
+        use std::os::unix::fs::PermissionsExt;
+
+        // root 下权限位不生效，只读目录挡不住写入
+        if nix::unistd::Uid::effective().is_root() {
+            return;
+        }
+
+        let base = std::env::temp_dir().join(format!(
+            "miao-layered-skip-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let stable_dir = base.join("stable");
+        tokio::fs::create_dir_all(&stable_dir).await.unwrap();
+        let config_path = stable_dir.join("config.yaml");
+        let volatile_path = base.join("volatile.yaml");
+
+        let config = Config {
+            subs: vec!["https://a.example.com".to_string()],
+            node_select: NodeSelect::Fastest(Region::Hk),
+            ..Config::default()
+        };
+        let state = std::sync::Arc::new(
+            AppState::with_config_path(config.clone(), config_path.clone(), volatile_path.clone())
+                .unwrap(),
+        );
+        save_config_layered(&state, &config).await.unwrap();
+        let stable_bytes = tokio::fs::read(&config_path).await.unwrap();
+        assert!(!String::from_utf8_lossy(&stable_bytes).contains("node_select"));
+
+        // 稳定层目录设为只读：若再次尝试落盘必失败。
+        // 只改易变字段（node_select），整体应成功——证明稳定层被跳过
+        std::fs::set_permissions(&stable_dir, std::fs::Permissions::from_mode(0o555)).unwrap();
+        let mut changed = config.clone();
+        changed.node_select = NodeSelect::Fastest(Region::Jp);
+        let result = save_config_layered(&state, &changed).await;
+        std::fs::set_permissions(&stable_dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+        result.expect("stable layer must be skipped when unchanged");
+        let volatile = load_volatile_config_at(&volatile_path).await.unwrap();
+        assert_eq!(volatile.node_select, NodeSelect::Fastest(Region::Jp));
+
+        let _ = tokio::fs::remove_dir_all(&base).await;
     }
 
     #[tokio::test]

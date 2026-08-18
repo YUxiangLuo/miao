@@ -121,5 +121,21 @@ cargo check -p miao-core --target x86_64-pc-windows-gnu
 | 旧 config.yaml 的 route_mode 生效 | 全平台 | 原被忽略；更直觉，release note 说明 |
 | set_route_mode 空节点：报错 → 正常持久化（Clear 模式） | 全平台 | 更合理 |
 
-风险：双文件无跨文件原子性——真正一致性锚点是校验过的 config.json+cache，
-YAML 撕裂最坏丢一次编辑；两层各自原子写。
+风险：双文件无跨文件原子性——真正一致性锚点是校验过的 config.json+cache；
+两层各自原子写，且 `save_config_layered` 在易变层写失败时把稳定层回写旧字节
+（best-effort 补偿，故障注入测试覆盖）；补偿本身也失败时撕裂留待下次成功保存自愈。
+
+## 八、Review 后记（已修复）
+
+- **P1 分层落盘撕裂**：`save_config_layered` 稳定层先写、易变层后写，后者失败时
+  稳定层已是新值。修复：写入前读旧字节，失败时回写/删除补偿。
+  测试：`save_config_layered_rolls_back_stable_on_volatile_failure`（volatile_path
+  指向目录做故障注入）、`save_config_layered_skips_unchanged_stable_layer`
+  （稳定层目录只读证明未变即跳过）。
+- **P2 spawn_server 测试隔离**：新增 `RuntimeOptions.volatile_path` 注入点（与
+  config_path 同款）；3 个 spawn 测试传临时路径，不再读真实
+  `/tmp/miao-sing-box/volatile.yaml`。
+- **P3（记录在案，不修）**：启动快速通道 cache 匹配只含 node_select 不含 route_mode；
+  停机手改 volatile.yaml 时会以旧模式起跑，Startup 刷新秒级自愈。
+- **P4（记录在案）**：README 的「tmpfs」表述在 /tmp 为磁盘挂载的发行版上不成立，
+  此时易变层实际持久，仅影响「系统重启回默认」的语义。

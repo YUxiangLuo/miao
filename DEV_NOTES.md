@@ -73,6 +73,7 @@ sudo ./target/release/miao-rust
 cargo run -p miao-desktop
 cargo run -p miao-cli
 # 以及任何会往 /tmp/miao-sing-box 抽内核的测试（spawn_server 测试必须 skip_extract）
+# spawn_server 测试还必须注入 volatile_path 临时路径，否则读的是真实运行时目录
 ```
 
 **前端改动只跑 `cargo build` 不会生效**：`include_str!` 嵌的是 `public/index.html`。改 JSX/CSS 后先 `./scripts/build-frontend.sh`。

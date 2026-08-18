@@ -11,7 +11,7 @@ use crate::error::{AppError, AppResult};
 use crate::models::{Config, DEFAULT_PORT};
 use crate::services::{
     config::{
-        gen_config, has_config_cache, load_volatile_config, persist_effective_node_select,
+        gen_config, has_config_cache, load_volatile_config_at, persist_effective_node_select,
         record_fresh_snapshot, refresh_subscriptions, restore_config_from_cache,
         runtime_config_matches_node_select, save_config_cache, GenConfigOutcome, RefreshEffect,
         RefreshPolicy, SubFetchRetry, SubSource,
@@ -38,6 +38,10 @@ pub struct RuntimeOptions {
     pub port_fallback: bool,
     /// Skip path resolution and load this file (missing file → in-memory default).
     pub config_path: Option<PathBuf>,
+    /// Override the volatile-layer file (node_select/route_mode). `None` uses the
+    /// platform default. Tests must point this at a temp path so they never read
+    /// or write the real runtime dir (`/tmp/miao-sing-box`).
+    pub volatile_path: Option<PathBuf>,
     /// Tests can skip extracting the embedded kernel when they will not start it.
     pub skip_extract: bool,
     /// Override the log file. Windows defaults to
@@ -156,9 +160,13 @@ pub async fn spawn_server(options: RuntimeOptions) -> AppResult<ServerHandle> {
         }
         Err(e) => return Err(e.into()),
     };
+    let volatile_path = options
+        .volatile_path
+        .clone()
+        .unwrap_or_else(crate::services::config::volatile_config_path);
     // 易变层 overlay：node_select/route_mode 的运行值覆盖 config.yaml 解析结果；
     // volatile 文件缺失/损坏时保留 config.yaml 里的同名字段（旧版配置兼容）
-    let config = config.overlay(load_volatile_config().await);
+    let config = config.overlay(load_volatile_config_at(&volatile_path).await);
     let requested_port = options.bind_port.or(config.port).unwrap_or(DEFAULT_PORT);
     let subs_count = config.subs.len();
     let nodes_count = config.nodes.len();
@@ -175,12 +183,8 @@ pub async fn spawn_server(options: RuntimeOptions) -> AppResult<ServerHandle> {
     }
 
     let app_state = Arc::new(
-        AppState::with_config_path(
-            config.clone(),
-            config_path,
-            crate::services::config::volatile_config_path(),
-        )
-        .map_err(|e| AppError::context("Failed to create HTTP client", e))?,
+        AppState::with_config_path(config.clone(), config_path, volatile_path)
+            .map_err(|e| AppError::context("Failed to create HTTP client", e))?,
     );
     let state_for_init = app_state.clone();
 
@@ -707,6 +711,7 @@ mod tests {
             bind_port: Some(0),
             port_fallback: false,
             config_path: Some(config_path),
+            volatile_path: Some(unique_test_volatile_path()),
             skip_extract: true,
             log_path: None,
         })
@@ -760,6 +765,7 @@ mod tests {
             bind_port: Some(occupied_port),
             port_fallback: true,
             config_path: Some(unique_test_config_path()),
+            volatile_path: Some(unique_test_volatile_path()),
             skip_extract: true,
             log_path: None,
         })
@@ -781,6 +787,7 @@ mod tests {
             bind_port: Some(occupied_port),
             port_fallback: false,
             config_path: Some(unique_test_config_path()),
+            volatile_path: Some(unique_test_volatile_path()),
             skip_extract: true,
             log_path: None,
         })
@@ -831,6 +838,17 @@ mod tests {
     fn unique_test_config_path() -> PathBuf {
         std::env::temp_dir().join(format!(
             "miao-spawn-server-test-{}-{}.yaml",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ))
+    }
+
+    fn unique_test_volatile_path() -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "miao-spawn-server-test-volatile-{}-{}.yaml",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
