@@ -1,6 +1,6 @@
 # 开发调试笔记
 
-开发机两台：**Arch**（Linux 日常开发 + 常驻生产 miao 实例）与 **Windows**（桌面版真机，全量构建链：Rust/Go/Bun/Node + Tauri CLI）。**master 单分支**：Linux CLI 与 Windows 桌面版都从这里出，不再分线维护（`feat/windows-tauri` 已并入）。命令以仓库根目录为基准；未注明时在 Arch 上执行。
+开发机两台：**Arch**（Linux 日常开发 + 常驻生产 miao 实例）与 **Windows**（桌面版真机，全量构建链）。**master 单分支**，Linux CLI 与 Windows 桌面版同出。命令以仓库根目录为基准，未注明时在 Arch 上执行。
 
 ## 要守住的哲学
 
@@ -14,211 +14,166 @@ Linux 版是：下载一个文件，`sudo` 跑，浏览器打开，TUN 接管流
 | Tauri 只当自带浏览器，打开 `http://127.0.0.1:<port>` | Linux / OpenWrt 也改成 Tauri |
 | 一次 UAC 对标一次 `sudo`；自启须用户显式勾选（任务计划，不是服务） | 服务模式 / 默认免 UAC |
 | Wintun 已在 sing-box 里；内核跟默认分支走 | 旁边再塞一份 `wintun.dll` |
-| Windows 构建不编 VPS、不编换进程升级 | 把 Linux 的 `exec` 热更原样搬过去覆盖正在跑的 exe |
+| Windows 构建不编 VPS、不编换进程升级 | 把 Linux 的 `exec` 热更搬过去覆盖正在跑的 exe |
 
-**Arch 上正在跑的 systemd miao 不要停、不要重启**。那台机器出网被它的 TUN 管着，一停 GitHub 就没了。Windows 真机已就位：桌面壳、NSIS 安装包、UAC、托盘、优雅退出以及 **TUN 分流（`auto_route` + `strict_route` / Wintun）** 都已在 Win10/11 真机跑通。
+**Arch 上正在跑的 systemd miao 不要停、不要重启**——出网被它的 TUN 管着，一停 GitHub 就没了。
 
-## 仓库怎么切
+## 仓库结构
 
 ```
 crates/miao-core      库：面板、配置事务、启停内核
-crates/miao-cli       Linux/OpenWrt 入口，二进制名仍是 miao-rust
-desktop/src-tauri     Tauri 2 壳，二进制名 miao；workspace 成员但不是 default-member
+crates/miao-cli       Linux/OpenWrt 入口，二进制名 miao-rust
+desktop/src-tauri     Tauri 2 壳（workspace 成员但不是 default-member）
 frontend/             唯一一份面板
-public/               vite 构建产物，被 include_str! 嵌进 core
+public/               vite 构建产物（gitignore），被 include_str! 嵌进 core
 embedded/             sing-box + srs，不入库
 ```
 
-`cargo test` / `cargo clippy`（不加 `--workspace`）只打 core + cli，和 CI 的 Linux quality 一致。不要 `cargo test --workspace`，那会去编桌面壳、拉 webkit。
+`cargo test` / `cargo clippy`（不加 `--workspace`）只打 core + cli；**不要 `cargo test --workspace`**（会去编桌面壳、拉 webkit）。
 
 ## 日常命令
 
 ```bash
-# 前端（改面板时）
-bun run --cwd frontend dev
-bun run --cwd frontend test
-bun run --cwd frontend lint
+# 前端
+bun run --cwd frontend dev / test / lint
 
-# 默认成员：Linux 行为必须保持绿
+# 默认成员门禁（与 CI 一致）
 cargo test --locked --all-targets
 cargo fmt --all -- --check
 cargo clippy --locked --all-targets --all-features -- -D warnings
 
-# Windows 静态门禁（本机可跑，不启动任何代理）
+# Windows 静态门禁（不启动任何代理）
 cargo check -p miao-core --target x86_64-pc-windows-gnu
-cargo check -p miao-desktop          # 本机有 webkit2gtk 才能过；不要 cargo run
+cargo check -p miao-desktop          # 需本机有 webkit2gtk；不要 cargo run
 
-# 内核（只写 embedded/，不要随后 extract 到 /tmp/miao-sing-box）
+# 内核（只写 embedded/）
 ./scripts/build-embedded.sh                         # Linux 本机架构
 MIAO_TARGET=windows-amd64 ./scripts/build-embedded.sh
 
-# 前端改完必须重新嵌入
+# 前端改完必须重新嵌入（只 cargo build 还是旧页面）
 ./scripts/build-frontend.sh
 
-# 本机全量构建（只出 Linux 本机架构）
-./build.sh
-
-# 发版：bump [workspace.package] 版本 + 打 tag，全平台同号（Linux musl ×2 + Windows 桌面）
-./release.sh vX.Y.Z
-
-gh run list --limit 5
-gh run watch <id> --exit-status
+./build.sh                 # 本机全量构建
+./release.sh vX.Y.Z        # 发版：bump 版本 + tag，全平台同号
 ```
 
-**禁止**（为了做 Windows 而破坏本机 Linux 实例）：
+**禁止**（会破坏本机生产实例）：
 
 ```bash
 sudo systemctl stop miao
 sudo ./target/release/miao-rust
 cargo run -p miao-desktop
 cargo run -p miao-cli
-# 以及任何会往 /tmp/miao-sing-box 抽内核的测试（spawn_server 测试必须 skip_extract）
-# spawn_server 测试还必须注入 volatile_path 临时路径，否则读的是真实运行时目录
+# 任何会往 /tmp/miao-sing-box 抽内核的测试（spawn_server 测试必须 skip_extract: true，
+# 且必须注入 volatile_path 临时路径，否则读写的是真实运行时目录）
 ```
 
-**前端改动只跑 `cargo build` 不会生效**：`include_str!` 嵌的是 `public/index.html`。改 JSX/CSS 后先 `./scripts/build-frontend.sh`。
+**PWA**：`frontend/public/` 的 manifest/sw.js/图标经 vite 拷进 `public/` 再嵌进二进制——新增静态资源必须同时在 `router.rs` 注册路由。SW 只是 Chrome 安装门槛的门票：只给导航请求做 network-first 兜底，**永远别缓存 `/api`**。
 
-**PWA**：面板可被 Chrome/Edge 安装为桌面应用。`frontend/public/` 里的 `manifest.webmanifest` / `sw.js` / `icon-*.png` 会被 vite 拷进 `public/`，再由 `handlers/static_assets.rs` 经 `include_str!`/`include_bytes!` 嵌入——新增静态资源必须同时在 `router.rs` 注册路由。SW 只是 Chrome 安装门槛的门票：只给导航请求做 network-first 兜底，**永远别缓存 `/api` 或改成离线优先**——面板离开后端就是死页面，单文件 HTML 每版都变，激进缓存只会让旧面板滞留。`/`、`/sw.js`、`/manifest.webmanifest` 都带 `Cache-Control: no-cache` 保证发版后即时更新。新增/替换图标时 PNG 由 `rsvg-convert` 从 `icon.svg` 导出（192/512 为可安装硬性要求，另有 maskable 512）。Windows 桌面壳的 WebView2 也会注册这份 SW，无害。
-
-**fresh clone**：`embedded/` 不入库，`include_bytes!` 引用它们。先 `./scripts/build-embedded.sh` 或 `./build.sh`。CI quality 用 stub 文件绕过，本地别学。Windows `include_bytes!` 走 `embedded/sing-box-windows-amd64.exe`；没有这份文件时，交叉 `check` 也会挂。本机若只有 stub，够编译、不够当真内核。
+**fresh clone**：`embedded/` 不入库，先 `./scripts/build-embedded.sh` 或 `./build.sh`。CI quality 用 stub 绕过，本地别学。Windows 交叉 check 还需要 `embedded/sing-box-windows-amd64.exe`（stub 够编译、不够当真内核）。
 
 ## 在 Arch 上怎么「做」Windows
 
-Arch 上的验收用语：测试绿、clippy 过、`windows-gnu` check 过、CI 的 `windows-latest` **编过**桌面壳。启动/UAC/托盘/TUN 分流的行为验收到 Windows 真机上做（已有基线：日常安装包路径已通）。
-
-交叉 check 需要 MinGW：
+验收口径：测试绿、clippy 过、`windows-gnu` check 过、CI 的 `windows-latest` **编过**桌面壳。启动/UAC/托盘/TUN 分流的行为验收到 Windows 真机上做。
 
 ```bash
 sudo pacman -S --needed mingw-w64-gcc
 rustup target add x86_64-pc-windows-gnu
-# 若链接器找不到：
-# export CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER=x86_64-w64-mingw32-gcc
+# 链接器找不到时：export CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER=x86_64-w64-mingw32-gcc
 ```
 
-`desktop` 在 Linux 上能 `cargo check` 是因为装了 webkit2gtk。CI 的 Ubuntu rust job **不编** `miao-desktop`；Windows 壳由 `windows-latest` job 编，且必须先下载 frontend 产物——`miao-core` 编译期要读 `public/index.html`。
+Windows 构建里故意拿掉的能力（管理员进程里不该有；Linux CLI 保留）：
 
-Windows 构建里故意拿掉的东西（管理员进程里不该有）：
-
-- `POST /api/upgrade` 整条换 exe 实现
+- `POST /api/upgrade` 换 exe 自升级
 - `POST /api/vps/deploy` 和 askpass
 - OpenWrt apk/opkg 安装器
-- Tauri 对 `http://127.0.0.1:*` 的远程 IPC（面板不用 invoke）
-
-Linux CLI 这些能力还在。
+- Tauri 对 `http://127.0.0.1:*` 的远程 IPC
 
 ## 在 Windows 真机上构建
 
-工具链已就位：Rust（rustup，msvc host）+ VS 2022 C++ 工具链、Go（免装版，`%LOCALAPPDATA%\Programs\go`）、Bun、Node（npm 全局 `@tauri-apps/cli`）。PowerShell 执行策略拦 `.ps1`，npm/tauri 一律用 `.cmd` 形态（`npm.cmd`、`tauri.cmd`）。
+工具链：Rust（msvc）+ VS 2022 C++、Go（`%LOCALAPPDATA%\Programs\go`）、Bun、Node（npm 全局 `@tauri-apps/cli`）。PowerShell 拦 `.ps1`，一律用 `.cmd` 形态。
 
 ```powershell
 bun run --cwd frontend build          # 改了前端才跑
-# Git Bash 里（PATH 先带上 Go）：
-MIAO_TARGET=windows-amd64 ./scripts/build-embedded.sh   # 真内核 + 规则集
-cargo build -p miao-desktop --locked --release          # target/release/miao.exe
+# Git Bash（PATH 先带上 Go）：
+MIAO_TARGET=windows-amd64 ./scripts/build-embedded.sh
+cargo build -p miao-desktop --locked --release
 # desktop/src-tauri 下：
-tauri.cmd build --bundles nsis --ci                     # target/release/bundle/nsis/*-setup.exe
+tauri.cmd build --bundles nsis --ci
 ```
 
-- **重编前先从托盘退出 miao**：运行中的 exe 被 Windows 锁定，链接报 `os error 5`
-- 只验证编译可造空 stub（`embedded/sing-box-windows-amd64.exe` + 3 个 srs），CI quality 同款手法；stub 够编译、不够当真内核
-- 本地产物落仓库根目录，已被 gitignore；仅自测用，发布以 CI 产物为准
-- `cargo test -p miao-core --locked --all-targets` 可在 Windows 上跑（CI windows job 同款）
-- 运行 `miao.exe` 会弹 UAC 并用 TUN 接管本机流量（真机已验）；调试时自己权衡，别在还要出网的会话里乱杀进程
+- **重编前先从托盘退出 miao**：运行中的 exe 被锁定，链接报 `os error 5`
+- 运行 `miao.exe` 会弹 UAC 并用 TUN 接管本机流量，调试时别在还要出网的会话里乱杀进程
+- 本地产物仅自测，发布以 CI 产物为准
 
 ## Arch 的 Linux 实例（别动它）
 
-Arch 日常跑的是 **systemd 服务**：`/usr/local/bin/miao`，`WorkingDirectory=/etc/miao`，配置 `/etc/miao/config.yaml`，运行时 `/tmp/miao-sing-box`，面板 `http://localhost:6161`。做 Windows 改动时把它当「生产依赖」，不是调试对象。
+systemd 服务：`/usr/local/bin/miao`，配置 `/etc/miao/config.yaml`，运行时 `/tmp/miao-sing-box`，面板 `http://localhost:6161`。当「生产依赖」，不是调试对象。
 
-如果以后有人要调 **Linux** 二进制：
-
-```bash
-cargo build --locked --release
-sudo systemctl stop miao
-sudo nohup ./target/release/miao-rust > /tmp/miao-dev.log 2>&1 &
-sudo bash install.sh ./target/release/miao-rust
-```
-
-注意：
-
-- 别用 `pgrep -f 'target/release/miao-rust'`，会误匹配 `sudo nohup` 包装进程。用 `sudo pgrep -x miao-rust` 或 `sudo ss -tlnp 'sport = :6161'`
-- 后端跑在 root 下，普通用户 pgrep 看不到
+- 查进程用 `sudo pgrep -x miao-rust` 或 `sudo ss -tlnp 'sport = :6161'`（`pgrep -f` 会误匹配 nohup 包装进程；root 进程普通用户看不到）
 - `api/status` 的 `data.pid` 是 **sing-box 子进程**，不是后端
-- 每次启动都会重释放内嵌文件到运行时目录；`cache.db` / `config.json.cache` 有意保留
-- 出网被 TUN 接管：**后端一停，GitHub 就没了**。`install.sh` 在线下载在这台机器上测不了；用离线路径。`remove.sh` 会删 `/etc/miao`，动之前先备份
-- git push 用 SSH（`origin` 是 `git@github.com:...`）。HTTPS + gh token 缺 `workflow` scope，推不动 workflow 文件
+- 每次启动重释放内嵌文件到运行时目录；`cache.db` / `config.json.cache` 有意保留
+- `remove.sh` 会删 `/etc/miao`，动之前先备份
+- git push 用 SSH（HTTPS + gh token 缺 `workflow` scope，推不动 workflow 文件）
 
 ## Windows 路径与行为（写代码时对照）
 
 | 项 | 实现 |
 | --- | --- |
-| 配置 | `%LOCALAPPDATA%\io.github.yuxiangluo.miao\config.yaml` |
-| 日志 | `%LOCALAPPDATA%\io.github.yuxiangluo.miao\miao.log`（GUI 没控制台） |
-| 上次节点 | `%LOCALAPPDATA%\io.github.yuxiangluo.miao\.last_proxy`（不要再放 Temp） |
+| 配置/日志/上次节点 | `%LOCALAPPDATA%\io.github.yuxiangluo.miao\`（config.yaml、miao.log、.last_proxy） |
 | 内核运行时 | `%TEMP%\miao-sing-box` |
 | 面板绑定 | `127.0.0.1` |
-| 单实例 | 命名 mutex 优先 `Global\io.github.yuxiangluo.miao`（跨会话，防快速用户切换双开抢 TUN），无权时退 `Local\`；未提权先 `OpenMutexW`，已有实例不再 UAC；已有实例的窗口按标题 + 进程镜像（miao.exe）双重确认 |
-| 停核 | `CREATE_NEW_PROCESS_GROUP` + `CTRL_BREAK`；超时再杀并只清 `sing-tun`（Arch / Linux CI 不要真执行这句 PowerShell） |
+| 单实例 | 命名 mutex 优先 `Global\`（跨会话防双开抢 TUN），无权退 `Local\`；未提权先 `OpenMutexW`，已有实例不再 UAC |
+| 停核 | `CREATE_NEW_PROCESS_GROUP` + `CTRL_BREAK`；超时再杀并只清 `sing-tun` |
 | 提权 | 确认无实例后再 `ShellExecuteW runas`；取消则 MessageBox |
-| 端口 | `port_fallback`：6161 被占时桌面壳改绑随机端口，不再直接退出 |
-| 内核看门狗 | 崩溃自动拉起（2s 巡检、1–16s 退避、最多 5 次），放弃时写 `config_warning`；有意启动/停核先递增 `sing_generation`，spawn 不覆盖仍活着的子进程 |
-| 日志轮转 | `miao.log` 超 8 MB 时启动改名 `.old`（单份滚动） |
-| 进程规则文案 | `/api/status` 的 `platform` 决定 placeholder（`qbittorrent.exe`） |
-| 托盘 | 左键单击唤出窗口，左键双击唤出/收回；右键菜单：显示窗口/打开日志/开机自启/退出 |
-| 开机自启 | 托盘 CheckMenuItem → 任务计划 `Miao`（ONLOGON + HIGHEST + `--minimized`），勾选状态即任务存在性、不落配置，切换后回读校验；卸载钩子 best-effort `schtasks /Delete` |
-| 安装/卸载守卫 | `NSIS_HOOK_PREINSTALL/PREUNINSTALL` 里 tasklist 查 miao.exe，在跑则弹「先托盘退出」（重试/取消）；提权进程安装包杀不掉，只能拦。卸载段只能 Call `un.*` 函数，注意 |
-| 自定义 NSIS 模板 | `nsis/installer.nsi`（基于 tauri-cli v2.11.4 官方模板）：默认「不卸载直接安装」+ 卸载前先查进程。升 CLI 版本要重套这两处（文件头有说明） |
+| 端口 | `port_fallback`：6161 被占时改绑随机端口 |
+| 内核看门狗 | 崩溃自动拉起（2s 巡检、1–16s 退避、最多 5 次），放弃时写 `config_warning`；有意启停先递增 `sing_generation` |
+| 日志轮转 | `miao.log` 超 8 MB 启动改名 `.old`（单份滚动） |
+| 托盘 | 单击唤出、双击唤出/收回；菜单：显示窗口/打开日志/开机自启/退出 |
+| 开机自启 | 任务计划 `Miao`（ONLOGON + HIGHEST + `--minimized`），勾选状态即任务存在性、不落配置，切换后回读校验 |
+| NSIS | 自定义模板 `nsis/installer.nsi`：安装/卸载前查 miao.exe 在跑则拦（提权进程杀不掉，只能拦）。升 tauri-cli 版本要重套这两处 |
 
 TUN JSON：`auto_route` + `strict_route`，`interface_name` 仍是 `sing-tun`。`cfg(target_os = "linux")` 才写 `auto_redirect`。
 
+## 写测试
+
+**后端**：只测纯函数、校验失败、读路径、不触网的 handler。成功写路径会起真实 sing-box，单测别碰。`spawn_server` 必须 `skip_extract: true` + 注入 `volatile_path` 临时路径。Windows 专属路由测试用 `#[cfg(windows)]` 断言 `/api/upgrade`、`/api/vps/deploy` 是 404。
+
+**前端**：App 集成测试 mock `/api/status|subs|nodes|rules|version` 和 Clash 端点。
+
+## 配置与内核管线（后端核心）
+
+变更链路：`config_update` 锁 → 改克隆 → `apply_config_change`（分层落盘 → 生成 → `sing-box check` → 热重启）。面板不直接碰内核，走 Clash API（`127.0.0.1:6262`）。
+
+落盘三层（详见 docs/refactor-plan.md）：稳定层 `config.yaml`（port/subs/nodes/custom_rules/mcp）、易变层 `volatile.yaml`（node_select/route_mode——unix 在 tmpfs 随系统重启清空，Windows 持久）、状态层（可删）。合并视图 = volatile > config > 默认；两层各自原子写 + 跳过未变。
+
+失败回滚去网络化：先快照 `config.json` 字节，回滚按 **内存快照 → `config.json.cache` → 重新拉订阅** 分层；内核已死时先 `sing-box check` 再启动；空 cache 拒绝恢复。
+
+订阅刷新只有一条管线 `refresh_subscriptions`，策略 `RefreshPolicy`：`Manual`（用户在场，失败即报）/ `ManualInApply`（事务内，node_select 随外层事务提交）/ `Startup`（全失败保留运行中的缓存）。节点集来源 `SubSource`：本地语义变更用 `sub-nodes.json` 快照零网络重建，增删订阅/手动刷新/启动才真拉取。订阅全失败时有本地材料则回滚保留现状，三者全无才落盘+停核。
+
+启动两条路：`config.json.cache` 存在且过 `sing-box check` → 秒开 + `Startup` 策略后台刷新（拉取阶段不持锁）；否则同步拉取。
+
+依赖与供应链：YAML 用 `yaml_serde`（serde_yaml 已归档）；`AppState.http_client` 显式 `no_proxy()`（本进程自己就是代理）；VPS 部署与后台刷新都不在 `config_update` 锁内做网络等待；VPS 的 Hysteria2 钉版 + `hashes.txt` 校验（升级靠人工 bump `HYSTERIA_VERSION`），凭据经 stdin 注入不进 argv，SSH `accept-new`（TOFU）。
+
+## MCP 端点
+
+`POST /mcp`：MCP 无状态 JSON-RPC，配置 `mcp: true` 开启（默认关，关闭时 404）。工具面与面板同构的平铺节点模型，selector 永不暴露；`switch_node` 走 Clash PUT + `save_last_proxy`（与面板同路径）。测试只覆盖纯分发、参数校验、无网络读路径。
+
+## CI
+
+push/PR 跑 `ci.yml`：Frontend quality → Rust quality（default-members + windows-gnu check）→ Windows 健康检查（`cargo test -p miao-core` + `cargo check -p miao-desktop`，内核用 stub，**不跑 exe、不开 TUN**）。
+
+打 `v*` tag 或手动跑 **Build Release**：quality → frontend → 并行编 Linux musl 矩阵（zigbuild）与 Windows 桌面（真内核 + NSIS）→ tag 触发时产物传 GitHub Release，手动跑只留 artifacts。发布产物以 CI 为准。
+
+## 脚本
+
+- `install.sh` / `remove.sh`：提交前 `shellcheck`
+- `build-embedded.sh` 的 `MIAO_TARGET=windows-amd64` 也会编 host 规则编译器 `sing-box-host`，不要拿它去抽本机正在跑的实例
+- `SING_BOX_REF` 接受分支/tag/完整 sha；仅手动钉版用，CI 始终跟默认分支 HEAD
+
 ## 前端调试（agent-browser）
-
-**设计 token（CRAP 重构后）**：间距只用 `--space-1..4`（6/10/16/24），圆角只用 `--radius-sm/radius/radius-lg/radius-pill`（6/8/12/999，卡片内嵌块 8、独立块 12、小控件 6），字号只用 `--fs-xs..xl`（0.75/0.8125/0.875/1/1.1875rem，更大标题除外）。徽标统一 `.badge` 基类 + info/success/warning/danger/neutral 变体，语义类名（counter-pill/rule-target-badge 等）保留但只带配色；写新徽标时组合使用，不要新写基元。徽标与相邻文本字号不同时（如规则行 fs-xs chip + fs-md 数值），容器必须 flex 中线对齐（`.list-row-title.structured`），靠默认基线对齐 chip 会视觉上浮。活数字（速率/延迟/流量/PID）必须带 `.num`（tabular-nums）。位数/单位变化引起宽度跳动的地方用定宽右对齐：顶栏速率 `.traffic-item .num` 宽 5.5rem（实测最宽 "1023 MB/s" ≈ 79px，88px 留字体度量余量，极端溢出向左吃空隙不动外部布局），新增同类展示沿用该模式。卡片标题栏统一「标题左、控件右」：`.section-title-wrap` 用 `flex: 1 1 auto` 占满剩余宽度把控件推到右缘，头部控件（.btn-sm/.icon-button/select）同高 30px。链接统计工具栏：筛选组居左成簇、搜索框居右限宽（`flex: 0 1 16rem`，不占满空白），排序固定按速度（无选择器）。按钮：ghost=取消类（透明无边框），secondary=确认级次要操作，primary=主提交。图标尺寸只有 12/14/16/18 四档。
-
-Arch 上的面板仍是那份 systemd Linux 实例，可以用来看 **共享 UI**（规则、节点、布局），不能用来验 UAC / WebView2 / WinTun。
 
 - `agent-browser open <url>` / `eval '<js>'` / `screenshot [--full] <path>`；`set viewport <w> <h>`
 - `eval` 跨调用保留 JS 上下文，同名 `const` 会炸，用 IIFE
 - React 受控组件要走原生 setter + `input`/`change` 事件
-- 首页固定高度，左右列内部滚；活跃链接区恒高且始终渲染，只显示一行、放不下直接裁切不滚动，条带卡片不可展开（明细走「查看全部」）
-- **桌面双列（>1180px）位置钉死、高度随视口伸缩**：融合顶栏 76（64px logo/速率/当前节点 chip/模式/版本一条卡片，与内容同宽对齐；品牌文字与 Sing-box 状态块已移除，body 上下 padding 6px 保持总高不变；当前节点 chip 即原节点列表横幅，点击测当前节点延迟）/ 内容网格 `max(582, 100vh−388)`（388=工作区上下 padding 96（各 48，上下留白一致）+顶栏 76+16+条带 16+184）/ 条带 184；右列三卡按 156:196:246 等比分配（630 设计高度时恰为 156/196/246），min-height 钉住设计值，网格低于 630 时整列内部滚动兜底。右列固定卡的滚动在 `.panel-card-body` 内部（header 固定）。841–1180px 单列堆叠带保持弹性
-- 移动端 ≤840px 由 `isDesktop` 门控，不要再加 CSS `display:none`
-
-## 写测试
-
-**前端**：`<details>` 折叠看 `open` 属性；RuleModal 关闭时不在 DOM；密码 ≥8 位；App 集成测试 mock `/api/status|subs|nodes|rules|version` 和 Clash 端点。Windows 相关：`upgrade_supported: false` 时版本条不是按钮；`vpsSupported: false` 时没有 VPS tab；`platform: 'windows'` 时进程规则 placeholder 换成 exe 路径。
-
-**后端**：只测纯函数、校验失败、读路径、不触网的 handler。成功写路径会起真实 sing-box，单测别碰。`spawn_server` 必须 `skip_extract: true`，且不要写 `/tmp/miao-sing-box`。Windows 专属路由测试用 `#[cfg(windows)]` 断言 `/api/upgrade`、`/api/vps/deploy` 是 404。
-
-配置变更链路没变：`config_update` 锁 → 改克隆 → `apply_config_change`（分层落盘 → 生成 → `sing-box check` → 热重启）。面板不直接碰内核，走 Clash API。
-
-落盘分三层（详见 docs/refactor-plan.md）：稳定层 `config.yaml`（port/subs/nodes/custom_rules/mcp），易变层 `volatile.yaml`（node_select/route_mode——unix 在 /tmp/miao-sing-box 随系统重启清空，Windows 在应用数据目录持久），状态层（config.json/.cache、sub-nodes.json、.last_proxy）。合并视图 = volatile overlay > config.yaml > 默认；`Config` 的 node_select/route_mode 只做单向 `skip_serializing`（仍反序列化，旧配置/手写启动默认值兼容），`save_config_layered` 两层各自原子写 + 跳过未变，单层变更零另一层 I/O。route_mode 已没有会话级特例：面板/MCP 切换就是普通 `apply_config_change`，`apply_runtime_config_change`/`route_mode_override` 已删除。
-
-失败回滚去网络化：apply/刷新入口先快照当前 `config.json` 字节（`snapshot_runtime_config`），回滚按 **内存快照 → `config.json.cache` → 重新拉订阅生成** 分层——前两层是纯本地文件操作，内核已死时先 `sing-box check` 再启动（挡坏材料，也兜住内核升级后旧配置不再合法）；仅本地材料全无时才重新拉订阅。cache 读写均已原子化（`write_file_atomic`），空 cache 拒绝恢复。面板「刷新订阅」（`regenerate_preserving_service_state`）失败同样走这套回滚，不再把坏配置留在磁盘上等看门狗踩。
-
-订阅刷新的机制只有一条管线：`services::config::refresh_subscriptions`（获取节点集 → 生成 → 校验 → 重启），策略由 `RefreshPolicy` 显式表达——`Manual`（面板「刷新订阅」等独立路径：总是重启，全失败用残血配置，重启后由管线持久化生效的 node_select）、`ManualInApply`（`apply_config_change` 事务内：机制同上，但 node_select 随外层事务一并提交，管线不提前写盘，避免「旧配置 + 新选择」中间快照）与 `Startup`（启动快速通道：全失败/校验失败保留运行中的缓存并把 cache 拷回 config.json——看门狗与手动停/启直接用磁盘 config.json 起进程、字节比对无变化不重启）。`regenerate_and_restart_runtime` 接收策略参数。订阅拉取层（`gen_config`）按调用方区分退避预算 `SubFetchRetry`：启动同步路径与 `Startup` 在订阅全失败时按 5s/15s/30s 退避重试（开机先于路由/DHCP 就绪的瞬态；测试里缩短），`Manual` 传 `None`——用户在场，失败即报。调用方按 `RefreshOutcome` 决定告警与收尾（存缓存/恢复节点）。
-
-节点集来源由 `SubSource` 分流：`old.subs == new.subs`（节点选择/route_mode/规则/手动节点等本地语义变更）→ `SnapshotOrFetch`，用 `sub-nodes.json` 快照零网络重建（`gen_config_from_snapshot`，快照缺失或 subs 护栏不匹配才退化拉取）；增删订阅/手动刷新/启动 → `Fetch` 真拉取。快照只在校验通过（或启动成功、字节无变化）后由 `record_fresh_snapshot` 落盘，全失败时不用空结果覆盖好快照。快照重建不动 `sub_status`（面板订阅状态=上次真拉取结果）。订阅全失败触发 `NoUsableNodes` 时，有本地材料（运行时快照/cache/sub-nodes.json 任一）则回滚并报错保留现状，不再停核清场；三者全无才落盘+停核。
-
-启动是两条路：`config.json.cache` 存在且通过 `sing-box check` → 直接起内核（秒开），随后以 `Startup` 策略后台刷新（拉取阶段不持 `config_update` 锁——网络退避不再阻塞面板写操作；落地阶段持锁复用预拉取结果（`SubSource::Prefetched`），期间订阅列表被改（面板编辑已自行应用）或服务被显式停止则放弃本次刷新；随初始化任务一同被关停取消）；无缓存/缓存失效 → 原同步拉取路径。
-
-依赖与供应链杂项：YAML 用 `yaml_serde`（serde_yaml 已弃用归档；官方 YAML 组织维护的分支，API 兼容，后端是纯 Rust 的 libyaml-rs）；`AppState.http_client` 显式 `no_proxy()`——本进程自己就是代理，订阅拉取与 Clash API 不应被 root 环境变量代理劫持；VPS 部署与启动后台刷新都不在 `config_update` 锁内做网络等待；VPS 的 Hysteria2 安装钉版 + 官方 `hashes.txt` 校验和验证（替代 curl|bash 的 get.hy2.sh，升级靠人工 bump 脚本内 `HYSTERIA_VERSION`），节点凭据经 stdin 变量前缀注入远端脚本、不进远端进程 argv，SSH 主机密钥 `accept-new`（TOFU：首连信任并记录到 root 的 known_hosts，之后变更被拒）。
-
-## MCP 端点
-
-`POST /mcp`（`services/mcp.rs` + `handlers/mcp.rs`）：MCP 2026-07-28 无状态 JSON-RPC——无握手无会话，通知回 202。开关是配置 `mcp: true`，**默认关**，关闭时 404 不暴露端点存在；运行时改配置即时生效（handler 内读配置做门控，不是路由注册时）。工具面与面板同构的平铺节点模型：selector（`proxy`）只是实现细节，永不暴露；`switch_node` 走 Clash PUT + `save_last_proxy`（与面板切换同路径，重启恢复）。测速/连接/当前节点都代理 Clash API（`127.0.0.1:6262`）。测试只覆盖纯分发、参数校验、无网络读路径；写路径成功分支会触网/起内核，单测别碰。
-
-## CI
-
-`ci.yml` 在 master 的 push、以及所有 PR 上跑：
-
-1. Frontend quality
-2. Rust quality（default-members + `cargo check -p miao-core --target x86_64-pc-windows-gnu`）
-3. Windows（`windows-latest`：`cargo test -p miao-core` + `cargo check -p miao-desktop` 健康检查；内核用 stub，**不跑 exe、不开 TUN**；完整 release 构建归 Build Release）
-
-打 `v*` tag 或手动跑 **Build Release**：quality → frontend → 并行编 Linux musl 矩阵（amd64/arm64，zigbuild）与 Windows 桌面（真内核 + NSIS 安装包）→ tag 触发时全部产物（`miao-rust-linux-*`、`miao-windows-amd64-setup.exe` 及各自 sha256）传到该 tag 的 GitHub Release；手动跑只留 Actions artifacts。发布产物以 CI 为准，本地产物只用于自测。
-
-## 脚本
-
-- `install.sh` / `remove.sh` 仍是 Linux systemd 的事，提交前 `shellcheck`
-- `build-embedded.sh` 的 `MIAO_TARGET=windows-amd64` 只多编一份 Windows 内核，也会编 host 规则编译器用的 `sing-box-host`，不要拿它去抽本机正在跑的实例
-- `build-embedded.sh` 的 `SING_BOX_REF` 接受分支/tag/完整 commit sha（sha 走 init+fetch，`clone --branch` 不收 sha）；仅手动钉版用，CI 不传、始终跟默认分支 HEAD
+- Arch 的生产实例面板可用来看共享 UI，不能用来验 UAC / WebView2 / WinTun
