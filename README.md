@@ -73,7 +73,7 @@ mcp: true                  # 默认关闭
 
 端点是 `POST http://<面板地址>/mcp`（MCP 2026-07-28，无状态 JSON-RPC，无握手无会话）。面板右下角的浮动控件可以一键开关并复制地址。
 
-内置工具：`get_status`（服务状态）、`list_nodes`（平铺节点池）、`switch_node`（切节点，持久化）、`test_delay`（测速）、`set_route_mode`（分流⇄全局）、`list_rules`、`list_connections`。与面板同一套心智模型：没有分组概念，所有订阅和手动节点组成一个节点池。
+内置工具：`get_status`（服务状态）、`list_nodes`（平铺节点池）、`switch_node`（切节点，持久化）、`set_node_select`（手动⇄地区最快）、`test_delay`（测速）、`set_route_mode`（分流⇄全局）、`set_adblock`（去广告开关）、`refresh_subscriptions`（刷新订阅）、`list_rules`、`list_connections`。与面板同一套心智模型：没有分组概念，所有订阅和手动节点组成一个节点池。
 
 连接时服务端会通过 `instructions` 告知调用者：「你的流量很可能正经过本代理，破坏性操作会自断其网」——agent 在执行热重启类操作前会先找你确认。
 

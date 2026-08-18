@@ -12,7 +12,7 @@ use futures::stream::{self, StreamExt};
 use serde_json::{json, Value as JsonValue};
 
 use crate::error::AppResult;
-use crate::models::{LastProxy, RouteMode};
+use crate::models::{LastProxy, NodeSelect, RouteMode};
 use crate::services::config::apply_config_change;
 use crate::state::AppState;
 use crate::VERSION;
@@ -25,6 +25,8 @@ const SELECTOR_TAG: &str = "proxy";
 const DELAY_TIMEOUT_MS: u64 = 3000;
 const DELAY_TEST_URL: &str = "http://www.gstatic.com/generate_204";
 const DELAY_CONCURRENCY: usize = 6;
+/// 测速请求的 HTTP 层超时：探测本身 3s，留 2s 余量兜底 sing-box 卡顿
+const DELAY_HTTP_TIMEOUT: Duration = Duration::from_millis(DELAY_TIMEOUT_MS + 2000);
 
 /// 处理一个 JSON-RPC 请求体。通知（无 id）返回 None，由 HTTP 层回 202。
 pub async fn handle(state: &Arc<AppState>, body: &[u8]) -> Option<JsonValue> {
@@ -125,13 +127,27 @@ fn tools_catalog() -> JsonValue {
         },
         {
             "name": "switch_node",
-            "description": "切换当前节点；选择会持久化，重启后自动恢复。毫秒级完成，但已建立的连接会重置",
+            "description": "切换当前节点；选择会持久化并自动恢复（OpenWrt 系统重启后回到默认选择）。毫秒级完成，但已建立的连接会重置",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "name": { "type": "string", "description": "节点名（来自 list_nodes）" },
                 },
                 "required": ["name"],
+            },
+        },
+        {
+            "name": "set_node_select",
+            "description": "节点选择策略：manual=手动选择（配合 switch_node 指定具体节点），fastest_hk/jp/tw/sg/us=内核自动选该地区延迟最低节点。纯本地语义变更（快照重建，不拉订阅），但会热重启内核，连接秒级中断",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "select": {
+                        "type": "string",
+                        "enum": ["manual", "fastest_hk", "fastest_jp", "fastest_tw", "fastest_sg", "fastest_us"],
+                    },
+                },
+                "required": ["select"],
             },
         },
         {
@@ -154,6 +170,22 @@ fn tools_catalog() -> JsonValue {
                 },
                 "required": ["mode"],
             },
+        },
+        {
+            "name": "set_adblock",
+            "description": "去广告开关：命中内置广告规则集的域名在路由层拦截。写入稳定层配置，重启后保持。纯本地语义变更（快照重建，不拉订阅），但会热重启内核，连接秒级中断",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "enabled": { "type": "boolean" },
+                },
+                "required": ["enabled"],
+            },
+        },
+        {
+            "name": "refresh_subscriptions",
+            "description": "真拉取全部订阅刷新节点池。有变化才热重启内核（连接秒级中断，可能包括你自己的）；全部订阅失败时保留当前运行配置并告警",
+            "inputSchema": { "type": "object", "properties": {} },
         },
         {
             "name": "list_rules",
@@ -186,8 +218,11 @@ async fn handle_tool_call(
         "get_status" => tool_get_status(state).await,
         "list_nodes" => tool_list_nodes(state).await,
         "switch_node" => tool_switch_node(state, &args).await,
+        "set_node_select" => tool_set_node_select(state, &args).await,
         "test_delay" => tool_test_delay(state, &args).await,
         "set_route_mode" => tool_set_route_mode(state, &args).await,
+        "set_adblock" => tool_set_adblock(state, &args).await,
+        "refresh_subscriptions" => tool_refresh_subscriptions(state).await,
         "list_rules" => tool_list_rules(state).await,
         "list_connections" => tool_list_connections(state).await,
         other => Err(format!("Unknown tool: {other}")),
@@ -487,7 +522,12 @@ async fn fetch_delay(state: &Arc<AppState>, name: &str) -> i64 {
         "{CLASH_API_BASE}/proxies/{}/delay?timeout={DELAY_TIMEOUT_MS}&url={DELAY_TEST_URL}",
         urlencoding::encode(name),
     );
-    let response = state.http_client.get(&url).send().await;
+    let response = state
+        .http_client
+        .get(&url)
+        .timeout(DELAY_HTTP_TIMEOUT)
+        .send()
+        .await;
     match response {
         Ok(res) if res.status().is_success() => res
             .json::<JsonValue>()
@@ -536,6 +576,108 @@ async fn tool_set_route_mode(state: &Arc<AppState>, args: &JsonValue) -> Result<
         "changed": true,
         "restarted": was_running,
         "note": "已写入易变层配置；OpenWrt/Linux 系统重启后回到 config.yaml 的启动默认值（未设置则规则分流）",
+    }))
+}
+
+/// 与面板「节点选择」同一条链路：配置事务 + 运行时热应用（易变层落盘）。
+/// 地区筛空时内核回退 manual：如实返回实际生效值（与面板提示一致）。
+async fn tool_set_node_select(
+    state: &Arc<AppState>,
+    args: &JsonValue,
+) -> Result<JsonValue, String> {
+    let raw = args
+        .get("select")
+        .and_then(JsonValue::as_str)
+        .ok_or_else(|| "Invalid params: missing `select`".to_string())?;
+    let node_select = NodeSelect::parse(raw).ok_or_else(|| {
+        "Invalid params: `select` 必须是 manual / fastest_hk / fastest_jp / fastest_tw / fastest_sg / fastest_us"
+            .to_string()
+    })?;
+
+    if state.initializing.load(Ordering::Relaxed) {
+        return Err("初始化进行中，稍后再试".to_string());
+    }
+
+    let _config_update = state.config_update.lock().await;
+    let old_config = state.config.read().await.clone();
+    if old_config.node_select == node_select {
+        return Ok(json!({ "node_select": raw, "changed": false }));
+    }
+
+    let mut new_config = old_config.clone();
+    new_config.node_select = node_select;
+
+    apply_config_change(state, &old_config, &new_config)
+        .await
+        .map_err(|e| format!("切换节点选择失败: {e}"))?;
+
+    let effective = state.config.read().await.node_select;
+    let note = if !node_select.is_manual() && effective.is_manual() {
+        "该地区没有可用节点，已切回手动选择"
+    } else {
+        "已写入易变层配置"
+    };
+    Ok(json!({
+        "node_select": effective.as_str(),
+        "requested": raw,
+        "changed": true,
+        "note": note,
+    }))
+}
+
+/// 与面板去广告开关同一条链路：配置事务 + 运行时热应用（稳定层落盘）。
+async fn tool_set_adblock(state: &Arc<AppState>, args: &JsonValue) -> Result<JsonValue, String> {
+    let enabled = args
+        .get("enabled")
+        .and_then(JsonValue::as_bool)
+        .ok_or_else(|| "Invalid params: missing `enabled` (boolean)".to_string())?;
+
+    if state.initializing.load(Ordering::Relaxed) {
+        return Err("初始化进行中，稍后再试".to_string());
+    }
+
+    let _config_update = state.config_update.lock().await;
+    let old_config = state.config.read().await.clone();
+    if old_config.adblock == enabled {
+        return Ok(json!({ "adblock": enabled, "changed": false }));
+    }
+
+    let mut new_config = old_config.clone();
+    new_config.adblock = enabled;
+
+    apply_config_change(state, &old_config, &new_config)
+        .await
+        .map_err(|e| format!("切换去广告失败: {e}"))?;
+
+    Ok(json!({
+        "adblock": enabled,
+        "changed": true,
+        "note": "已写入稳定层配置，重启后保持",
+    }))
+}
+
+/// 与面板「刷新订阅」同一条链路：真拉取 → 生成 → 校验 → 有变化才热重启；
+/// 全部订阅失败时保留当前运行配置。
+async fn tool_refresh_subscriptions(state: &Arc<AppState>) -> Result<JsonValue, String> {
+    if state.initializing.load(Ordering::Relaxed) {
+        return Err("初始化进行中，稍后再试".to_string());
+    }
+    if state.config.read().await.subs.is_empty() {
+        return Err("没有配置订阅，无可刷新".to_string());
+    }
+
+    let _config_update = state.config_update.lock().await;
+    let config = state.config.read().await.clone();
+
+    let restarted = crate::services::config::regenerate_preserving_service_state(&config, state)
+        .await
+        .map_err(|e| format!("刷新订阅失败: {e}"))?;
+
+    let warning = state.config_warning.lock().await.clone();
+    Ok(json!({
+        "refreshed": true,
+        "restarted": restarted,
+        "warning": warning.map(JsonValue::from).unwrap_or(JsonValue::Null),
     }))
 }
 
@@ -727,8 +869,11 @@ mod tests {
             "get_status",
             "list_nodes",
             "switch_node",
+            "set_node_select",
             "test_delay",
             "set_route_mode",
+            "set_adblock",
+            "refresh_subscriptions",
             "list_rules",
             "list_connections",
         ] {
@@ -868,6 +1013,92 @@ mod tests {
             .as_str()
             .unwrap()
             .contains("rule 或 global"));
+    }
+
+    #[tokio::test]
+    async fn set_node_select_validates_select_value() {
+        let response = call(
+            &state(Config::default()),
+            json!({
+                "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                "params": { "name": "set_node_select", "arguments": { "select": "fastest_kr" } },
+            }),
+        )
+        .await;
+        assert_eq!(response["result"]["isError"], true);
+        assert!(response["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("manual"));
+    }
+
+    #[tokio::test]
+    async fn set_node_select_is_idempotent_without_touching_runtime() {
+        // 默认 manual，请求 manual：未变化直接返回，不起内核不写盘
+        let response = call(
+            &state(Config::default()),
+            json!({
+                "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                "params": { "name": "set_node_select", "arguments": { "select": "manual" } },
+            }),
+        )
+        .await;
+        let text = response["result"]["content"][0]["text"].as_str().unwrap();
+        let payload: JsonValue = serde_json::from_str(text).unwrap();
+        assert_eq!(payload["node_select"], "manual");
+        assert_eq!(payload["changed"], false);
+    }
+
+    #[tokio::test]
+    async fn set_adblock_validates_params() {
+        let response = call(
+            &state(Config::default()),
+            json!({
+                "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                "params": { "name": "set_adblock", "arguments": {} },
+            }),
+        )
+        .await;
+        assert_eq!(response["result"]["isError"], true);
+        assert!(response["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("enabled"));
+    }
+
+    #[tokio::test]
+    async fn set_adblock_is_idempotent_without_touching_runtime() {
+        // 默认 false，请求 false：未变化直接返回，不起内核不写盘
+        let response = call(
+            &state(Config::default()),
+            json!({
+                "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                "params": { "name": "set_adblock", "arguments": { "enabled": false } },
+            }),
+        )
+        .await;
+        let text = response["result"]["content"][0]["text"].as_str().unwrap();
+        let payload: JsonValue = serde_json::from_str(text).unwrap();
+        assert_eq!(payload["adblock"], false);
+        assert_eq!(payload["changed"], false);
+    }
+
+    #[tokio::test]
+    async fn refresh_subscriptions_requires_subs() {
+        // 无订阅：在进管线前报错（不触网不起内核）
+        let response = call(
+            &state(Config::default()),
+            json!({
+                "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                "params": { "name": "refresh_subscriptions", "arguments": {} },
+            }),
+        )
+        .await;
+        assert_eq!(response["result"]["isError"], true);
+        assert!(response["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("没有配置订阅"));
     }
 
     #[tokio::test]
