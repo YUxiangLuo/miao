@@ -108,10 +108,6 @@ pub struct Config {
     pub nodes: Vec<String>,
     #[serde(default)]
     pub custom_rules: Vec<String>,
-    /// 去广告开关:命中内置广告规则集的域名在路由层 reject;
-    /// 不拦 DNS,自定义放行规则才能对误拦域名生效
-    #[serde(default)]
-    pub adblock: bool,
     /// MCP 端点（POST /mcp，JSON-RPC 工具接口）开关。
     /// Linux 面板绑 0.0.0.0，开启后局域网可达——默认关闭，按需显式开启。
     #[serde(default)]
@@ -187,7 +183,6 @@ nodes: []
             nodes: vec![],
             custom_rules: vec![],
             route_mode: super::RouteMode::Global,
-            adblock: false,
             mcp: false,
             node_select: Default::default(),
         };
@@ -205,7 +200,6 @@ nodes: []
             nodes: vec![],
             custom_rules: vec![],
             route_mode: Default::default(),
-            adblock: false,
             mcp: false,
             node_select: Default::default(),
         };

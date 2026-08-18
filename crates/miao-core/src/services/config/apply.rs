@@ -57,7 +57,7 @@ pub enum SubSource {
     /// 真拉取（增删订阅/手动刷新/启动）
     Fetch,
     /// 快照优先，缺失或与当前订阅列表不匹配时退化到真拉取
-    /// （本地语义变更：节点选择/路由模式/规则/去广告/手动节点——切换不是刷新）
+    /// （本地语义变更：节点选择/路由模式/规则/手动节点——切换不是刷新）
     SnapshotOrFetch,
     /// 已预拉取的订阅节点集（启动后台刷新：网络等待在配置锁外完成，
     /// 持锁落地阶段只复用结果，不再碰网络）
@@ -425,7 +425,7 @@ pub async fn apply_config_change(
 
     // 回滚 tier 1 材料：变更前正在运行/最近可用的运行时配置字节（config.json）
     let snapshot = snapshot_runtime_config().await;
-    // 订阅列表没变就是本地语义变更（节点选择/路由模式/规则/去广告/手动节点），走快照零网络重建
+    // 订阅列表没变就是本地语义变更（节点选择/路由模式/规则/手动节点），走快照零网络重建
     let source = sub_source_for(old_config, new_config);
 
     let apply_result = match apply_mode {

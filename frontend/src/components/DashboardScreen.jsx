@@ -80,8 +80,6 @@ export function DashboardScreen({ app }) {
               loadingAction={app.loadingAction}
               onAddRule={app.handleAddRule}
               onDeleteRule={app.handleOpenDeleteRuleConfirm}
-              adblockEnabled={Boolean(app.status.adblock)}
-              onToggleAdblock={app.handleToggleAdblock}
               nodeNames={app.ruleNodeNames}
               connections={app.connectionsInfo?.connections}
               platform={app.status.platform || 'linux'}

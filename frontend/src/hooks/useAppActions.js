@@ -387,16 +387,6 @@ export function useAppActions(data) {
     openConfirm('删除规则', `确定要删除此规则吗？\n${label}`, () => handleDeleteRule(rule))
   }, [openConfirm, handleDeleteRule])
 
-  const handleToggleAdblock = useCallback(async (enabled) => {
-    try {
-      await apiCall('adblock', { method: 'POST', body: JSON.stringify({ enabled }) }, 'toggleAdblock')
-      await fetchStatus()
-      showToast(enabled ? '去广告已开启' : '去广告已关闭', 'success')
-    } catch (error) {
-      showToast(error.message, 'error')
-    }
-  }, [apiCall, fetchStatus, showToast])
-
   const handleToggleMcp = useCallback(async (enabled) => {
     try {
       await apiCall('mcp', { method: 'POST', body: JSON.stringify({ enabled }) }, 'toggleMcp')
@@ -429,7 +419,6 @@ export function useAppActions(data) {
     handleOpenDeleteSubConfirm,
     handleAddRule,
     handleOpenDeleteRuleConfirm,
-    handleToggleAdblock,
     handleToggleMcp,
   }
 }

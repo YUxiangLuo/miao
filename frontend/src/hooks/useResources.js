@@ -7,8 +7,7 @@ export function useStatus() {
     uptime_secs: null,
     initializing: false,
     route_mode: 'rule',
-    node_select: 'manual',
-    adblock: false
+    node_select: 'manual'
   })
   // 是否成功拿到过后端响应：区分「服务未运行」与「后端根本没起来」
   const [statusLoaded, setStatusLoaded] = useState(false)

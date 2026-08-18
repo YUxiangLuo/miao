@@ -5,8 +5,8 @@ pub mod proxy;
 pub mod version;
 
 pub use api::{
-    AdblockRequest, ApiResponse, ConnectivityResult, DeleteRuleRequest, McpRequest,
-    NodeSelectRequest, RouteModeRequest, RuleInfo, RuleRequest, StatusData, SubRequest, SubStatus,
+    ApiResponse, ConnectivityResult, DeleteRuleRequest, McpRequest, NodeSelectRequest,
+    RouteModeRequest, RuleInfo, RuleRequest, StatusData, SubRequest, SubStatus,
 };
 #[cfg(not(windows))]
 pub use api::{VpsDeployRequest, VpsDeployResponse};

@@ -183,12 +183,7 @@ pub(super) fn build_sing_box_config(
         arr.extend(outbounds);
     }
 
-    apply_route_mode(
-        &mut sing_box_config,
-        config.route_mode,
-        &custom_rules,
-        config.adblock,
-    );
+    apply_route_mode(&mut sing_box_config, config.route_mode, &custom_rules);
 
     Ok((sing_box_config, skipped_rules, effective_select))
 }
@@ -239,29 +234,10 @@ fn apply_route_mode(
     sing_box_config: &mut serde_json::Value,
     route_mode: RouteMode,
     custom_rules: &[String],
-    adblock: bool,
 ) {
-    // 广告规则集(REIJI007/AdBlock_Rule_For_Sing-box 编译的本地 srs)仅在使用时挂载
-    if adblock {
-        if let Some(rule_sets) = sing_box_config["route"]["rule_set"].as_array_mut() {
-            rule_sets.insert(
-                0,
-                serde_json::json!({
-                    "type": "local",
-                    "tag": "adblock",
-                    "format": "binary",
-                    "path": "./adblock_reject.srs"
-                }),
-            );
-        }
-    }
-
     if let Some(rules) = sing_box_config["route"]["rules"].as_array_mut() {
-        // 两种模式下自定义规则都优先生效;广告拦截排在其后,用户可放行误拦域名
-        let mut insertions = parse_custom_rules(custom_rules);
-        if adblock {
-            insertions.push(serde_json::json!({"rule_set": ["adblock"], "action": "reject"}));
-        }
+        // 两种模式下自定义规则都优先生效
+        let insertions = parse_custom_rules(custom_rules);
         match route_mode {
             RouteMode::Rule => {
                 // Preserve the mandatory pre-routing actions, then let user rules take

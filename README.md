@@ -59,7 +59,6 @@ Win10/11 x64，从 [Releases](https://github.com/YUxiangLuo/miao/releases/latest
 | 节点列表 | 订阅 + 手动节点平铺为一个池；单个/批量测速，点击切换，重启后恢复上次选择 |
 | 链接统计 | 活动连接按站点聚合：实时速度、累计流量，展开看逐条明细 |
 | 自定义规则 | 域名/IP/端口/进程名/进程路径 → 直连/代理/拦截/**指定节点**；节点失效自动跳过并在列表标记 |
-| 去广告 | 内嵌广告规则集，路由层拦截，一键开关 |
 | 手动节点 | 分享链接批量导入（`hysteria2://` `hy2://` `ss://` `vmess://` `vless://` `trojan://` `tuic://` `anytls://`）或手动填写；VPS 一键部署 Hysteria2（仅 Linux） |
 | 订阅管理 | Clash YAML 订阅添加/刷新，失败自动回退缓存配置 |
 | 版本升级 | 仅 Linux：检测新版本并面板内一键自升级（SHA256 校验） |
@@ -84,8 +83,6 @@ custom_rules:              # 可选：优先于内置分流，全局模式下仍
   - '{"process_name":"qbittorrent","action":"route","outbound":"香港节点"}'
   # outbound 除 proxy/direct 外也可填节点 tag；节点消失时该规则被跳过并在面板标记
 
-adblock: true              # 可选：去广告（路由层拦截，默认关闭）
-
 mcp: true                  # 可选：MCP 端点（POST /mcp），默认关闭
 
 route_mode: global         # 可选：启动默认路由模式（rule 规则分流 / global 全局代理）
@@ -105,7 +102,7 @@ OpenWrt 的易变层写 tmpfs：切节点/切模式这类高频操作零闪存�
 
 配置里加一行 `mcp: true`（默认关闭），端点是 `POST http://<面板地址>/mcp`（MCP 2026-07-28，无状态 JSON-RPC，无握手无会话）。面板右下角的浮动控件可以一键开关并复制地址。
 
-内置工具：`get_status`（服务状态）、`list_nodes`（平铺节点池）、`switch_node`（切节点，持久化）、`set_node_select`（手动⇄地区最快）、`test_delay`（测速）、`set_route_mode`（分流⇄全局）、`set_adblock`（去广告开关）、`refresh_subscriptions`（刷新订阅）、`list_rules`、`list_connections`。
+内置工具：`get_status`（服务状态）、`list_nodes`（平铺节点池）、`switch_node`（切节点，持久化）、`set_node_select`（手动⇄地区最快）、`test_delay`（测速）、`set_route_mode`（分流⇄全局）、`refresh_subscriptions`（刷新订阅）、`list_rules`、`list_connections`。
 
 连接时服务端通过 `instructions` 告知调用者：「你的流量很可能正经过本代理，破坏性操作会自断其网」——agent 在执行热重启类操作前会先找你确认。
 

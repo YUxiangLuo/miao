@@ -35,8 +35,7 @@ fn collect_manual_outbounds_ignores_invalid_json_nodes() {
             ],
             custom_rules: vec![],
             route_mode: Default::default(),
-            adblock: false,
-            mcp: false,
+                mcp: false,
             node_select: Default::default(),
         };
 
@@ -59,8 +58,7 @@ fn collect_manual_outbounds_preserves_hysteria2_without_default_bandwidth() {
             ],
             custom_rules: vec![],
             route_mode: Default::default(),
-            adblock: false,
-            mcp: false,
+                mcp: false,
             node_select: Default::default(),
         };
 
@@ -113,7 +111,6 @@ fn build_sing_box_config_skips_rules_with_missing_node() {
             r#"{"process_name":"curl","action":"route","outbound":"manual-a"}"#.to_string(),
         ],
         route_mode: Default::default(),
-        adblock: false,
         mcp: false,
         node_select: Default::default(),
     };
@@ -169,7 +166,6 @@ fn build_sing_box_config_merges_nodes_and_valid_custom_rules() {
             "not-json".to_string(),
         ],
         route_mode: Default::default(),
-        adblock: false,
         mcp: false,
         node_select: Default::default(),
     };
@@ -227,7 +223,6 @@ fn build_sing_box_config_global_mode_removes_split_rules() {
             r#"{"domain_suffix":["example.com"],"action":"route","outbound":"direct"}"#.to_string(),
         ],
         route_mode: RouteMode::Global,
-        adblock: false,
         mcp: false,
         node_select: Default::default(),
     };
@@ -277,9 +272,9 @@ fn sub_source_is_snapshot_when_subs_unchanged() {
         subs: vec!["https://a.example.com".to_string()],
         ..Config::default()
     };
-    // 节点选择/规则/去广告等本地语义变更不动 subs → 快照重建
+    // 节点选择/规则/MCP/手动节点等本地语义变更不动 subs → 快照重建
     let mut new = old.clone();
-    new.adblock = true;
+    new.mcp = true;
     assert_eq!(sub_source_for(&old, &new), SubSource::SnapshotOrFetch);
 
     let mut new = old.clone();
@@ -403,7 +398,6 @@ fn build_sing_box_config_renames_duplicate_outbound_tags() {
         nodes: vec![],
         custom_rules: vec![],
         route_mode: Default::default(),
-        adblock: false,
         mcp: false,
         node_select: Default::default(),
     };
@@ -463,7 +457,6 @@ fn build_sing_box_config_renames_tags_reserved_by_template() {
         nodes: vec![],
         custom_rules: vec![],
         route_mode: Default::default(),
-        adblock: false,
         mcp: false,
         node_select: Default::default(),
     };
@@ -516,7 +509,6 @@ fn build_sing_box_config_errors_when_no_nodes_available() {
         nodes: vec![],
         custom_rules: vec![],
         route_mode: Default::default(),
-        adblock: false,
         mcp: false,
         node_select: Default::default(),
     };
@@ -537,7 +529,6 @@ fn collect_manual_outbounds_handles_empty_nodes() {
         nodes: vec![],
         custom_rules: vec![],
         route_mode: Default::default(),
-        adblock: false,
         mcp: false,
         node_select: Default::default(),
     };
@@ -560,7 +551,6 @@ fn collect_manual_outbounds_handles_all_invalid_nodes() {
         ],
         custom_rules: vec![],
         route_mode: Default::default(),
-        adblock: false,
         mcp: false,
         node_select: Default::default(),
     };
@@ -580,7 +570,6 @@ fn build_sing_box_config_preserves_node_order() {
         nodes: vec![],
         custom_rules: vec![],
         route_mode: Default::default(),
-        adblock: false,
         mcp: false,
         node_select: Default::default(),
     };
@@ -619,7 +608,6 @@ fn build_sing_box_config_handles_no_custom_rules() {
         nodes: vec![],
         custom_rules: vec![],
         route_mode: Default::default(),
-        adblock: false,
         mcp: false,
         node_select: Default::default(),
     };
@@ -654,7 +642,6 @@ fn build_sing_box_config_splits_direct_route_rules() {
         nodes: vec![],
         custom_rules: vec![],
         route_mode: Default::default(),
-        adblock: false,
         mcp: false,
         node_select: Default::default(),
     };
@@ -719,148 +706,6 @@ fn build_sing_box_config_splits_direct_route_rules() {
 }
 
 #[test]
-fn build_sing_box_config_injects_adblock_rules_when_enabled() {
-    let config = Config {
-        port: None,
-        subs: vec![],
-        nodes: vec![],
-        custom_rules: vec![
-            r#"{"domain_suffix":"ads-whitelist.example.com","action":"route","outbound":"direct"}"#
-                .to_string(),
-        ],
-        route_mode: Default::default(),
-        adblock: true,
-        mcp: false,
-        node_select: Default::default(),
-    };
-
-    let (built, _skipped, _) = build_sing_box_config(
-        &config,
-        vec!["manual-a".to_string()],
-        vec![json!({
-            "type": "hysteria2",
-            "tag": "manual-a",
-            "server": "manual.example.com",
-            "server_port": 443,
-            "password": "secret"
-        })],
-        vec![],
-        vec![],
-    )
-    .unwrap();
-
-    let rule_sets = built["route"]["rule_set"].as_array().unwrap();
-    assert_eq!(rule_sets[0]["tag"], "adblock");
-    assert_eq!(rule_sets[0]["type"], "local");
-    assert_eq!(rule_sets[0]["format"], "binary");
-    assert_eq!(rule_sets[0]["path"], "./adblock_reject.srs");
-
-    let rules = built["route"]["rules"].as_array().unwrap();
-    // 自定义规则在前、广告拦截在后,用户可以放行误拦域名
-    assert_eq!(
-        rules[2]["domain_suffix"],
-        json!("ads-whitelist.example.com")
-    );
-    assert_eq!(rules[3]["rule_set"], json!(["adblock"]));
-    assert_eq!(rules[3]["action"], "reject");
-    assert_eq!(rules[4]["ip_is_private"], true);
-
-    // 广告拦截只在路由层;DNS 规则保持原样,自定义放行规则才能生效
-    let dns_rules = built["dns"]["rules"].as_array().unwrap();
-    assert_eq!(dns_rules.len(), 1);
-    assert!(dns_rules
-        .iter()
-        .all(|rule| rule.get("rule_set") != Some(&json!(["adblock"]))));
-}
-
-#[test]
-fn build_sing_box_config_keeps_adblock_in_global_mode() {
-    let config = Config {
-        port: None,
-        subs: vec![],
-        nodes: vec![],
-        custom_rules: vec![],
-        route_mode: crate::models::RouteMode::Global,
-        adblock: true,
-        mcp: false,
-        node_select: Default::default(),
-    };
-
-    let (built, _skipped, _) = build_sing_box_config(
-        &config,
-        vec!["manual-a".to_string()],
-        vec![json!({
-            "type": "hysteria2",
-            "tag": "manual-a",
-            "server": "manual.example.com",
-            "server_port": 443,
-            "password": "secret"
-        })],
-        vec![],
-        vec![],
-    )
-    .unwrap();
-
-    // 全局模式下分流规则被裁掉,广告拦截保留(仅路由层)
-    let rules = built["route"]["rules"].as_array().unwrap();
-    assert_eq!(rules.len(), 3);
-    assert_eq!(rules[0]["action"], "sniff");
-    assert_eq!(rules[1]["action"], "hijack-dns");
-    assert_eq!(rules[2]["rule_set"], json!(["adblock"]));
-    assert_eq!(rules[2]["action"], "reject");
-
-    // DNS 层不注入广告拦截
-    let dns_rules = built["dns"]["rules"].as_array().unwrap();
-    assert!(dns_rules.is_empty());
-
-    assert!(built["route"]["rule_set"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|rule_set| rule_set["tag"] == "adblock"));
-}
-
-#[test]
-fn build_sing_box_config_omits_adblock_when_disabled() {
-    let config = Config {
-        port: None,
-        subs: vec![],
-        nodes: vec![],
-        custom_rules: vec![],
-        route_mode: Default::default(),
-        adblock: false,
-        mcp: false,
-        node_select: Default::default(),
-    };
-
-    let (built, _skipped, _) = build_sing_box_config(
-        &config,
-        vec!["manual-a".to_string()],
-        vec![json!({
-            "type": "hysteria2",
-            "tag": "manual-a",
-            "server": "manual.example.com",
-            "server_port": 443,
-            "password": "secret"
-        })],
-        vec![],
-        vec![],
-    )
-    .unwrap();
-
-    assert!(built["route"]["rule_set"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .all(|rule_set| rule_set["tag"] != "adblock"));
-    assert!(built["route"]["rules"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .all(|rule| rule.get("rule_set") != Some(&json!(["adblock"]))));
-}
-
-#[test]
 fn build_sing_box_config_binds_clash_api_to_localhost() {
     let config = Config {
         port: None,
@@ -868,7 +713,6 @@ fn build_sing_box_config_binds_clash_api_to_localhost() {
         nodes: vec![],
         custom_rules: vec![],
         route_mode: Default::default(),
-        adblock: false,
         mcp: false,
         node_select: Default::default(),
     };
@@ -906,7 +750,6 @@ fn build_sing_box_config_ignores_all_invalid_custom_rules() {
             "".to_string(),
         ],
         route_mode: Default::default(),
-        adblock: false,
         mcp: false,
         node_select: Default::default(),
     };
@@ -948,7 +791,6 @@ async fn save_config_performs_atomic_write() {
         nodes: vec![],
         custom_rules: vec![],
         route_mode: Default::default(),
-        adblock: false,
         mcp: false,
         node_select: Default::default(),
     };
@@ -990,7 +832,6 @@ async fn save_config_overwrites_existing_file() {
         nodes: vec![],
         custom_rules: vec![],
         route_mode: Default::default(),
-        adblock: false,
         mcp: false,
         node_select: Default::default(),
     };
@@ -1017,7 +858,6 @@ async fn save_config_skips_identical_content() {
         nodes: vec![],
         custom_rules: vec![],
         route_mode: Default::default(),
-        adblock: false,
         mcp: false,
         node_select: Default::default(),
     };

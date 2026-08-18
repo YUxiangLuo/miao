@@ -195,7 +195,7 @@ async fn restore_runtime_config_bytes_at(path: &Path, bytes: &[u8]) -> AppResult
 }
 
 /// 订阅节点集快照：上次真拉取拿到的节点，供本地语义变更（节点选择/路由模式/
-/// 规则/去广告/手动节点）零网络重建配置。`subs` 是一致性护栏：与当前配置的
+/// 规则/手动节点）零网络重建配置。`subs` 是一致性护栏：与当前配置的
 /// 订阅列表不一致时快照作废（订阅增删后必须真拉取一次重建快照）。
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct SubNodesSnapshot {

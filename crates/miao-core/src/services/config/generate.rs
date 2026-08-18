@@ -120,7 +120,7 @@ pub(super) async fn gen_config_from_nodes(
 }
 
 /// 用订阅节点集快照零网络重建配置；快照缺失或与当前订阅列表不匹配时退化到真拉取。
-/// 本地语义变更（节点选择/路由模式/规则/去广告/手动节点）走这里：
+/// 本地语义变更（节点选择/路由模式/规则/手动节点）走这里：
 /// 切换不是刷新，不该被订阅网络故障拖累。
 pub async fn gen_config_from_snapshot(
     config: &Config,

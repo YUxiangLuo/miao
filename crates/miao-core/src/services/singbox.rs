@@ -41,10 +41,6 @@ const SITE_RULE_BINARY: &[u8] = include_bytes!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../embedded/geosite-geolocation-cn.srs"
 ));
-const ADBLOCK_RULE_BINARY: &[u8] = include_bytes!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../../embedded/adblock_reject.srs"
-));
 
 pub fn get_sing_box_home() -> PathBuf {
     #[cfg(windows)]
@@ -87,11 +83,10 @@ pub fn extract_sing_box() -> AppResult<PathBuf> {
     // install.sh 升级、手动替换二进制等路径不经过面板自升级的清理逻辑。
     // 先删再写而非覆盖写:若有上次崩溃残留的 sing-box 进程仍在运行,覆盖写会得到 ETXTBSY。
     // 其余运行时文件(cache.db / config.json.cache)有意保留。
-    let embedded_files: [(&str, &[u8]); 4] = [
+    let embedded_files: [(&str, &[u8]); 3] = [
         (sing_box_file_name(), SING_BOX_BINARY),
         ("chinaip.srs", IP_RULE_BINARY),
         ("chinasite.srs", SITE_RULE_BINARY),
-        ("adblock_reject.srs", ADBLOCK_RULE_BINARY),
     ];
 
     for (name, bytes) in embedded_files {
@@ -103,6 +98,8 @@ pub fn extract_sing_box() -> AppResult<PathBuf> {
         fs::write(&path, bytes)
             .map_err(|e| AppError::context(format!("Failed to write embedded file {name}"), e))?;
     }
+    // 去广告功能已移除：清掉旧版本释放的广告规则集，避免孤儿文件常驻运行时目录
+    let _ = fs::remove_file(sing_box_home.join("adblock_reject.srs"));
     set_executable(&sing_box_path)
         .map_err(|e| AppError::context("Failed to set permissions on sing-box binary", e))?;
 

@@ -17,8 +17,6 @@ function renderCard(props = {}) {
       loadingAction=""
       onAddRule={vi.fn().mockResolvedValue(true)}
       onDeleteRule={vi.fn()}
-      adblockEnabled={false}
-      onToggleAdblock={vi.fn()}
       {...props}
     />,
   )
@@ -211,26 +209,6 @@ describe('RulesCard', () => {
   it('shows an empty state when there are no rules', () => {
     renderCard({ rules: [] })
     expect(screen.getByText('暂无自定义规则')).toBeInTheDocument()
-  })
-
-  it('renders the adblock switch next to the title and toggles on click', async () => {
-    const user = userEvent.setup()
-    const onToggleAdblock = vi.fn()
-    renderCard({ adblockEnabled: false, onToggleAdblock })
-
-    const toggle = screen.getByRole('switch', { name: '去广告' })
-    expect(toggle).toHaveAttribute('aria-checked', 'false')
-
-    await user.click(toggle)
-    expect(onToggleAdblock).toHaveBeenCalledWith(true)
-  })
-
-  it('reflects the enabled adblock state and disables the switch while pending', () => {
-    renderCard({ adblockEnabled: true, loadingAction: 'toggleAdblock' })
-
-    const toggle = screen.getByRole('switch', { name: '去广告' })
-    expect(toggle).toHaveAttribute('aria-checked', 'true')
-    expect(toggle).toBeDisabled()
   })
 
   it('offers node names as rule targets and submits the selected node', async () => {

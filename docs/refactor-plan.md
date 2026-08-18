@@ -9,7 +9,7 @@
 ## 一、三层定义（最终版）
 
 ```
-稳定层 config.yaml     port / subs / nodes / custom_rules / adblock / mcp
+稳定层 config.yaml     port / subs / nodes / custom_rules / mcp
                        OpenWrt+Linux: /etc/miao（低频写，可接受）
 易变层 volatile.yaml   node_select / route_mode
                        OpenWrt+Linux: /tmp/miao-sing-box/（tmpfs，随系统重启清空）

@@ -61,8 +61,6 @@ export function RulesCard({
   loadingAction,
   onAddRule,
   onDeleteRule,
-  adblockEnabled,
-  onToggleAdblock,
   nodeNames = [],
   connections = [],
   platform = 'linux',
@@ -72,7 +70,6 @@ export function RulesCard({
 }) {
   const [showRuleModal, setShowRuleModal] = useState(false)
   const adding = loadingAction === 'addRule'
-  const adblockPending = loadingAction === 'toggleAdblock'
   const activeIndexes = useMemo(
     () => activeRuleIndexes(rules, connections),
     [rules, connections],
@@ -89,22 +86,6 @@ export function RulesCard({
               <span>自定义规则</span>
               <span className="counter-pill">{rules.length}</span>
             </div>
-            <button
-              type="button"
-              role="switch"
-              aria-checked={adblockEnabled}
-              aria-label="去广告"
-              title="拦截广告域名(连接层拦截,规则集内嵌)"
-              className={classNames('toggle-switch', adblockEnabled && 'on')}
-              disabled={isInitializing || adblockPending}
-              aria-busy={adblockPending || undefined}
-              onClick={() => onToggleAdblock(!adblockEnabled)}
-            >
-              <span className="toggle-switch-label">去广告</span>
-              <span className="toggle-switch-track">
-                <span className="toggle-switch-thumb" />
-              </span>
-            </button>
             <Button
               tone="secondary"
               size="sm"

@@ -65,14 +65,9 @@ pub async fn get_status(State(state): State<Arc<AppState>>) -> Json<ApiResponse<
     } else {
         Some(warnings.join(";"))
     };
-    let (route_mode, adblock, mcp, node_select) = {
+    let (route_mode, mcp, node_select) = {
         let config = state.config.read().await;
-        (
-            config.route_mode,
-            config.adblock,
-            config.mcp,
-            config.node_select,
-        )
+        (config.route_mode, config.mcp, config.node_select)
     };
 
     success(
@@ -82,7 +77,6 @@ pub async fn get_status(State(state): State<Arc<AppState>>) -> Json<ApiResponse<
             initializing,
             route_mode,
             node_select,
-            adblock,
             pid,
             uptime_secs,
             warning,
@@ -292,7 +286,6 @@ mod tests {
             nodes: vec![],
             custom_rules: vec![],
             route_mode: Default::default(),
-            adblock: false,
             mcp: false,
             node_select: Default::default(),
         });
@@ -320,7 +313,6 @@ mod tests {
             nodes: vec![],
             custom_rules: vec![],
             route_mode: RouteMode::Global,
-            adblock: false,
             mcp: false,
             node_select: Default::default(),
         });

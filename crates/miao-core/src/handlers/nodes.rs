@@ -392,7 +392,6 @@ mod tests {
             ],
             custom_rules: vec![],
             route_mode: Default::default(),
-            adblock: false,
             mcp: false,
             node_select: Default::default(),
         });
@@ -474,7 +473,6 @@ mod tests {
             ],
             custom_rules: vec![],
             route_mode: Default::default(),
-            adblock: false,
             mcp: false,
             node_select: Default::default(),
         });
@@ -506,7 +504,6 @@ mod tests {
             ],
             custom_rules: vec![],
             route_mode: Default::default(),
-            adblock: false,
             mcp: false,
             node_select: Default::default(),
         });
@@ -527,7 +524,6 @@ mod tests {
             nodes: vec![],
             custom_rules: vec![],
             route_mode: Default::default(),
-            adblock: false,
             mcp: false,
             node_select: Default::default(),
         });
@@ -552,7 +548,6 @@ mod tests {
             ],
             custom_rules: vec![],
             route_mode: Default::default(),
-            adblock: false,
             mcp: false,
             node_select: Default::default(),
         });
@@ -576,7 +571,6 @@ mod tests {
             ],
             custom_rules: vec![],
             route_mode: Default::default(),
-            adblock: false,
             mcp: false,
             node_select: Default::default(),
         });
@@ -605,7 +599,6 @@ mod tests {
             ],
             custom_rules: vec![],
             route_mode: Default::default(),
-            adblock: false,
             mcp: false,
             node_select: Default::default(),
         });
@@ -631,7 +624,6 @@ mod tests {
             ],
             custom_rules: vec![],
             route_mode: Default::default(),
-            adblock: false,
             mcp: false,
             node_select: Default::default(),
         });
@@ -656,7 +648,6 @@ mod tests {
             ],
             custom_rules: vec![],
             route_mode: Default::default(),
-            adblock: false,
             mcp: false,
             node_select: Default::default(),
         });

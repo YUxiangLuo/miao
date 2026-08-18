@@ -14,7 +14,7 @@ use crate::handlers::{
     mcp::{handle_mcp, set_mcp},
     nodes::{add_node, delete_node, get_nodes},
     proxy::set_last_proxy,
-    rules::{add_rule, delete_rule, get_rules, set_adblock},
+    rules::{add_rule, delete_rule, get_rules},
     service::{
         get_status, set_node_select, set_route_mode, start_service, stop_service, test_connectivity,
     },
@@ -47,7 +47,6 @@ pub fn build_router(app_state: Arc<AppState>) -> Router {
         .route("/api/rules", get(get_rules))
         .route("/api/rules", post(add_rule))
         .route("/api/rules", delete(delete_rule))
-        .route("/api/adblock", post(set_adblock))
         .route("/api/mcp", post(set_mcp))
         .route("/api/last-proxy", post(set_last_proxy))
         .route("/mcp", post(handle_mcp));
@@ -82,7 +81,6 @@ mod tests {
             nodes: vec![],
             custom_rules: vec![],
             route_mode: Default::default(),
-            adblock: false,
             mcp: false,
             node_select: Default::default(),
         })
@@ -103,7 +101,6 @@ mod tests {
             nodes: vec![],
             custom_rules: vec![],
             route_mode: Default::default(),
-            adblock: false,
             mcp: false,
             node_select: Default::default(),
         })
@@ -131,7 +128,6 @@ mod tests {
             nodes: vec![],
             custom_rules: vec![],
             route_mode: Default::default(),
-            adblock: false,
             mcp: false,
             node_select: Default::default(),
         })
@@ -165,7 +161,6 @@ mod tests {
             nodes: vec![],
             custom_rules: vec![],
             route_mode: Default::default(),
-            adblock: false,
             mcp: false,
             node_select: Default::default(),
         })
@@ -196,7 +191,6 @@ mod tests {
             ],
             custom_rules: vec![],
             route_mode: Default::default(),
-            adblock: false,
             mcp: false,
             node_select: Default::default(),
         })
@@ -224,7 +218,6 @@ mod tests {
             nodes: vec![],
             custom_rules: vec![],
             route_mode: Default::default(),
-            adblock: false,
             mcp: false,
             node_select: Default::default(),
         })
@@ -271,7 +264,6 @@ mod tests {
             nodes: vec![],
             custom_rules: vec![],
             route_mode: Default::default(),
-            adblock: false,
             mcp: false,
             node_select: Default::default(),
         })
@@ -300,7 +292,6 @@ mod tests {
             nodes: vec![],
             custom_rules: vec![],
             route_mode: Default::default(),
-            adblock: false,
             mcp: false,
             node_select: Default::default(),
         })
@@ -331,7 +322,6 @@ mod tests {
             ],
             custom_rules: vec![],
             route_mode: Default::default(),
-            adblock: false,
             mcp: false,
             node_select: Default::default(),
         })
@@ -367,7 +357,6 @@ mod tests {
             ],
             custom_rules: vec![],
             route_mode: Default::default(),
-            adblock: false,
             mcp: false,
             node_select: Default::default(),
         })
@@ -396,7 +385,6 @@ mod tests {
             nodes: vec![],
             custom_rules: vec![],
             route_mode: Default::default(),
-            adblock: false,
             mcp: false,
             node_select: Default::default(),
         })
@@ -428,7 +416,6 @@ mod tests {
             nodes: vec![],
             custom_rules: vec![],
             route_mode: Default::default(),
-            adblock: false,
             mcp: false,
             node_select: Default::default(),
         })
@@ -459,7 +446,6 @@ mod tests {
                 r#"{"process_name":"curl","action":"route","outbound":"direct"}"#.to_string(),
             ],
             route_mode: Default::default(),
-            adblock: false,
             mcp: false,
             node_select: Default::default(),
         })
@@ -491,7 +477,6 @@ mod tests {
                 r#"{"rule_set":["custom"],"action":"route","outbound":"proxy"}"#.to_string(),
             ],
             route_mode: Default::default(),
-            adblock: false,
             mcp: false,
             node_select: Default::default(),
         })
@@ -525,7 +510,6 @@ mod tests {
             nodes: vec![],
             custom_rules: vec![],
             route_mode: Default::default(),
-            adblock: false,
             mcp: false,
             node_select: Default::default(),
         })
@@ -558,7 +542,6 @@ mod tests {
             nodes: vec![],
             custom_rules: vec![],
             route_mode: Default::default(),
-            adblock: false,
             mcp: false,
             node_select: Default::default(),
         })
@@ -587,7 +570,6 @@ mod tests {
             nodes: vec![],
             custom_rules: vec![],
             route_mode: Default::default(),
-            adblock: false,
             mcp: false,
             node_select: Default::default(),
         })
@@ -619,7 +601,6 @@ mod tests {
             ],
             custom_rules: vec![],
             route_mode: Default::default(),
-            adblock: false,
             mcp: false,
             node_select: Default::default(),
         })
@@ -639,55 +620,6 @@ mod tests {
         assert_eq!(json["success"], true);
         assert_eq!(json["data"]["tag"], "vps-node");
         assert!(json["message"].as_str().unwrap().contains("已存在"));
-    }
-
-    #[tokio::test]
-    async fn router_adblock_toggle_is_idempotent_when_state_matches() {
-        let app = test_app(Config {
-            port: None,
-            subs: vec![],
-            nodes: vec![],
-            custom_rules: vec![],
-            route_mode: Default::default(),
-            adblock: false,
-            mcp: false,
-            node_select: Default::default(),
-        })
-        .await;
-
-        let response = app
-            .oneshot(json_request(
-                "POST",
-                "/api/adblock",
-                json!({ "enabled": false }),
-            ))
-            .await
-            .unwrap();
-
-        assert_eq!(response.status(), StatusCode::OK);
-        let json = response_json(response).await;
-        assert_eq!(json["success"], true);
-        assert_eq!(json["message"], "Adblock setting unchanged");
-    }
-
-    #[tokio::test]
-    async fn router_rejects_adblock_toggle_during_initialization() {
-        let state = app_state(Config::default());
-        let app = build_router(state);
-
-        let response = app
-            .oneshot(json_request(
-                "POST",
-                "/api/adblock",
-                json!({ "enabled": true }),
-            ))
-            .await
-            .unwrap();
-
-        assert_eq!(response.status(), StatusCode::CONFLICT);
-        let json = response_json(response).await;
-        assert_eq!(json["success"], false);
-        assert_eq!(json["message"], "Initialization is still in progress");
     }
 
     #[tokio::test]

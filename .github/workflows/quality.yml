@@ -68,7 +68,6 @@ jobs:
           : > embedded/sing-box-windows-amd64.exe
           : > embedded/geoip-cn.srs
           : > embedded/geosite-geolocation-cn.srs
-          : > embedded/adblock_reject.srs
 
       - name: Check formatting
         run: cargo fmt --all -- --check
@@ -118,7 +117,6 @@ jobs:
           : > embedded/sing-box-amd64
           : > embedded/geoip-cn.srs
           : > embedded/geosite-geolocation-cn.srs
-          : > embedded/adblock_reject.srs
 
       - name: Test miao-core
         run: cargo test -p miao-core --locked --all-targets

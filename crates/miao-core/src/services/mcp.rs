@@ -172,17 +172,6 @@ fn tools_catalog() -> JsonValue {
             },
         },
         {
-            "name": "set_adblock",
-            "description": "去广告开关：命中内置广告规则集的域名在路由层拦截。写入稳定层配置，重启后保持。纯本地语义变更（快照重建，不拉订阅），但会热重启内核，连接秒级中断",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "enabled": { "type": "boolean" },
-                },
-                "required": ["enabled"],
-            },
-        },
-        {
             "name": "refresh_subscriptions",
             "description": "真拉取全部订阅刷新节点池。有变化才热重启内核（连接秒级中断，可能包括你自己的）；全部订阅失败时保留当前运行配置并告警",
             "inputSchema": { "type": "object", "properties": {} },
@@ -221,7 +210,6 @@ async fn handle_tool_call(
         "set_node_select" => tool_set_node_select(state, &args).await,
         "test_delay" => tool_test_delay(state, &args).await,
         "set_route_mode" => tool_set_route_mode(state, &args).await,
-        "set_adblock" => tool_set_adblock(state, &args).await,
         "refresh_subscriptions" => tool_refresh_subscriptions(state).await,
         "list_rules" => tool_list_rules(state).await,
         "list_connections" => tool_list_connections(state).await,
@@ -349,7 +337,6 @@ async fn tool_get_status(state: &Arc<AppState>) -> Result<JsonValue, String> {
         "running": running,
         "initializing": state.initializing.load(Ordering::Relaxed),
         "route_mode": route_mode,
-        "adblock": config.adblock,
         "node_select": config.node_select,
         "current_node": current_node,
         "node_count": node_count,
@@ -625,37 +612,6 @@ async fn tool_set_node_select(
     }))
 }
 
-/// 与面板去广告开关同一条链路：配置事务 + 运行时热应用（稳定层落盘）。
-async fn tool_set_adblock(state: &Arc<AppState>, args: &JsonValue) -> Result<JsonValue, String> {
-    let enabled = args
-        .get("enabled")
-        .and_then(JsonValue::as_bool)
-        .ok_or_else(|| "Invalid params: missing `enabled` (boolean)".to_string())?;
-
-    if state.initializing.load(Ordering::Relaxed) {
-        return Err("初始化进行中，稍后再试".to_string());
-    }
-
-    let _config_update = state.config_update.lock().await;
-    let old_config = state.config.read().await.clone();
-    if old_config.adblock == enabled {
-        return Ok(json!({ "adblock": enabled, "changed": false }));
-    }
-
-    let mut new_config = old_config.clone();
-    new_config.adblock = enabled;
-
-    apply_config_change(state, &old_config, &new_config)
-        .await
-        .map_err(|e| format!("切换去广告失败: {e}"))?;
-
-    Ok(json!({
-        "adblock": enabled,
-        "changed": true,
-        "note": "已写入稳定层配置，重启后保持",
-    }))
-}
-
 /// 与面板「刷新订阅」同一条链路：真拉取 → 生成 → 校验 → 有变化才热重启；
 /// 全部订阅失败时保留当前运行配置。
 async fn tool_refresh_subscriptions(state: &Arc<AppState>) -> Result<JsonValue, String> {
@@ -872,7 +828,6 @@ mod tests {
             "set_node_select",
             "test_delay",
             "set_route_mode",
-            "set_adblock",
             "refresh_subscriptions",
             "list_rules",
             "list_connections",
@@ -1046,40 +1001,6 @@ mod tests {
         let text = response["result"]["content"][0]["text"].as_str().unwrap();
         let payload: JsonValue = serde_json::from_str(text).unwrap();
         assert_eq!(payload["node_select"], "manual");
-        assert_eq!(payload["changed"], false);
-    }
-
-    #[tokio::test]
-    async fn set_adblock_validates_params() {
-        let response = call(
-            &state(Config::default()),
-            json!({
-                "jsonrpc": "2.0", "id": 1, "method": "tools/call",
-                "params": { "name": "set_adblock", "arguments": {} },
-            }),
-        )
-        .await;
-        assert_eq!(response["result"]["isError"], true);
-        assert!(response["result"]["content"][0]["text"]
-            .as_str()
-            .unwrap()
-            .contains("enabled"));
-    }
-
-    #[tokio::test]
-    async fn set_adblock_is_idempotent_without_touching_runtime() {
-        // 默认 false，请求 false：未变化直接返回，不起内核不写盘
-        let response = call(
-            &state(Config::default()),
-            json!({
-                "jsonrpc": "2.0", "id": 1, "method": "tools/call",
-                "params": { "name": "set_adblock", "arguments": { "enabled": false } },
-            }),
-        )
-        .await;
-        let text = response["result"]["content"][0]["text"].as_str().unwrap();
-        let payload: JsonValue = serde_json::from_str(text).unwrap();
-        assert_eq!(payload["adblock"], false);
         assert_eq!(payload["changed"], false);
     }
 
