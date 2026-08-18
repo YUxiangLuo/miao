@@ -145,7 +145,7 @@ TUN JSON：`auto_route` + `strict_route`，`interface_name` 仍是 `sing-tun`。
 
 变更链路：`config_update` 锁 → 改克隆 → `apply_config_change`（分层落盘 → 生成 → `sing-box check` → 热重启）。面板不直接碰内核，走 Clash API（`127.0.0.1:6262`）。
 
-落盘三层（详见 docs/refactor-plan.md）：稳定层 `config.yaml`（port/subs/nodes/custom_rules/mcp）、易变层 `volatile.yaml`（node_select/route_mode——unix 在 tmpfs 随系统重启清空，Windows 持久）、状态层（可删）。合并视图 = volatile > config > 默认；两层各自原子写 + 跳过未变。
+落盘三层（详见 docs/config.md）：稳定层 `config.yaml`（port/subs/nodes/custom_rules/mcp）、易变层 `volatile.yaml`（node_select/route_mode——unix 在 tmpfs 随系统重启清空，Windows 持久）、状态层（可删）。合并视图 = volatile > config > 默认；两层各自原子写 + 跳过未变。
 
 失败回滚去网络化：先快照 `config.json` 字节，回滚按 **内存快照 → `config.json.cache` → 重新拉订阅** 分层；内核已死时先 `sing-box check` 再启动；空 cache 拒绝恢复。
 
