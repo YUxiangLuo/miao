@@ -42,8 +42,8 @@
     flex-grow: 1;
     min-height: 0;
 }
-/* 左列节点卡片:恒等于列高(可收缩),头部与当前节点横幅固定,仅节点网格内部滚动;
-   min-height 保底 = 头部+横幅+网格最小可用高度,列高不足时退回整列滚动兜底 */
+/* 左列节点卡片:恒等于列高(可收缩),头部固定,仅节点网格内部滚动;
+   min-height 保底 = 头部+网格最小可用高度,列高不足时退回整列滚动兜底 */
 .left-column > *:last-child {
     flex-shrink: 1;
     min-height: var(--node-card-min-height);

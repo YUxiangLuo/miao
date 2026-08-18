@@ -5,7 +5,6 @@ import {
   classNames, 
   formatDelay, 
   getDelayTone,
-  protocolLabel 
 } from '../utils.js'
 
 const NODE_SELECT_OPTIONS = [
@@ -57,7 +56,6 @@ export function ProxyCard({
   status, 
   primaryGroup, 
   primaryGroupName, 
-  currentNodeMeta,
   delays, 
   testingNodes, 
   testingGroup,
@@ -69,8 +67,6 @@ export function ProxyCard({
   onSetNodeSelect,
   onOpenAddNode
 }) {
-  const currentNodeDelay = primaryGroup?.now ? delays[primaryGroup.now] : undefined
-  const isTestingCurrent = primaryGroup?.now ? testingNodes[primaryGroup.now] : false
   const nodeSelect = status.node_select || 'manual'
   const isFastest = nodeSelect.startsWith('fastest_')
   // 受控 select 在 apply 期间停在用户选择上:status.node_select 要等热重启后的
@@ -116,35 +112,6 @@ export function ProxyCard({
         </div>
       }
     >
-      <button
-        type="button"
-        className="current-node-banner"
-        onClick={() => primaryGroup?.now && onTestDelay(primaryGroup.now)}
-        disabled={!primaryGroup?.now || isTestingCurrent}
-        title={primaryGroup?.now ? '点击测试当前节点延迟' : undefined}
-        aria-label={primaryGroup?.now ? `测试当前节点 ${primaryGroup.now} 延迟` : '当前节点'}
-      >
-        <div className="banner-copy">
-          <span className="banner-label">当前节点</span>
-          <strong title={primaryGroup?.now || undefined}>{primaryGroup?.now || '未选择'}</strong>
-          {(currentNodeMeta || !primaryGroup) && (
-            <span className="banner-meta">
-              {currentNodeMeta
-                ? `${currentNodeMeta.server}:${currentNodeMeta.server_port} · ${protocolLabel(currentNodeMeta.node_type)}`
-                : '等待服务启动'}
-            </span>
-          )}
-        </div>
-        <div className={classNames('banner-delay', 'num', getDelayTone(currentNodeDelay))}>
-          {isTestingCurrent 
-            ? <LoaderCircle size={18} className="spin" /> 
-            : currentNodeDelay !== undefined && currentNodeDelay < 0
-              ? <strong className="banner-delay-timeout">超时</strong>
-              : <strong>{currentNodeDelay !== undefined ? currentNodeDelay : '--'}</strong>}
-          {!isTestingCurrent && currentNodeDelay >= 0 && <span>ms</span>}
-        </div>
-      </button>
-
       <div className="proxy-grid-wrap">
         {primaryGroup ? (
           <div className="proxy-grid">

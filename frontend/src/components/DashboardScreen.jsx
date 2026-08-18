@@ -33,6 +33,10 @@ export function DashboardScreen({ app }) {
           loadingAction={app.loadingAction}
           onSetRouteMode={app.handleOpenSetRouteModeConfirm}
           onOpenConnections={app.handleOpenConnections}
+          primaryGroup={app.primaryGroup}
+          delays={app.delays}
+          testingNodes={app.testingNodes}
+          onTestDelay={app.handleTestDelay}
         />
 
         <div className="content-grid">
@@ -41,7 +45,6 @@ export function DashboardScreen({ app }) {
               status={app.status}
               primaryGroup={app.primaryGroup}
               primaryGroupName={app.primaryGroupName}
-              currentNodeMeta={app.currentNodeMeta}
               delays={app.delays}
               testingNodes={app.testingNodes}
               testingGroup={app.testingGroup}

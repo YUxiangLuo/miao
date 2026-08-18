@@ -50,14 +50,6 @@ export function useAppData() {
   const { versionInfo, fetchVersion } = useVersion()
   const { delays, testingNodes, testingGroup, testDelay, testGroupDelays, clearDelays } = useDelays()
 
-  const nodeMetaMap = useMemo(() => {
-    const map = new Map()
-    nodes.forEach((node) => map.set(node.tag, node))
-    return map
-  }, [nodes])
-
-  const currentNodeMeta = primaryGroup?.now ? nodeMetaMap.get(primaryGroup.now) : null
-
   // 进入首页且当前节点就绪后,自动测一次延迟;切换节点后也会测新节点。
   // 每个节点每次会话只自动测一次,手动点测不受影响
   const autoTestedNodeRef = useRef('')
@@ -185,7 +177,6 @@ export function useAppData() {
     testDelay,
     testGroupDelays,
     clearDelays,
-    currentNodeMeta,
     resetNodeForm,
     needsOnboarding,
   }

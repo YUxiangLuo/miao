@@ -14,7 +14,6 @@ describe('ProxyCard accessibility', () => {
         status={{ running: true, initializing: false, node_select: 'manual' }}
         primaryGroup={{ now: 'node-a', all: ['node-a'] }}
         primaryGroupName="proxy"
-        currentNodeMeta={null}
         delays={{}}
         testingNodes={{}}
         testingGroup=""
@@ -36,21 +35,19 @@ describe('ProxyCard accessibility', () => {
     expect(onTestDelay).toHaveBeenCalledWith('node-a')
   })
 
-  it('tests the current node from the banner and still switches an inactive tile', async () => {
+  it('switches an inactive tile', async () => {
     const user = userEvent.setup()
     const onSwitchProxy = vi.fn()
-    const onTestDelay = vi.fn()
 
     render(
       <ProxyCard
         status={{ running: true, initializing: false, node_select: 'manual' }}
         primaryGroup={{ now: 'node-a', all: ['node-a', 'node-b'] }}
         primaryGroupName="proxy"
-        currentNodeMeta={null}
         delays={{}}
         testingNodes={{}}
         testingGroup=""
-        onTestDelay={onTestDelay}
+        onTestDelay={vi.fn()}
         onTestGroupDelays={vi.fn()}
         onSwitchProxy={onSwitchProxy}
         onSetNodeSelect={vi.fn()}
@@ -58,8 +55,8 @@ describe('ProxyCard accessibility', () => {
       />,
     )
 
-    await user.click(screen.getByRole('button', { name: '测试当前节点 node-a 延迟' }))
-    expect(onTestDelay).toHaveBeenCalledWith('node-a')
+    // 当前节点横幅已迁至顶栏，卡片内不再提供「测试当前节点」入口
+    expect(screen.queryByRole('button', { name: /测试当前节点/ })).not.toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: '切换到 node-b' }))
     expect(onSwitchProxy).toHaveBeenCalledWith('proxy', 'node-b')
@@ -74,7 +71,6 @@ describe('ProxyCard accessibility', () => {
         status={{ running: true, initializing: false, node_select: 'manual' }}
         primaryGroup={{ now: 'node-a', all: ['node-a', 'node-b'] }}
         primaryGroupName="proxy"
-        currentNodeMeta={null}
         delays={{}}
         testingNodes={{ 'node-b': true }}
         testingGroup=""
@@ -100,7 +96,6 @@ describe('ProxyCard accessibility', () => {
         status={{ running: true, initializing: false, node_select: 'fastest_hk' }}
         primaryGroup={{ now: '香港-01', all: ['香港-01'] }}
         primaryGroupName="proxy"
-        currentNodeMeta={null}
         delays={{}}
         testingNodes={{}}
         testingGroup=""
@@ -133,7 +128,6 @@ describe('ProxyCard accessibility', () => {
         status={{ running: true, initializing: false, node_select: 'fastest_jp' }}
         primaryGroup={{ now: '日本-01', all: ['日本-01', '日本-02'] }}
         primaryGroupName="proxy"
-        currentNodeMeta={null}
         delays={{}}
         testingNodes={{}}
         testingGroup=""
@@ -163,7 +157,6 @@ describe('ProxyCard accessibility', () => {
         status={{ running: true, initializing: false, node_select: 'manual' }}
         primaryGroup={{ now: 'node-a', all: ['node-a'] }}
         primaryGroupName="proxy"
-        currentNodeMeta={null}
         delays={{}}
         testingNodes={{}}
         testingGroup=""

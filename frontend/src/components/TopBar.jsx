@@ -6,7 +6,7 @@ import {
   Route,
 } from 'lucide-react'
 import { SectionCard, LogoIcon } from './ui.jsx'
-import { classNames, formatSpeed } from '../utils.js'
+import { classNames, formatDelay, formatSpeed, getDelayTone } from '../utils.js'
 
 export function TopBar({
   status,
@@ -17,12 +17,19 @@ export function TopBar({
   loadingAction,
   onSetRouteMode,
   onOpenConnections,
+  primaryGroup,
+  delays,
+  testingNodes,
+  onTestDelay,
 }) {
   const upgradeSupported = versionInfo.upgrade_supported !== false
   const label = versionInfo.has_update ? versionInfo.latest : versionInfo.current || 'v--'
   const isGlobalMode = status.route_mode === 'global'
   const modeSwitching = loadingAction === 'routeMode'
   const modeControlDisabled = modeSwitching || status.initializing
+  const currentNode = primaryGroup?.now
+  const currentNodeDelay = currentNode ? delays?.[currentNode] : undefined
+  const isTestingCurrent = currentNode ? Boolean(testingNodes?.[currentNode]) : false
 
   return (
     <SectionCard className="status-card topbar" bodyClassName="status-card-body" header={null}>
@@ -50,6 +57,22 @@ export function TopBar({
         </button>
       </div>
       <div className="topbar-divider" />
+
+      <button
+        type="button"
+        className="current-node-chip"
+        onClick={() => currentNode && onTestDelay?.(currentNode)}
+        disabled={!currentNode || isTestingCurrent}
+        title={currentNode ? '点击测试当前节点延迟' : '当前节点'}
+        aria-label={currentNode ? `测试当前节点 ${currentNode} 延迟` : '当前节点'}
+      >
+        <strong className="current-node-chip-name" title={currentNode || undefined}>
+          {currentNode || '未选择'}
+        </strong>
+        <span className={classNames('current-node-chip-delay', 'num', getDelayTone(currentNodeDelay))}>
+          {isTestingCurrent ? <LoaderCircle size={14} className="spin" /> : formatDelay(currentNodeDelay)}
+        </span>
+      </button>
 
       <div className="status-card-spacer" />
       <div className="route-mode-segment" role="group" aria-label="代理模式">

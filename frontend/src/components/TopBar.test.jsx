@@ -15,6 +15,10 @@ function renderTopBar(overrides = {}) {
     loadingAction: null,
     onSetRouteMode: vi.fn(),
     onOpenConnections: vi.fn(),
+    primaryGroup: { now: 'node-a', all: ['node-a'] },
+    delays: { 'node-a': 98 },
+    testingNodes: {},
+    onTestDelay: vi.fn(),
     ...overrides,
   }
   return { ...render(<TopBar {...props} />), props }
@@ -36,6 +40,28 @@ describe('TopBar merged layout', () => {
     expect(screen.getByTitle('查看链接统计')).toBeInTheDocument()
     expect(screen.getByRole('group', { name: '代理模式' })).toBeInTheDocument()
     expect(screen.getByText('v0.31.0')).toBeInTheDocument()
+  })
+
+  it('shows the current node chip and tests its delay on click', async () => {
+    const user = userEvent.setup()
+    const onTestDelay = vi.fn()
+    renderTopBar({ onTestDelay })
+
+    const chip = screen.getByRole('button', { name: '测试当前节点 node-a 延迟' })
+    expect(chip).toBeInTheDocument()
+    expect(screen.getByText('node-a')).toBeInTheDocument()
+    expect(screen.getByText('98 ms')).toBeInTheDocument()
+
+    await user.click(chip)
+    expect(onTestDelay).toHaveBeenCalledWith('node-a')
+  })
+
+  it('disables the current node chip when there is no current node', () => {
+    renderTopBar({ primaryGroup: null })
+
+    const chip = screen.getByRole('button', { name: '当前节点' })
+    expect(chip).toBeDisabled()
+    expect(screen.getByText('未选择')).toBeInTheDocument()
   })
 
   it('does not offer in-app upgrade when the platform cannot replace the binary', () => {

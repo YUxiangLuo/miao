@@ -42,7 +42,8 @@
              + 条带 margin-top 16 + 条带 184；
        视口偏矮时网格 flex 收缩、列内滚动兜底（与既有行为一致） */
     --home-grid-height: max(582px, calc(100vh - 388px));
-    --node-card-min-height: 326px;
+    /* 左列节点卡保底：头部 51 + 网格最小可用 187（两行 tile）；当前节点横幅迁往顶栏后不再计入 */
+    --node-card-min-height: 238px;
 }
 
 * {
