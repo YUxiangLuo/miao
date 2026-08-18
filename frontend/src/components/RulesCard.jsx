@@ -20,7 +20,6 @@ const RuleRow = memo(function RuleRow({ rule, onDelete, disabled, active }) {
               <span className={classNames('badge', 'rule-field-chip')}>{display.fieldLabel}</span>
               <span className="rule-value" title={display.value}>{display.value}</span>
             </div>
-            <div className="list-row-meta">{display.field}</div>
           </>
         ) : (
           <>
