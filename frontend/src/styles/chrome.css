@@ -89,7 +89,8 @@
 }
 /* 头部内控件同高（icon-button 宽度 32px 不动） */
 .section-header .btn-sm,
-.section-header .icon-button {
+.section-header .icon-button,
+.section-header select {
     height: 30px;
     min-height: 30px;
 }
@@ -97,6 +98,8 @@
     display: flex;
     align-items: center;
     gap: var(--space-2);
+    /* 占满剩余宽度，把头部控件（按钮/select）推到最右侧 */
+    flex: 1 1 auto;
     min-width: 0;
     color: var(--text);
     font-size: var(--fs-lg);

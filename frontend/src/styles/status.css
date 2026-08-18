@@ -93,6 +93,14 @@
     font-size: var(--fs-lg);
     font-weight: 500;
 }
+/* 速率数值定宽：数值位数/单位变化（37–79px 摆动）不再引起顶栏布局抖动。
+   实测最宽 "1023 MB/s" ≈ 79px，取 5.5rem(88px) 留字体度量余量；
+   右对齐且不裁切——极端字体下溢出只向左吃掉与图标间的空隙，外部布局不受影响。 */
+.traffic-item .num {
+    display: inline-block;
+    width: 5.5rem;
+    text-align: right;
+}
 .traffic-icon.up {
     color: var(--accent);
 }

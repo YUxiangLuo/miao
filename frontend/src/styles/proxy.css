@@ -3,7 +3,6 @@
     align-items: center;
     gap: var(--space-1);
     min-width: 0;
-    margin-left: 4px;
     color: var(--text-muted);
     font-size: var(--fs-xs);
     font-weight: 500;
@@ -13,7 +12,6 @@
 }
 .node-select select {
     max-width: 8.75rem;
-    min-height: 26px;
     padding: 2px var(--space-1);
     border-radius: var(--radius);
     border: 1px solid var(--border);
@@ -32,6 +30,8 @@
     display: flex;
     align-items: center;
     gap: var(--space-2);
+    /* 与节点卡片（.proxy-tile）同高，条带与下方网格视觉对齐 */
+    min-height: 88px;
     padding: var(--space-2) var(--space-3);
     width: 100%;
     background: var(--surface-blue);
@@ -46,21 +46,6 @@
 }
 .current-node-banner:disabled {
     cursor: default;
-}
-.banner-icon-wrap {
-    width: 36px;
-    height: 36px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: var(--surface-blue-strong);
-    border-radius: var(--radius-pill);
-}
-.banner-glyph {
-    color: var(--accent-strong);
-}
-.banner-glyph.idle {
-    color: var(--text-subtle);
 }
 .banner-delay .banner-delay-timeout {
     font-size: var(--fs-lg);

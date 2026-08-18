@@ -94,7 +94,7 @@ describe('ProxyCard accessibility', () => {
     expect(onSwitchProxy).toHaveBeenCalledWith('proxy', 'node-b')
   })
 
-  it('places the node-select dropdown next to the title', () => {
+  it('places the node-select dropdown in the header controls (right cluster)', () => {
     render(
       <ProxyCard
         status={{ running: true, initializing: false, node_select: 'fastest_hk' }}
@@ -114,7 +114,13 @@ describe('ProxyCard accessibility', () => {
 
     const select = screen.getByRole('combobox', { name: '节点选择' })
     expect(select).toHaveValue('fastest_hk')
-    expect(screen.getByText('节点列表')).toBeInTheDocument()
+    const title = screen.getByText('节点列表')
+    expect(title).toBeInTheDocument()
+    // select 属于头部右侧控件组，不在标题簇内（title-wrap 占满剩余宽度把控件推到右边）
+    const header = title.closest('.section-header')
+    expect(header).not.toBeNull()
+    expect(header.contains(select)).toBe(true)
+    expect(title.closest('.section-title-wrap').contains(select)).toBe(false)
   })
 
   it('disables tile switching in fastest mode but still tests delay', async () => {

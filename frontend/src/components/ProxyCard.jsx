@@ -1,5 +1,5 @@
 import { memo, useState } from 'react'
-import { Server, Waypoints, Zap, LoaderCircle, Plus } from 'lucide-react'
+import { Waypoints, Zap, LoaderCircle, Plus } from 'lucide-react'
 import { Button, SectionCard } from './ui.jsx'
 import { 
   classNames, 
@@ -85,24 +85,24 @@ export function ProxyCard({
           <div className="section-title-wrap">
             <Waypoints size={14} className="section-icon" />
             <span>节点列表</span>
-            <label className="node-select">
-              <span className="node-select-label">节点选择</span>
-              <select
-                aria-label="节点选择"
-                value={pendingSelect || nodeSelect}
-                disabled={status.initializing || nodeSelectPending}
-                onChange={(event) => {
-                  const next = event.target.value
-                  setPendingSelect(next)
-                  Promise.resolve(onSetNodeSelect?.(next)).finally(() => setPendingSelect(''))
-                }}
-              >
-                {NODE_SELECT_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value}>{option.label}</option>
-                ))}
-              </select>
-            </label>
           </div>
+          <label className="node-select">
+            <span className="node-select-label">节点选择</span>
+            <select
+              aria-label="节点选择"
+              value={pendingSelect || nodeSelect}
+              disabled={status.initializing || nodeSelectPending}
+              onChange={(event) => {
+                const next = event.target.value
+                setPendingSelect(next)
+                Promise.resolve(onSetNodeSelect?.(next)).finally(() => setPendingSelect(''))
+              }}
+            >
+              {NODE_SELECT_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
+          </label>
           <Button 
             tone="secondary" 
             size="sm" 
@@ -124,17 +124,16 @@ export function ProxyCard({
         title={primaryGroup?.now ? '点击测试当前节点延迟' : undefined}
         aria-label={primaryGroup?.now ? `测试当前节点 ${primaryGroup.now} 延迟` : '当前节点'}
       >
-        <div className="banner-icon-wrap"><Server size={18} className={classNames('banner-glyph', !primaryGroup?.now && 'idle')} /></div>
         <div className="banner-copy">
           <span className="banner-label">当前节点</span>
           <strong title={primaryGroup?.now || undefined}>{primaryGroup?.now || '未选择'}</strong>
-          <span className="banner-meta">
-            {currentNodeMeta
-              ? `${currentNodeMeta.server}:${currentNodeMeta.server_port} · ${protocolLabel(currentNodeMeta.node_type)}`
-              : primaryGroup 
-                ? `来自代理组 ${primaryGroupName}` 
+          {(currentNodeMeta || !primaryGroup) && (
+            <span className="banner-meta">
+              {currentNodeMeta
+                ? `${currentNodeMeta.server}:${currentNodeMeta.server_port} · ${protocolLabel(currentNodeMeta.node_type)}`
                 : '等待服务启动'}
-          </span>
+            </span>
+          )}
         </div>
         <div className={classNames('banner-delay', 'num', getDelayTone(currentNodeDelay))}>
           {isTestingCurrent 
