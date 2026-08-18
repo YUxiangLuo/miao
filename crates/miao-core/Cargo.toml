@@ -22,7 +22,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 arc-swap = "1.7"
 bytes = "1.0"
-tokio-tungstenite = "0.29"
+tokio-tungstenite = "0.30"
 
 [target.'cfg(unix)'.dependencies]
 nix = { version = "0.29", features = ["signal", "user"] }
