@@ -11,11 +11,19 @@ import {
   NodeModal,
   ToastStack,
 } from './index.js'
+import { WifiOff } from 'lucide-react'
 
 export function DashboardScreen({ app }) {
   return (
     <div className="shell">
       <main className="workspace">
+        {app.backendUnreachable && (
+          <div className="offline-banner" role="alert">
+            <WifiOff size={14} />
+            <span>与后端服务的连接已断开，正在自动重试…</span>
+          </div>
+        )}
+
         <TopBar
           status={app.status}
           traffic={app.traffic}

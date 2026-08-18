@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import App from './App.jsx'
@@ -12,8 +12,20 @@ function jsonResponse(payload, status = 200) {
   }
 }
 
+function stubMatchMedia() {
+  vi.stubGlobal('matchMedia', vi.fn().mockImplementation(() => ({
+    matches: false,
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+  })))
+  window.matchMedia = globalThis.matchMedia
+}
+
 describe('App onboarding integration', () => {
-  afterEach(() => vi.unstubAllGlobals())
+  afterEach(() => {
+    vi.useRealTimers()
+    vi.unstubAllGlobals()
+  })
 
   it('adds the first subscription and leaves onboarding', async () => {
     let hasSubscription = false
@@ -211,5 +223,118 @@ describe('App onboarding integration', () => {
       }))
     })
     expect(await screen.findByText('已切换为分流模式')).toBeInTheDocument()
+  })
+
+  it('shows a reconnecting state instead of onboarding when the backend is unreachable', async () => {
+    vi.useFakeTimers()
+    let backendDown = true
+    const fetchMock = vi.fn(async (input) => {
+      const url = String(input)
+      if (backendDown) throw new Error('connection refused')
+      if (url === '/api/status') {
+        return jsonResponse({
+          success: true,
+          data: { running: false, initializing: false, route_mode: 'rule' },
+        })
+      }
+      if (url === '/api/nodes' || url === '/api/subs' || url === '/api/rules') {
+        return jsonResponse({ success: true, data: [] })
+      }
+      if (url === '/api/version') {
+        return jsonResponse({
+          success: true,
+          data: { current: 'v0.29.5', latest: null, has_update: false },
+        })
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    })
+
+    vi.stubGlobal('fetch', fetchMock)
+    stubMatchMedia()
+
+    render(<App />)
+    await act(async () => {})
+
+    // 后端不可达：显示重连提示，而不是把默认空状态误判成引导页
+    expect(screen.getByText('无法连接后端，正在自动重试…')).toBeInTheDocument()
+    expect(screen.queryByText('添加订阅链接或手动节点以开始使用')).not.toBeInTheDocument()
+
+    // 后台轮询仍在继续重试
+    const statusCallsBefore = fetchMock.mock.calls.filter(([url]) => url === '/api/status').length
+    await act(async () => { vi.advanceTimersByTime(6000) })
+    const statusCallsAfter = fetchMock.mock.calls.filter(([url]) => url === '/api/status').length
+    expect(statusCallsAfter).toBeGreaterThan(statusCallsBefore)
+    expect(screen.getByText('无法连接后端，正在自动重试…')).toBeInTheDocument()
+
+    // 后端恢复后自动进入正常流程（空数据 → 引导页）
+    backendDown = false
+    await act(async () => { vi.advanceTimersByTime(3000) })
+    expect(screen.getByText('添加订阅链接或手动节点以开始使用')).toBeInTheDocument()
+    expect(screen.queryByText('无法连接后端，正在自动重试…')).not.toBeInTheDocument()
+  })
+
+  it('shows a disconnect banner after repeated polling failures and hides it after recovery', async () => {
+    vi.useFakeTimers()
+    let backendDown = false
+    const fetchMock = vi.fn(async (input) => {
+      const url = String(input)
+      if (backendDown) throw new Error('connection refused')
+      if (url === '/api/status') {
+        return jsonResponse({
+          success: true,
+          data: { running: true, initializing: false, route_mode: 'rule', pid: 1, uptime_secs: 10 },
+        })
+      }
+      if (url === '/api/nodes' || url === '/api/subs' || url === '/api/rules') {
+        return jsonResponse({ success: true, data: [] })
+      }
+      if (url === '/api/version') {
+        return jsonResponse({
+          success: true,
+          data: { current: 'v0.29.5', latest: null, has_update: false },
+        })
+      }
+      if (url === '/api/clash/connections') {
+        return jsonResponse({ connections: [], uploadTotal: 0, downloadTotal: 0 })
+      }
+      if (url === '/api/clash/proxies') {
+        return jsonResponse({
+          proxies: {
+            proxy: { type: 'Selector', name: 'proxy', now: 'node-a', all: ['node-a'] },
+          },
+        })
+      }
+      if (url.startsWith('/api/clash/proxies/') && url.includes('/delay')) {
+        return jsonResponse({ delay: 80 })
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    })
+
+    vi.stubGlobal('fetch', fetchMock)
+    stubMatchMedia()
+
+    render(<App />)
+    await act(async () => {})
+    expect(screen.getByText('节点列表')).toBeInTheDocument()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+
+    // 偶发失败不提示（阈值 3 次）
+    backendDown = true
+    await act(async () => { vi.advanceTimersByTime(3000) })
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    await act(async () => { vi.advanceTimersByTime(3000) })
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+
+    // 连续失败达到阈值：出现断线横幅，且停留在仪表盘而不是跳转引导页
+    await act(async () => { vi.advanceTimersByTime(3000) })
+    expect(screen.getByRole('alert')).toHaveTextContent('与后端服务的连接已断开，正在自动重试…')
+    expect(screen.getByText('节点列表')).toBeInTheDocument()
+    expect(screen.queryByText('添加订阅链接或手动节点以开始使用')).not.toBeInTheDocument()
+
+    // 恢复后轮询成功，横幅自动消失
+    backendDown = false
+    await act(async () => { vi.advanceTimersByTime(3000) })
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(screen.getByText('节点列表')).toBeInTheDocument()
   })
 })

@@ -400,6 +400,20 @@
     justify-content: flex-end;
     gap: 8px;
 }
+/* 后端不可达时的顶部断线横幅（DashboardScreen），恢复后随状态自动消失 */
+.offline-banner {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+    margin-bottom: 16px;
+    padding: 10px 14px;
+    border-radius: 8px;
+    border: 1px solid rgba(176, 82, 82, 0.45);
+    background: var(--surface-red);
+    color: var(--danger);
+    font-size: 0.875rem;
+}
 .toast-stack {
     position: fixed;
     top: 20px;

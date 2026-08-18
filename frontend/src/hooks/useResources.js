@@ -10,18 +10,29 @@ export function useStatus() {
     node_select: 'manual',
     adblock: false
   })
+  // 是否成功拿到过后端响应：区分「服务未运行」与「后端根本没起来」
+  const [statusLoaded, setStatusLoaded] = useState(false)
+  // 连续失败次数（成功即清零），作为面板断线提示的健康度信号
+  const [statusFailures, setStatusFailures] = useState(0)
 
   const fetchStatus = useCallback(async () => {
     try {
       const response = await fetch('/api/status')
       const payload = await response.json()
-      if (payload.success && payload.data) setStatus(payload.data)
+      if (payload.success && payload.data) {
+        setStatus(payload.data)
+        setStatusLoaded(true)
+        setStatusFailures(0)
+        return
+      }
     } catch {
-      // Keep the last known state during transient failures.
+      // 失败计数在下方统一处理
     }
+    // Keep the last known state during transient failures.
+    setStatusFailures((count) => count + 1)
   }, [])
 
-  return { status, fetchStatus }
+  return { status, statusLoaded, statusFailures, fetchStatus }
 }
 
 export function useSubs() {

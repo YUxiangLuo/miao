@@ -4,7 +4,7 @@ import { useStatus, useSubs, useNodes, useRules, useVersion } from './useResourc
 import { useProxies, useTraffic, useConnections, useDelays, isClashProxyGroup } from './useClash.js'
 import { usePolling } from './usePolling.js'
 import { useDesktopLayout } from './useDesktopLayout.js'
-import { EMPTY_NODE_FORM, nodeTypeDefaults, POLL_INTERVAL, POLL_INTERVAL_STARTUP } from '../utils.js'
+import { EMPTY_NODE_FORM, nodeTypeDefaults, POLL_INTERVAL, POLL_INTERVAL_STARTUP, STATUS_FAILURE_THRESHOLD } from '../utils.js'
 
 export function useAppData() {
   const [firstLoadDone, setFirstLoadDone] = useState(false)
@@ -23,7 +23,7 @@ export function useAppData() {
 
   const { toasts, showToast, dismissToast } = useToast()
   const { apiCall } = useApi({ setLoadingAction })
-  const { status, fetchStatus } = useStatus()
+  const { status, statusLoaded, statusFailures, fetchStatus } = useStatus()
   const { subs, fetchSubs } = useSubs()
   const { nodes, fetchNodes } = useNodes()
   const { rules, fetchRules } = useRules()
@@ -81,7 +81,12 @@ export function useAppData() {
       .finally(() => setFirstLoadDone(true))
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // 连续失败达到阈值视为后端不可达：面板显示断线提示，且不再按空数据误判进入引导页
+  const backendUnreachable = statusFailures >= STATUS_FAILURE_THRESHOLD
+
   const needsOnboarding = firstLoadDone
+    && statusLoaded
+    && !backendUnreachable
     && !status.initializing
     && !status.running
     && subs.length === 0
@@ -154,6 +159,8 @@ export function useAppData() {
     dismissToast,
     apiCall,
     status,
+    statusLoaded,
+    backendUnreachable,
     fetchStatus,
     subs,
     fetchSubs,
