@@ -11,8 +11,6 @@
 
 Miao 把 sing-box 内核、geo 分流规则和 Web 控制面板编进同一个可执行文件。在 Linux / OpenWrt 上它是 `sudo` 即跑的单二进制；在 Windows 上它是带系统托盘的桌面程序。没有配置文件也能启动——面板先给引导页，不落盘任何东西。
 
-本文档是使用手册与配置参考。想看产品介绍与截图导览，去官网 <https://miao.vesein.dev>。
-
 ![Miao 控制面板](docs/screenshot.png)
 
 ## 安装
