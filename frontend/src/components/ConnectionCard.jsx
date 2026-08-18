@@ -10,7 +10,7 @@ function connectionRule(connection) {
 
 // 轮询刷新时数值变化会触发 key 变化重新挂载,配合 CSS 淡入提示数据已更新
 export function AnimatedValue({ value, className }) {
-  return <span key={String(value)} className={classNames('value-anim', className)}>{value}</span>
+  return <span key={String(value)} className={classNames('value-anim', 'num', className)}>{value}</span>
 }
 
 function SiteMark({ domain }) {
@@ -56,7 +56,7 @@ function ConnectionDetailRow({ connection }) {
       <div className="connection-detail-line">
         <span className="connection-detail-rule" title={ruleText}>{ruleText}</span>
         <span
-          className="connection-detail-duration"
+          className="connection-detail-duration num"
           title={connection.start ? `建立于 ${connection.start}` : undefined}
         >
           {connectionDuration(connection)}
@@ -67,11 +67,11 @@ function ConnectionDetailRow({ connection }) {
         <span className="connection-detail-chain" title={chain}>{chain}</span>
         <span className="connection-detail-bytes">
           <small className="tone-download">
-            <ArrowDown size={11} />
+            <ArrowDown size={12} />
             {formatBytes(connection.download)}
           </small>
           <small className="tone-upload">
-            <ArrowUp size={11} />
+            <ArrowUp size={12} />
             {formatBytes(connection.upload)}
           </small>
         </span>
@@ -100,17 +100,17 @@ export function ConnectionCard({ group, expanded, onToggle }) {
         {expandable && <ChevronDown size={14} className="connection-card-chevron" aria-hidden="true" />}
       </div>
       <div className="connection-card-meta">
-        <span className={classNames('connection-outbound-chip', group.outbound === 'direct' && 'direct')}>
+        <span className={classNames('badge', 'connection-outbound-chip', group.outbound === 'direct' && 'direct')}>
           {group.outbound}
         </span>
-        {group.count > 1 && <span className="connection-count-chip">{group.count} 条链接</span>}
+        {group.count > 1 && <span className="badge connection-count-chip">{group.count} 条链接</span>}
         <span className="connection-card-speed">
           <small className="tone-download">
-            <ArrowDown size={11} />
+            <ArrowDown size={12} />
             <AnimatedValue value={formatSpeed(group.downloadSpeed)} />
           </small>
           <small className="tone-upload">
-            <ArrowUp size={11} />
+            <ArrowUp size={12} />
             <AnimatedValue value={formatSpeed(group.uploadSpeed)} />
           </small>
         </span>
@@ -119,11 +119,11 @@ export function ConnectionCard({ group, expanded, onToggle }) {
         <span className="connection-card-total-label">累计</span>
         <span className="connection-card-total-values">
           <small className="tone-download">
-            <ArrowDown size={11} />
+            <ArrowDown size={12} />
             <AnimatedValue value={formatBytes(group.download)} />
           </small>
           <small className="tone-upload">
-            <ArrowUp size={11} />
+            <ArrowUp size={12} />
             <AnimatedValue value={formatBytes(group.upload)} />
           </small>
         </span>

@@ -91,7 +91,7 @@ export function RuleModal({ open, loading, onClose, onSubmit, nodeNames = [], pl
     const delay = delays[name]
     if (delay === undefined) return null
     return delay > 0
-      ? <span className="node-delay ok">{delay} ms</span>
+      ? <span className="node-delay ok num">{delay} ms</span>
       : <span className="node-delay timeout">超时</span>
   }
 
@@ -257,7 +257,7 @@ export function RuleModal({ open, loading, onClose, onSubmit, nodeNames = [], pl
                 ) : (
                   <>
                     <div className="rule-node-search">
-                      <Search size={13} />
+                      <Search size={12} />
                       <input
                         value={nodeQuery}
                         onChange={(event) => setNodeQuery(event.target.value)}
@@ -289,7 +289,7 @@ export function RuleModal({ open, loading, onClose, onSubmit, nodeNames = [], pl
 
               {isNodeTarget && (
                 <div className="rule-node-warning">
-                  <TriangleAlert size={13} />
+                  <TriangleAlert size={12} />
                   <span>若该节点日后消失（改名或订阅变更），此规则将暂停生效并在列表中标记，节点恢复后自动生效</span>
                 </div>
               )}

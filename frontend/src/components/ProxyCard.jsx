@@ -45,9 +45,9 @@ const ProxyTile = memo(function ProxyTile({ nodeName, delay, isActive, isTesting
         aria-label={`测试 ${nodeName} 延迟`}
       >
         {isTesting 
-          ? <LoaderCircle size={10} className="spin" /> 
-          : <Zap size={10} />}
-        <span>{isTesting ? '测试中…' : formatDelay(delay)}</span>
+          ? <LoaderCircle size={12} className="spin" /> 
+          : <Zap size={12} />}
+        <span className="num">{isTesting ? '测试中…' : formatDelay(delay)}</span>
       </button>
     </div>
   )
@@ -136,9 +136,9 @@ export function ProxyCard({
                 : '等待服务启动'}
           </span>
         </div>
-        <div className={classNames('banner-delay', getDelayTone(currentNodeDelay))}>
+        <div className={classNames('banner-delay', 'num', getDelayTone(currentNodeDelay))}>
           {isTestingCurrent 
-            ? <LoaderCircle size={20} className="spin" /> 
+            ? <LoaderCircle size={18} className="spin" /> 
             : currentNodeDelay !== undefined && currentNodeDelay < 0
               ? <strong className="banner-delay-timeout">超时</strong>
               : <strong>{currentNodeDelay !== undefined ? currentNodeDelay : '--'}</strong>}
@@ -168,7 +168,7 @@ export function ProxyCard({
               onClick={onOpenAddNode}
               disabled={status.initializing}
             >
-              <Plus size={13} />
+              <Plus size={12} />
               <span>添加节点</span>
             </button>
           </div>

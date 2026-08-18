@@ -55,7 +55,7 @@ export function McpFloat({ enabled, pending, onToggle, showToast }) {
         title={`复制 MCP 地址：${url}`}
         aria-label="复制 MCP 地址"
       >
-        {copied ? <Check size={13} /> : <Copy size={13} />}
+        {copied ? <Check size={12} /> : <Copy size={12} />}
       </button>
     </div>
   )

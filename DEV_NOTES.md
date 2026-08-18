@@ -170,6 +170,8 @@ TUN JSON：`auto_route` + `strict_route`，`interface_name` 仍是 `sing-tun`。
 
 ## 前端调试（agent-browser）
 
+**设计 token（CRAP 重构后）**：间距只用 `--space-1..4`（6/10/16/24），圆角只用 `--radius-sm/radius/radius-lg/radius-pill`（6/8/12/999，卡片内嵌块 8、独立块 12、小控件 6），字号只用 `--fs-xs..xl`（0.75/0.8125/0.875/1/1.1875rem，更大标题除外）。徽标统一 `.badge` 基类 + info/success/warning/danger/neutral 变体，语义类名（counter-pill/rule-target-badge 等）保留但只带配色；写新徽标时组合使用，不要新写基元。活数字（速率/延迟/流量/PID）必须带 `.num`（tabular-nums）。按钮：ghost=取消类（透明无边框），secondary=确认级次要操作，primary=主提交。图标尺寸只有 12/14/16/18 四档。
+
 Arch 上的面板仍是那份 systemd Linux 实例，可以用来看 **共享 UI**（规则、节点、布局），不能用来验 UAC / WebView2 / WinTun。
 
 - `agent-browser open <url>` / `eval '<js>'` / `screenshot [--full] <path>`；`set viewport <w> <h>`

@@ -71,7 +71,7 @@ export function ConnectionsModal({
             <Activity size={18} className="icon-accent" />
             <h3 id={titleId}>链接统计</h3>
             {status.running && (
-              <span className="connections-live-badge">
+              <span className="badge connections-live-badge">
                 <i />
                 {groups.length} 个站点 · {connections.length} 条链接
               </span>
@@ -105,11 +105,11 @@ export function ConnectionsModal({
                 </span>
                 <strong className="connection-stat-value connection-stat-pair">
                   <span className="tone-download">
-                    <ArrowDown size={13} />
+                    <ArrowDown size={12} />
                     <AnimatedValue value={formatSpeed(downloadSpeed)} />
                   </span>
                   <span className="tone-upload">
-                    <ArrowUp size={13} />
+                    <ArrowUp size={12} />
                     <AnimatedValue value={formatSpeed(uploadSpeed)} />
                   </span>
                 </strong>
@@ -121,11 +121,11 @@ export function ConnectionsModal({
                 </span>
                 <strong className="connection-stat-value connection-stat-pair">
                   <span className="tone-download">
-                    <ArrowDown size={13} />
+                    <ArrowDown size={12} />
                     <AnimatedValue value={formatBytes(downloadTotal)} />
                   </span>
                   <span className="tone-upload">
-                    <ArrowUp size={13} />
+                    <ArrowUp size={12} />
                     <AnimatedValue value={formatBytes(uploadTotal)} />
                   </span>
                 </strong>

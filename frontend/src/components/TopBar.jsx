@@ -36,40 +36,43 @@ export function TopBar({
       </div>
       <div className="topbar-divider" />
 
-      <div className="status-left-wrap">
-        <div className={classNames('status-pill-icon', serviceTone)}>
-          <StatusIcon size={18} className={classNames('status-pill-glyph', status.initializing && 'spin')} />
-        </div>
-        <div className="status-copy">
-          <div className="status-title">
-            Sing-box {status.initializing ? '初始化中' : status.running ? '运行中' : '已停止'}
+      <div className="status-cluster">
+        <div className="status-left-wrap">
+          <div className={classNames('status-pill-icon', serviceTone)}>
+            <StatusIcon size={18} className={classNames('status-pill-glyph', status.initializing && 'spin')} />
           </div>
-          <div className="status-subtitle">
-            {status.running
-              ? `PID: ${status.pid ?? '--'} · 运行时长: ${formatUptime(status.uptime_secs)}`
-              : status.initializing
-                ? '正在获取订阅并启动服务…'
-                : '等待启动服务'}
+          <div className="status-copy">
+            <div className="status-title">
+              Sing-box {status.initializing ? '初始化中' : status.running ? '运行中' : '已停止'}
+            </div>
+            <div className="status-subtitle num">
+              {status.running
+                ? `PID: ${status.pid ?? '--'} · 运行时长: ${formatUptime(status.uptime_secs)}`
+                : status.initializing
+                  ? '正在获取订阅并启动服务…'
+                  : '等待启动服务'}
+            </div>
           </div>
         </div>
-      </div>
 
-      <button
-        type="button"
-        className="traffic-chip"
-        onClick={onOpenConnections}
-        disabled={!status.running}
-        title={status.running ? '查看链接统计' : '启动服务后可查看链接统计'}
-      >
-        <div className="traffic-item">
-          <ArrowUp size={14} className="traffic-icon up" />
-          <span>{formatSpeed(traffic.up)}</span>
-        </div>
-        <div className="traffic-item">
-          <ArrowDown size={14} className="traffic-icon down" />
-          <span>{formatSpeed(traffic.down)}</span>
-        </div>
-      </button>
+        <button
+          type="button"
+          className="traffic-chip"
+          onClick={onOpenConnections}
+          disabled={!status.running}
+          title={status.running ? '查看链接统计' : '启动服务后可查看链接统计'}
+        >
+          <div className="traffic-item">
+            <ArrowUp size={14} className="traffic-icon up" />
+            <span className="num">{formatSpeed(traffic.up)}</span>
+          </div>
+          <div className="traffic-item">
+            <ArrowDown size={14} className="traffic-icon down" />
+            <span className="num">{formatSpeed(traffic.down)}</span>
+          </div>
+        </button>
+      </div>
+      <div className="topbar-divider" />
 
       <div className="status-card-spacer" />
       <div className="route-mode-segment" role="group" aria-label="代理模式">
@@ -82,7 +85,7 @@ export function TopBar({
             if (isGlobalMode) onSetRouteMode('rule')
           }}
         >
-          <Route size={13} />
+          <Route size={14} />
           <span>分流模式</span>
         </button>
         <button
@@ -94,7 +97,7 @@ export function TopBar({
             if (!isGlobalMode) onSetRouteMode('global')
           }}
         >
-          <Globe2 size={13} />
+          <Globe2 size={14} />
           <span>{modeSwitching ? '切换中' : '全局代理'}</span>
         </button>
       </div>

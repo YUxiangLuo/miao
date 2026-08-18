@@ -57,7 +57,7 @@ export function ConnectionsToolbar({
             onClick={() => onQueryChange('')}
             aria-label="清除搜索"
           >
-            <X size={13} />
+            <X size={12} />
           </button>
         )}
         {filtered && (

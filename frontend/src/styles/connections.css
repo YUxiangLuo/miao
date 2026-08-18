@@ -13,18 +13,18 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 12px;
-    margin-bottom: 16px;
+    gap: var(--space-2);
+    margin-bottom: var(--space-3);
 }
 .modal-title-wrap {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: var(--space-2);
 }
 .modal-title-wrap h3 {
     margin: 0;
     color: var(--text-strong);
-    font-size: 1.1875rem;
+    font-size: var(--fs-xl);
 }
 .icon-accent {
     color: var(--accent-strong);
@@ -38,7 +38,7 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    border-radius: 999px;
+    border-radius: var(--radius-pill);
     border: 1px solid transparent;
     background: rgba(255, 255, 255, 0.06);
     color: var(--text);
@@ -61,40 +61,33 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 12px;
-    padding: 14px 20px;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-3);
     border-bottom: 1px solid var(--border-soft);
     background: rgba(255, 255, 255, 0.015);
 }
 .connections-header-title {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: var(--space-2);
     min-width: 0;
 }
 .connections-header-title h3 {
     margin: 0;
     color: var(--text-strong);
-    font-size: 1.1875rem;
+    font-size: var(--fs-xl);
     white-space: nowrap;
 }
+/* 徽标基元由 .badge 提供，这里只保留 LIVE 绿配色与描边 */
 .connections-live-badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 7px;
-    padding: 4px 10px;
-    border-radius: 999px;
     border: 1px solid rgba(74, 158, 117, 0.35);
     background: var(--surface-green-soft);
     color: var(--success);
-    font-size: 0.8125rem;
-    font-weight: 600;
-    white-space: nowrap;
 }
 .connections-live-badge i {
     width: 6px;
     height: 6px;
-    border-radius: 999px;
+    border-radius: var(--radius-pill);
     background: currentColor;
     animation: livePulse 2s ease-in-out infinite;
 }
@@ -109,39 +102,39 @@
 .connections-header-actions {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--space-2);
 }
 .connections-body {
     flex: 1;
     min-height: 0;
     display: flex;
     flex-direction: column;
-    gap: 14px;
-    padding: 16px 20px;
+    gap: var(--space-2);
+    padding: var(--space-3);
     overflow: hidden;
 }
 .connection-stat-grid {
     flex: 0 0 auto;
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 12px;
+    gap: var(--space-2);
 }
 .connection-stat {
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: var(--space-2);
     min-width: 0;
-    padding: 12px 14px;
-    border-radius: 10px;
+    padding: var(--space-2);
+    border-radius: var(--radius);
     background: var(--surface-soft);
     border: 1px solid var(--border-soft);
 }
 .connection-stat-label {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: var(--space-1);
     color: var(--text-muted);
-    font-size: 0.8125rem;
+    font-size: var(--fs-sm);
 }
 .connection-stat-label svg {
     color: var(--text-subtle);
@@ -159,12 +152,12 @@
 .connection-stat-pair {
     display: flex;
     align-items: center;
-    gap: 16px;
+    gap: var(--space-3);
 }
 .connection-stat-pair > span {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
+    gap: var(--space-1);
     min-width: 0;
 }
 .connection-stat-pair .tone-download {
@@ -195,11 +188,11 @@
 }
 .connections-error {
     flex: 0 0 auto;
-    padding: 9px 10px;
-    border-radius: 6px;
+    padding: var(--space-2);
+    border-radius: var(--radius);
     background: var(--surface-red);
     color: var(--danger);
-    font-size: 0.875rem;
+    font-size: var(--fs-md);
 }
 .connections-main {
     flex: 1;
@@ -207,29 +200,29 @@
     min-height: 0;
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: var(--space-2);
 }
 .connections-toolbar {
     flex: 0 0 auto;
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: var(--space-2);
 }
 .connections-toolbar-row {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 10px;
+    gap: var(--space-2);
     flex-wrap: wrap;
 }
 .connections-search {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--space-2);
     min-width: 0;
-    padding: 0 10px 0 12px;
+    padding: 0 var(--space-2);
     border: 1px solid var(--border-soft);
-    border-radius: 9px;
+    border-radius: var(--radius);
     background: var(--surface-soft);
     color: var(--text-muted);
 }
@@ -241,7 +234,7 @@
     outline: none;
     background: transparent;
     color: var(--text);
-    font-size: 0.875rem;
+    font-size: var(--fs-md);
 }
 .connections-search input[type="search"]::-webkit-search-cancel-button {
     appearance: none;
@@ -257,7 +250,7 @@
     align-items: center;
     justify-content: center;
     border: none;
-    border-radius: 999px;
+    border-radius: var(--radius-pill);
     background: rgba(255, 255, 255, 0.06);
     color: var(--text-muted);
 }
@@ -268,7 +261,7 @@
 .connections-search-count {
     flex: 0 0 auto;
     color: var(--text-subtle);
-    font-size: 0.75rem;
+    font-size: var(--fs-xs);
     font-weight: 600;
     letter-spacing: 0.02em;
     white-space: nowrap;
@@ -279,20 +272,20 @@
     gap: 2px;
     padding: 3px;
     border: 1px solid var(--border-soft);
-    border-radius: 8px;
+    border-radius: var(--radius);
     background: var(--surface-soft);
 }
 .connections-pill {
     min-height: 28px;
     display: inline-flex;
     align-items: center;
-    gap: 6px;
-    padding: 4px 10px;
+    gap: var(--space-1);
+    padding: 4px var(--space-2);
     border: none;
-    border-radius: 6px;
+    border-radius: var(--radius-sm);
     background: transparent;
     color: var(--text-muted);
-    font-size: 0.8125rem;
+    font-size: var(--fs-sm);
     font-weight: 500;
     white-space: nowrap;
 }
@@ -308,32 +301,9 @@
     min-width: 1.1em;
     color: inherit;
     font-style: normal;
-    font-size: 0.75rem;
+    font-size: var(--fs-xs);
     font-weight: 700;
     opacity: 0.8;
-}
-.connections-tool-button {
-    min-height: 34px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 6px;
-    padding: 7px 10px;
-    border: 1px solid var(--border-soft);
-    border-radius: 7px;
-    background: var(--surface-soft);
-    color: var(--text-muted);
-    font-size: 0.875rem;
-    white-space: nowrap;
-}
-.connections-tool-button:hover:not(:disabled) {
-    border-color: var(--border);
-    color: var(--text);
-    background: #252b35;
-}
-.connections-tool-button:disabled {
-    opacity: 0.45;
-    cursor: not-allowed;
 }
 .connection-card-grid {
     flex: 1;
@@ -341,7 +311,7 @@
     overflow: auto;
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-    gap: 10px;
+    gap: var(--space-2);
     padding: 4px;
     align-content: start;
     align-items: start;
@@ -350,9 +320,9 @@
     display: flex;
     flex-direction: column;
     min-width: 0;
-    padding: 14px;
+    padding: var(--space-2);
     border: 2px solid var(--border-soft);
-    border-radius: 10px;
+    border-radius: var(--radius);
     background: var(--surface-soft);
     transition: border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
 }
@@ -379,14 +349,14 @@
 .connection-card-head {
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: var(--space-2);
     width: 100%;
     padding: 0;
     border: none;
     background: transparent;
     color: inherit;
     text-align: left;
-    border-radius: 6px;
+    border-radius: var(--radius-sm);
 }
 .connection-card-head:focus-visible {
     outline: 2px solid var(--accent);
@@ -395,7 +365,7 @@
 .connection-card-top {
     display: flex;
     align-items: flex-start;
-    gap: 12px;
+    gap: var(--space-2);
     min-width: 0;
 }
 .site-icon {
@@ -405,13 +375,13 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    border-radius: 8px;
+    border-radius: var(--radius);
     overflow: hidden;
 }
 .site-icon.letter {
     background: var(--surface-blue);
     color: var(--accent-strong);
-    font-size: 0.875rem;
+    font-size: var(--fs-md);
     font-weight: 700;
 }
 .connection-card-identity {
@@ -426,7 +396,7 @@
     align-self: center;
     width: 6px;
     height: 6px;
-    border-radius: 999px;
+    border-radius: var(--radius-pill);
     background: var(--success);
     box-shadow: 0 0 6px rgba(74, 222, 128, 0.8);
     animation: livePulse 2s ease-in-out infinite;
@@ -444,7 +414,7 @@
 .connection-card-domain {
     display: block;
     color: var(--text-strong);
-    font-size: 0.9375rem;
+    font-size: var(--fs-lg);
     font-weight: 650;
     line-height: 1.3;
     overflow: hidden;
@@ -454,10 +424,10 @@
 .connection-card-rule {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: var(--space-1);
     min-width: 0;
     color: var(--text-muted);
-    font-size: 0.8125rem;
+    font-size: var(--fs-sm);
     line-height: 1.35;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -465,33 +435,29 @@
 }
 .connection-card-rule em {
     flex: 0 0 auto;
-    padding: 0 5px;
-    border-radius: 4px;
+    padding: 0 var(--space-1);
+    border-radius: var(--radius-sm);
     background: var(--surface-blue);
     color: var(--accent-strong);
     font-style: normal;
-    font-size: 0.75rem;
+    font-size: var(--fs-xs);
     font-weight: 700;
 }
 .connection-card-meta {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--space-2);
     min-width: 0;
 }
+/* 徽标基元由 .badge 提供，这里只保留配色与截断 */
 .connection-outbound-chip,
 .connection-count-chip {
     flex: 0 1 auto;
     min-width: 0;
-    padding: 2px 7px;
-    border-radius: 999px;
     background: var(--surface-blue);
     color: var(--accent-strong);
-    font-size: 0.75rem;
-    font-weight: 650;
     overflow: hidden;
     text-overflow: ellipsis;
-    white-space: nowrap;
 }
 .connection-outbound-chip.direct {
     background: var(--surface-green-soft);
@@ -506,9 +472,9 @@
     margin-left: auto;
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--space-2);
     color: var(--text-muted);
-    font-size: 0.75rem;
+    font-size: var(--fs-xs);
     white-space: nowrap;
 }
 .connection-card-speed small {
@@ -528,22 +494,22 @@
 .connection-card-total {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--space-2);
     min-width: 0;
-    padding-top: 10px;
+    padding-top: var(--space-2);
     border-top: 1px dashed var(--border-soft);
 }
 .connection-card-total-label {
     color: var(--text-subtle);
-    font-size: 0.75rem;
+    font-size: var(--fs-xs);
 }
 .connection-card-total-values {
     margin-left: auto;
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: var(--space-2);
     color: var(--text-muted);
-    font-size: 0.75rem;
+    font-size: var(--fs-xs);
     white-space: nowrap;
 }
 .connection-card-total-values small {
@@ -561,28 +527,28 @@
     opacity: 0.75;
 }
 .connection-card-details {
-    margin-top: 12px;
-    padding-top: 10px;
+    margin-top: var(--space-2);
+    padding-top: var(--space-2);
     border-top: 1px solid var(--border-soft);
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: var(--space-2);
 }
 .connection-detail-row {
     display: flex;
     flex-direction: column;
-    gap: 5px;
-    padding: 8px 10px;
-    border-radius: 8px;
+    gap: var(--space-1);
+    padding: var(--space-2);
+    border-radius: var(--radius);
     background: rgba(255, 255, 255, 0.03);
     border: 1px solid var(--border-soft);
 }
 .connection-detail-line {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--space-2);
     min-width: 0;
-    font-size: 0.75rem;
+    font-size: var(--fs-xs);
 }
 .connection-detail-rule {
     min-width: 0;
@@ -600,8 +566,8 @@
 }
 .connection-detail-net {
     flex: 0 0 auto;
-    padding: 1px 6px;
-    border-radius: 4px;
+    padding: 1px var(--space-1);
+    border-radius: var(--radius-sm);
     background: rgba(255, 255, 255, 0.05);
     color: var(--text-muted);
     font-weight: 600;
@@ -617,7 +583,7 @@
     margin-left: auto;
     flex: 0 0 auto;
     display: inline-flex;
-    gap: 8px;
+    gap: var(--space-2);
     color: var(--text-muted);
     white-space: nowrap;
 }
@@ -637,11 +603,11 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: 22px 16px;
+    padding: var(--space-3);
     color: var(--text-muted);
-    font-size: 0.9375rem;
+    font-size: var(--fs-lg);
     text-align: center;
 }
 .connections-empty.inline {
-    padding: 18px 12px;
+    padding: var(--space-3) var(--space-2);
 }

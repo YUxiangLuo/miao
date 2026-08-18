@@ -28,7 +28,7 @@ const SubRow = memo(function SubRow({ sub, onDelete, disabled }) {
         disabled={disabled}
         aria-label={`删除订阅 ${maskSubscription(sub.url)}`}
       >
-        <Trash2 size={13} />
+        <Trash2 size={12} />
       </button>
     </div>
   )

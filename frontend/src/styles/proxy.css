@@ -1,11 +1,11 @@
 .node-select {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
+    gap: var(--space-1);
     min-width: 0;
     margin-left: 4px;
     color: var(--text-muted);
-    font-size: 0.75rem;
+    font-size: var(--fs-xs);
     font-weight: 500;
 }
 .node-select-label {
@@ -14,8 +14,8 @@
 .node-select select {
     max-width: 8.75rem;
     min-height: 26px;
-    padding: 2px 6px;
-    border-radius: 5px;
+    padding: 2px var(--space-1);
+    border-radius: var(--radius);
     border: 1px solid var(--border);
     background: var(--surface-soft);
     color: var(--text);
@@ -31,8 +31,8 @@
 .current-node-banner {
     display: flex;
     align-items: center;
-    gap: 14px;
-    padding: 12px 16px;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-3);
     width: 100%;
     background: var(--surface-blue);
     border: none;
@@ -54,7 +54,7 @@
     align-items: center;
     justify-content: center;
     background: var(--surface-blue-strong);
-    border-radius: 18px;
+    border-radius: var(--radius-pill);
 }
 .banner-glyph {
     color: var(--accent-strong);
@@ -63,7 +63,7 @@
     color: var(--text-subtle);
 }
 .banner-delay .banner-delay-timeout {
-    font-size: 1.0625rem;
+    font-size: var(--fs-lg);
 }
 .banner-copy {
     display: flex;
@@ -74,14 +74,14 @@
 }
 .banner-label {
     color: var(--accent-strong);
-    font-size: 0.75rem;
+    font-size: var(--fs-xs);
     font-weight: 500;
     letter-spacing: 0.5px;
     text-transform: uppercase;
 }
 .banner-copy strong {
     color: var(--text-strong);
-    font-size: 1.1875rem;
+    font-size: var(--fs-xl);
     line-height: 1.2;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -89,7 +89,7 @@
 }
 .banner-meta {
     color: var(--text-muted);
-    font-size: 0.8125rem;
+    font-size: var(--fs-sm);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -105,7 +105,7 @@
     line-height: 1;
 }
 .banner-delay span {
-    font-size: 0.75rem;
+    font-size: var(--fs-xs);
     font-weight: 500;
 }
 .banner-delay.fast,
@@ -123,7 +123,7 @@
     color: var(--danger);
 }
 .proxy-grid-wrap {
-    padding: 12px;
+    padding: var(--space-2);
     flex: 1 1 auto;
     min-height: 0;
     overflow-y: auto;
@@ -131,7 +131,7 @@
 .proxy-grid {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 8px;
+    gap: var(--space-2);
 }
 .proxy-tile {
     position: relative;
@@ -140,9 +140,9 @@
     flex-direction: column;
     align-items: flex-start;
     justify-content: flex-end;
-    gap: 6px;
-    padding: 10px 12px;
-    border-radius: 6px;
+    gap: var(--space-1);
+    padding: var(--space-2);
+    border-radius: var(--radius);
     border: 1px solid var(--border);
     background: #252b35;
     color: var(--text);
@@ -161,7 +161,7 @@
     z-index: 0;
     display: flex;
     align-items: flex-start;
-    padding: 10px 12px;
+    padding: var(--space-2);
     border: none;
     background: transparent;
     color: inherit;
@@ -177,14 +177,14 @@
     min-width: 0;
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: var(--space-1);
 }
 .proxy-node-switching {
     display: inline-flex;
     align-items: center;
     min-width: 0;
     max-width: 100%;
-    gap: 6px;
+    gap: var(--space-1);
 }
 .proxy-node-switching .spin {
     flex: 0 0 auto;
@@ -204,15 +204,15 @@
 }
 .proxy-node-name {
     color: var(--text);
-    font-size: 0.875rem;
+    font-size: var(--fs-md);
     font-weight: 600;
 }
 .proxy-tag {
     display: inline-flex;
     align-items: center;
-    gap: 5px;
+    gap: var(--space-1);
     color: var(--text-strong);
-    font-size: 0.875rem;
+    font-size: var(--fs-md);
     font-weight: 700;
 }
 .proxy-tag span:last-child {
@@ -225,7 +225,7 @@
     flex: 0 0 auto;
     width: 6px;
     height: 6px;
-    border-radius: 999px;
+    border-radius: var(--radius-pill);
     background: var(--success);
 }
 .proxy-test-chip {
@@ -234,11 +234,11 @@
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    padding: 3px 6px;
-    border-radius: 4px;
+    padding: 3px var(--space-1);
+    border-radius: var(--radius-sm);
     border: none;
     background: var(--surface-soft);
-    font-size: 0.8125rem;
+    font-size: var(--fs-sm);
     cursor: pointer;
     color: var(--text-muted);
 }

@@ -12,7 +12,7 @@
     --border-soft: #2b3040;
     --text: #cdd3da;
     --text-strong: #eef3f8;
-    --text-muted: #7e8b9a;
+    --text-muted: #8b98a8;
     --text-subtle: #4d5563;
     --accent: #617fa6;
     --accent-strong: #7b9dc4;
@@ -20,7 +20,22 @@
     --warning: #a07840;
     --danger: #b05252;
     --shadow: 0 16px 32px rgba(0, 0, 0, 0.25);
+    /* ── 音阶 token（CRAP 重构）：间距/圆角/字号只取下列档位，不再出现散值 ── */
+    --space-1: 6px;
+    --space-2: 10px;
+    --space-3: 16px;
+    --space-4: 24px;
+    --radius-sm: 6px; /* 控件/输入 */
+    --radius-lg: 12px; /* 弹窗/终端块 */
+    --radius-pill: 999px;
+    --fs-xs: 0.75rem;
+    --fs-sm: 0.8125rem;
+    --fs-md: 0.875rem;
+    --fs-lg: 1rem;
+    --fs-xl: 1.1875rem;
     --radius: 8px;
+    /* 活数字（速率/延迟/流量/PID）等宽，位数变化不再移位 */
+    --font-numeric: tabular-nums;
     --home-connections-height: 184px;
     /* 桌面双列（>1180px）内容网格高度：630px 保底，高视口吃掉全部剩余垂直空间。
        344 = 工作区上下 padding 48 + 顶栏 76 + 顶栏 margin-bottom 20
@@ -62,4 +77,8 @@ select {
 }
 button {
     cursor: pointer;
+}
+/* 活数字（速率/延迟/流量/PID）等宽：配合 .num 类使用 */
+.num {
+    font-variant-numeric: var(--font-numeric);
 }

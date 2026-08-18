@@ -17,7 +17,7 @@ const RuleRow = memo(function RuleRow({ rule, onDelete, disabled, active }) {
         {display.structured ? (
           <>
             <div className="list-row-title">
-              <span className="rule-field-chip">{display.fieldLabel}</span>
+              <span className={classNames('badge', 'rule-field-chip')}>{display.fieldLabel}</span>
               <span className="rule-value" title={display.value}>{display.value}</span>
             </div>
             <div className="list-row-meta">{display.field}</div>
@@ -35,11 +35,11 @@ const RuleRow = memo(function RuleRow({ rule, onDelete, disabled, active }) {
           title="出口节点不存在,该规则未生效;请删除后重新添加"
           aria-label="规则未生效"
         >
-          <TriangleAlert size={13} />
+          <TriangleAlert size={12} />
         </span>
       )}
       {display.structured && display.target && (
-        <span className={classNames('rule-target-badge', ['proxy', 'direct', 'reject'].includes(display.target) ? display.target : 'node')}>
+        <span className={classNames('badge', 'rule-target-badge', ['proxy', 'direct', 'reject'].includes(display.target) ? display.target : 'node')}>
           {ruleTargetLabel(display.target)}
         </span>
       )}
@@ -49,7 +49,7 @@ const RuleRow = memo(function RuleRow({ rule, onDelete, disabled, active }) {
         disabled={disabled}
         aria-label={`删除规则 ${display.structured ? display.value : display.raw}`}
       >
-        <Trash2 size={13} />
+        <Trash2 size={12} />
       </button>
     </div>
   )
@@ -84,7 +84,7 @@ export function RulesCard({
             <div className="section-title-wrap">
               <ListFilter size={14} className="section-icon" />
               <span>自定义规则</span>
-              <span className="counter-pill">{rules.length}</span>
+              <span className={classNames('badge', 'counter-pill')}>{rules.length}</span>
             </div>
             <Button
               tone="secondary"
