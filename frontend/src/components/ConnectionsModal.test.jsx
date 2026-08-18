@@ -200,26 +200,15 @@ describe('ConnectionsModal cards', () => {
     expect(screen.queryByText('www.bilibili.com')).not.toBeInTheDocument()
   })
 
-  it('sorts cards by domain', async () => {
-    const user = userEvent.setup()
-    renderModal([
-      connection({ id: 'a', downloadSpeed: 900, metadata: { host: 'zeta.dev' } }),
-      connection({ id: 'b', downloadSpeed: 100, metadata: { host: 'alpha.dev' } }),
-    ])
-
-    await user.click(screen.getByRole('button', { name: '域名' }))
-    const domains = screen.getAllByText(/\.dev$/).map((node) => node.textContent)
-    expect(domains).toEqual(['alpha.dev', 'zeta.dev'])
-  })
-
-  it('sorts cards by combined speed when clicking the speed pill', async () => {
-    const user = userEvent.setup()
+  it('sorts cards by combined speed (fixed order, no sort pills)', () => {
     renderModal([
       connection({ id: 'a', downloadSpeed: 10, uploadSpeed: 0, metadata: { host: 'slow.dev' } }),
       connection({ id: 'b', downloadSpeed: 0, uploadSpeed: 500, metadata: { host: 'fast.dev' } }),
     ])
 
-    await user.click(screen.getByRole('button', { name: '速度' }))
+    // 排序选择器已移除：固定按上下行合计速度降序
+    expect(screen.queryByRole('button', { name: '速度' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '域名' })).not.toBeInTheDocument()
     const domains = screen.getAllByText(/\.dev$/).map((node) => node.textContent)
     expect(domains).toEqual(['fast.dev', 'slow.dev'])
   })

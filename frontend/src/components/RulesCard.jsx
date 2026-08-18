@@ -16,7 +16,7 @@ const RuleRow = memo(function RuleRow({ rule, onDelete, disabled, active }) {
       <div className="list-row-content">
         {display.structured ? (
           <>
-            <div className="list-row-title">
+            <div className="list-row-title structured">
               <span className={classNames('badge', 'rule-field-chip')}>{display.fieldLabel}</span>
               <span className="rule-value" title={display.value}>{display.value}</span>
             </div>

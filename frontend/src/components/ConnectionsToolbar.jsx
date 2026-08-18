@@ -1,6 +1,6 @@
 import { Search, X } from 'lucide-react'
 import { classNames } from '../utils.js'
-import { PATH_FILTERS, SORT_OPTIONS } from './connectionFilters.js'
+import { PATH_FILTERS } from './connectionFilters.js'
 
 function PillGroup({ label, value, options, counts, onChange }) {
   return (
@@ -29,8 +29,6 @@ export function ConnectionsToolbar({
   onQueryChange,
   path,
   onPathChange,
-  sortKey,
-  onSortChange,
   counts,
   resultCount,
   totalCount,
@@ -40,47 +38,43 @@ export function ConnectionsToolbar({
 
   return (
     <div className="connections-toolbar">
-      <label className="connections-search">
-        <Search size={14} />
-        <input
-          data-autofocus
-          type="search"
-          value={query}
-          onChange={(event) => onQueryChange(event.target.value)}
-          placeholder="搜索域名、规则或出口"
-          aria-label="搜索链接"
-        />
-        {hasQuery && (
-          <button
-            type="button"
-            className="connections-search-clear"
-            onClick={() => onQueryChange('')}
-            aria-label="清除搜索"
-          >
-            <X size={12} />
-          </button>
-        )}
-        {filtered && (
-          <span className="connections-search-count">
-            {resultCount} / {totalCount}
-          </span>
-        )}
-      </label>
-
       <div className="connections-toolbar-row">
-        <PillGroup
-          label="按出口筛选"
-          value={path}
-          options={PATH_FILTERS}
-          counts={counts}
-          onChange={onPathChange}
-        />
-        <PillGroup
-          label="排序"
-          value={sortKey}
-          options={SORT_OPTIONS}
-          onChange={onSortChange}
-        />
+        <div className="connections-toolbar-filters">
+          <PillGroup
+            label="按出口筛选"
+            value={path}
+            options={PATH_FILTERS}
+            counts={counts}
+            onChange={onPathChange}
+          />
+        </div>
+
+        <label className="connections-search">
+          <Search size={14} />
+          <input
+            data-autofocus
+            type="search"
+            value={query}
+            onChange={(event) => onQueryChange(event.target.value)}
+            placeholder="搜索域名、规则或出口"
+            aria-label="搜索链接"
+          />
+          {hasQuery && (
+            <button
+              type="button"
+              className="connections-search-clear"
+              onClick={() => onQueryChange('')}
+              aria-label="清除搜索"
+            >
+              <X size={12} />
+            </button>
+          )}
+          {filtered && (
+            <span className="connections-search-count">
+              {resultCount} / {totalCount}
+            </span>
+          )}
+        </label>
       </div>
     </div>
   )

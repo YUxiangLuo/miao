@@ -31,7 +31,6 @@ export function ConnectionsModal({
   const dialogRef = useDialog(open, onClose)
   const [query, setQuery] = useState('')
   const [path, setPath] = useState('all')
-  const [sortKey, setSortKey] = useState('speed')
   const [expandedId, setExpandedId] = useState(null)
 
   const connections = useMemo(() => {
@@ -48,8 +47,8 @@ export function ConnectionsModal({
     [groups, query],
   )
   const visibleGroups = useMemo(
-    () => sortConnectionGroups(filterConnectionGroups(searchedGroups, { path }), sortKey),
-    [path, searchedGroups, sortKey],
+    () => sortConnectionGroups(filterConnectionGroups(searchedGroups, { path })),
+    [path, searchedGroups],
   )
   const pathCounts = useMemo(() => pathCountsFor(searchedGroups), [searchedGroups])
 
@@ -140,8 +139,6 @@ export function ConnectionsModal({
                 onQueryChange={setQuery}
                 path={path}
                 onPathChange={setPath}
-                sortKey={sortKey}
-                onSortChange={setSortKey}
                 counts={pathCounts}
                 resultCount={visibleGroups.length}
                 totalCount={groups.length}

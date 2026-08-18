@@ -80,22 +80,8 @@ describe('connection filters', () => {
 })
 
 describe('connection sorting', () => {
-  it('sorts by combined up/down speed by default', () => {
+  it('sorts by combined up/down speed (fixed order)', () => {
     expect(sortConnectionGroups(groups).map((group) => group.domain))
       .toEqual(['api.github.com', 'www.bilibili.com', 'chatgpt.com'])
-    expect(sortConnectionGroups(groups, 'speed').map((group) => group.domain))
-      .toEqual(['api.github.com', 'www.bilibili.com', 'chatgpt.com'])
-  })
-
-  it('sorts by cumulative traffic', () => {
-    expect(sortConnectionGroups(groups, 'traffic').map((group) => group.domain))
-      .toEqual(['www.bilibili.com', 'api.github.com', 'chatgpt.com'])
-  })
-
-  it('sorts by domain or connection count', () => {
-    expect(sortConnectionGroups(groups, 'domain').map((group) => group.domain))
-      .toEqual(['api.github.com', 'chatgpt.com', 'www.bilibili.com'])
-    expect(sortConnectionGroups(groups, 'count').map((group) => group.domain))
-      .toEqual(['www.bilibili.com', 'api.github.com', 'chatgpt.com'])
   })
 })

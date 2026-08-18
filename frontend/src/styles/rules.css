@@ -40,8 +40,12 @@
     align-items: center;
     color: var(--warning);
 }
-.list-row-title .rule-field-chip {
-    margin-right: var(--space-1);
+/* 结构化规则行：chip（fs-xs 药丸）与数值（fs-md）字号不同，默认基线对齐会让
+   chip 视觉上浮。改为 flex 中线对齐，两种字号的字形中心重合。 */
+.list-row-title.structured {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
 }
 .list-row.rule-active {
     background: rgba(74, 158, 117, 0.1);

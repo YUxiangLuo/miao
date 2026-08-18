@@ -212,14 +212,23 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
+    gap: var(--space-3);
+    flex-wrap: wrap;
+}
+.connections-toolbar-filters {
+    display: flex;
+    align-items: center;
     gap: var(--space-2);
     flex-wrap: wrap;
+    min-width: 0;
 }
 .connections-search {
     display: flex;
     align-items: center;
     gap: var(--space-2);
-    min-width: 0;
+    /* 限宽：不与筛选组抢空间，也不占满右侧空白；space-between 提供与筛选组的间距 */
+    flex: 0 1 16rem;
+    min-width: 12rem;
     padding: 0 var(--space-2);
     border: 1px solid var(--border-soft);
     border-radius: var(--radius);
@@ -229,7 +238,8 @@
 .connections-search input {
     min-width: 0;
     width: 100%;
-    min-height: 38px;
+    /* 与 pills 容器同高（28+3*2+1*2=36px），单行排列时中线重合 */
+    min-height: 34px;
     border: none;
     outline: none;
     background: transparent;
