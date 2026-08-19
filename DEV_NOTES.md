@@ -110,7 +110,7 @@ tauri.cmd build --bundles nsis --ci
 
 systemd 服务：`/usr/local/bin/miao`，配置 `/etc/miao/config.yaml`，运行时 `/tmp/miao-sing-box`，面板 `http://localhost:6161`。当「生产依赖」，不是调试对象。
 
-- 查进程用 `sudo pgrep -x miao-rust` 或 `sudo ss -tlnp 'sport = :6161'`（`pgrep -f` 会误匹配 nohup 包装进程；root 进程普通用户看不到）
+- 查进程用 `sudo pgrep -x miao` 或 `sudo ss -tlnp 'sport = :6161'`（进程名来自安装路径 `/usr/local/bin/miao`，不是构建产物名 `miao-rust`；`pgrep -f` 会误匹配 nohup 包装进程；root 进程普通用户看不到）。服务整体状态直接 `systemctl status miao`
 - `api/status` 的 `data.pid` 是 **sing-box 子进程**，不是后端
 - 每次启动重释放内嵌文件到运行时目录；`cache.db` / `config.json.cache` 有意保留
 - `remove.sh` 会删 `/etc/miao`，动之前先备份
