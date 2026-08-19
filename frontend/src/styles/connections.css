@@ -113,63 +113,6 @@
     padding: var(--space-3);
     overflow: hidden;
 }
-.connection-stat-grid {
-    flex: 0 0 auto;
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: var(--space-2);
-}
-.connection-stat {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-2);
-    min-width: 0;
-    padding: var(--space-2);
-    border-radius: var(--r-md);
-    background: var(--surface-soft);
-    border: var(--bw) solid var(--border-soft);
-}
-.connection-stat-label {
-    display: flex;
-    align-items: center;
-    gap: var(--space-1);
-    color: var(--text-muted);
-    font-size: var(--fs-sm);
-}
-.connection-stat-label svg {
-    color: var(--text-subtle);
-}
-.connection-stat-value {
-    flex: 0 0 auto;
-    color: var(--text-strong);
-    font-size: var(--fs-2xl);
-    font-weight: var(--fw-bold);
-    line-height: var(--lh-tight);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-.connection-stat-pair {
-    display: flex;
-    align-items: center;
-    gap: var(--space-3);
-}
-.connection-stat-pair > span {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--space-1);
-    min-width: 0;
-}
-.connection-stat-pair .tone-download {
-    color: var(--info-strong);
-}
-.connection-stat-pair .tone-upload {
-    color: var(--success);
-}
-.connection-stat-pair svg {
-    flex: 0 0 auto;
-    opacity: var(--o-icon);
-}
 @keyframes valueFade {
     from {
         opacity: 0.2;
@@ -681,4 +624,99 @@
 }
 .conn-row-total .tone-upload {
     color: var(--success);
+}
+
+/* ── 直连/代理双通道汇总卡 ────────────────────────────────────────
+   每条 lane：路径 chip + 速率对（主指标）+ 累计对（次要）+ 链接数，
+   底部占比条 = 本通道占两通道合计速率的份额（代理蓝/直连绿）。 */
+.path-stats {
+    flex: 0 0 auto;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    padding: var(--space-2);
+    border-radius: var(--r-md);
+    background: var(--surface-soft);
+    border: var(--bw) solid var(--border-soft);
+}
+.path-lane {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto auto;
+    align-items: center;
+    column-gap: var(--space-3);
+    row-gap: var(--space-1);
+    min-width: 0;
+}
+.path-chip {
+    justify-content: center;
+    min-width: var(--badge-min-w);
+}
+.path-speed {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-3);
+    min-width: 0;
+}
+.path-speed small {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    font-size: var(--fs-lg);
+    font-weight: var(--fw-semibold);
+    font-variant-numeric: var(--font-numeric);
+    white-space: nowrap;
+}
+.path-speed .tone-download {
+    color: var(--info-strong);
+}
+.path-speed .tone-upload {
+    color: var(--success);
+}
+.path-total {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    color: var(--text-muted);
+    font-size: var(--fs-sm);
+    white-space: nowrap;
+}
+.path-total-label {
+    color: var(--text-subtle);
+}
+.path-total small {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    font-variant-numeric: var(--font-numeric);
+}
+.path-total .tone-download {
+    color: var(--info-strong);
+}
+.path-total .tone-upload {
+    color: var(--success);
+}
+.path-count {
+    color: var(--text-muted);
+    font-size: var(--fs-sm);
+    white-space: nowrap;
+    justify-self: end;
+}
+.path-share {
+    grid-column: 1 / -1;
+    display: block;
+    height: var(--conn-bar-h);
+    border-radius: var(--r-pill);
+    background: var(--hover);
+    overflow: hidden;
+}
+.path-share > i {
+    display: block;
+    height: 100%;
+    transition: width var(--dur-slow) var(--ease);
+}
+.path-share.info > i {
+    background: var(--info);
+}
+.path-share.success > i {
+    background: var(--success);
 }

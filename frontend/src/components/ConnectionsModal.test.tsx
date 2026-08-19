@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react'
+import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { ConnectionsModal } from './ConnectionsModal'
@@ -42,7 +42,7 @@ describe('ConnectionsModal connection list', () => {
 
     // 同域名的三条连接各占一行，不再聚合成站点卡
     expect(screen.getAllByText('api.github.com')).toHaveLength(3)
-    expect(screen.getByText('3 条链接')).toBeInTheDocument()
+    expect(document.querySelector('.connections-live-badge')).toHaveTextContent('3 条链接')
   })
 
   it('shows humanized rule, process, network and duration in the row subtitle', () => {
@@ -68,21 +68,35 @@ describe('ConnectionsModal connection list', () => {
     expect(subtitle).toHaveTextContent('TCP/443')
   })
 
-  it('shows merged stat cards for link count, speed and cumulative traffic', () => {
+  it('splits speed and cumulative traffic into proxy and direct lanes', () => {
     renderModal([
-      connection({ id: 'a', downloadSpeed: 2048, uploadSpeed: 1024, download: 2048, upload: 1024 }),
-      connection({ id: 'b', metadata: { host: 'x.com' } }),
+      connection({ id: 'a', chains: ['proxy'], downloadSpeed: 2048, uploadSpeed: 1024, download: 2048, upload: 1024 }),
+      connection({ id: 'b', chains: ['direct'], downloadSpeed: 512, download: 4096, metadata: { host: 'www.bilibili.com' } }),
     ])
 
-    const stats = document.querySelector('.connection-stat-grid') as HTMLElement
-    expect(within(stats).getByText('链接')).toBeInTheDocument()
-    expect(within(stats).getByText('2')).toBeInTheDocument()
-    expect(within(stats).getByText('实时速度')).toBeInTheDocument()
-    expect(within(stats).getByText('累计流量')).toBeInTheDocument()
-    // 合并后的速度卡与累计卡各自包含上下行两个数值
-    expect(screen.getAllByText('2.0 KB/s')).not.toHaveLength(0)
-    expect(screen.getAllByText('2.0 KB')).not.toHaveLength(0)
-    expect(screen.getAllByText('1.0 KB')).not.toHaveLength(0)
+    const stats = document.querySelector('.path-stats') as HTMLElement
+    const lanes = stats.querySelectorAll('.path-lane')
+    const [proxyLane, directLane] = lanes
+
+    // 代理通道：速率与累计只含代理连接；计数 1
+    expect(proxyLane).toHaveTextContent('代理')
+    expect(proxyLane).toHaveTextContent('2.0 KB/s')
+    expect(proxyLane).toHaveTextContent('1.0 KB/s')
+    expect(proxyLane).toHaveTextContent('2.0 KB')
+    expect(proxyLane).toHaveTextContent('1.0 KB')
+    expect(proxyLane).toHaveTextContent('1 条链接')
+
+    // 直连通道：512 B/s 与 4.0 KB，计数 1
+    expect(directLane).toHaveTextContent('直连')
+    expect(directLane).toHaveTextContent('512 B/s')
+    expect(directLane).toHaveTextContent('4.0 KB')
+    expect(directLane).toHaveTextContent('1 条链接')
+
+    // 占比条：代理 (2048+1024)/3584 ≈ 86%，直连 512/3584 ≈ 14%
+    const proxyBar = proxyLane.querySelector('.path-share > i') as HTMLElement
+    const directBar = directLane.querySelector('.path-share > i') as HTMLElement
+    expect(proxyBar.style.width).toBe('86%')
+    expect(directBar.style.width).toBe('14%')
   })
 
   it('shows a friendly label for the final fallback rule', () => {

@@ -148,6 +148,42 @@ export function sortConnections(connections: EnrichedConnection[]): EnrichedConn
   )
 }
 
+// ---- 面板汇总：直连 / 代理双通道统计 ----
+
+export interface PathStats {
+  count: number
+  downloadSpeed: number
+  uploadSpeed: number
+  download: number
+  upload: number
+}
+
+export interface SplitStats {
+  proxy: PathStats
+  direct: PathStats
+}
+
+const EMPTY_PATH_STATS: PathStats = { count: 0, downloadSpeed: 0, uploadSpeed: 0, download: 0, upload: 0 }
+
+/**
+ * 把存活连接按出口分为直连/代理两通道并各自汇总。
+ * 注意：累计量是「当前存活连接」的字节合计——Clash API 的 uploadTotal/downloadTotal
+ * 含已关闭连接且无法按通道拆分，故这里不用。
+ */
+export function splitConnectionStats(connections: EnrichedConnection[]): SplitStats {
+  const proxy = { ...EMPTY_PATH_STATS }
+  const direct = { ...EMPTY_PATH_STATS }
+  for (const connection of connections) {
+    const lane = isDirectOutbound(connectionOutbound(connection)) ? direct : proxy
+    lane.count += 1
+    lane.downloadSpeed += Number(connection.downloadSpeed || 0)
+    lane.uploadSpeed += Number(connection.uploadSpeed || 0)
+    lane.download += Number(connection.download || 0)
+    lane.upload += Number(connection.upload || 0)
+  }
+  return { proxy, direct }
+}
+
 export function connectionRule(connection: ClashConnection): string {
   const rule = connection.rule || '-'
   return connection.rulePayload ? `${rule} : ${connection.rulePayload}` : rule

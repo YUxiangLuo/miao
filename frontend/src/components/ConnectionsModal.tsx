@@ -1,19 +1,10 @@
 import { useId, useMemo, useState } from 'react'
-import {
-  Activity,
-  ArrowDown,
-  ArrowUp,
-  Gauge,
-  HardDriveDownload,
-  Link2,
-  X,
-} from 'lucide-react'
+import { Activity, X } from 'lucide-react'
 import { ICON } from '../tokens'
 import { useDialog } from '../hooks/useDialog'
-import { formatBytes, formatSpeed } from '../utils'
 import { ConnectionsToolbar } from './ConnectionsToolbar'
-import { AnimatedValue } from './ConnectionCard'
 import { ConnectionRow } from './ConnectionRow'
+import { ConnectionStats } from './ConnectionStats'
 import {
   filterConnectionsByPath,
   pathCountsForConnections,
@@ -48,10 +39,6 @@ export function ConnectionsModal({
   const connections = useMemo(() => {
     return Array.isArray(data?.connections) ? data.connections : []
   }, [data?.connections])
-  const uploadTotal = Number(data?.uploadTotal || connections.reduce((sum, item) => sum + Number(item.upload || 0), 0))
-  const downloadTotal = Number(data?.downloadTotal || connections.reduce((sum, item) => sum + Number(item.download || 0), 0))
-  const uploadSpeed = connections.reduce((sum, item) => sum + Number(item.uploadSpeed || 0), 0)
-  const downloadSpeed = connections.reduce((sum, item) => sum + Number(item.downloadSpeed || 0), 0)
 
   const visibleConnections = useMemo(
     () => sortConnections(filterConnectionsByPath(connections, path)),
@@ -94,49 +81,7 @@ export function ConnectionsModal({
           <div className="connections-empty">服务未运行，暂无链接统计。</div>
         ) : (
           <div className="connections-body">
-            <div className="connection-stat-grid">
-              <div className="connection-stat">
-                <span className="connection-stat-label">
-                  <Link2 size={ICON.xs} />
-                  链接
-                </span>
-                <strong className="connection-stat-value">
-                  <AnimatedValue value={connections.length} />
-                </strong>
-              </div>
-              <div className="connection-stat">
-                <span className="connection-stat-label">
-                  <Gauge size={ICON.xs} />
-                  实时速度
-                </span>
-                <strong className="connection-stat-value connection-stat-pair">
-                  <span className="tone-download">
-                    <ArrowDown size={ICON.xs} />
-                    <AnimatedValue value={formatSpeed(downloadSpeed)} />
-                  </span>
-                  <span className="tone-upload">
-                    <ArrowUp size={ICON.xs} />
-                    <AnimatedValue value={formatSpeed(uploadSpeed)} />
-                  </span>
-                </strong>
-              </div>
-              <div className="connection-stat">
-                <span className="connection-stat-label">
-                  <HardDriveDownload size={ICON.xs} />
-                  累计流量
-                </span>
-                <strong className="connection-stat-value connection-stat-pair">
-                  <span className="tone-download">
-                    <ArrowDown size={ICON.xs} />
-                    <AnimatedValue value={formatBytes(downloadTotal)} />
-                  </span>
-                  <span className="tone-upload">
-                    <ArrowUp size={ICON.xs} />
-                    <AnimatedValue value={formatBytes(uploadTotal)} />
-                  </span>
-                </strong>
-              </div>
-            </div>
+            <ConnectionStats connections={connections} />
 
             {error && <div className="connections-error">{error}</div>}
 
