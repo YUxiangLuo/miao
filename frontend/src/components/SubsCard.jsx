@@ -1,5 +1,6 @@
 import { memo } from 'react'
 import { Check, CircleX, RefreshCw, Rss, Plus, Trash2 } from 'lucide-react'
+import { ICON } from '../tokens.js'
 import { Button, SectionCard } from './ui.jsx'
 import { classNames, maskSubscription } from '../utils.js'
 
@@ -8,8 +9,8 @@ const SubRow = memo(function SubRow({ sub, onDelete, disabled }) {
     <div className="list-row">
       <div className={classNames('status-icon-badge', sub.success ? 'success' : 'error')}>
         {sub.success 
-          ? <Check size={12} /> 
-          : <CircleX size={12} />}
+          ? <Check size={ICON.xs} /> 
+          : <CircleX size={ICON.xs} />}
       </div>
       <div className="list-row-content">
         <div className="list-row-title">{maskSubscription(sub.url)}</div>
@@ -28,7 +29,7 @@ const SubRow = memo(function SubRow({ sub, onDelete, disabled }) {
         disabled={disabled}
         aria-label={`删除订阅 ${maskSubscription(sub.url)}`}
       >
-        <Trash2 size={12} />
+        <Trash2 size={ICON.xs} />
       </button>
     </div>
   )
@@ -41,13 +42,13 @@ export function SubsCard({ subs, newSubUrl, setNewSubUrl, loadingAction, onAddSu
       header={
         <div className="section-header">
           <div className="section-title-wrap">
-            <Rss size={14} className="section-icon" />
+            <Rss size={ICON.sm} className="section-icon" />
             <span>订阅管理</span>
           </div>
           <Button 
             tone="secondary" 
             size="sm" 
-            icon={<RefreshCw size={12} />} 
+            icon={<RefreshCw size={ICON.xs} />} 
             loading={loadingAction === 'refreshSubs'} 
             disabled={subs.length === 0 || loadingAction === 'refreshSubs' || isInitializing} 
             onClick={onRefreshSubs}
@@ -78,7 +79,7 @@ export function SubsCard({ subs, newSubUrl, setNewSubUrl, loadingAction, onAddSu
           <Button 
             tone="secondary" 
             size="sm" 
-            icon={<Plus size={12} />} 
+            icon={<Plus size={ICON.xs} />} 
             loading={loadingAction === 'addSub'} 
             disabled={isInitializing}
             onClick={onAddSub}

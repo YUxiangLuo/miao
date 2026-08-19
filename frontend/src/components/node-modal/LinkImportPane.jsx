@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import { ListPlus } from 'lucide-react'
+import { ICON } from '../../tokens.js'
 import { Button } from '../ui.jsx'
 import { buildNodeRequest } from '../../nodeForm.js'
 import { parseShareLinks } from '../../shareLink.js'
@@ -111,7 +112,7 @@ export function LinkImportPane({ onImport, loading }) {
 
       <Button
         tone="primary"
-        icon={<ListPlus size={14} />}
+        icon={<ListPlus size={ICON.sm} />}
         loading={busy}
         disabled={!validPayloads.length || busy}
         onClick={handleImport}

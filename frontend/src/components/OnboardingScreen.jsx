@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Plus, Settings } from 'lucide-react'
+import { ICON, LOGO_SIZE } from '../tokens.js'
 import { Button, LogoIcon } from './ui.jsx'
 import { validateSubscriptionUrl } from '../utils.js'
 
@@ -24,7 +25,7 @@ export function OnboardingScreen({ onAddSub, loadingAction, onOpenAddNode, showT
     <div className="onboarding">
       <div className="onboarding-card">
         <div className="onboarding-header">
-          <LogoIcon size={40} />
+          <LogoIcon size={LOGO_SIZE.onboarding} />
           <h1 className="onboarding-title">Miao</h1>
           <p className="onboarding-subtitle">添加订阅链接或手动节点以开始使用</p>
         </div>
@@ -40,7 +41,7 @@ export function OnboardingScreen({ onAddSub, loadingAction, onOpenAddNode, showT
             <Button
               tone="primary"
               size="sm"
-              icon={<Plus size={12} />}
+              icon={<Plus size={ICON.xs} />}
               loading={isLoading}
               onClick={handleAddSub}
             >
@@ -56,7 +57,7 @@ export function OnboardingScreen({ onAddSub, loadingAction, onOpenAddNode, showT
         <div className="onboarding-section">
           <Button
             tone="secondary"
-            icon={<Settings size={14} />}
+            icon={<Settings size={ICON.sm} />}
             onClick={onOpenAddNode}
             className="onboarding-node-btn"
           >

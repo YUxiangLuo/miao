@@ -76,9 +76,9 @@
         flex-direction: column;
     }
     .toast-stack {
-        left: 12px;
-        right: 12px;
-        top: 12px;
+        left: var(--float-offset-mobile);
+        right: var(--float-offset-mobile);
+        top: var(--float-offset-mobile);
     }
     .toast {
         min-width: 0;

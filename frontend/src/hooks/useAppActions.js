@@ -1,5 +1,5 @@
 import { useCallback } from 'react'
-import { CONNECTIONS_MODAL_MIN_WIDTH } from '../layout.js'
+import { CONNECTIONS_MODAL_MIN_WIDTH } from '../tokens.js'
 import { validateSubscriptionUrl } from '../utils.js'
 import { buildNodeRequest } from '../nodeForm.js'
 

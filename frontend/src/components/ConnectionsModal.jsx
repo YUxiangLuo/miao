@@ -8,6 +8,7 @@ import {
   HardDriveDownload,
   X,
 } from 'lucide-react'
+import { ICON } from '../tokens.js'
 import { useDialog } from '../hooks/useDialog.js'
 import { formatBytes, formatSpeed } from '../utils.js'
 import { ConnectionsToolbar } from './ConnectionsToolbar.jsx'
@@ -67,7 +68,7 @@ export function ConnectionsModal({
       >
         <header className="connections-header">
           <div className="connections-header-title">
-            <Activity size={18} className="icon-accent" />
+            <Activity size={ICON.lg} className="icon-accent" />
             <h3 id={titleId}>链接统计</h3>
             {status.running && (
               <span className="badge connections-live-badge">
@@ -78,7 +79,7 @@ export function ConnectionsModal({
           </div>
           <div className="connections-header-actions">
             <button className="icon-button" onClick={onClose} title="关闭 (Esc)" aria-label="关闭链接统计">
-              <X size={16} />
+              <X size={ICON.md} />
             </button>
           </div>
         </header>
@@ -90,7 +91,7 @@ export function ConnectionsModal({
             <div className="connection-stat-grid">
               <div className="connection-stat">
                 <span className="connection-stat-label">
-                  <Globe size={12} />
+                  <Globe size={ICON.xs} />
                   站点
                 </span>
                 <strong className="connection-stat-value">
@@ -99,32 +100,32 @@ export function ConnectionsModal({
               </div>
               <div className="connection-stat">
                 <span className="connection-stat-label">
-                  <Gauge size={12} />
+                  <Gauge size={ICON.xs} />
                   实时速度
                 </span>
                 <strong className="connection-stat-value connection-stat-pair">
                   <span className="tone-download">
-                    <ArrowDown size={12} />
+                    <ArrowDown size={ICON.xs} />
                     <AnimatedValue value={formatSpeed(downloadSpeed)} />
                   </span>
                   <span className="tone-upload">
-                    <ArrowUp size={12} />
+                    <ArrowUp size={ICON.xs} />
                     <AnimatedValue value={formatSpeed(uploadSpeed)} />
                   </span>
                 </strong>
               </div>
               <div className="connection-stat">
                 <span className="connection-stat-label">
-                  <HardDriveDownload size={12} />
+                  <HardDriveDownload size={ICON.xs} />
                   累计流量
                 </span>
                 <strong className="connection-stat-value connection-stat-pair">
                   <span className="tone-download">
-                    <ArrowDown size={12} />
+                    <ArrowDown size={ICON.xs} />
                     <AnimatedValue value={formatBytes(downloadTotal)} />
                   </span>
                   <span className="tone-upload">
-                    <ArrowUp size={12} />
+                    <ArrowUp size={ICON.xs} />
                     <AnimatedValue value={formatBytes(uploadTotal)} />
                   </span>
                 </strong>

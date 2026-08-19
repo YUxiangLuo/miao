@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { CONNECTIONS_MODAL_MIN_WIDTH } from '../layout.js'
+import { CONNECTIONS_MODAL_MIN_WIDTH } from '../tokens.js'
 
 export function useDesktopLayout() {
   const [isDesktop, setIsDesktop] = useState(() => (

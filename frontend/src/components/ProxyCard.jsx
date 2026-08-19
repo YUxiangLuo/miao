@@ -1,5 +1,6 @@
 import { memo, useState } from 'react'
 import { Waypoints, Zap, LoaderCircle, Plus } from 'lucide-react'
+import { ICON } from '../tokens.js'
 import { Button, SectionCard } from './ui.jsx'
 import { 
   classNames, 
@@ -30,7 +31,7 @@ const ProxyTile = memo(function ProxyTile({ nodeName, delay, isActive, isTesting
       >
         <div className="proxy-tile-top">
           {isSwitching
-            ? <span className="proxy-node-name proxy-node-switching"><LoaderCircle size={12} className="spin" /><span>{nodeName}</span></span>
+            ? <span className="proxy-node-name proxy-node-switching"><LoaderCircle size={ICON.xs} className="spin" /><span>{nodeName}</span></span>
             : isActive
               ? <div className="proxy-tag"><span className="proxy-tag-dot" /><span>{nodeName}</span></div>
               : <span className="proxy-node-name">{nodeName}</span>}
@@ -44,8 +45,8 @@ const ProxyTile = memo(function ProxyTile({ nodeName, delay, isActive, isTesting
         aria-label={`测试 ${nodeName} 延迟`}
       >
         {isTesting 
-          ? <LoaderCircle size={12} className="spin" /> 
-          : <Zap size={12} />}
+          ? <LoaderCircle size={ICON.xs} className="spin" /> 
+          : <Zap size={ICON.xs} />}
         <span className="num">{isTesting ? '测试中…' : formatDelay(delay)}</span>
       </button>
     </div>
@@ -79,7 +80,7 @@ export function ProxyCard({
       header={
         <div className="section-header">
           <div className="section-title-wrap">
-            <Waypoints size={14} className="section-icon" />
+            <Waypoints size={ICON.sm} className="section-icon" />
             <span>节点列表</span>
           </div>
           <label className="node-select">
@@ -102,7 +103,7 @@ export function ProxyCard({
           <Button 
             tone="secondary" 
             size="sm" 
-            icon={<Zap size={12} />} 
+            icon={<Zap size={ICON.xs} />} 
             loading={testingGroup === primaryGroupName} 
             disabled={!primaryGroup || !status.running} 
             onClick={() => primaryGroup && onTestGroupDelays(primaryGroupName, primaryGroup.all)}
@@ -134,7 +135,7 @@ export function ProxyCard({
               onClick={onOpenAddNode}
               disabled={status.initializing}
             >
-              <Plus size={12} />
+              <Plus size={ICON.xs} />
               <span>添加节点</span>
             </button>
           </div>

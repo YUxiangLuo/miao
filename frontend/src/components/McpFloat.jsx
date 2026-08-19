@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Check, Copy } from 'lucide-react'
+import { ICON } from '../tokens.js'
 import { classNames } from '../utils.js'
 
 // 首页右下角的 MCP 浮动控件：端点开关 + 一键复制地址
@@ -55,7 +56,7 @@ export function McpFloat({ enabled, pending, onToggle, showToast }) {
         title={`复制 MCP 地址：${url}`}
         aria-label="复制 MCP 地址"
       >
-        {copied ? <Check size={12} /> : <Copy size={12} />}
+        {copied ? <Check size={ICON.xs} /> : <Copy size={ICON.xs} />}
       </button>
     </div>
   )

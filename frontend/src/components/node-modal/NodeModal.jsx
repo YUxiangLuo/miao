@@ -1,5 +1,6 @@
 import { useEffect, useId, useState } from 'react'
 import { Plus, X } from 'lucide-react'
+import { ICON } from '../../tokens.js'
 import { useDialog } from '../../hooks/useDialog.js'
 import { classNames } from '../../utils.js'
 import { LinkImportPane } from './LinkImportPane.jsx'
@@ -35,11 +36,11 @@ export function NodeModal({ open, nodeType, setNodeType, form, setForm, loading,
       >
         <div className="modal-title-row">
           <div className="modal-title-wrap">
-            <Plus size={18} className="icon-accent" />
+            <Plus size={ICON.lg} className="icon-accent" />
             <h3 id={titleId}>添加节点</h3>
           </div>
           <button className="icon-button" onClick={onClose} aria-label="关闭节点对话框">
-            <X size={16} />
+            <X size={ICON.md} />
           </button>
         </div>
 

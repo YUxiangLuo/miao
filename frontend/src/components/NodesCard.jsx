@@ -1,12 +1,13 @@
 import { memo } from 'react'
 import { Anchor, Plus, Server, Trash2 } from 'lucide-react'
+import { ICON } from '../tokens.js'
 import { Button, SectionCard } from './ui.jsx'
 import { protocolLabel, classNames } from '../utils.js'
 
 const NodeRow = memo(function NodeRow({ node, onDelete, disabled }) {
   return (
     <div className="list-row">
-      <Server size={12} className="list-leading-icon" />
+      <Server size={ICON.xs} className="list-leading-icon" />
       <div className="list-row-content">
         <div className="list-row-title">{node.tag}</div>
         <div className="list-row-meta" title={`${node.server}:${node.server_port}`}>
@@ -19,7 +20,7 @@ const NodeRow = memo(function NodeRow({ node, onDelete, disabled }) {
         disabled={disabled}
         aria-label={`删除节点 ${node.tag}`}
       >
-        <Trash2 size={12} />
+        <Trash2 size={ICON.xs} />
       </button>
     </div>
   )
@@ -32,14 +33,14 @@ export function NodesCard({ nodes, isInitializing, onDeleteNode, onOpenAddNode }
       header={
         <div className="section-header">
           <div className="section-title-wrap">
-            <Anchor size={14} className="section-icon" />
+            <Anchor size={ICON.sm} className="section-icon" />
             <span>手动节点</span>
             <span className={classNames('badge', 'counter-pill')}>{nodes.length}</span>
           </div>
           <Button
             tone="secondary"
             size="sm"
-            icon={<Plus size={12} />}
+            icon={<Plus size={ICON.xs} />}
             disabled={isInitializing}
             onClick={onOpenAddNode}
           >

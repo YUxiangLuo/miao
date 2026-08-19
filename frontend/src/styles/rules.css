@@ -2,8 +2,8 @@
 /* 徽标基元由 .badge 提供（统一 pill 体系），这里只保留颜色 */
 .rule-field-chip {
     flex: 0 0 auto;
-    background: var(--surface-blue);
-    color: var(--accent-strong);
+    background: var(--info-tint);
+    color: var(--info-strong);
 }
 .rule-value {
     min-width: 0;
@@ -16,8 +16,8 @@
     flex: 0 0 auto;
 }
 .rule-target-badge.proxy {
-    background: var(--surface-blue);
-    color: var(--accent-strong);
+    background: var(--info-tint);
+    color: var(--info-strong);
 }
 .rule-target-badge.direct {
     background: var(--surface-green-soft);
@@ -32,7 +32,7 @@
     color: var(--text-muted);
 }
 .list-row.skipped .list-row-content {
-    opacity: 0.5;
+    opacity: var(--o-dim);
 }
 .rule-skipped-icon {
     flex: 0 0 auto;
@@ -48,23 +48,23 @@
     gap: var(--space-1);
 }
 .list-row.rule-active {
-    background: rgba(74, 158, 117, 0.1);
-    box-shadow: inset 3px 0 0 var(--success);
-    animation: ruleActivePulse 1.6s ease-in-out infinite;
+    background: color-mix(in srgb, var(--success) 10%, transparent);
+    box-shadow: inset var(--bw-bar) 0 0 var(--success);
+    animation: ruleActivePulse var(--anim-rule) ease-in-out infinite;
 }
 .list-row.rule-active .rule-field-chip {
     background: var(--surface-green-soft);
     color: var(--success);
 }
 .list-row.rule-active .rule-target-badge {
-    animation: ruleActiveBadge 1.6s ease-in-out infinite;
+    animation: ruleActiveBadge var(--anim-rule) ease-in-out infinite;
 }
 @keyframes ruleActivePulse {
     0%, 100% {
-        background: rgba(74, 158, 117, 0.08);
+        background: color-mix(in srgb, var(--success) 8%, transparent);
     }
     50% {
-        background: rgba(74, 158, 117, 0.22);
+        background: color-mix(in srgb, var(--success) 22%, transparent);
     }
 }
 @keyframes ruleActiveBadge {
@@ -109,7 +109,7 @@
     padding: var(--space-3);
 }
 .rule-step + .rule-step {
-    border-left: 1px solid var(--border-soft);
+    border-left: var(--bw) solid var(--border-soft);
 }
 .rule-step-title {
     display: flex;
@@ -119,17 +119,18 @@
     color: var(--text-strong);
     font-size: var(--fs-lg);
 }
+/* 步骤序号用品牌紫（accent）而非语义蓝：引导流程是品牌时刻 */
 .rule-step-no {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 20px;
-    height: 20px;
+    width: var(--size-step-no);
+    height: var(--size-step-no);
     border-radius: 50%;
-    background: var(--surface-blue);
+    background: var(--accent-tint);
     color: var(--accent-strong);
     font-size: var(--fs-xs);
-    font-weight: 700;
+    font-weight: var(--fw-heavy);
     flex-shrink: 0;
 }
 .rule-group-label {
@@ -144,8 +145,8 @@
 }
 .rule-type-chip {
     padding: var(--space-1) var(--space-2);
-    border-radius: var(--radius-pill);
-    border: 1px solid var(--border);
+    border-radius: var(--r-pill);
+    border: var(--bw) solid var(--border);
     background: var(--surface-soft);
     color: var(--text-muted);
     font-size: var(--fs-sm);
@@ -157,17 +158,17 @@
     border-color: var(--accent);
 }
 .rule-type-chip.active {
-    background: var(--surface-blue);
-    border-color: var(--surface-blue-strong);
+    background: var(--accent-tint);
+    border-color: var(--accent);
     color: var(--accent-strong);
-    font-weight: 650;
+    font-weight: var(--fw-bold);
 }
 .rule-editor {
     margin-top: var(--space-3);
     padding: var(--space-2) var(--space-3) var(--space-3);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    background: rgba(255, 255, 255, 0.015);
+    border: var(--bw) solid var(--border);
+    border-radius: var(--r-md);
+    background: var(--inset-fill);
 }
 .rule-editor-head {
     display: flex;
@@ -178,7 +179,7 @@
 .rule-editor-title {
     color: var(--text-strong);
     font-size: var(--fs-lg);
-    font-weight: 650;
+    font-weight: var(--fw-bold);
 }
 .rule-editor-desc {
     color: var(--text-subtle);
@@ -187,10 +188,10 @@
 .rule-value-block input,
 .rule-value-block select {
     width: 100%;
-    min-height: 38px;
+    min-height: var(--control-h-lg);
     padding: var(--space-2);
-    border-radius: var(--radius);
-    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
+    border: var(--bw) solid var(--border);
     background: var(--surface-soft);
     color: var(--text);
     outline: none;
@@ -202,7 +203,7 @@
     border-color: var(--accent);
 }
 .rule-chips-block {
-    margin-top: 4px;
+    margin-top: var(--space-0);
 }
 .rule-chips {
     display: flex;
@@ -210,9 +211,9 @@
     gap: var(--space-1);
 }
 .rule-chip {
-    padding: 4px var(--space-2);
-    border-radius: var(--radius-pill);
-    border: 1px solid var(--border);
+    padding: var(--space-0) var(--space-2);
+    border-radius: var(--r-pill);
+    border: var(--bw) solid var(--border);
     background: var(--surface-soft);
     color: var(--text-muted);
     font-size: var(--fs-sm);
@@ -224,8 +225,8 @@
     border-color: var(--accent);
 }
 .rule-chip.active {
-    background: var(--surface-blue);
-    border-color: var(--surface-blue-strong);
+    background: var(--accent-tint);
+    border-color: var(--accent);
     color: var(--accent-strong);
 }
 .rule-target-grid {
@@ -237,10 +238,10 @@
     display: flex;
     flex-direction: column;
     align-items: flex-start;
-    gap: 4px;
+    gap: var(--space-0);
     padding: var(--space-2);
-    border-radius: var(--radius);
-    border: 1px solid var(--border);
+    border-radius: var(--r-md);
+    border: var(--bw) solid var(--border);
     background: var(--surface-soft);
     color: var(--text);
     cursor: pointer;
@@ -251,9 +252,9 @@
     border-color: var(--accent);
 }
 .rule-target-card.active.proxy {
-    border-color: var(--accent-strong);
-    background: var(--surface-blue);
-    color: var(--accent-strong);
+    border-color: var(--info-strong);
+    background: var(--info-tint);
+    color: var(--info-strong);
 }
 .rule-target-card.active.direct {
     border-color: var(--success);
@@ -266,7 +267,7 @@
     color: var(--danger);
 }
 .rule-target-label {
-    font-weight: 650;
+    font-weight: var(--fw-bold);
     font-size: var(--fs-lg);
     color: var(--text-strong);
 }
@@ -285,8 +286,8 @@
     align-items: center;
     gap: var(--space-1);
     padding: var(--space-1) var(--space-2);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
+    border: var(--bw) solid var(--border);
+    border-radius: var(--r-sm);
     background: var(--surface-soft);
     color: var(--text-subtle);
     margin-bottom: var(--space-2);
@@ -303,8 +304,8 @@
 .rule-node-list {
     display: flex;
     flex-direction: column;
-    gap: 4px;
-    max-height: 280px;
+    gap: var(--space-0);
+    max-height: var(--rule-list-max-h);
     overflow-y: auto;
 }
 .rule-node-row {
@@ -313,8 +314,8 @@
     justify-content: space-between;
     gap: var(--space-2);
     padding: var(--space-2);
-    border-radius: var(--radius);
-    border: 1px solid var(--border);
+    border-radius: var(--r-md);
+    border: var(--bw) solid var(--border);
     background: var(--surface-soft);
     color: var(--text);
     cursor: pointer;
@@ -326,7 +327,7 @@
 }
 .rule-node-row.active {
     border-color: var(--accent-strong);
-    background: var(--surface-blue);
+    background: var(--accent-tint);
 }
 .rule-node-name {
     min-width: 0;
@@ -339,7 +340,7 @@
 .node-delay {
     flex: 0 0 auto;
     font-size: var(--fs-xs);
-    font-weight: 650;
+    font-weight: var(--fw-bold);
 }
 .node-delay.ok {
     color: var(--success);
@@ -361,11 +362,11 @@
     align-items: flex-start;
     margin-top: var(--space-2);
     padding: var(--space-2);
-    border-radius: var(--radius);
-    background: rgba(160, 120, 64, 0.12);
+    border-radius: var(--r-md);
+    background: color-mix(in srgb, var(--warning) 12%, transparent);
     color: var(--warning);
     font-size: var(--fs-sm);
-    line-height: 1.5;
+    line-height: var(--lh-normal);
 }
 .rule-footer {
     flex: 0 0 auto;
@@ -374,8 +375,8 @@
     justify-content: space-between;
     gap: var(--space-3);
     padding: var(--space-2) var(--space-3);
-    border-top: 1px solid var(--border-soft);
-    background: rgba(255, 255, 255, 0.015);
+    border-top: var(--bw) solid var(--border-soft);
+    background: var(--inset-fill);
 }
 .rule-preview {
     min-width: 0;

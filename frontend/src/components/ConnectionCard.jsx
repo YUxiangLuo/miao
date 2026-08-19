@@ -1,4 +1,5 @@
 import { ArrowDown, ArrowUp, ChevronDown } from 'lucide-react'
+import { ICON } from '../tokens.js'
 import { classNames, formatBytes, formatSpeed, formatUptime } from '../utils.js'
 import { iconForDomain } from './siteIcons.js'
 import { displayRuleText, groupSpeed } from './connectionFilters.js'
@@ -67,11 +68,11 @@ function ConnectionDetailRow({ connection }) {
         <span className="connection-detail-chain" title={chain}>{chain}</span>
         <span className="connection-detail-bytes">
           <small className="tone-download">
-            <ArrowDown size={12} />
+            <ArrowDown size={ICON.xs} />
             {formatBytes(connection.download)}
           </small>
           <small className="tone-upload">
-            <ArrowUp size={12} />
+            <ArrowUp size={ICON.xs} />
             {formatBytes(connection.upload)}
           </small>
         </span>
@@ -97,7 +98,7 @@ export function ConnectionCard({ group, expanded, onToggle }) {
           </span>
         </div>
         {active && <span className="connection-live-dot" title="正在传输" aria-hidden="true" />}
-        {expandable && <ChevronDown size={14} className="connection-card-chevron" aria-hidden="true" />}
+        {expandable && <ChevronDown size={ICON.sm} className="connection-card-chevron" aria-hidden="true" />}
       </div>
       <div className="connection-card-meta">
         <span className={classNames('badge', 'connection-outbound-chip', group.outbound === 'direct' && 'direct')}>
@@ -106,11 +107,11 @@ export function ConnectionCard({ group, expanded, onToggle }) {
         {group.count > 1 && <span className="badge connection-count-chip">{group.count} 条链接</span>}
         <span className="connection-card-speed">
           <small className="tone-download">
-            <ArrowDown size={12} />
+            <ArrowDown size={ICON.xs} />
             <AnimatedValue value={formatSpeed(group.downloadSpeed)} />
           </small>
           <small className="tone-upload">
-            <ArrowUp size={12} />
+            <ArrowUp size={ICON.xs} />
             <AnimatedValue value={formatSpeed(group.uploadSpeed)} />
           </small>
         </span>
@@ -119,11 +120,11 @@ export function ConnectionCard({ group, expanded, onToggle }) {
         <span className="connection-card-total-label">累计</span>
         <span className="connection-card-total-values">
           <small className="tone-download">
-            <ArrowDown size={12} />
+            <ArrowDown size={ICON.xs} />
             <AnimatedValue value={formatBytes(group.download)} />
           </small>
           <small className="tone-upload">
-            <ArrowUp size={12} />
+            <ArrowUp size={ICON.xs} />
             <AnimatedValue value={formatBytes(group.upload)} />
           </small>
         </span>

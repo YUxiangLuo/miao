@@ -13,7 +13,7 @@
     flex-direction: column;
     /* 上下留白 2×--space-4（48px）且数值一致，内容网格相应让高（见 --home-grid-height） */
     padding: calc(var(--space-4) * 2) var(--space-4);
-    max-width: 1400px;
+    max-width: var(--workspace-max);
     width: 100%;
     margin: 0 auto;
 }
@@ -21,7 +21,7 @@
     flex: 1 1 auto;
     min-height: 0;
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 400px;
+    grid-template-columns: minmax(0, 1fr) var(--right-col-w);
     gap: var(--space-3);
 }
 .left-column,
@@ -86,11 +86,11 @@
     gap: var(--space-2);
     color: var(--text);
     font-size: var(--fs-md);
-    font-weight: 600;
+    font-weight: var(--fw-semibold);
 }
 /* 徽标基元由 .badge 提供，这里只保留计数色 */
 .home-connections-count {
-    min-width: 18px;
+    min-width: var(--count-min-w);
     background: var(--surface-green-soft);
     color: var(--success);
     text-align: center;
@@ -100,7 +100,7 @@
     background: none;
     color: var(--text-muted);
     font-size: var(--fs-sm);
-    padding: 4px 2px;
+    padding: var(--space-0) 2px;
 }
 .home-connections-all:hover {
     color: var(--text);
@@ -135,7 +135,7 @@
    内部滚动兜底（与既有行为一致）。841–1180px 单列堆叠带不受此约束，保持弹性。 */
 @media (min-width: 1181px) {
     .status-card {
-        height: 76px;
+        height: var(--topbar-h);
     }
     .status-card .status-card-body {
         height: 100%;
@@ -152,15 +152,15 @@
     /* 右列三张卡按 156:196:246 等比分配；超出部分在卡片 body 内部滚动，header 固定 */
     .right-column > *:nth-child(1) {
         flex: 156 1 0;
-        min-height: 156px;
+        min-height: var(--right-col-h1);
     }
     .right-column > *:nth-child(2) {
         flex: 196 1 0;
-        min-height: 196px;
+        min-height: var(--right-col-h2);
     }
     .right-column > *:nth-child(3) {
         flex: 246 1 0;
-        min-height: 246px;
+        min-height: var(--right-col-h3);
     }
     .right-column > * {
         display: flex;

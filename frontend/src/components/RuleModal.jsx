@@ -1,5 +1,6 @@
 import { useEffect, useId, useState } from 'react'
 import { Ban, Globe, ListFilter, Plus, Search, TriangleAlert, X, Zap } from 'lucide-react'
+import { ICON } from '../tokens.js'
 import { useDialog } from '../hooks/useDialog.js'
 import { Button } from './ui.jsx'
 import { PROTOCOL_OPTIONS, RULE_TARGET_OPTIONS, ruleFieldOptions } from '../ruleFormat.js'
@@ -114,13 +115,13 @@ export function RuleModal({ open, loading, onClose, onSubmit, nodeNames = [], pl
       >
         <header className="connections-header">
           <div className="connections-header-title">
-            <ListFilter size={18} className="icon-accent" />
+            <ListFilter size={ICON.lg} className="icon-accent" />
             <h3 id={titleId}>添加规则</h3>
             <span className="rule-modal-subtitle">规则按顺序优先于内置分流（国内直连 / 国外代理），全局模式下仍生效</span>
           </div>
           <div className="connections-header-actions">
             <button className="icon-button" onClick={onClose} title="关闭 (Esc)" aria-label="关闭规则对话框">
-              <X size={16} />
+              <X size={ICON.md} />
             </button>
           </div>
         </header>
@@ -242,7 +243,7 @@ export function RuleModal({ open, loading, onClose, onSubmit, nodeNames = [], pl
                       className={classNames('rule-target-card', card.value, target === card.value && 'active')}
                       onClick={() => setTarget(card.value)}
                     >
-                      <Icon size={18} />
+                      <Icon size={ICON.lg} />
                       <span className="rule-target-label">{card.label}</span>
                       <span className="rule-target-desc">{card.desc}</span>
                     </button>
@@ -257,7 +258,7 @@ export function RuleModal({ open, loading, onClose, onSubmit, nodeNames = [], pl
                 ) : (
                   <>
                     <div className="rule-node-search">
-                      <Search size={12} />
+                      <Search size={ICON.xs} />
                       <input
                         value={nodeQuery}
                         onChange={(event) => setNodeQuery(event.target.value)}
@@ -289,7 +290,7 @@ export function RuleModal({ open, loading, onClose, onSubmit, nodeNames = [], pl
 
               {isNodeTarget && (
                 <div className="rule-node-warning">
-                  <TriangleAlert size={12} />
+                  <TriangleAlert size={ICON.xs} />
                   <span>若该节点日后消失（改名或订阅变更），此规则将暂停生效并在列表中标记，节点恢复后自动生效</span>
                 </div>
               )}
@@ -312,7 +313,7 @@ export function RuleModal({ open, loading, onClose, onSubmit, nodeNames = [], pl
               <Button
                 tone="primary"
                 size="sm"
-                icon={<Plus size={12} />}
+                icon={<Plus size={ICON.xs} />}
                 loading={loading}
                 disabled={!canSubmit}
                 onClick={submit}

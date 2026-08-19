@@ -1,7 +1,9 @@
 import { LoaderCircle } from 'lucide-react'
 import { classNames } from '../utils.js'
+import { ICON } from '../tokens.js'
 
 export function LogoIcon({ size = 20 }) {
+  // 配色走 chrome.css 的 .brand-icon（fill 取自 --brand/--logo-face），此处只管几何
   return (
     <svg
       width={size}
@@ -10,12 +12,12 @@ export function LogoIcon({ size = 20 }) {
       xmlns="http://www.w3.org/2000/svg"
       className="brand-icon"
     >
-      <circle cx="32" cy="37" r="21" fill="#a78bfa"/>
-      <polygon points="13,30 21,8 30,25" fill="#a78bfa"/>
-      <polygon points="51,30 43,8 34,25" fill="#a78bfa"/>
-      <circle cx="24" cy="35" r="3.5" fill="#fff"/>
-      <circle cx="40" cy="35" r="3.5" fill="#fff"/>
-      <path d="M30 42 L34 42 L32 45Z" fill="#fff"/>
+      <circle className="logo-body" cx="32" cy="37" r="21" />
+      <polygon className="logo-body" points="13,30 21,8 30,25" />
+      <polygon className="logo-body" points="51,30 43,8 34,25" />
+      <circle className="logo-face" cx="24" cy="35" r="3.5" />
+      <circle className="logo-face" cx="40" cy="35" r="3.5" />
+      <path className="logo-face" d="M30 42 L34 42 L32 45Z" />
     </svg>
   )
 }
@@ -39,7 +41,7 @@ export function Button({
       disabled={isDisabled}
       aria-busy={loading ? true : undefined}
     >
-      {loading ? <LoaderCircle className="spin" size={size === 'sm' ? 12 : 14} /> : icon}
+      {loading ? <LoaderCircle className="spin" size={size === 'sm' ? ICON.xs : ICON.sm} /> : icon}
       <span>{children}</span>
     </button>
   )

@@ -1,5 +1,6 @@
 import { useId } from 'react'
 import { CircleAlert, X } from 'lucide-react'
+import { ICON } from '../tokens.js'
 import { useDialog } from '../hooks/useDialog.js'
 import { Button } from './ui.jsx'
 
@@ -21,11 +22,11 @@ export function ConfirmModal({ open, title, message, onCancel, onConfirm }) {
       >
         <div className="modal-title-row">
           <div className="modal-title-wrap">
-            <CircleAlert size={18} className="icon-warning" />
+            <CircleAlert size={ICON.lg} className="icon-warning" />
             <h3 id={titleId}>{title}</h3>
           </div>
           <button className="icon-button" onClick={onCancel} aria-label="关闭确认对话框">
-            <X size={16} />
+            <X size={ICON.md} />
           </button>
         </div>
         <p className="modal-message">{message}</p>

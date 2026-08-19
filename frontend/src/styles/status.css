@@ -22,30 +22,30 @@
    仅钉 line-height 不够——CJK 节点名的字形框超出行高仍会撑大行盒。 */
 .traffic-chip,
 .current-node-chip {
-    height: 44px;
+    height: var(--chip-h);
 }
 .traffic-chip {
     display: flex;
     align-items: center;
     gap: var(--space-3);
     padding: var(--space-2) var(--space-3);
-    border-radius: var(--radius);
-    border: 1px solid transparent;
+    border-radius: var(--r-md);
+    border: var(--bw) solid transparent;
     background: var(--surface-soft);
     color: inherit;
     cursor: pointer;
-    transition: 0.18s ease;
+    transition: var(--dur) var(--ease);
 }
 .traffic-chip:hover:not(:disabled) {
     border-color: var(--border);
-    background: #252b35;
+    background: var(--raised);
 }
 .traffic-chip:disabled {
     cursor: default;
-    opacity: 0.6;
+    opacity: var(--o-disabled);
 }
 .traffic-chip:focus-visible {
-    outline: 2px solid var(--accent);
+    outline: var(--bw-strong) solid var(--accent);
     outline-offset: 2px;
 }
 .traffic-item {
@@ -54,14 +54,14 @@
     gap: var(--space-1);
     color: var(--text);
     font-size: var(--fs-lg);
-    font-weight: 500;
+    font-weight: var(--fw-medium);
 }
 /* 速率数值定宽：数值位数/单位变化（37–79px 摆动）不再引起顶栏布局抖动。
    实测最宽 "1023 MB/s" ≈ 79px，取 5.5rem(88px) 留字体度量余量；
    右对齐且不裁切——极端字体下溢出只向左吃掉与图标间的空隙，外部布局不受影响。 */
 .traffic-item .num {
     display: inline-block;
-    width: 5.5rem;
+    width: var(--num-w);
     text-align: right;
 }
 .traffic-icon.up {
@@ -78,30 +78,30 @@
     gap: var(--space-3);
     min-width: 0;
     padding: var(--space-2) var(--space-3);
-    border-radius: var(--radius);
-    border: 1px solid transparent;
+    border-radius: var(--r-md);
+    border: var(--bw) solid transparent;
     background: var(--surface-soft);
     color: inherit;
     cursor: pointer;
-    transition: 0.18s ease;
+    transition: var(--dur) var(--ease);
 }
 .current-node-chip:hover:not(:disabled) {
     border-color: var(--border);
-    background: #252b35;
+    background: var(--raised);
 }
 .current-node-chip:disabled {
     cursor: default;
-    opacity: 0.6;
+    opacity: var(--o-disabled);
 }
 .current-node-chip:focus-visible {
-    outline: 2px solid var(--accent);
+    outline: var(--bw-strong) solid var(--accent);
     outline-offset: 2px;
 }
 .current-node-chip-name {
     color: var(--text-strong);
     font-size: var(--fs-lg);
-    font-weight: 500;
-    max-width: 11rem;
+    font-weight: var(--fw-medium);
+    max-width: var(--node-name-max);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -109,7 +109,7 @@
 }
 .current-node-chip-delay {
     font-size: var(--fs-md);
-    font-weight: 500;
+    font-weight: var(--fw-medium);
     white-space: nowrap;
 }
 .current-node-chip-delay.fast {
@@ -128,37 +128,37 @@
     gap: 2px;
     padding: 3px;
     border: 1px solid var(--border-soft);
-    border-radius: var(--radius);
+    border-radius: var(--r-md);
     background: var(--surface-soft);
     flex: 0 0 auto;
 }
 .route-mode-option {
-    min-height: 30px;
+    min-height: var(--control-h-header);
     display: inline-flex;
     align-items: center;
     justify-content: center;
     gap: var(--space-1);
     padding: var(--space-1) var(--space-2);
     border: none;
-    border-radius: var(--radius-sm);
+    border-radius: var(--r-sm);
     background: transparent;
     color: var(--text-muted);
     font-size: var(--fs-md);
-    font-weight: 500;
+    font-weight: var(--fw-medium);
     white-space: nowrap;
-    transition: 0.18s ease;
+    transition: var(--dur) var(--ease);
 }
 .route-mode-option:hover:not(:disabled):not(.active) {
     color: var(--text);
-    background: rgba(255, 255, 255, 0.04);
+    background: var(--hover-subtle);
 }
 .route-mode-option.active {
-    background: #3a4d66;
-    color: var(--accent-strong);
+    background: var(--accent-tint-strong);
+    color: var(--accent-tint-text);
 }
 .route-mode-option:disabled {
     cursor: not-allowed;
-    opacity: 0.72;
+    opacity: var(--o-disabled);
 }
 .route-mode-option svg {
     flex: 0 0 auto;

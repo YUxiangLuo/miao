@@ -8,10 +8,10 @@
 }
 .onboarding-card {
     width: 100%;
-    max-width: 460px;
+    max-width: var(--onboarding-w);
     background: var(--surface);
     border: 1px solid var(--border);
-    border-radius: var(--radius);
+    border-radius: var(--r-lg);
     /* 首屏门面刻意例外：比音阶大档（24px）更松的呼吸感，不做 token 归并 */
     padding: 40px 32px;
     box-shadow: var(--shadow);
@@ -25,7 +25,7 @@
 }
 .onboarding-title {
     font-size: 1.75rem;
-    font-weight: 600;
+    font-weight: var(--fw-semibold);
     color: var(--text-strong);
     margin: var(--space-2) 0 0;
 }
@@ -45,9 +45,9 @@
 }
 .onboarding-input-row input {
     flex: 1;
-    min-height: 36px;
+    min-height: var(--control-h-md);
     padding: var(--space-1) var(--space-2);
-    border-radius: var(--radius);
+    border-radius: var(--r-sm);
     border: 1px solid var(--border);
     background: var(--surface-soft);
     color: var(--text);
@@ -69,7 +69,7 @@
 .onboarding-divider::after {
     content: "";
     flex: 1;
-    height: 1px;
+    height: var(--bw);
     background: var(--border);
 }
 .onboarding-node-btn {

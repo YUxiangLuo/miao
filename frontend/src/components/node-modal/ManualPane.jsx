@@ -1,4 +1,5 @@
 import { Plus } from 'lucide-react'
+import { ICON } from '../../tokens.js'
 import { Button } from '../ui.jsx'
 import {
   CIPHER_OPTIONS,
@@ -269,7 +270,7 @@ export function ManualPane({ nodeType, setNodeType, form, setForm, loading, onSu
       <Button
         tone="primary"
         loading={loading}
-        icon={<Plus size={14} />}
+        icon={<Plus size={ICON.sm} />}
         disabled={!canSubmit || loading}
         onClick={onSubmit}
       >

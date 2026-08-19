@@ -1,4 +1,5 @@
 import { Search, X } from 'lucide-react'
+import { ICON } from '../tokens.js'
 import { classNames } from '../utils.js'
 import { PATH_FILTERS } from './connectionFilters.js'
 
@@ -50,7 +51,7 @@ export function ConnectionsToolbar({
         </div>
 
         <label className="connections-search">
-          <Search size={14} />
+          <Search size={ICON.sm} />
           <input
             data-autofocus
             type="search"
@@ -66,7 +67,7 @@ export function ConnectionsToolbar({
               onClick={() => onQueryChange('')}
               aria-label="清除搜索"
             >
-              <X size={12} />
+              <X size={ICON.xs} />
             </button>
           )}
           {filtered && (

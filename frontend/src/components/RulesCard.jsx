@@ -1,5 +1,6 @@
 import { memo, useMemo, useState } from 'react'
 import { ListFilter, Plus, Trash2, TriangleAlert } from 'lucide-react'
+import { ICON } from '../tokens.js'
 import { Button, SectionCard } from './ui.jsx'
 import { RuleModal } from './RuleModal.jsx'
 import { classNames } from '../utils.js'
@@ -34,7 +35,7 @@ const RuleRow = memo(function RuleRow({ rule, onDelete, disabled, active }) {
           title="出口节点不存在,该规则未生效;请删除后重新添加"
           aria-label="规则未生效"
         >
-          <TriangleAlert size={12} />
+          <TriangleAlert size={ICON.xs} />
         </span>
       )}
       {display.structured && display.target && (
@@ -48,7 +49,7 @@ const RuleRow = memo(function RuleRow({ rule, onDelete, disabled, active }) {
         disabled={disabled}
         aria-label={`删除规则 ${display.structured ? display.value : display.raw}`}
       >
-        <Trash2 size={12} />
+        <Trash2 size={ICON.xs} />
       </button>
     </div>
   )
@@ -81,14 +82,14 @@ export function RulesCard({
         header={
           <div className="section-header">
             <div className="section-title-wrap">
-              <ListFilter size={14} className="section-icon" />
+              <ListFilter size={ICON.sm} className="section-icon" />
               <span>自定义规则</span>
               <span className={classNames('badge', 'counter-pill')}>{rules.length}</span>
             </div>
             <Button
               tone="secondary"
               size="sm"
-              icon={<Plus size={12} />}
+              icon={<Plus size={ICON.xs} />}
               disabled={isInitializing}
               onClick={() => {
                 setShowRuleModal(true)

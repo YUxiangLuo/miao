@@ -1,5 +1,6 @@
 import { useMemo } from 'react'
 import { Activity } from 'lucide-react'
+import { ICON } from '../tokens.js'
 import { ConnectionCard } from './ConnectionCard.jsx'
 import { groupConnections, groupSpeed, sortConnectionGroups } from './connectionFilters.js'
 
@@ -25,7 +26,7 @@ export function HomeConnections({ status, data, onOpenAll }) {
     <section className="home-connections" aria-label="活跃链接">
       <div className="home-connections-header">
         <div className="home-connections-title">
-          <Activity size={14} className="section-icon" />
+          <Activity size={ICON.sm} className="section-icon" />
           <span>活跃链接</span>
           <span className="badge home-connections-count">{activeGroups.length}</span>
         </div>

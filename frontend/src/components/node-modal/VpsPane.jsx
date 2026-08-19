@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Rocket } from 'lucide-react'
+import { ICON } from '../../tokens.js'
 import { Button } from '../ui.jsx'
 
 export function VpsPane({ onDeploy, loading }) {
@@ -52,7 +53,7 @@ export function VpsPane({ onDeploy, loading }) {
       </div>
       <Button
         tone="primary"
-        icon={<Rocket size={14} />}
+        icon={<Rocket size={ICON.sm} />}
         loading={busy}
         disabled={!canDeploy || busy}
         onClick={handleDeploy}

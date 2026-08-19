@@ -5,15 +5,15 @@
     min-width: 0;
     color: var(--text-muted);
     font-size: var(--fs-xs);
-    font-weight: 500;
+    font-weight: var(--fw-medium);
 }
 .node-select-label {
     white-space: nowrap;
 }
 .node-select select {
-    max-width: 8.75rem;
+    max-width: var(--node-select-max);
     padding: 2px var(--space-1);
-    border-radius: var(--radius);
+    border-radius: var(--r-sm);
     border: 1px solid var(--border);
     background: var(--surface-soft);
     color: var(--text);
@@ -23,7 +23,7 @@
     border-color: var(--accent);
 }
 .node-select select:disabled {
-    opacity: 0.6;
+    opacity: var(--o-disabled);
     cursor: default;
 }
 .proxy-test-chip.fast span {
@@ -49,30 +49,30 @@
 }
 .proxy-tile {
     position: relative;
-    min-height: 88px;
+    min-height: var(--tile-min-h);
     display: flex;
     flex-direction: column;
     align-items: flex-start;
     justify-content: flex-end;
     gap: var(--space-1);
     padding: var(--space-2);
-    border-radius: var(--radius);
-    border: 1px solid var(--border);
-    background: #252b35;
+    border-radius: var(--r-md);
+    border: var(--bw) solid var(--border);
+    background: var(--raised);
     color: var(--text);
     text-align: left;
 }
 .proxy-tile:hover:not(.active) {
-    border-color: #485365;
+    border-color: var(--border-strong);
 }
 .proxy-tile.active {
-    background: var(--surface-blue-strong);
+    background: var(--accent-tint);
     border-color: var(--accent);
 }
 .proxy-switch-button {
     position: absolute;
     inset: 0;
-    z-index: 0;
+    z-index: var(--z-base);
     display: flex;
     align-items: flex-start;
     padding: var(--space-2);
@@ -83,7 +83,7 @@
     cursor: default;
 }
 .proxy-switch-button:focus-visible {
-    outline: 2px solid var(--accent);
+    outline: var(--bw-strong) solid var(--accent);
     outline-offset: -3px;
 }
 .proxy-tile-top {
@@ -119,7 +119,7 @@
 .proxy-node-name {
     color: var(--text);
     font-size: var(--fs-md);
-    font-weight: 600;
+    font-weight: var(--fw-semibold);
 }
 .proxy-tag {
     display: inline-flex;
@@ -127,7 +127,7 @@
     gap: var(--space-1);
     color: var(--text-strong);
     font-size: var(--fs-md);
-    font-weight: 700;
+    font-weight: var(--fw-heavy);
 }
 .proxy-tag span:last-child {
     min-width: 0;
@@ -137,19 +137,19 @@
 }
 .proxy-tag-dot {
     flex: 0 0 auto;
-    width: 6px;
-    height: 6px;
-    border-radius: var(--radius-pill);
+    width: var(--size-dot);
+    height: var(--size-dot);
+    border-radius: var(--r-pill);
     background: var(--success);
 }
 .proxy-test-chip {
     position: relative;
-    z-index: 1;
+    z-index: var(--z-raised);
     display: inline-flex;
     align-items: center;
-    gap: 4px;
+    gap: var(--space-0);
     padding: 3px var(--space-1);
-    border-radius: var(--radius-sm);
+    border-radius: var(--r-sm);
     border: none;
     background: var(--surface-soft);
     font-size: var(--fs-sm);
@@ -157,7 +157,7 @@
     color: var(--text-muted);
 }
 .proxy-tile.active .proxy-test-chip {
-    background: #1e3345;
+    background: var(--accent-tint-deep);
 }
 .proxy-test-chip:disabled {
     cursor: default;
