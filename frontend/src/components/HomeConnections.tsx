@@ -8,7 +8,7 @@ import type { StatusData } from '../types/api'
 import type { ConnectionGroup, ConnectionsInfo } from '../types/clash'
 
 // 首页条带专用卡：圆角正方形，favicon 为主视觉 + 主域名 + 出口 chip。
-// 刻意不复用链接统计面板的 ConnectionCard——那里承载速率/累计/展开明细，
+// 首页条带是独立的轻量呈现（图标+主域名+出口），与链接统计面板的行式列表各自演进
 // 首页只需要「谁在用网、走的哪条出口」的一眼概览；明细由「查看全部」承载。
 function HomeSiteCard({ group }: { group: ConnectionGroup }) {
   const main = mainDomain(group.domain)

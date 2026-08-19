@@ -3,7 +3,7 @@ import { ICON } from '../tokens'
 import { formatBytes, formatSpeed } from '../utils'
 import type { EnrichedConnection } from '../types/clash'
 import { splitConnectionStats, type PathStats } from './connectionFilters'
-import { AnimatedValue } from './ConnectionCard'
+import { AnimatedValue } from './connectionUi'
 
 function laneShare(lane: PathStats, other: PathStats): number {
   const mine = lane.downloadSpeed + lane.uploadSpeed

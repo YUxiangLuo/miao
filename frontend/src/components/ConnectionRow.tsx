@@ -13,7 +13,7 @@ import {
   processNameOf,
 } from './connectionFilters'
 import { connectionDomain } from './siteIcons'
-import { AnimatedValue, SiteMark } from './ConnectionCard'
+import { AnimatedValue, SiteMark } from './connectionUi'
 
 export interface ConnectionRowProps {
   connection: EnrichedConnection
@@ -75,7 +75,7 @@ export function ConnectionRow({ connection }: ConnectionRowProps) {
           </i>
         </span>
         <span className="conn-row-total">
-          <span className="connection-card-total-label">累计</span>
+          <span className="conn-row-total-label">累计</span>
           <small className="tone-download">
             <ArrowDown size={ICON.xs} />
             <AnimatedValue value={formatBytes(connection.download)} />

@@ -8,31 +8,25 @@
     flex-direction: column;
     overflow: hidden;
     padding: 0;
-}
-.modal-title-row {
+}.modal-title-row {
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: var(--space-2);
     margin-bottom: var(--space-3);
-}
-.modal-title-wrap {
+}.modal-title-wrap {
     display: flex;
     align-items: center;
     gap: var(--space-2);
-}
-.modal-title-wrap h3 {
+}.modal-title-wrap h3 {
     margin: 0;
     color: var(--text-strong);
     font-size: var(--fs-xl);
-}
-.icon-accent {
+}.icon-accent {
     color: var(--accent-strong);
-}
-.icon-warning {
+}.icon-warning {
     color: var(--warning);
-}
-.icon-button {
+}.icon-button {
     width: var(--size-icon-btn);
     height: var(--size-icon-btn);
     display: inline-flex;
@@ -42,17 +36,14 @@
     border: var(--bw) solid transparent;
     background: var(--hover);
     color: var(--text);
-}
-.icon-button.subtle {
+}.icon-button.subtle {
     width: var(--size-icon-btn-sm);
     height: var(--size-icon-btn-sm);
     background: transparent;
     color: var(--text-subtle);
-}
-.icon-button:hover {
+}.icon-button:hover {
     background: var(--hover-strong);
-}
-.icon-button:disabled {
+}.icon-button:disabled {
     opacity: var(--o-dim);
     cursor: not-allowed;
 }
@@ -77,8 +68,7 @@
     color: var(--text-strong);
     font-size: var(--fs-xl);
     white-space: nowrap;
-}
-/* 徽标基元由 .badge 提供，这里只保留 LIVE 绿配色与描边 */
+}/* 徽标基元由 .badge 提供，这里只保留 LIVE 绿配色与描边 */
 .connections-live-badge {
     border: var(--bw) solid color-mix(in srgb, var(--success) 35%, transparent);
     background: var(--surface-green-soft);
@@ -90,15 +80,12 @@
     border-radius: var(--r-pill);
     background: currentColor;
     animation: livePulse var(--anim-live) ease-in-out infinite;
-}
-@keyframes livePulse {
+}@keyframes livePulse {
     0%, 100% {
         opacity: 1;
-    }
-    50% {
+    }    50% {
         opacity: 0.3;
-    }
-}
+    }}
 .connections-header-actions {
     display: flex;
     align-items: center;
@@ -112,23 +99,18 @@
     gap: var(--space-2);
     padding: var(--space-3);
     overflow: hidden;
-}
-@keyframes valueFade {
+}@keyframes valueFade {
     from {
         opacity: 0.2;
-    }
-    to {
+    }    to {
         opacity: 1;
-    }
-}
+    }}
 .value-anim {
     animation: valueFade var(--anim-fade) ease-out;
-}
-@media (prefers-reduced-motion: reduce) {
+}@media (prefers-reduced-motion: reduce) {
     .value-anim {
         animation: none;
-    }
-}
+    }}
 .connections-error {
     flex: 0 0 auto;
     padding: var(--space-2);
@@ -203,58 +185,12 @@
     font-size: var(--fs-xs);
     font-weight: var(--fw-heavy);
     opacity: var(--o-emphasis);
-}
-.connection-card {
-    display: flex;
-    flex-direction: column;
-    min-width: 0;
-    padding: var(--space-2);
-    border: var(--bw-strong) solid var(--border-soft);
-    border-radius: var(--r-md);
-    background: var(--surface-soft);
-    transition: border-color var(--dur-slow) ease, background var(--dur-slow) ease, box-shadow var(--dur-slow) ease;
-}
-.connection-card:hover {
-    border-color: var(--border);
-    background: var(--hover-subtle);
-}
-/* 活跃连接：中性浮起（描边提亮一档 + 弱填充），"正在传输"的信号由脉冲活点
+}/* 活跃连接：中性浮起（描边提亮一档 + 弱填充），"正在传输"的信号由脉冲活点
    承担——大面积绿块会让整条带变成噪声墙，安静的面板里绿色只属于小焦点 */
 .connection-card.active,
 .connection-card.active:hover {
     border-color: var(--border-strong);
     background: var(--hover-subtle);
-}
-.connection-card.expanded {
-    border-color: var(--border);
-    background: var(--hover-subtle);
-}
-.connection-card.active.expanded,
-.connection-card.active.expanded:hover {
-    border-color: var(--border-strong);
-    background: var(--hover-subtle);
-}
-.connection-card-head {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-2);
-    width: 100%;
-    padding: 0;
-    border: none;
-    background: transparent;
-    color: inherit;
-    text-align: left;
-    border-radius: var(--r-sm);
-}
-.connection-card-head:focus-visible {
-    outline: var(--bw-strong) solid var(--accent);
-    outline-offset: 3px;
-}
-.connection-card-top {
-    display: flex;
-    align-items: flex-start;
-    gap: var(--space-2);
-    min-width: 0;
 }
 .site-icon {
     flex: 0 0 auto;
@@ -271,73 +207,7 @@
     color: var(--info-strong);
     font-size: var(--fs-md);
     font-weight: var(--fw-heavy);
-}
-.connection-card-identity {
-    flex: 1;
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-0);
-}
-.connection-live-dot {
-    flex: 0 0 auto;
-    align-self: center;
-    width: var(--size-dot);
-    height: var(--size-dot);
-    border-radius: var(--r-pill);
-    background: var(--success);
-    box-shadow: 0 0 6px color-mix(in srgb, var(--success-strong) 80%, transparent);
-    animation: livePulse var(--anim-live) ease-in-out infinite;
-}
-.connection-card-chevron {
-    flex: 0 0 auto;
-    align-self: flex-start;
-    margin-top: var(--space-0);
-    color: var(--text-subtle);
-    transition: transform var(--dur-slow) ease;
-}
-.connection-card.expanded .connection-card-chevron {
-    transform: rotate(180deg);
-}
-.connection-card-domain {
-    display: block;
-    color: var(--text-strong);
-    font-size: var(--fs-lg);
-    font-weight: var(--fw-bold);
-    line-height: var(--lh-snug);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-.connection-card-rule {
-    display: flex;
-    align-items: center;
-    gap: var(--space-1);
-    min-width: 0;
-    color: var(--text-muted);
-    font-size: var(--fs-sm);
-    line-height: var(--lh-snug);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-.connection-card-rule em {
-    flex: 0 0 auto;
-    padding: 0 var(--space-1);
-    border-radius: var(--r-sm);
-    background: var(--info-tint);
-    color: var(--info-strong);
-    font-style: normal;
-    font-size: var(--fs-xs);
-    font-weight: var(--fw-heavy);
-}
-.connection-card-meta {
-    display: flex;
-    align-items: center;
-    gap: var(--space-2);
-    min-width: 0;
-}
-/* 徽标基元由 .badge 提供，这里只保留配色与截断 */
+}/* 徽标基元由 .badge 提供，这里只保留配色与截断 */
 .connection-outbound-chip,
 .connection-count-chip {
     flex: 0 1 auto;
@@ -351,140 +221,9 @@
     background: var(--surface-green-soft);
     color: var(--success);
 }
-.connection-count-chip {
-    flex: 0 0 auto;
-    background: var(--hover-subtle);
-    color: var(--text-muted);
-}
-.connection-card-speed {
-    margin-left: auto;
-    display: flex;
-    align-items: center;
-    gap: var(--space-2);
-    color: var(--text-muted);
-    font-size: var(--fs-xs);
-    white-space: nowrap;
-}
-.connection-card-speed small {
-    display: inline-flex;
-    align-items: center;
-    gap: 3px;
-}
-.connection-card-speed small.tone-download {
-    color: var(--info-strong);
-}
-.connection-card-speed small.tone-upload {
-    color: var(--success);
-}
-.connection-card-speed svg {
-    opacity: var(--o-icon);
-}
-.connection-card-total {
-    display: flex;
-    align-items: center;
-    gap: var(--space-2);
-    min-width: 0;
-    padding-top: var(--space-2);
-    border-top: var(--bw) dashed var(--border-soft);
-}
-.connection-card-total-label {
+.conn-row-total-label {
     color: var(--text-subtle);
     font-size: var(--fs-xs);
-}
-.connection-card-total-values {
-    margin-left: auto;
-    display: flex;
-    align-items: center;
-    gap: var(--space-2);
-    color: var(--text-muted);
-    font-size: var(--fs-xs);
-    white-space: nowrap;
-}
-.connection-card-total-values small {
-    display: inline-flex;
-    align-items: center;
-    gap: 3px;
-}
-.connection-card-total-values .tone-download {
-    color: var(--info-strong);
-}
-.connection-card-total-values .tone-upload {
-    color: var(--success);
-}
-.connection-card-total-values svg {
-    opacity: var(--o-icon);
-}
-.connection-card-details {
-    margin-top: var(--space-2);
-    padding-top: var(--space-2);
-    border-top: var(--bw) solid var(--border-soft);
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-2);
-}
-.connection-detail-row {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-1);
-    padding: var(--space-2);
-    border-radius: var(--r-md);
-    background: var(--hover-subtle);
-    border: var(--bw) solid var(--border-soft);
-}
-.connection-detail-line {
-    display: flex;
-    align-items: center;
-    gap: var(--space-2);
-    min-width: 0;
-    font-size: var(--fs-xs);
-}
-.connection-detail-rule {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    color: var(--text);
-    font-weight: var(--fw-semibold);
-}
-.connection-detail-duration {
-    margin-left: auto;
-    flex: 0 0 auto;
-    color: var(--text-muted);
-    white-space: nowrap;
-}
-.connection-detail-net {
-    flex: 0 0 auto;
-    padding: 1px var(--space-1);
-    border-radius: var(--r-sm);
-    background: var(--hover-subtle);
-    color: var(--text-muted);
-    font-weight: var(--fw-semibold);
-}
-.connection-detail-chain {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    color: var(--text-muted);
-}
-.connection-detail-bytes {
-    margin-left: auto;
-    flex: 0 0 auto;
-    display: inline-flex;
-    gap: var(--space-2);
-    color: var(--text-muted);
-    white-space: nowrap;
-}
-.connection-detail-bytes small {
-    display: inline-flex;
-    align-items: center;
-    gap: 3px;
-}
-.connection-detail-bytes .tone-download {
-    color: var(--info-strong);
-}
-.connection-detail-bytes .tone-upload {
-    color: var(--success);
 }
 .connections-empty {
     flex: 1;
@@ -499,7 +238,6 @@
 .connections-empty.inline {
     padding: var(--space-3) var(--space-2);
 }
-
 /* ── 链接统计行式列表（站点/进程/出口三维共用） ─────────────────────
    层级原则：活跃行全亮 + 速率比例条；空闲行降为 dim 沉睡。
    比例条颜色即出口语义：直连绿 / 代理蓝 / 拦截红。 */
@@ -583,9 +321,8 @@
     color: var(--info-strong);
 }
 .conn-row-speed .tone-upload {
-    color: var(--success);
-}
-/* 速率比例条：蓝段=下载、绿段=上传（与数字同色），总长 = 总速率相对占比 */
+    color: var(--accent-strong);
+}/* 速率比例条：蓝段=下载、绿段=上传（与数字同色），总长 = 总速率相对占比 */
 .conn-speed-bar {
     grid-column: 1 / -1;
     display: flex;
@@ -603,7 +340,7 @@
     background: var(--info);
 }
 .conn-speed-bar .seg-up {
-    background: var(--success);
+    background: var(--accent);
 }
 .conn-row-total {
     flex: 0 0 var(--conn-total-w);
@@ -623,9 +360,8 @@
     color: var(--info-strong);
 }
 .conn-row-total .tone-upload {
-    color: var(--success);
+    color: var(--accent-strong);
 }
-
 /* ── 直连/代理双通道汇总卡 ────────────────────────────────────────
    每条 lane：路径 chip + 速率对（主指标）+ 累计对（次要）+ 链接数，
    底部占比条 = 本通道占两通道合计速率的份额（代理蓝/直连绿）。 */
@@ -670,7 +406,7 @@
     color: var(--info-strong);
 }
 .path-speed .tone-upload {
-    color: var(--success);
+    color: var(--accent-strong);
 }
 .path-total {
     display: inline-flex;
@@ -693,7 +429,7 @@
     color: var(--info-strong);
 }
 .path-total .tone-upload {
-    color: var(--success);
+    color: var(--accent-strong);
 }
 .path-count {
     color: var(--text-muted);
