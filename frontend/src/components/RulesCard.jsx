@@ -4,7 +4,7 @@ import { ICON } from '../tokens.js'
 import { Button, SectionCard } from './ui.jsx'
 import { RuleModal } from './RuleModal.jsx'
 import { classNames } from '../utils.js'
-import { describeRule, ruleTargetLabel } from '../ruleFormat.js'
+import { describeRule, ruleFieldTone, ruleTargetLabel } from '../ruleFormat.js'
 import { activeRuleIndexes } from '../ruleActivity.js'
 
 const RuleRow = memo(function RuleRow({ rule, onDelete, disabled, active }) {
@@ -18,7 +18,7 @@ const RuleRow = memo(function RuleRow({ rule, onDelete, disabled, active }) {
         {display.structured ? (
           <>
             <div className="list-row-title structured">
-              <span className={classNames('badge', 'rule-field-chip')}>{display.fieldLabel}</span>
+              <span className={classNames('badge', 'rule-field-chip', ruleFieldTone(display.field))}>{display.fieldLabel}</span>
               <span className="rule-value" title={display.value}>{display.value}</span>
             </div>
           </>

@@ -277,6 +277,7 @@
 .badge.success { background: var(--surface-green-soft); color: var(--success); }
 .badge.warning { background: color-mix(in srgb, var(--warning) 18%, transparent); color: var(--warning); }
 .badge.danger { background: var(--surface-red); color: var(--danger); }
+.badge.accent { background: var(--accent-tint); color: var(--accent-strong); }
 .badge.neutral { background: var(--surface-soft); color: var(--text-muted); }
 .list-stack {
     display: flex;

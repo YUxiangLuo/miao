@@ -6,6 +6,7 @@ import {
   RULE_TARGET_OPTIONS,
   ruleFieldLabel,
   ruleFieldOptions,
+  ruleFieldTone,
   ruleTargetLabel,
 } from './ruleFormat.js'
 
@@ -47,6 +48,15 @@ describe('ruleFormat', () => {
     expect(ruleTargetLabel('reject')).toBe('拦截')
     expect(ruleTargetLabel('proxy')).toBe('代理')
     expect(ruleTargetLabel(undefined)).toBe('未知')
+  })
+
+  it('assigns a badge tone to every whitelisted field', () => {
+    const tones = RULE_FIELD_OPTIONS.map((option) => ruleFieldTone(option.value))
+    // 每个白名单字段都有具名色调，且同族字段同色
+    tones.forEach((tone) => expect(tone).not.toBe('neutral'))
+    expect(ruleFieldTone('domain')).toBe(ruleFieldTone('domain_suffix'))
+    expect(ruleFieldTone('process_name')).toBe(ruleFieldTone('process_path'))
+    expect(ruleFieldTone('unknown-field')).toBe('neutral')
   })
 
   it('uses windows process placeholders without changing field values', () => {

@@ -1,17 +1,16 @@
 import { memo } from 'react'
-import { Anchor, Plus, Server, Trash2 } from 'lucide-react'
+import { Anchor, Plus, Trash2 } from 'lucide-react'
 import { ICON } from '../tokens.js'
 import { Button, SectionCard } from './ui.jsx'
-import { protocolLabel, classNames } from '../utils.js'
+import { protocolTone, classNames } from '../utils.js'
 
 const NodeRow = memo(function NodeRow({ node, onDelete, disabled }) {
   return (
     <div className="list-row">
-      <Server size={ICON.xs} className="list-leading-icon" />
       <div className="list-row-content">
-        <div className="list-row-title">{node.tag}</div>
-        <div className="list-row-meta" title={`${node.server}:${node.server_port}`}>
-          {node.server}:{node.server_port} · {protocolLabel(node.node_type)}
+        <div className="list-row-title structured">
+          <span className="rule-value" title={node.tag}>{node.tag}</span>
+          <span className={classNames('badge', protocolTone(node.node_type))}>{node.node_type}</span>
         </div>
       </div>
       <button

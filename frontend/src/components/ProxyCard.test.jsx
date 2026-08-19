@@ -62,6 +62,29 @@ describe('ProxyCard accessibility', () => {
     expect(onSwitchProxy).toHaveBeenCalledWith('proxy', 'node-b')
   })
 
+  it('shows the protocol name when nodeProtocols has an entry', () => {
+    render(
+      <ProxyCard
+        status={{ running: true, initializing: false, node_select: 'manual' }}
+        primaryGroup={{ now: 'node-a', all: ['node-a', 'node-b'] }}
+        primaryGroupName="proxy"
+        nodeProtocols={{ 'node-a': 'Hysteria2' }}
+        delays={{}}
+        testingNodes={{}}
+        testingGroup=""
+        onTestDelay={vi.fn()}
+        onTestGroupDelays={vi.fn()}
+        onSwitchProxy={vi.fn()}
+        onSetNodeSelect={vi.fn()}
+        onOpenAddNode={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByText('Hysteria2')).toBeInTheDocument()
+    // 无协议数据的节点不渲染协议行
+    expect(screen.getByRole('button', { name: '切换到 node-b' }).textContent).not.toContain('Hysteria2')
+  })
+
   it('keeps switching available while a node delay test is running', async () => {
     const user = userEvent.setup()
     const onSwitchProxy = vi.fn()

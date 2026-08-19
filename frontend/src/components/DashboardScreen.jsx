@@ -46,6 +46,7 @@ export function DashboardScreen({ app }) {
               status={app.status}
               primaryGroup={app.primaryGroup}
               primaryGroupName={app.primaryGroupName}
+              nodeProtocols={app.nodeProtocols}
               delays={app.delays}
               testingNodes={app.testingNodes}
               testingGroup={app.testingGroup}

@@ -181,6 +181,26 @@ export function formatDelay(delay) {
   return `${delay} ms`
 }
 
+// 协议 chip 色调（.badge 五色变体之一）：常见协议显式映射，
+// 未知协议按名称哈希到五色之一——同一协议永远同色
+const PROTOCOL_TONES = {
+  hysteria2: 'accent',
+  hysteria: 'accent',
+  anytls: 'info',
+  vless: 'success',
+  vmess: 'warning',
+  trojan: 'danger',
+}
+const PROTOCOL_TONE_FALLBACKS = ['info', 'success', 'warning', 'danger', 'accent']
+
+export function protocolTone(protocol) {
+  const key = (protocol || '').toLowerCase()
+  if (PROTOCOL_TONES[key]) return PROTOCOL_TONES[key]
+  let hash = 0
+  for (const ch of key) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0
+  return PROTOCOL_TONE_FALLBACKS[hash % PROTOCOL_TONE_FALLBACKS.length]
+}
+
 export function protocolLabel(type) {
   const map = {
     hysteria2: 'hysteria2',

@@ -29,6 +29,15 @@ export function useAppData() {
   const { rules, fetchRules } = useRules()
   const { proxies, primaryGroupName, primaryGroup, fetchProxies } = useProxies(status)
 
+  // 节点名 → 协议类型（Clash API 的 type，如 Hysteria2/AnyTLS/VLESS）；分组项不入图
+  const nodeProtocols = useMemo(() => {
+    const map = {}
+    Object.entries(proxies || {}).forEach(([name, proxy]) => {
+      if (proxy?.type && !isClashProxyGroup(proxy.type)) map[name] = proxy.type
+    })
+    return map
+  }, [proxies])
+
   // 规则「指定节点」下拉的候选:手动节点(服务停止时也在) ∪ 运行时全部 outbound
   // 与后端 known_rule_targets 同口径(排除内置 proxy/direct 与分组项),不随 fastest_* 地区过滤收缩
   const ruleNodeNames = useMemo(() => {
@@ -164,6 +173,7 @@ export function useAppData() {
     primaryGroup,
     fetchProxies,
     ruleNodeNames,
+    nodeProtocols,
     traffic,
     connectionsInfo,
     connectionsLoading,

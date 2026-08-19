@@ -1,9 +1,7 @@
 /* 自定义规则卡片 */
-/* 徽标基元由 .badge 提供（统一 pill 体系），这里只保留颜色 */
+/* 徽标基元由 .badge 提供（统一 pill 体系），颜色由 .badge.{tone} 色调类提供 */
 .rule-field-chip {
     flex: 0 0 auto;
-    background: var(--info-tint);
-    color: var(--info-strong);
 }
 .rule-value {
     min-width: 0;

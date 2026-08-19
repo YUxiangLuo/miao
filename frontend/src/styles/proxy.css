@@ -26,14 +26,14 @@
     opacity: var(--o-disabled);
     cursor: default;
 }
-.proxy-test-chip.fast span {
+.proxy-test-btn.fast span {
     color: var(--success);
 }
-.proxy-test-chip.medium span {
+.proxy-test-btn.medium span {
     color: var(--warning);
 }
-.proxy-test-chip.slow span,
-.proxy-test-chip.timeout span {
+.proxy-test-btn.slow span,
+.proxy-test-btn.timeout span {
     color: var(--danger);
 }
 .proxy-grid-wrap {
@@ -51,9 +51,7 @@
     position: relative;
     min-height: var(--tile-min-h);
     display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    justify-content: flex-end;
+    align-items: center;
     gap: var(--space-1);
     padding: var(--space-2);
     border-radius: var(--r-md);
@@ -84,12 +82,13 @@
     border-color: var(--accent);
 }
 .proxy-switch-button {
-    position: absolute;
-    inset: 0;
-    z-index: var(--z-base);
+    flex: 1 1 auto;
+    min-width: 0;
+    align-self: stretch;
     display: flex;
-    align-items: flex-start;
-    padding: var(--space-2);
+    flex-direction: column;
+    justify-content: center;
+    gap: var(--space-1);
     border: none;
     background: transparent;
     color: inherit;
@@ -132,7 +131,7 @@
 }
 .proxy-node-name {
     color: var(--text);
-    font-size: var(--fs-md);
+    font-size: var(--fs-lg);
     font-weight: var(--fw-semibold);
 }
 .proxy-tag {
@@ -140,7 +139,7 @@
     align-items: center;
     gap: var(--space-1);
     color: var(--text-strong);
-    font-size: var(--fs-md);
+    font-size: var(--fs-lg);
     font-weight: var(--fw-heavy);
 }
 .proxy-tag span:last-child {
@@ -156,27 +155,45 @@
     border-radius: var(--r-pill);
     background: var(--success);
 }
-.proxy-test-chip {
-    position: relative;
-    z-index: var(--z-raised);
-    display: inline-flex;
-    align-items: center;
-    gap: var(--space-0);
-    padding: 3px var(--space-1);
-    border-radius: var(--r-sm);
-    border: none;
-    background: var(--surface-soft);
-    font-size: var(--fs-sm);
-    cursor: pointer;
-    color: var(--text-muted);
+/* 协议 chip：名称下方一行，颜色由 .badge.{tone} 按协议提供 */
+.proxy-proto {
+    align-self: flex-start;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
-.proxy-tile.active .proxy-test-chip {
+/* 紫 chip 压在选中 tile（同色 tint）上会隐形，加深一档 */
+.proxy-tile.active .badge.accent {
     background: var(--accent-tint-deep);
 }
-.proxy-test-chip:disabled {
+/* 正方形测速按钮：图标 + 延迟值上下排；默认无底，hover 才显底 */
+.proxy-test-btn {
+    flex: 0 0 auto;
+    width: var(--size-tile-test);
+    height: var(--size-tile-test);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-0);
+    border-radius: var(--r-sm);
+    border: none;
+    background: transparent;
+    font-size: var(--fs-xs);
+    cursor: pointer;
+    color: var(--text-muted);
+    transition: background var(--dur) var(--ease);
+}
+.proxy-test-btn:hover:not(:disabled) {
+    background: var(--hover-strong);
+}
+.proxy-test-btn .num {
+    white-space: nowrap;
+}
+.proxy-test-btn:disabled {
     cursor: default;
 }
-.proxy-test-chip.neutral {
+.proxy-test-btn.neutral {
     color: var(--text-subtle);
 }
 .add-tile {

@@ -54,6 +54,24 @@ export function ruleFieldLabel(field) {
   return RULE_FIELD_OPTIONS.find((option) => option.value === field)?.label || field
 }
 
+// 规则字段 chip 色调（.badge 五色变体之一）：按字段族着色，与节点协议 chip 同体系
+const RULE_FIELD_TONES = {
+  domain: 'info',
+  domain_suffix: 'info',
+  domain_keyword: 'info',
+  ip_cidr: 'success',
+  source_ip_cidr: 'success',
+  port: 'warning',
+  port_range: 'warning',
+  protocol: 'danger',
+  process_name: 'accent',
+  process_path: 'accent',
+}
+
+export function ruleFieldTone(field) {
+  return RULE_FIELD_TONES[field] || 'neutral'
+}
+
 export function ruleTargetLabel(target) {
   return RULE_TARGET_OPTIONS.find((option) => option.value === target)?.label || target || '未知'
 }

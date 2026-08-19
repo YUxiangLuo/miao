@@ -6,6 +6,7 @@ import {
   classNames, 
   formatDelay, 
   getDelayTone,
+  protocolTone,
 } from '../utils.js'
 
 const NODE_SELECT_OPTIONS = [
@@ -17,7 +18,7 @@ const NODE_SELECT_OPTIONS = [
   { value: 'fastest_us', label: '美国最快' },
 ]
 
-const ProxyTile = memo(function ProxyTile({ nodeName, delay, isActive, isTesting, isSwitching, switchDisabled, onSwitchProxy, onTestDelay, group }) {
+const ProxyTile = memo(function ProxyTile({ nodeName, protocol, delay, isActive, isTesting, isSwitching, switchDisabled, onSwitchProxy, onTestDelay, group }) {
   return (
     <div className={classNames('proxy-tile', isActive && 'active')}>
       <button
@@ -36,18 +37,19 @@ const ProxyTile = memo(function ProxyTile({ nodeName, delay, isActive, isTesting
               ? <div className="proxy-tag"><span className="proxy-tag-dot" /><span>{nodeName}</span></div>
               : <span className="proxy-node-name">{nodeName}</span>}
         </div>
+        {protocol && <span className={classNames('badge', 'proxy-proto', protocolTone(protocol))}>{protocol}</span>}
       </button>
       <button
         type="button"
-        className={classNames('proxy-test-chip', getDelayTone(delay))}
+        className={classNames('proxy-test-btn', getDelayTone(delay))}
         onClick={() => onTestDelay(nodeName)}
         disabled={isTesting}
         aria-label={`测试 ${nodeName} 延迟`}
       >
-        {isTesting 
-          ? <LoaderCircle size={ICON.xs} className="spin" /> 
-          : <Zap size={ICON.xs} />}
-        <span className="num">{isTesting ? '测试中…' : formatDelay(delay)}</span>
+        {isTesting
+          ? <LoaderCircle size={ICON.lg} className="spin" />
+          : <Zap size={ICON.lg} />}
+        <span className="num">{isTesting ? '…' : formatDelay(delay)}</span>
       </button>
     </div>
   )
@@ -57,6 +59,7 @@ export function ProxyCard({
   status, 
   primaryGroup, 
   primaryGroupName, 
+  nodeProtocols = {},
   delays, 
   testingNodes, 
   testingGroup,
@@ -120,6 +123,7 @@ export function ProxyCard({
               <ProxyTile
                 key={nodeName}
                 nodeName={nodeName}
+                protocol={nodeProtocols[nodeName]}
                 delay={delays[nodeName]}
                 isActive={primaryGroup.now === nodeName}
                 isTesting={Boolean(testingNodes[nodeName])}

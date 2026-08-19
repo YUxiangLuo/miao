@@ -6,6 +6,7 @@ import {
   formatUptime,
   maskSubscription,
   protocolLabel,
+  protocolTone,
   validateHysteria2Obfs,
   validateNodeTag,
   validatePassword,
@@ -35,6 +36,20 @@ describe('formatters', () => {
     expect(protocolLabel('tuic')).toBe('tuic')
     expect(protocolLabel('hysteria2')).toBe('hysteria2')
     expect(maskSubscription('https://example.com/path/to/token123456')).toBe('example.com...en123456')
+  })
+
+  it('assigns stable badge tones to protocols', () => {
+    // 常见协议显式映射（大小写不敏感）
+    expect(protocolTone('Hysteria2')).toBe('accent')
+    expect(protocolTone('AnyTLS')).toBe('info')
+    expect(protocolTone('VLESS')).toBe('success')
+    expect(protocolTone('vmess')).toBe('warning')
+    expect(protocolTone('trojan')).toBe('danger')
+    // 未知协议哈希到五色之一且结果稳定
+    const tones = ['info', 'success', 'warning', 'danger', 'accent']
+    expect(tones).toContain(protocolTone('ShadowTLS'))
+    expect(protocolTone('ShadowTLS')).toBe(protocolTone('shadowtls'))
+    expect(protocolTone('')).toBe(protocolTone(undefined))
   })
 })
 

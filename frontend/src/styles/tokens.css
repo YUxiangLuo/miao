@@ -181,6 +181,7 @@
     --rule-list-max-h: 280px;
     --conn-card-min: 280px; /* 连接卡网格最小列宽 */
     --tile-min-h: 88px; /* 节点 tile 最小高度 */
+    --size-tile-test: 64px; /* 节点 tile 正方形测速按钮边长（四位数延迟 + ms 不换行） */
 
     /* 活数字（速率/延迟/流量/PID）等宽，位数变化不再移位 */
     --font-numeric: tabular-nums;
