@@ -75,6 +75,8 @@ describe('HomeConnections', () => {
     const domains = screen.getAllByText(/\.dev$/).map((node) => node.textContent)
     expect(domains).toEqual(['fast.dev', 'slow.dev'])
     expect(screen.getByText('2')).toBeInTheDocument()
+    // 出口 chip：直连显示 direct，代理显示链路第一节
+    expect(screen.getAllByText('proxy').length).toBeGreaterThan(0)
   })
 
   it('opens the full connections view from the strip', async () => {
@@ -101,8 +103,25 @@ describe('HomeConnections', () => {
       />,
     )
 
-    // 条带单行裁切,卡片不提供展开入口;明细由「查看全部」承载
-    expect(screen.getByText('api.github.com')).toBeInTheDocument()
+    // 条带单行裁切,卡片不提供展开入口;明细由「查看全部」承载。
+    // 卡片只显示主域名,完整域名在 title 里
+    expect(screen.queryByText('api.github.com')).not.toBeInTheDocument()
+    expect(screen.getByText('github.com')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /链接详情/ })).not.toBeInTheDocument()
+  })
+
+  it('takes the letter fallback from the main domain, not the subdomain', () => {
+    render(
+      <HomeConnections
+        status={{ running: true }}
+        data={{ connections: [connection({ id: 'a', downloadSpeed: 80, metadata: { host: 'api.kimi.com' } })] }}
+        onOpenAll={vi.fn()}
+      />,
+    )
+
+    // kimi.com 无品牌图标,字母块应取主域名首字母 K 而非子域名的 A
+    expect(screen.getByText('kimi.com')).toBeInTheDocument()
+    expect(screen.getByText('K')).toBeInTheDocument()
+    expect(screen.queryByText('A')).not.toBeInTheDocument()
   })
 })

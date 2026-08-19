@@ -105,22 +105,66 @@
 .home-connections-all:hover {
     color: var(--text);
 }
-/* 注意特异性：.connection-card-grid 在 connections.css 中带 overflow:auto，
-   单类选择器会被它覆盖（文件顺序在后），导致条带出现滚动条且零高隐式行重叠绘制。
-   双类选择器确保裁切生效。 */
-/* 裁切的几何：padding:0 + row-gap:0 让显式行(1fr)恒等于整个网格区高度，
-   隐式行起点永远精确落在裁切线上——第二行不可能漏出，与字体渲染差异无关。 */
+/* 条带单行 flex：正方形卡片定宽排开，放不下的直接裁切（overflow:hidden），
+   明细走「查看全部」；空态块 flex:1 占满整行 */
 .home-connections .home-connections-grid {
     flex: 1;
     min-height: 0;
     overflow: hidden;
     padding: 0;
-    grid-template-rows: minmax(0, 1fr);
-    grid-auto-rows: 0;
-    row-gap: 0;
+    display: flex;
+    gap: var(--space-2);
+}
+/* 圆角正方形卡：favicon 主视觉 + 主域名 + 出口 chip */
+.home-site-card {
+    flex: 0 0 auto;
+    width: var(--home-site-card);
+    height: var(--home-site-card);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-1);
+    padding: var(--space-2);
+    border-radius: var(--r-lg);
+    border: var(--bw) solid var(--border);
+    background: var(--raised);
+    overflow: hidden;
+}
+.home-site-icon {
+    flex: 0 0 auto;
+    width: var(--size-site-icon-lg);
+    height: var(--size-site-icon-lg);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--r-md);
+    overflow: hidden;
+}
+.home-site-icon.letter {
+    background: var(--info-tint);
+    color: var(--info-strong);
+    /* 1.75rem 不入字号音阶：图标字母是图形元素，28/64≈44% 与 .site-icon 的 14/32 同比例 */
+    font-size: 1.75rem;
+    font-weight: var(--fw-heavy);
+}
+.home-site-domain {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--text);
+    font-size: var(--fs-sm);
+    font-weight: var(--fw-medium);
+}
+/* 出口 chip：节点名可能很长（旗 emoji+全名），允许截断 */
+.home-site-outbound {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 .home-connections-empty {
-    grid-column: 1 / -1;
+    flex: 1;
     display: flex;
     align-items: center;
     justify-content: center;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { connectionDomain, iconForDomain, normalizeDomain, stripHostPort } from './siteIcons.js'
+import { connectionDomain, iconForDomain, mainDomain, normalizeDomain, stripHostPort } from './siteIcons.js'
 
 describe('stripHostPort', () => {
   it('strips a host:port pair', () => {
@@ -38,6 +38,31 @@ describe('connectionDomain', () => {
 
   it('returns unknown when no destination is present', () => {
     expect(connectionDomain({ metadata: {} })).toBe('unknown')
+  })
+})
+
+describe('mainDomain', () => {
+  it('strips subdomains down to the registrable domain', () => {
+    expect(mainDomain('mercury.jd.com')).toBe('jd.com')
+    expect(mainDomain('ws.chatgpt.com')).toBe('chatgpt.com')
+    expect(mainDomain('api.github.com')).toBe('github.com')
+  })
+
+  it('keeps already-short domains and strips www', () => {
+    expect(mainDomain('x.com')).toBe('x.com')
+    expect(mainDomain('www.example.com')).toBe('example.com')
+  })
+
+  it('keeps three labels for compound public suffixes', () => {
+    expect(mainDomain('foo.com.cn')).toBe('foo.com.cn')
+    expect(mainDomain('www.bbc.co.uk')).toBe('bbc.co.uk')
+    expect(mainDomain('api.example.co.jp')).toBe('example.co.jp')
+  })
+
+  it('passes IPs and unknown through', () => {
+    expect(mainDomain('1.2.3.4')).toBe('1.2.3.4')
+    expect(mainDomain('2001:db8::1')).toBe('2001:db8::1')
+    expect(mainDomain('unknown')).toBe('unknown')
   })
 })
 

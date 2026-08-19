@@ -150,6 +150,7 @@
     --size-status-badge: 28px; /* 订阅状态圆形图标 */
     --size-icon-btn: 32px;
     --size-site-icon: 32px;
+    --size-site-icon-lg: 64px; /* 首页活跃链接正方形卡的站点图标（主视觉，占卡片近半高） */
     --topbar-divider-h: 32px;
     --badge-min-w: 20px; /* 计数徽标 */
     --count-min-w: 18px; /* 活跃链接计数 */
@@ -197,6 +198,7 @@
 
     /* 首页布局常量 */
     --home-connections-height: 184px;
+    --home-site-card: 144px; /* 活跃链接正方形卡片边长（条带单行排开，多余裁切） */
     /* 桌面双列（>1180px）内容网格高度：582px 保底（原 630 − 留白增量 48），高视口吃掉全部剩余垂直空间。
        388 = 工作区上下 padding 96（各 48，上下留白一致）+ 顶栏 76 + 顶栏 margin-bottom 16
              + 条带 margin-top 16 + 条带 184；
