@@ -2,7 +2,8 @@ import type { ChangeEvent } from 'react'
 import { Search, X } from 'lucide-react'
 import { ICON } from '../tokens'
 import { classNames } from '../utils'
-import { PATH_FILTERS, type PathCounts, type PathFilterOption } from './connectionFilters'
+import type { ConnectionDimension } from '../types/clash'
+import { DIMENSION_FILTERS, PATH_FILTERS, type PathCounts, type PathFilterOption } from './connectionFilters'
 
 export interface PillGroupProps {
   label: string
@@ -35,6 +36,8 @@ function PillGroup({ label, value, options, counts, onChange }: PillGroupProps) 
 }
 
 export interface ConnectionsToolbarProps {
+  dimension: ConnectionDimension
+  onDimensionChange: (value: ConnectionDimension) => void
   query: string
   onQueryChange: (value: string) => void
   path: string
@@ -45,6 +48,8 @@ export interface ConnectionsToolbarProps {
 }
 
 export function ConnectionsToolbar({
+  dimension,
+  onDimensionChange,
   query,
   onQueryChange,
   path,
@@ -60,6 +65,12 @@ export function ConnectionsToolbar({
     <div className="connections-toolbar">
       <div className="connections-toolbar-row">
         <div className="connections-toolbar-filters">
+          <PillGroup
+            label="聚合维度"
+            value={dimension}
+            options={DIMENSION_FILTERS}
+            onChange={(value) => onDimensionChange(value as ConnectionDimension)}
+          />
           <PillGroup
             label="按出口筛选"
             value={path}

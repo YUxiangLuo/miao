@@ -621,3 +621,151 @@
 .connections-empty.inline {
     padding: var(--space-3) var(--space-2);
 }
+
+/* ── 链接统计行式列表（站点/进程/出口三维共用） ─────────────────────
+   层级原则：活跃行全亮 + 速率比例条；空闲行降为 dim 沉睡。
+   比例条颜色即出口语义：直连绿 / 代理蓝 / 拦截红。 */
+.conn-rows {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+}
+.conn-row {
+    min-width: 0;
+    border: var(--bw-strong) solid var(--border-soft);
+    border-radius: var(--r-md);
+    background: var(--surface-soft);
+    transition: border-color var(--dur-slow) ease, background var(--dur-slow) ease, opacity var(--dur-slow) ease;
+}
+.conn-row:hover {
+    border-color: var(--border);
+    background: var(--hover-subtle);
+}
+.conn-row.idle {
+    opacity: var(--o-dim);
+}
+.conn-row.idle:hover,
+.conn-row.idle.expanded {
+    opacity: 1;
+}
+.conn-row.active,
+.conn-row.active:hover {
+    border-color: var(--border-strong);
+    background: var(--hover-subtle);
+}
+.conn-row-main {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    width: 100%;
+    min-height: var(--conn-row-min-h);
+    padding: var(--space-1) var(--space-2);
+    border: none;
+    background: transparent;
+    color: inherit;
+    text-align: left;
+    border-radius: var(--r-sm);
+    cursor: pointer;
+}
+.conn-row-main:focus-visible {
+    outline: var(--bw-strong) solid var(--accent);
+    outline-offset: 3px;
+}
+.conn-row-id {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-0);
+}
+.conn-row-title {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: var(--fs-md);
+}
+.conn-row-sub {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--text-muted);
+    font-size: var(--fs-sm);
+}
+.conn-row-speed {
+    flex: 0 0 var(--conn-speed-w);
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    align-items: center;
+    column-gap: var(--space-2);
+    color: var(--text-muted);
+}
+.conn-row-speed small {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    white-space: nowrap;
+    font-variant-numeric: var(--font-numeric);
+}
+.conn-row-speed .tone-download {
+    color: var(--info-strong);
+}
+.conn-row-speed .tone-upload {
+    color: var(--success);
+}
+/* 速率比例条：占满速率单元宽度的通栏，高度取 --conn-bar-h */
+.conn-speed-bar {
+    grid-column: 1 / -1;
+    display: block;
+    height: var(--conn-bar-h);
+    border-radius: var(--r-pill);
+    background: var(--hover);
+    overflow: hidden;
+}
+.conn-speed-bar > i {
+    display: block;
+    height: 100%;
+    border-radius: inherit;
+    transition: width var(--dur-slow) var(--ease);
+}
+.conn-speed-bar.bar-proxy > i {
+    background: var(--info);
+}
+.conn-speed-bar.bar-direct > i {
+    background: var(--success);
+}
+.conn-speed-bar.bar-reject > i {
+    background: var(--danger);
+}
+.conn-row-total {
+    flex: 0 0 var(--conn-total-w);
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    color: var(--text-muted);
+    white-space: nowrap;
+}
+.conn-row-total small {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    font-variant-numeric: var(--font-numeric);
+}
+.conn-row-total .tone-download {
+    color: var(--info-strong);
+}
+.conn-row-total .tone-upload {
+    color: var(--success);
+}
+.conn-row .connection-card-chevron {
+    align-self: center;
+    margin-top: 0;
+}
+.conn-row.expanded .connection-card-chevron {
+    transform: rotate(180deg);
+}
+.conn-row .connection-card-details {
+    padding: 0 var(--space-2) var(--space-2) calc(var(--size-site-icon) + var(--space-2) * 2);
+}

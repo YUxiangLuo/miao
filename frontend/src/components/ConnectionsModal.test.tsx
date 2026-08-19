@@ -60,9 +60,10 @@ describe('ConnectionsModal cards', () => {
       connection({ id: 'a', downloadSpeed: 2048, uploadSpeed: 1024, download: 2048, upload: 1024 }),
     ])
 
-    expect(screen.getByText('站点')).toBeInTheDocument()
-    expect(screen.getByText('实时速度')).toBeInTheDocument()
-    expect(screen.getByText('累计流量')).toBeInTheDocument()
+    const stats = document.querySelector('.connection-stat-grid') as HTMLElement
+    expect(within(stats).getByText('站点')).toBeInTheDocument()
+    expect(within(stats).getByText('实时速度')).toBeInTheDocument()
+    expect(within(stats).getByText('累计流量')).toBeInTheDocument()
     // 合并后的速度卡与累计卡各自包含上下行两个数值
     expect(screen.getAllByText('2.0 KB/s')).not.toHaveLength(0)
     expect(screen.getAllByText('2.0 KB')).not.toHaveLength(0)

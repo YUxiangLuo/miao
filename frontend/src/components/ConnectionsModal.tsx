@@ -1,27 +1,30 @@
 import { useId, useMemo, useState } from 'react'
 import {
   Activity,
+  AppWindow,
   ArrowDown,
   ArrowUp,
   Gauge,
   Globe,
   HardDriveDownload,
+  Split,
   X,
 } from 'lucide-react'
 import { ICON } from '../tokens'
 import { useDialog } from '../hooks/useDialog'
 import { formatBytes, formatSpeed } from '../utils'
 import { ConnectionsToolbar } from './ConnectionsToolbar'
-import { AnimatedValue, ConnectionCard } from './ConnectionCard'
+import { AnimatedValue } from './ConnectionCard'
+import { ConnectionRow } from './ConnectionRow'
 import {
-  filterConnectionGroups,
-  groupConnections,
-  pathCountsFor,
-  sortConnectionGroups,
+  buildGroupRows,
+  filterGroupRows,
+  pathCountsForRows,
+  sortGroupRows,
 } from './connectionFilters'
 
 import type { StatusData } from '../types/api'
-import type { ConnectionsInfo } from '../types/clash'
+import type { ConnectionDimension, ConnectionsInfo } from '../types/clash'
 
 export interface ConnectionsModalProps {
   open: boolean
@@ -31,6 +34,19 @@ export interface ConnectionsModalProps {
   error: string
   onClose: () => void
 }
+
+const DIMENSION_LABELS: Record<ConnectionDimension, string> = {
+  site: '站点',
+  process: '进程',
+  outbound: '出口',
+}
+
+/** 统计卡首格图标随维度切换 */
+const DIMENSION_ICONS = {
+  site: Globe,
+  process: AppWindow,
+  outbound: Split,
+} as const
 
 export function ConnectionsModal({
   open,
@@ -42,6 +58,7 @@ export function ConnectionsModal({
 }: ConnectionsModalProps) {
   const titleId = useId()
   const dialogRef = useDialog(open, onClose)
+  const [dimension, setDimension] = useState<ConnectionDimension>('site')
   const [query, setQuery] = useState('')
   const [path, setPath] = useState('all')
   const [expandedId, setExpandedId] = useState<string | null>(null)
@@ -54,16 +71,27 @@ export function ConnectionsModal({
   const uploadSpeed = connections.reduce((sum, item) => sum + Number(item.uploadSpeed || 0), 0)
   const downloadSpeed = connections.reduce((sum, item) => sum + Number(item.downloadSpeed || 0), 0)
 
-  const groups = useMemo(() => groupConnections(connections), [connections])
-  const searchedGroups = useMemo(
-    () => filterConnectionGroups(groups, { query, path: 'all' }),
-    [groups, query],
+  // 三维聚合：站点 / 进程 / 出口，全部归一为 GroupRow 后走同一套筛选排序
+  const rows = useMemo(() => buildGroupRows(dimension, connections), [dimension, connections])
+  const searchedRows = useMemo(
+    () => filterGroupRows(rows, { query, path: 'all' }),
+    [rows, query],
   )
-  const visibleGroups = useMemo(
-    () => sortConnectionGroups(filterConnectionGroups(searchedGroups, { path })),
-    [path, searchedGroups],
+  const visibleRows = useMemo(
+    () => sortGroupRows(filterGroupRows(searchedRows, { path })),
+    [path, searchedRows],
   )
-  const pathCounts = useMemo(() => pathCountsFor(searchedGroups), [searchedGroups])
+  const pathCounts = useMemo(() => pathCountsForRows(searchedRows), [searchedRows])
+  const maxSpeed = useMemo(
+    () => visibleRows.reduce((max, row) => Math.max(max, row.downloadSpeed + row.uploadSpeed), 0),
+    [visibleRows],
+  )
+  // 维度切换后展开态按旧维度 id 已无意义，收起避免错位
+  const handleDimensionChange = (next: ConnectionDimension) => {
+    setDimension(next)
+    setExpandedId(null)
+  }
+  const DimensionIcon = DIMENSION_ICONS[dimension]
 
   if (!open) return null
 
@@ -85,7 +113,7 @@ export function ConnectionsModal({
             {status.running && (
               <span className="badge connections-live-badge">
                 <i />
-                {groups.length} 个站点 · {connections.length} 条链接
+                {rows.length} 个{DIMENSION_LABELS[dimension]} · {connections.length} 条链接
               </span>
             )}
           </div>
@@ -103,11 +131,11 @@ export function ConnectionsModal({
             <div className="connection-stat-grid">
               <div className="connection-stat">
                 <span className="connection-stat-label">
-                  <Globe size={ICON.xs} />
-                  站点
+                  <DimensionIcon size={ICON.xs} />
+                  {DIMENSION_LABELS[dimension]}
                 </span>
                 <strong className="connection-stat-value">
-                  <AnimatedValue value={groups.length} />
+                  <AnimatedValue value={rows.length} />
                 </strong>
               </div>
               <div className="connection-stat">
@@ -148,29 +176,32 @@ export function ConnectionsModal({
 
             <div className="connections-main">
               <ConnectionsToolbar
+                dimension={dimension}
+                onDimensionChange={handleDimensionChange}
                 query={query}
                 onQueryChange={setQuery}
                 path={path}
                 onPathChange={setPath}
                 counts={pathCounts}
-                resultCount={visibleGroups.length}
-                totalCount={groups.length}
+                resultCount={visibleRows.length}
+                totalCount={rows.length}
               />
 
-              {visibleGroups.length > 0 ? (
-                <div className="connection-card-grid">
-                  {visibleGroups.map((group) => (
-                    <ConnectionCard
-                      key={group.id}
-                      group={group}
-                      expanded={expandedId === group.id}
-                      onToggle={() => setExpandedId(expandedId === group.id ? null : group.id)}
+              {visibleRows.length > 0 ? (
+                <div className="conn-rows">
+                  {visibleRows.map((row) => (
+                    <ConnectionRow
+                      key={row.id}
+                      row={row}
+                      maxSpeed={maxSpeed}
+                      expanded={expandedId === row.id}
+                      onToggle={() => setExpandedId(expandedId === row.id ? null : row.id)}
                     />
                   ))}
                 </div>
               ) : (
                 <div className="connections-empty inline">
-                  {loading && connections.length === 0 ? '加载中…' : '暂无匹配站点'}
+                  {loading && connections.length === 0 ? '加载中…' : `暂无匹配${DIMENSION_LABELS[dimension]}`}
                 </div>
               )}
             </div>

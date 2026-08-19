@@ -15,7 +15,7 @@ export function AnimatedValue({ value, className }: { value: string | number; cl
   return <span key={String(value)} className={classNames('value-anim', 'num', className)}>{value}</span>
 }
 
-function SiteMark({ domain }: { domain: string }) {
+export function SiteMark({ domain }: { domain: string }) {
   const icon = iconForDomain(domain)
   const isLetter = 'letter' in icon
   return (
@@ -43,7 +43,7 @@ function connectionDuration(connection: ClashConnection): string {
   return formatUptime(Math.max(0.1, (Date.now() - startedAt) / 1000))
 }
 
-function ConnectionDetailRow({ connection }: { connection: ClashConnection }) {
+export function ConnectionDetailRow({ connection }: { connection: ClashConnection }) {
   const meta = connection.metadata || {}
   const chain = Array.isArray(connection.chains) && connection.chains.length > 0
     ? connection.chains.join(' → ')

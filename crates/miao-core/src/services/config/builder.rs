@@ -310,6 +310,10 @@ fn get_config_template() -> serde_json::Value {
             "final": "proxy",
             "auto_detect_interface": true,
             "default_domain_resolver": "local",
+            // 无条件启用进程搜索：面板「按进程」视图与 Clash API 的 processPath 依赖它；
+            // 否则仅当存在 process 类规则时才收集，无进程规则的用户面板会拿不到数据。
+            // 开销为每条新连接一次进程查找，可忽略。
+            "find_process": true,
             "rules": [
                 {"action": "sniff"},
                 {"protocol": "dns", "action": "hijack-dns"},

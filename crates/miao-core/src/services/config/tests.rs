@@ -137,6 +137,27 @@ fn build_sing_box_config_skips_rules_with_missing_node() {
 }
 
 #[test]
+fn generated_config_enables_find_process_for_panel_process_view() {
+    // 面板「按进程」视图依赖 Clash API 的 processPath，而 sing-box 只在
+    // find_process 或进程类规则存在时才收集——无条件开启保证任何用户配置下都有数据。
+    let config = Config {
+        nodes: vec![r#"{"type":"hysteria2","tag":"manual-a","server":"a.example.com","server_port":443,"password":"p","tls":{"enabled":true}}"#.to_string()],
+        ..Default::default()
+    };
+
+    let (built, _, _) = build_sing_box_config(
+        &config,
+        vec!["manual-a".to_string()],
+        vec![json!({"type":"hysteria2","tag":"manual-a","server":"a.example.com","server_port":443,"password":"p","tls":{"enabled":true}})],
+        vec![],
+        vec![],
+    )
+    .unwrap();
+
+    assert_eq!(built["route"]["find_process"], json!(true));
+}
+
+#[test]
 fn runtime_config_node_tags_excludes_builtin_outbounds() {
     let config_json = json!({
         "outbounds": [

@@ -181,6 +181,10 @@
     --share-link-min-h: 110px;
     --rule-list-max-h: 280px;
     --conn-card-min: 280px; /* 连接卡网格最小列宽 */
+    --conn-row-min-h: 56px; /* 链接统计行最小高度 */
+    --conn-speed-w: 9.5rem; /* 行内速率单元宽（上下行两行数字 + 比例条） */
+    --conn-total-w: 8.5rem; /* 行内累计单元宽 */
+    --conn-bar-h: 3px; /* 速率比例条高度（与 --bw-bar 同档） */
     --tile-min-h: 88px; /* 节点 tile 最小高度 */
     --size-tile-test: 64px; /* 节点 tile 正方形测速按钮边长（四位数延迟 + ms 不换行） */
 

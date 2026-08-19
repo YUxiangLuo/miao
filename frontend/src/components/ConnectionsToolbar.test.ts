@@ -2,11 +2,15 @@ import { describe, expect, it } from 'vitest'
 import {
   displayRuleText,
   filterConnectionGroups,
+  humanizeClashRule,
   isDirectOutbound,
   pathCountsFor,
+  processGroupRows,
+  outboundGroupRows,
+  processNameOf,
   sortConnectionGroups,
 } from './connectionFilters'
-import { connectionGroupMock } from '../testFixtures'
+import { connectionGroupMock, connectionMock } from '../testFixtures'
 
 const groups = [
   connectionGroupMock({
@@ -84,5 +88,93 @@ describe('connection sorting', () => {
   it('sorts by combined up/down speed (fixed order)', () => {
     expect(sortConnectionGroups(groups).map((group) => group.domain))
       .toEqual(['api.github.com', 'www.bilibili.com', 'chatgpt.com'])
+  })
+})
+
+describe('processNameOf', () => {
+  it('extracts the basename and strips the user suffix', () => {
+    expect(processNameOf('/usr/lib/firefox/firefox (alice)')).toBe('firefox')
+    expect(processNameOf('/opt/brave-origin-bin/brave (alice)')).toBe('brave')
+  })
+
+  it('handles Windows paths and NT device paths', () => {
+    expect(processNameOf('C:\\Program Files\\qBittorrent\\qbittorrent.exe')).toBe('qbittorrent.exe')
+    expect(processNameOf('\\Device\\HarddiskVolume3\\Windows\\System32\\svchost.exe')).toBe('svchost.exe')
+  })
+
+  it('returns null for empty input', () => {
+    expect(processNameOf('')).toBeNull()
+    expect(processNameOf(undefined)).toBeNull()
+  })
+})
+
+describe('humanizeClashRule', () => {
+  it('translates rule_set and final into friendly labels', () => {
+    expect(humanizeClashRule('final')).toBe('兜底规则')
+    expect(humanizeClashRule('rule_set=chinasite => route(direct)')).toBe('中国站点规则集 → 直连')
+    expect(humanizeClashRule('rule_set=chinaip => route(direct)')).toBe('中国 IP 规则集 → 直连')
+  })
+
+  it('translates custom rule matchers with field labels and targets', () => {
+    expect(humanizeClashRule('process_name=qbittorrent => route(direct)')).toBe('进程名 qbittorrent → 直连')
+    expect(humanizeClashRule('domain_keyword=openai => route(香港节点)')).toBe('域名关键词 openai → 香港节点')
+    expect(humanizeClashRule('protocol=bittorrent => reject')).toBe('嗅探协议 bittorrent → 拦截')
+  })
+
+  it('translates bare ip_is_private matcher', () => {
+    expect(humanizeClashRule('ip_is_private => route(direct)')).toBe('私有 IP → 直连')
+  })
+
+  it('returns null for unparseable formats so callers fall back', () => {
+    expect(humanizeClashRule('')).toBeNull()
+    expect(humanizeClashRule('RuleSet')).toBeNull()
+    expect(humanizeClashRule('Match')).toBeNull()
+  })
+})
+
+describe('dimension group rows', () => {
+  const conns = [
+    connectionMock({
+      id: 'a',
+      downloadSpeed: 100,
+      metadata: { host: 'api.github.com', processPath: '/usr/bin/brave (alice)' },
+    }),
+    connectionMock({
+      id: 'b',
+      downloadSpeed: 50,
+      chains: ['direct'],
+      metadata: { host: 'www.bilibili.com', processPath: '/usr/bin/brave (alice)' },
+    }),
+    connectionMock({
+      id: 'c',
+      downloadSpeed: 10,
+      metadata: { host: 'mtalk.google.com', processPath: '/usr/lib/firefox/firefox (alice)' },
+    }),
+  ]
+
+  it('groups by process with domain counts and summed speeds', () => {
+    const rows = processGroupRows(conns)
+    expect(rows).toHaveLength(2)
+    const brave = rows.find((r) => r.title === 'brave')!
+    expect(brave.count).toBe(2)
+    expect(brave.subtitle).toBe('2 个站点')
+    expect(brave.downloadSpeed).toBe(150)
+    const firefox = rows.find((r) => r.title === 'firefox')!
+    expect(firefox.subtitle).toBe('1 个站点')
+  })
+
+  it('groups connections without process info into 未知进程', () => {
+    const rows = processGroupRows([connectionMock({ metadata: { host: 'a.dev' } })])
+    expect(rows).toHaveLength(1)
+    expect(rows[0].title).toBe('未知进程')
+  })
+
+  it('groups by outbound', () => {
+    const rows = outboundGroupRows(conns)
+    const proxy = rows.find((r) => r.title === 'proxy')!
+    const direct = rows.find((r) => r.title === 'direct')!
+    expect(proxy.count).toBe(2)
+    expect(direct.count).toBe(1)
+    expect(direct.subtitle).toBe('1 个站点')
   })
 })
