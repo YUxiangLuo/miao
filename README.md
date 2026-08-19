@@ -7,7 +7,7 @@
   </p>
 </div>
 
-Miao 把 sing-box 内核、geo 分流规则和 Web 控制面板编进同一个可执行文件。TUN 接管整机流量，浏览器打开面板即完成配置。Linux / OpenWrt 上是 `sudo` 即跑的单二进制，Windows 上是带系统托盘的桌面程序。
+Miao 把 sing-box 内核、geo 分流规则和 Web 控制面板编进同一个可执行文件。TUN 接管整机流量，浏览器打开面板即完成配置（深色 / 浅色双主题）。Linux / OpenWrt 上是 `sudo` 即跑的单二进制，Windows 上是带系统托盘的桌面程序。
 
 ![Miao 控制面板](https://miao.vesein.dev/assets/panel.webp)
 
