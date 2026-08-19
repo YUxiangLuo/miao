@@ -1,5 +1,5 @@
 import { memo } from 'react'
-import { Anchor, Plus, Trash2 } from 'lucide-react'
+import { Plus, Server, Trash2 } from 'lucide-react'
 import { ICON } from '../tokens.js'
 import { Button, SectionCard } from './ui.jsx'
 import { protocolTone, classNames } from '../utils.js'
@@ -32,7 +32,7 @@ export function NodesCard({ nodes, isInitializing, onDeleteNode, onOpenAddNode }
       header={
         <div className="section-header">
           <div className="section-title-wrap">
-            <Anchor size={ICON.sm} className="section-icon" />
+            <Server size={ICON.sm} className="section-icon" />
             <span>手动节点</span>
             <span className={classNames('badge', 'counter-pill')}>{nodes.length}</span>
           </div>
