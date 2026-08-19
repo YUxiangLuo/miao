@@ -642,10 +642,10 @@
 .conn-row-speed .tone-upload {
     color: var(--success);
 }
-/* 速率比例条：占满速率单元宽度的通栏，高度取 --conn-bar-h */
+/* 速率比例条：蓝段=下载、绿段=上传（与数字同色），总长 = 总速率相对占比 */
 .conn-speed-bar {
     grid-column: 1 / -1;
-    display: block;
+    display: flex;
     height: var(--conn-bar-h);
     border-radius: var(--r-pill);
     background: var(--hover);
@@ -654,17 +654,13 @@
 .conn-speed-bar > i {
     display: block;
     height: 100%;
-    border-radius: inherit;
     transition: width var(--dur-slow) var(--ease);
 }
-.conn-speed-bar.bar-proxy > i {
+.conn-speed-bar .seg-down {
     background: var(--info);
 }
-.conn-speed-bar.bar-direct > i {
+.conn-speed-bar .seg-up {
     background: var(--success);
-}
-.conn-speed-bar.bar-reject > i {
-    background: var(--danger);
 }
 .conn-row-total {
     flex: 0 0 var(--conn-total-w);

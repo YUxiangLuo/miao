@@ -144,4 +144,19 @@ describe('ConnectionsModal connection list', () => {
     expect(screen.getByLabelText('active.dev 链接').className).toContain('active')
     expect(screen.getByLabelText('idle.dev 链接').className).toContain('idle')
   })
+
+  it('renders the speed bar as full-width download/upload segments matching the numbers', () => {
+    renderModal([
+      connection({ id: 'a', downloadSpeed: 300, uploadSpeed: 100 }),
+      connection({ id: 'b', downloadSpeed: 50, metadata: { host: 'only-down.dev' } }),
+    ])
+
+    // 每行恒满宽：段宽 = 本行内上下行占比，不随全场最大值缩放
+    const rowA = screen.getByLabelText('api.github.com 链接')
+    expect((rowA.querySelector('.seg-down') as HTMLElement).style.width).toBe('75%')
+    expect((rowA.querySelector('.seg-up') as HTMLElement).style.width).toBe('25%')
+    const rowB = screen.getByLabelText('only-down.dev 链接')
+    expect((rowB.querySelector('.seg-down') as HTMLElement).style.width).toBe('100%')
+    expect((rowB.querySelector('.seg-up') as HTMLElement).style.width).toBe('0%')
+  })
 })

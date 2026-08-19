@@ -15,7 +15,6 @@ import { ConnectionsToolbar } from './ConnectionsToolbar'
 import { AnimatedValue } from './ConnectionCard'
 import { ConnectionRow } from './ConnectionRow'
 import {
-  connectionSpeed,
   filterConnectionsByPath,
   pathCountsForConnections,
   sortConnections,
@@ -59,10 +58,6 @@ export function ConnectionsModal({
     [connections, path],
   )
   const pathCounts = useMemo(() => pathCountsForConnections(connections), [connections])
-  const maxSpeed = useMemo(
-    () => visibleConnections.reduce((max, connection) => Math.max(max, connectionSpeed(connection)), 0),
-    [visibleConnections],
-  )
 
   if (!open) return null
 
@@ -158,7 +153,6 @@ export function ConnectionsModal({
                     <ConnectionRow
                       key={connection.id}
                       connection={connection}
-                      maxSpeed={maxSpeed}
                     />
                   ))}
                 </div>
