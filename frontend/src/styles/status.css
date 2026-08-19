@@ -58,11 +58,12 @@
 }
 /* 速率数值定宽：数值位数/单位变化（37–79px 摆动）不再引起顶栏布局抖动。
    实测最宽 "1023 MB/s" ≈ 79px，取 5.5rem(88px) 留字体度量余量；
-   右对齐且不裁切——极端字体下溢出只向左吃掉与图标间的空隙，外部布局不受影响。 */
+   左对齐让数字始终紧跟箭头（右对齐会在短数值时把二者远远分开）；
+   定宽盒内右侧留白不可见，位数增长向右吃掉余量，外部布局不受影响。 */
 .traffic-item .num {
     display: inline-block;
     width: var(--num-w);
-    text-align: right;
+    text-align: left;
 }
 .traffic-icon.up {
     color: var(--accent);
