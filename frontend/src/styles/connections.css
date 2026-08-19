@@ -340,12 +340,12 @@
     border-color: var(--border);
     background: var(--hover-subtle);
 }
-/* 活跃连接:加粗绿色描边 + 外发光 + 底色微染,配合活动点一眼可辨 */
+/* 活跃连接：中性浮起（描边提亮一档 + 弱填充），"正在传输"的信号由脉冲活点
+   承担——大面积绿块会让整条带变成噪声墙，安静的面板里绿色只属于小焦点 */
 .connection-card.active,
 .connection-card.active:hover {
-    border-color: color-mix(in srgb, var(--success-strong) 60%, transparent);
-    background: color-mix(in srgb, var(--success) 10%, transparent);
-    box-shadow: 0 0 16px color-mix(in srgb, var(--success-strong) 15%, transparent);
+    border-color: var(--border-strong);
+    background: var(--hover-subtle);
 }
 .connection-card.expanded {
     border-color: var(--border);
@@ -353,8 +353,8 @@
 }
 .connection-card.active.expanded,
 .connection-card.active.expanded:hover {
-    border-color: color-mix(in srgb, var(--success-strong) 60%, transparent);
-    background: color-mix(in srgb, var(--success) 12%, transparent);
+    border-color: var(--border-strong);
+    background: var(--hover-subtle);
 }
 .connection-card-head {
     display: flex;
