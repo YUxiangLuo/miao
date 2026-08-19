@@ -43,6 +43,7 @@ const RuleRow = memo(function RuleRow({ rule, onDelete, disabled, active }) {
           {ruleTargetLabel(display.target)}
         </span>
       )}
+      {active && <span className="rule-live-dot" title="正在匹配" aria-hidden="true" />}
       <button
         className="icon-button subtle"
         onClick={() => onDelete(rule)}

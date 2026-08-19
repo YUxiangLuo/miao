@@ -47,28 +47,19 @@
     align-items: center;
     gap: var(--space-1);
 }
-/* 规则命中：与连接卡同一语言——不用整行色块，信号收敛到三个小焦点：
-   左侧静态绿条（扫读定位）+ 字段 chip 变绿 + target 徽章亮度脉冲（活体信号） */
-.list-row.rule-active {
-    box-shadow: inset var(--bw-bar) 0 0 var(--success);
-}
-.list-row.rule-active .rule-field-chip {
-    background: var(--surface-green-soft);
-    color: var(--success);
-}
-.list-row.rule-active .rule-target-badge {
-    animation: ruleActiveBadge var(--anim-rule) ease-in-out infinite;
-}
-@keyframes ruleActiveBadge {
-    0%, 100% {
-        filter: brightness(1);
-    }
-    50% {
-        filter: brightness(1.18);
-    }
+/* 规则命中：与活跃连接同一语言——行尾脉冲绿点，行本身无任何变色 */
+.list-row .rule-live-dot {
+    flex: 0 0 auto;
+    align-self: center;
+    width: var(--size-dot);
+    height: var(--size-dot);
+    border-radius: var(--r-pill);
+    background: var(--success);
+    box-shadow: 0 0 6px color-mix(in srgb, var(--success-strong) 80%, transparent);
+    animation: livePulse var(--anim-live) ease-in-out infinite;
 }
 @media (prefers-reduced-motion: reduce) {
-    .list-row.rule-active .rule-target-badge {
+    .list-row .rule-live-dot {
         animation: none;
     }
 }
