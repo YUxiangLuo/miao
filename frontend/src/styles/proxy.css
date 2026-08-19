@@ -61,9 +61,23 @@
     background: var(--raised);
     color: var(--text);
     text-align: left;
+    transition: transform var(--dur) var(--ease), border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
+}
+/* 悬停浮起：上移 2px + 小阴影；选中态只加强描边，浮起照常有 */
+.proxy-tile:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-lift);
 }
 .proxy-tile:hover:not(.active) {
     border-color: var(--border-strong);
+}
+.proxy-tile.active:hover {
+    border-color: var(--accent-strong);
+}
+@media (prefers-reduced-motion: reduce) {
+    .proxy-tile {
+        transition: none;
+    }
 }
 .proxy-tile.active {
     background: var(--accent-tint);
