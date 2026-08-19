@@ -35,7 +35,7 @@ embedded/             sing-box + srs，不入库
 
 ```bash
 # 前端
-bun run --cwd frontend dev / test / lint
+bun run --cwd frontend dev / test / lint / typecheck
 
 # 默认成员门禁（与 CI 一致）
 cargo test --locked --all-targets
