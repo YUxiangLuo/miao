@@ -24,12 +24,17 @@ Linux 版是：下载一个文件，`sudo` 跑，浏览器打开，TUN 接管流
 crates/miao-core      库：面板、配置事务、启停内核
 crates/miao-cli       Linux/OpenWrt 入口，二进制名 miao-rust
 desktop/src-tauri     Tauri 2 壳（workspace 成员但不是 default-member）
-frontend/             唯一一份面板
+frontend/             唯一一份面板（React 19 + TypeScript strict + Vite）
 public/               vite 构建产物（gitignore），被 include_str! 嵌进 core
 embedded/             sing-box + srs，不入库
 ```
 
 `cargo test` / `cargo clippy`（不加 `--workspace`）只打 core + cli；**不要 `cargo test --workspace`**（会去编桌面壳、拉 webkit）。
+
+## 前端栈与跨层约定
+
+- **TypeScript 钉 6.0.3**：typescript-eslint 8.x 尚未支持 TS 7（7.0 无进程内编程 API，7.1 才会有新 API，跟踪 typescript-eslint#10940）。`bun add -d typescript@latest` 会直接炸 lint，别升。
+- **前后端类型对齐**：`frontend/src/types/api.ts` 与 `crates/miao-core/src/models/*.rs` 的 serde 结构体一一对应——`skip_serializing_if` → `?:`，裸 `Option<T>` → `| null`。**改 Rust models 必须同步 api.ts**；`types/clash.ts` 无后端 schema（Clash API 反代），按前端实际消费面维护。
 
 ## 日常命令
 
@@ -61,12 +66,14 @@ MIAO_TARGET=windows-amd64 ./scripts/build-embedded.sh
 
 ```bash
 sudo systemctl stop miao
-sudo ./target/release/miao-rust
+sudo ./target/release/miao-rust   # 裸跑会与生产实例抢 TUN 和 6161 端口
 cargo run -p miao-desktop
 cargo run -p miao-cli
 # 任何会往 /tmp/miao-sing-box 抽内核的测试（spawn_server 测试必须 skip_extract: true，
 # 且必须注入 volatile_path 临时路径，否则读写的是真实运行时目录）
 ```
+
+**合法升级本机生产实例的唯一姿势**：`./scripts/build-frontend.sh && cargo build --locked --release && sudo bash install.sh ./target/release/miao-rust`。install.sh 会停服→换二进制→重启，断网窗口约 2 秒；升级前先 `sudo cp /usr/local/bin/miao /tmp/miao.$(date +%s).backup` 留回滚。注意只跑 `cargo build` 不重嵌前端，部署的还是旧页面。
 
 **PWA**：`frontend/public/` 的 manifest/sw.js/图标经 vite 拷进 `public/` 再嵌进二进制——新增静态资源必须同时在 `router.rs` 注册路由。SW 只是 Chrome 安装门槛的门票：只给导航请求做 network-first 兜底，**永远别缓存 `/api`**。
 
@@ -106,9 +113,9 @@ tauri.cmd build --bundles nsis --ci
 - 运行 `miao.exe` 会弹 UAC 并用 TUN 接管本机流量，调试时别在还要出网的会话里乱杀进程
 - 本地产物仅自测，发布以 CI 产物为准
 
-## Arch 的 Linux 实例（别动它）
+## Arch 的 Linux 实例（生产依赖，不是调试对象）
 
-systemd 服务：`/usr/local/bin/miao`，配置 `/etc/miao/config.yaml`，运行时 `/tmp/miao-sing-box`，面板 `http://localhost:6161`。当「生产依赖」，不是调试对象。
+systemd 服务：`/usr/local/bin/miao`，配置 `/etc/miao/config.yaml`，运行时 `/tmp/miao-sing-box`，面板 `http://localhost:6161`。别拿它调试、别随手重启；升级走前文「合法升级」一条。
 
 - 查进程用 `sudo pgrep -x miao` 或 `sudo ss -tlnp 'sport = :6161'`（进程名来自安装路径 `/usr/local/bin/miao`，不是构建产物名 `miao-rust`；`pgrep -f` 会误匹配 nohup 包装进程；root 进程普通用户看不到）。服务整体状态直接 `systemctl status miao`
 - `api/status` 的 `data.pid` 是 **sing-box 子进程**，不是后端
@@ -139,22 +146,24 @@ TUN JSON：`auto_route` + `strict_route`，`interface_name` 仍是 `sing-tun`。
 
 **后端**：只测纯函数、校验失败、读路径、不触网的 handler。成功写路径会起真实 sing-box，单测别碰。`spawn_server` 必须 `skip_extract: true` + 注入 `volatile_path` 临时路径。Windows 专属路由测试用 `#[cfg(windows)]` 断言 `/api/upgrade`、`/api/vps/deploy` 是 404。
 
-**前端**：App 集成测试 mock `/api/status|subs|nodes|rules|version` 和 Clash 端点。`setupTests.js` 全局 stub 了 `matchMedia`（恒 false=深色）与 `localStorage`（Node ≥22 内建版遮蔽 jsdom，返回 undefined，故用内存 stub）。
+**前端**：App 集成测试 mock `/api/status|subs|nodes|rules|version` 和 Clash 端点。`setupTests.ts` 全局 stub 了 `matchMedia`（恒 false=深色）与 `localStorage`（Node ≥22 内建版遮蔽 jsdom，返回 undefined，故用内存 stub）。**构造 API/Clash 类型的 mock 一律用 `src/testFixtures.ts` 的工厂**（`statusMock`/`connectionMock`/`connectionGroupMock`/`ruleMock`）：后端加必填字段时在工厂补默认值，测试只覆盖差异字段，不要手写散装对象。
 
 ## 设计 token 约定
 
-样式唯一来源是 `frontend/src/styles/tokens.css`（九段：主题色/派生色/音阶/动效/层级/透明度/描边/控件几何/组件几何）。写样式先找 token，没有再新增；**禁止组件里出现硬编码颜色/尺寸/时长**。例外（需在注释说明）：`@media` 断点（CSS 不支持 var，JS 镜像在 `src/tokens.js`）、≤3px 光学补偿 padding、onboarding 门面散值、`siteIcons.js` 第三方品牌色。
+样式唯一来源是 `frontend/src/styles/tokens.css`（九段：主题色/派生色/音阶/动效/层级/透明度/描边/控件几何/组件几何）。写样式先找 token，没有再新增；**禁止组件里出现硬编码颜色/尺寸/时长**。例外（需在注释说明）：`@media` 断点（CSS 不支持 var，JS 镜像在 `src/tokens.ts`）、≤3px 光学补偿 padding、onboarding 门面散值、`siteIcons.ts` 第三方品牌色。
 
 - **双主题**：仅段 1 分主题——`:root` 深色（默认）+ `:root[data-theme="light"]` 亮色。其余段主题无关。语义色的 alpha 面/描边一律 `color-mix(in srgb, var(--x) N%, transparent)` 现算，随主题自动派生，不要写死 rgba。
 - **色彩语义**：紫（`--accent` 族）= 交互与选中（品牌色，与 logo 同族）+ 上传速率；蓝（`--info` 族）= 代理路径（出口 chip、规则字段）+ 下载速率；绿专属直连/红拦截/琥珀警告——彩色不再跨维度复用（曾因上传绿与直连绿冲突导致链接统计页读混乱）。选中态用 `--accent-tint`，不要用 info 蓝。
 - **圆角角色档**：`--r-sm` 控件 / `--r-md` 内容块 / `--r-lg` 容器 / `--r-xl` 浮层 / `--r-pill` 徽章；同心规则：外层恒比内层大一级。
-- **主题切换**：只有显式 dark/light 两态，默认 dark，不跟随系统；`hooks/useTheme.js` + `index.html` 内联引导脚本防 FOUC。主题键 `miao-theme`，开关在顶栏（Sun/Moon）。新增主题 = 复制段 1 改值。
-- **JS 侧常量**（图标尺寸、断点、主题键）统一 `src/tokens.js`，与 CSS 注释互指、双向同步。
+- **主题切换**：只有显式 dark/light 两态，默认 dark，不跟随系统；`hooks/useTheme.ts` + `index.html` 内联引导脚本防 FOUC。主题键 `miao-theme`，开关在顶栏（Sun/Moon）。新增主题 = 复制段 1 改值。
+- **JS 侧常量**（图标尺寸、断点、主题键）统一 `src/tokens.ts`，与 CSS 注释互指、双向同步。
 - JS 消费 token：lucide 用 `ICON.xs/sm/md/lg`，logo 用 `LOGO_SIZE`，不要写字面量。
 
 ## 配置与内核管线（后端核心）
 
 变更链路：`config_update` 锁 → 改克隆 → `apply_config_change`（分层落盘 → 生成 → `sing-box check` → 热重启）。面板不直接碰内核，走 Clash API（`127.0.0.1:6262`）。
+
+生成配置无条件带 `route.find_process: true`（builder.rs）：面板「链接统计」每行副标题的进程名依赖 Clash API 的 `processPath`，而 sing-box 只在有进程类规则或此开关下才跑进程搜索器——删掉它，没有进程规则的用户面板就没有进程列数据。
 
 落盘三层（详见 docs/config.md）：稳定层 `config.yaml`（port/subs/nodes/custom_rules/mcp）、易变层 `volatile.yaml`（node_select/route_mode——unix 在 tmpfs 随系统重启清空，Windows 持久）、状态层（可删）。合并视图 = volatile > config > 默认；两层各自原子写 + 跳过未变。
 
@@ -172,7 +181,7 @@ TUN JSON：`auto_route` + `strict_route`，`interface_name` 仍是 `sing-tun`。
 
 ## CI
 
-push/PR 跑 `ci.yml`：Frontend quality → Rust quality（default-members + windows-gnu check）→ Windows 健康检查（`cargo test -p miao-core` + `cargo check -p miao-desktop`，内核用 stub，**不跑 exe、不开 TUN**）。
+push/PR 跑 `ci.yml`：Frontend quality（install → audit → lint → **typecheck** → test → build）→ Rust quality（default-members + windows-gnu check）→ Windows 健康检查（`cargo test -p miao-core` + `cargo check -p miao-desktop`，内核用 stub，**不跑 exe、不开 TUN**）。
 
 打 `v*` tag 或手动跑 **Build Release**：quality → frontend → 并行编 Linux musl 矩阵（zigbuild）与 Windows 桌面（真内核 + NSIS）→ tag 触发时产物传 GitHub Release，手动跑只留 artifacts。发布产物以 CI 为准。
 
