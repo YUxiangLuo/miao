@@ -31,34 +31,43 @@
     .status-card-body {
         flex-wrap: wrap;
     }
-    /* 融合顶栏的移动端行序：品牌+版本号一行，状态一行，速率一行，模式一行 */
+    /* 融合顶栏移动端行序：品牌+主题开关+版本号一行，当前节点一行，速率一行，模式一行 */
     .topbar .brand {
         order: 1;
     }
-    .topbar .version-chip {
+    .topbar .theme-toggle {
         order: 2;
         margin-left: auto;
     }
-    .topbar-divider {
+    .topbar .version-chip {
+        order: 3;
+    }
+    .topbar-divider,
+    .status-card-spacer {
         display: none;
     }
+    .topbar .current-node-chip {
+        order: 4;
+        width: 100%;
+    }
+    .topbar .current-node-chip-name {
+        max-width: none;
+    }
     .topbar .status-cluster {
-        order: 3;
+        order: 5;
         width: 100%;
         flex-wrap: wrap;
-    }
-    .topbar .status-left-wrap {
-        width: 100%;
     }
     .traffic-chip {
         width: 100%;
         justify-content: center;
     }
-    .route-mode-segment {
-        order: 5;
+    .topbar .route-mode-segment {
+        order: 6;
+        width: 100%;
     }
-    .status-card-spacer {
-        display: none;
+    .topbar .route-mode-option {
+        flex: 1;
     }
     .proxy-grid {
         grid-template-columns: repeat(2, minmax(0, 1fr));
