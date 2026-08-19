@@ -201,8 +201,8 @@
 
 /* ── 1b. 亮色主题 ────────────────────────────────────────────────────
    只覆盖段 1；段 2-9（音阶/动效/几何）与主题无关，不重复。
-   auto 解析在 JS 侧（hooks/useTheme.js 监听 prefers-color-scheme），
-   因此这里不需要 @media 重复一份色值。 */
+   主题只有显式 dark/light 两态（hooks/useTheme.js + index.html 引导脚本），
+   默认 dark，不跟随系统。 */
 :root[data-theme="light"] {
     color-scheme: light;
     --bg: #eceef2;

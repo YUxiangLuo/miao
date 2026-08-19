@@ -9,14 +9,12 @@
     <meta name="theme-color" content="#1a1d22" />
     <link rel="apple-touch-icon" href="/icon-192.png" />
     <script>
-      // 主题引导：渲染前解析 data-theme，避免闪烁（FOUC）。
-      // auto 在此解析为具体主题；运行期跟随系统由 hooks/useTheme.js 监听。
-      // 键名与色值镜像 src/tokens.js（THEME_KEY / THEME_META），改动需同步。
+      // 主题引导：渲染前把显式主题落到 data-theme，避免闪烁（FOUC）。
+      // 只有 dark/light 两态，默认 dark；键名与色值镜像 src/tokens.js
+      // （THEME_KEY / THEME_META），改动需同步。
       try {
-        var t = localStorage.getItem('miao-theme') || 'auto'
-        if (t === 'auto') {
-          t = window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'
-        }
+        var t = localStorage.getItem('miao-theme')
+        if (t !== 'light') t = 'dark'
         document.documentElement.dataset.theme = t
         var meta = document.querySelector('meta[name="theme-color"]')
         if (meta) meta.content = t === 'light' ? '#eceef2' : '#1a1d22'

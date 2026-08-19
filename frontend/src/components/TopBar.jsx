@@ -3,7 +3,6 @@ import {
   ArrowDown,
   Globe2,
   LoaderCircle,
-  Monitor,
   Moon,
   Route,
   Sun,
@@ -13,8 +12,8 @@ import { SectionCard, LogoIcon } from './ui.jsx'
 import { useTheme } from '../hooks/useTheme.js'
 import { classNames, formatDelay, formatSpeed, getDelayTone } from '../utils.js'
 
-const THEME_LABEL = { auto: '跟随系统', light: '浅色', dark: '深色' }
-const THEME_ICON = { auto: Monitor, light: Sun, dark: Moon }
+const THEME_LABEL = { light: '浅色', dark: '深色' }
+const THEME_ICON = { light: Sun, dark: Moon }
 
 export function TopBar({
   status,
@@ -38,8 +37,8 @@ export function TopBar({
   const currentNode = primaryGroup?.now
   const currentNodeDelay = currentNode ? delays?.[currentNode] : undefined
   const isTestingCurrent = currentNode ? Boolean(testingNodes?.[currentNode]) : false
-  const { theme, cycle } = useTheme()
-  const ThemeIcon = THEME_ICON[theme] || Monitor
+  const { theme, toggle } = useTheme()
+  const ThemeIcon = THEME_ICON[theme] || Moon
 
   return (
     <SectionCard className="status-card topbar" bodyClassName="status-card-body" header={null}>
@@ -115,7 +114,7 @@ export function TopBar({
       <button
         type="button"
         className="theme-toggle"
-        onClick={cycle}
+        onClick={toggle}
         aria-label={`主题：${THEME_LABEL[theme]}，点击切换`}
         title={`主题：${THEME_LABEL[theme]}，点击切换`}
       >

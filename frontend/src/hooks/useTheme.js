@@ -1,32 +1,23 @@
 import { useCallback, useEffect, useState } from 'react'
 import { THEME_KEY, THEME_META } from '../tokens.js'
 
-const LIGHT_MQ = '(prefers-color-scheme: light)'
-
-// 'auto' 时跟随系统；显式 light/dark 直接生效
-function resolve(theme) {
-  if (theme !== 'auto') return theme
-  if (typeof window.matchMedia !== 'function') return 'dark'
-  return window.matchMedia(LIGHT_MQ).matches ? 'light' : 'dark'
-}
-
 function apply(theme) {
-  const resolved = resolve(theme)
-  document.documentElement.dataset.theme = resolved
+  document.documentElement.dataset.theme = theme
   const meta = document.querySelector('meta[name="theme-color"]')
-  if (meta) meta.content = THEME_META[resolved] || THEME_META.dark
+  if (meta) meta.content = THEME_META[theme] || THEME_META.dark
 }
 
+// 只有显式 dark/light 两态；任何历史值（如旧版的 auto）都归一为 dark 默认
 function readStored() {
   try {
-    return window.localStorage.getItem(THEME_KEY) || 'auto'
+    return window.localStorage.getItem(THEME_KEY) === 'light' ? 'light' : 'dark'
   } catch {
-    return 'auto'
+    return 'dark'
   }
 }
 
-// 主题三态循环：auto → light → dark。初始值已由 index.html 引导脚本落到
-// documentElement 上，这里负责后续切换、持久化与跟随系统变化。
+// 初始值已由 index.html 引导脚本落到 documentElement 上，
+// 这里负责后续切换与持久化。
 export function useTheme() {
   const [theme, setTheme] = useState(readStored)
 
@@ -37,16 +28,11 @@ export function useTheme() {
     } catch {
       /* 隐私模式等不可写场景静默跳过 */
     }
-    if (theme !== 'auto') return undefined
-    const mq = window.matchMedia(LIGHT_MQ)
-    const onChange = () => apply('auto')
-    mq.addEventListener('change', onChange)
-    return () => mq.removeEventListener('change', onChange)
   }, [theme])
 
-  const cycle = useCallback(() => {
-    setTheme((t) => (t === 'auto' ? 'light' : t === 'light' ? 'dark' : 'auto'))
+  const toggle = useCallback(() => {
+    setTheme((t) => (t === 'dark' ? 'light' : 'dark'))
   }, [])
 
-  return { theme, cycle }
+  return { theme, toggle }
 }

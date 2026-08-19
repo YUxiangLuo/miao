@@ -148,7 +148,7 @@ TUN JSON：`auto_route` + `strict_route`，`interface_name` 仍是 `sing-tun`。
 - **双主题**：仅段 1 分主题——`:root` 深色（默认）+ `:root[data-theme="light"]` 亮色。其余段主题无关。语义色的 alpha 面/描边一律 `color-mix(in srgb, var(--x) N%, transparent)` 现算，随主题自动派生，不要写死 rgba。
 - **色彩语义**：紫（`--accent` 族）= 交互与选中（品牌色，与 logo 同族）；蓝（`--info` 族）专职代理路径语义（出口 chip、规则字段、下载速率）；绿直连/红拦截/琥珀警告。选中态用 `--accent-tint`，不要用 info 蓝。
 - **圆角角色档**：`--r-sm` 控件 / `--r-md` 内容块 / `--r-lg` 容器 / `--r-xl` 浮层 / `--r-pill` 徽章；同心规则：外层恒比内层大一级。
-- **auto 解析在 JS**：`hooks/useTheme.js` 监听 `prefers-color-scheme`；`index.html` 内联引导脚本防 FOUC。主题键 `miao-theme`（auto/light/dark 三态循环），开关在顶栏。新增主题 = 复制段 1 改值。
+- **主题切换**：只有显式 dark/light 两态，默认 dark，不跟随系统；`hooks/useTheme.js` + `index.html` 内联引导脚本防 FOUC。主题键 `miao-theme`，开关在顶栏（Sun/Moon）。新增主题 = 复制段 1 改值。
 - **JS 侧常量**（图标尺寸、断点、主题键）统一 `src/tokens.js`，与 CSS 注释互指、双向同步。
 - JS 消费 token：lucide 用 `ICON.xs/sm/md/lg`，logo 用 `LOGO_SIZE`，不要写字面量。
 
