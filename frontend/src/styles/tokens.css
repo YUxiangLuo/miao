@@ -207,7 +207,7 @@
     color-scheme: light;
     --bg: #eceef2;
     --surface: #ffffff;
-    --surface-soft: #f2f4f7;
+    --surface-soft: #eef0f4; /* 白底上的凹槽/chip 填充（与卡片拉开可辨的灰阶） */
     --raised: #ffffff; /* tile 与卡片同色，层级交给描边+阴影 */
     --modal-bg: #ffffff;
     --toast-bg: rgba(255, 255, 255, 0.96);
@@ -216,13 +216,14 @@
     --hover-subtle: rgba(20, 25, 35, 0.04);
     --hover-strong: rgba(20, 25, 35, 0.1);
     --inset-fill: rgba(20, 25, 35, 0.02);
-    --border: #dde1e8;
-    --border-soft: #e7eaf0;
-    --border-strong: #c3c9d4;
+    --border: #ccd2dc;
+    --border-soft: #dcdfe7;
+    --border-strong: #b6bfcc;
+    /* 对比度基线：muted ≥6.8:1（正文级），subtle ≥3.6:1（装饰级） */
     --text: #2f3641;
     --text-strong: #161a21;
-    --text-muted: #5f6a7a;
-    --text-subtle: #9aa4b2;
+    --text-muted: #525b69;
+    --text-subtle: #7c8697;
     --accent: #6758c9;
     --accent-strong: #5546b8;
     --accent-tint: #e4e1fa;
@@ -234,7 +235,7 @@
     --info: #3570b8;
     --info-strong: #2f5f9e;
     --info-tint: #e8eef7;
-    --success: #1f7a4d;
+    --success: #1c6f45; /* 在 surface-green-soft 上 5.2:1 */
     --success-strong: #16a34a;
     --warning: #9c6a1b;
     --danger: #bf4040;
