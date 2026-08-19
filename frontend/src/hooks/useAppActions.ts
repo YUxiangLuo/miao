@@ -36,8 +36,6 @@ export function useAppActions(data: AppData) {
     clashApiBase,
     switchingNode,
     setSwitchingNode,
-    newSubUrl,
-    setNewSubUrl,
     nodeType,
     nodeForm,
     setShowNodeModal,
@@ -167,22 +165,24 @@ export function useAppActions(data: AppData) {
     }
   }, [status.node_select, clashApiBase, fetchProxies, showToast, switchingNode, setSwitchingNode])
 
-  const handleAddSubscription = useCallback(async () => {
-    const error = validateSubscriptionUrl(newSubUrl.trim())
+  const handleAddSubscription = useCallback(async (url: string): Promise<boolean> => {
+    const trimmed = url.trim()
+    const error = validateSubscriptionUrl(trimmed)
     if (error) {
       showToast(error, 'error')
-      return
+      return false
     }
     try {
-      await apiCall('subs', { method: 'POST', body: JSON.stringify({ url: newSubUrl.trim() }) }, 'addSub')
-      setNewSubUrl('')
+      await apiCall('subs', { method: 'POST', body: JSON.stringify({ url: trimmed }) }, 'addSub')
       clearDelays()
       await fetchSubs()
       showToast('订阅已添加', 'success')
+      return true
     } catch (error) {
       showToast(errorMessage(error), 'error')
+      return false
     }
-  }, [newSubUrl, apiCall, clearDelays, fetchSubs, showToast, setNewSubUrl])
+  }, [apiCall, clearDelays, fetchSubs, showToast])
 
   const handleOnboardingAddSub = useCallback(async (url: string): Promise<boolean> => {
     try {

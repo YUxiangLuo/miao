@@ -81,9 +81,6 @@
     .form-grid.two {
         grid-template-columns: minmax(0, 1fr);
     }
-    .subscription-add-row {
-        flex-direction: column;
-    }
     .toast-stack {
         left: var(--float-offset-mobile);
         right: var(--float-offset-mobile);

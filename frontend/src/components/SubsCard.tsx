@@ -1,7 +1,8 @@
-import { memo } from 'react'
-import { Check, CircleX, RefreshCw, Rss, Plus, Trash2 } from 'lucide-react'
+import { memo, useEffect, useId, useState } from 'react'
+import { Check, CircleX, RefreshCw, Rss, Plus, Trash2, X } from 'lucide-react'
 import { ICON } from '../tokens'
 import { Button, SectionCard } from './ui'
+import { useDialog } from '../hooks/useDialog'
 import { classNames, maskSubscription } from '../utils'
 import type { SubStatus } from '../types/api'
 
@@ -42,18 +43,93 @@ const SubRow = memo(function SubRow({ sub, onDelete, disabled }: SubRowProps) {
   )
 })
 
+interface AddSubModalProps {
+  open: boolean
+  loading: boolean
+  onClose: () => void
+  /** 返回是否添加成功；成功时由本组件负责关闭并清空输入 */
+  onSubmit: (url: string) => Promise<boolean>
+}
+
+function AddSubModal({ open, loading, onClose, onSubmit }: AddSubModalProps) {
+  const titleId = useId()
+  const dialogRef = useDialog(open, onClose)
+  const [url, setUrl] = useState('')
+
+  // 关闭后重新打开时回到空输入
+  useEffect(() => {
+    if (!open) setUrl('')
+  }, [open])
+
+  if (!open) return null
+
+  const submit = async () => {
+    const trimmed = url.trim()
+    if (!trimmed) return
+    if (await onSubmit(trimmed)) onClose()
+  }
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div
+        ref={dialogRef}
+        className="modal-card modal-confirm"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        tabIndex={-1}
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="modal-title-row">
+          <div className="modal-title-wrap">
+            <Rss size={ICON.lg} className="icon-accent" />
+            <h3 id={titleId}>添加订阅</h3>
+          </div>
+          <button className="icon-button" onClick={onClose} aria-label="关闭添加订阅对话框">
+            <X size={ICON.md} />
+          </button>
+        </div>
+        <div className="field add-sub-field">
+          <input
+            value={url}
+            onChange={(event) => setUrl(event.target.value)}
+            onKeyDown={(event) => event.key === 'Enter' && submit()}
+            placeholder="粘贴订阅链接..."
+            aria-label="订阅链接"
+            data-autofocus
+          />
+        </div>
+        <div className="modal-actions">
+          <Button tone="ghost" size="sm" onClick={onClose}>取消</Button>
+          <Button
+            tone="primary"
+            size="sm"
+            icon={<Plus size={ICON.xs} />}
+            loading={loading}
+            disabled={!url.trim()}
+            onClick={submit}
+          >
+            添加
+          </Button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export interface SubsCardProps {
   subs: SubStatus[]
-  newSubUrl: string
-  setNewSubUrl: (url: string) => void
   loadingAction: string
-  onAddSub: () => void
+  onAddSub: (url: string) => Promise<boolean>
   onDeleteSub: (url: string) => void
   onRefreshSubs: () => void
   isInitializing: boolean
 }
 
-export function SubsCard({ subs, newSubUrl, setNewSubUrl, loadingAction, onAddSub, onDeleteSub, onRefreshSubs, isInitializing }: SubsCardProps) {
+export function SubsCard({ subs, loadingAction, onAddSub, onDeleteSub, onRefreshSubs, isInitializing }: SubsCardProps) {
+  const [showAdd, setShowAdd] = useState(false)
+  const refreshing = loadingAction === 'refreshSubs'
+
   return (
     <SectionCard
       bodyClassName="panel-body-tight"
@@ -62,16 +138,24 @@ export function SubsCard({ subs, newSubUrl, setNewSubUrl, loadingAction, onAddSu
           <div className="section-title-wrap">
             <Rss size={ICON.sm} className="section-icon" />
             <span>订阅管理</span>
+            <button
+              className="icon-button subtle"
+              onClick={onRefreshSubs}
+              disabled={subs.length === 0 || refreshing || isInitializing}
+              aria-label="刷新订阅"
+              title="刷新订阅"
+            >
+              <RefreshCw size={ICON.xs} className={refreshing ? 'spin' : undefined} />
+            </button>
           </div>
-          <Button 
-            tone="secondary" 
-            size="sm" 
-            icon={<RefreshCw size={ICON.xs} />} 
-            loading={loadingAction === 'refreshSubs'} 
-            disabled={subs.length === 0 || loadingAction === 'refreshSubs' || isInitializing} 
-            onClick={onRefreshSubs}
+          <Button
+            tone="secondary"
+            size="sm"
+            icon={<Plus size={ICON.xs} />}
+            disabled={isInitializing}
+            onClick={() => setShowAdd(true)}
           >
-            刷新
+            添加
           </Button>
         </div>
       }
@@ -87,25 +171,13 @@ export function SubsCard({ subs, newSubUrl, setNewSubUrl, loadingAction, onAddSu
               disabled={isInitializing}
             />
           ))}
-        <div className="subscription-add-row">
-          <input 
-            value={newSubUrl} 
-            onChange={(event) => setNewSubUrl(event.target.value)} 
-            onKeyDown={(event) => event.key === 'Enter' && onAddSub()} 
-            placeholder="粘贴订阅链接..." 
-          />
-          <Button 
-            tone="secondary" 
-            size="sm" 
-            icon={<Plus size={ICON.xs} />} 
-            loading={loadingAction === 'addSub'} 
-            disabled={isInitializing}
-            onClick={onAddSub}
-          >
-            添加
-          </Button>
-        </div>
       </div>
+      <AddSubModal
+        open={showAdd}
+        loading={loadingAction === 'addSub'}
+        onClose={() => setShowAdd(false)}
+        onSubmit={onAddSub}
+      />
     </SectionCard>
   )
 }

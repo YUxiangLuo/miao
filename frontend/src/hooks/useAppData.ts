@@ -26,7 +26,6 @@ export function useAppData() {
   const [firstLoadDone, setFirstLoadDone] = useState(false)
   const [loadingAction, setLoadingAction] = useState('')
   const [upgrading, setUpgrading] = useState(false)
-  const [newSubUrl, setNewSubUrl] = useState('')
   const [nodeForm, setNodeForm] = useState<NodeForm>(EMPTY_NODE_FORM)
   const [nodeType, setNodeType] = useState<NodeType>('hysteria2')
   const [showNodeModal, setShowNodeModal] = useState(false)
@@ -155,8 +154,6 @@ export function useAppData() {
     loadingAction,
     upgrading,
     setUpgrading,
-    newSubUrl,
-    setNewSubUrl,
     nodeForm,
     setNodeForm,
     nodeType,

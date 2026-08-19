@@ -71,8 +71,6 @@ export function DashboardScreen({ app }: { app: ReturnType<typeof useAppControll
 
             <SubsCard
               subs={app.subs}
-              newSubUrl={app.newSubUrl}
-              setNewSubUrl={app.setNewSubUrl}
               loadingAction={app.loadingAction}
               onAddSub={app.handleAddSubscription}
               onDeleteSub={app.handleOpenDeleteSubConfirm}
