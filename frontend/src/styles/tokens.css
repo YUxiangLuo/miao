@@ -205,20 +205,23 @@
    默认 dark，不跟随系统。 */
 :root[data-theme="light"] {
     color-scheme: light;
-    --bg: #eceef2;
+    /* 亮色不用中性灰底：要么白，要么品牌紫的微微彩色（whisper tint） */
+    --bg: #f5f4fa;
     --surface: #ffffff;
-    --surface-soft: #eef0f4; /* 白底上的凹槽/chip 填充（与卡片拉开可辨的灰阶） */
+    --surface-soft: #f1f0f9; /* 白卡上的凹槽/chip 填充：微紫，与卡片可辨 */
     --raised: #ffffff; /* tile 与卡片同色，层级交给描边+阴影 */
     --modal-bg: #ffffff;
     --toast-bg: rgba(255, 255, 255, 0.96);
-    --scrim: rgba(35, 40, 55, 0.45);
-    --hover: rgba(20, 25, 35, 0.06);
-    --hover-subtle: rgba(20, 25, 35, 0.04);
-    --hover-strong: rgba(20, 25, 35, 0.1);
-    --inset-fill: rgba(20, 25, 35, 0.02);
-    --border: #ccd2dc;
-    --border-soft: #dcdfe7;
-    --border-strong: #b6bfcc;
+    --scrim: rgba(40, 36, 66, 0.45);
+    /* hover/凹陷层取 accent 紫的 alpha，不再是黑灰 */
+    --hover: rgba(103, 88, 201, 0.06);
+    --hover-subtle: rgba(103, 88, 201, 0.04);
+    --hover-strong: rgba(103, 88, 201, 0.1);
+    --inset-fill: rgba(103, 88, 201, 0.025);
+    /* 描边带一丝紫灰，与 tint 底同族 */
+    --border: #cfd0de;
+    --border-soft: #e1e2ec;
+    --border-strong: #b7bacd;
     /* 对比度基线：muted ≥6.8:1（正文级），subtle ≥3.6:1（装饰级） */
     --text: #2f3641;
     --text-strong: #161a21;
@@ -231,7 +234,7 @@
     --accent-tint-strong: #6758c9;
     --accent-tint-text: #ffffff;
     --accent-tint-deep: #d5d0f6;
-    --secondary-hover: #e4e7ec;
+    --secondary-hover: #e9e7f8;
     --info: #3570b8;
     --info-strong: #2f5f9e;
     --info-tint: #e8eef7;
@@ -244,8 +247,8 @@
     --toggle-thumb-on: #ffffff;
     --surface-green-soft: #def0e6;
     --surface-red: #fbe9e9;
-    --shadow: 0 16px 32px rgba(30, 35, 45, 0.1);
-    --shadow-modal: 0 24px 60px rgba(30, 35, 45, 0.18);
+    --shadow: 0 16px 32px rgba(70, 60, 120, 0.1);
+    --shadow-modal: 0 24px 60px rgba(70, 60, 120, 0.16);
 }
 
 * {
