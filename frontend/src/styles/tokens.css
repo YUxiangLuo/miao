@@ -206,14 +206,14 @@
    默认 dark，不跟随系统。 */
 :root[data-theme="light"] {
     color-scheme: light;
-    /* 亮色不用中性灰底：要么白，要么品牌紫的微微彩色（whisper tint） */
-    --bg: #f5f4fa;
+    /* 亮色不用中性灰底：页面纯白，层级交给描边+阴影；紫色只留 hover/tint 等微彩色 */
+    --bg: #ffffff;
     --surface: #ffffff;
     --surface-soft: #f1f0f9; /* 白卡上的凹槽/chip 填充：微紫，与卡片可辨 */
     --raised: #ffffff; /* tile 与卡片同色，层级交给描边+阴影 */
     --modal-bg: #ffffff;
     --toast-bg: rgba(255, 255, 255, 0.96);
-    --scrim: rgba(40, 36, 66, 0.45);
+    --scrim: rgba(15, 18, 25, 0.3); /* 中性灰遮罩：不带紫偏色；浅度足以透光，模糊+阴影保住弹窗对比 */
     /* hover/凹陷层取 accent 紫的 alpha，不再是黑灰 */
     --hover: rgba(103, 88, 201, 0.06);
     --hover-subtle: rgba(103, 88, 201, 0.04);

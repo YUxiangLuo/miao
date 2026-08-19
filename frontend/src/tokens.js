@@ -14,4 +14,4 @@ export const CONNECTIONS_MODAL_MIN_WIDTH = 841
 
 // 主题：localStorage 键 + PWA theme-color（与 tokens.css 的 --bg 双主题值同步）
 export const THEME_KEY = 'miao-theme'
-export const THEME_META = { dark: '#1a1d22', light: '#f5f4fa' }
+export const THEME_META = { dark: '#1a1d22', light: '#ffffff' }
