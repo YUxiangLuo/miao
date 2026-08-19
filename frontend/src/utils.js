@@ -181,17 +181,18 @@ export function formatDelay(delay) {
   return `${delay} ms`
 }
 
-// 协议 chip 色调（.badge 五色变体之一）：常见协议显式映射，
-// 未知协议按名称哈希到五色之一——同一协议永远同色
+// 协议 chip 色调（.badge 变体之一）：常见协议显式映射，
+// 未知协议按名称哈希到色调之一——同一协议永远同色。
+// 分类 chip 不用红色系：danger 保留给错误/拦截等警示语义
 const PROTOCOL_TONES = {
   hysteria2: 'accent',
   hysteria: 'accent',
   anytls: 'info',
   vless: 'success',
   vmess: 'warning',
-  trojan: 'danger',
+  trojan: 'neutral',
 }
-const PROTOCOL_TONE_FALLBACKS = ['info', 'success', 'warning', 'danger', 'accent']
+const PROTOCOL_TONE_FALLBACKS = ['info', 'success', 'warning', 'accent']
 
 export function protocolTone(protocol) {
   const key = (protocol || '').toLowerCase()

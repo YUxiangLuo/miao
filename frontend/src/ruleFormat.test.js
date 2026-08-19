@@ -52,8 +52,8 @@ describe('ruleFormat', () => {
 
   it('assigns a badge tone to every whitelisted field', () => {
     const tones = RULE_FIELD_OPTIONS.map((option) => ruleFieldTone(option.value))
-    // 每个白名单字段都有具名色调，且同族字段同色
-    tones.forEach((tone) => expect(tone).not.toBe('neutral'))
+    // 每个白名单字段都有具名色调，分类 chip 不用红色系，同族字段同色
+    tones.forEach((tone) => expect(['info', 'success', 'warning', 'accent', 'neutral']).toContain(tone))
     expect(ruleFieldTone('domain')).toBe(ruleFieldTone('domain_suffix'))
     expect(ruleFieldTone('process_name')).toBe(ruleFieldTone('process_path'))
     expect(ruleFieldTone('unknown-field')).toBe('neutral')

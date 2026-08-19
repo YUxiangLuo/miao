@@ -44,9 +44,9 @@ describe('formatters', () => {
     expect(protocolTone('AnyTLS')).toBe('info')
     expect(protocolTone('VLESS')).toBe('success')
     expect(protocolTone('vmess')).toBe('warning')
-    expect(protocolTone('trojan')).toBe('danger')
-    // 未知协议哈希到五色之一且结果稳定
-    const tones = ['info', 'success', 'warning', 'danger', 'accent']
+    expect(protocolTone('trojan')).toBe('neutral')
+    // 未知协议哈希到非红色调之一且结果稳定
+    const tones = ['info', 'success', 'warning', 'accent']
     expect(tones).toContain(protocolTone('ShadowTLS'))
     expect(protocolTone('ShadowTLS')).toBe(protocolTone('shadowtls'))
     expect(protocolTone('')).toBe(protocolTone(undefined))
