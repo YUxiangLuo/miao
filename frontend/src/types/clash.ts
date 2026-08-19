@@ -98,26 +98,3 @@ export interface ConnectionGroup {
   outbound: string
 }
 
-/** 链接统计的聚合维度 */
-export type ConnectionDimension = 'site' | 'process' | 'outbound'
-
-/**
- * 统一的行模型：三个维度（站点/进程/出口）的聚合组都归一到此形状，
- * 由同一个 ConnectionRow 渲染。
- */
-export interface GroupRow {
-  id: string
-  /** 行标题：站点域名 / 进程名 / 出口名 */
-  title: string
-  /** 副标题：站点视图为人话规则（含 +N 其他规则），进程/出口视图为「N 个站点」 */
-  subtitle: string
-  /** 图标 lookup 键（站点=域名，进程=进程名；字母兜底复用站点图标逻辑） */
-  mark: string
-  outbound: string
-  count: number
-  downloadSpeed: number
-  uploadSpeed: number
-  download: number
-  upload: number
-  connections: EnrichedConnection[]
-}

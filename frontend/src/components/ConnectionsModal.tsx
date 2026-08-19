@@ -1,13 +1,11 @@
 import { useId, useMemo, useState } from 'react'
 import {
   Activity,
-  AppWindow,
   ArrowDown,
   ArrowUp,
   Gauge,
-  Globe,
   HardDriveDownload,
-  Split,
+  Link2,
   X,
 } from 'lucide-react'
 import { ICON } from '../tokens'
@@ -17,14 +15,14 @@ import { ConnectionsToolbar } from './ConnectionsToolbar'
 import { AnimatedValue } from './ConnectionCard'
 import { ConnectionRow } from './ConnectionRow'
 import {
-  buildGroupRows,
-  filterGroupRows,
-  pathCountsForRows,
-  sortGroupRows,
+  connectionSpeed,
+  filterConnectionsByPath,
+  pathCountsForConnections,
+  sortConnections,
 } from './connectionFilters'
 
 import type { StatusData } from '../types/api'
-import type { ConnectionDimension, ConnectionsInfo } from '../types/clash'
+import type { ConnectionsInfo } from '../types/clash'
 
 export interface ConnectionsModalProps {
   open: boolean
@@ -35,19 +33,7 @@ export interface ConnectionsModalProps {
   onClose: () => void
 }
 
-const DIMENSION_LABELS: Record<ConnectionDimension, string> = {
-  site: '站点',
-  process: '进程',
-  outbound: '出口',
-}
-
-/** 统计卡首格图标随维度切换 */
-const DIMENSION_ICONS = {
-  site: Globe,
-  process: AppWindow,
-  outbound: Split,
-} as const
-
+/** 链接统计：以链接为单位的全量列表，仅保留直连/代理筛选 */
 export function ConnectionsModal({
   open,
   status,
@@ -58,10 +44,7 @@ export function ConnectionsModal({
 }: ConnectionsModalProps) {
   const titleId = useId()
   const dialogRef = useDialog(open, onClose)
-  const [dimension, setDimension] = useState<ConnectionDimension>('site')
-  const [query, setQuery] = useState('')
   const [path, setPath] = useState('all')
-  const [expandedId, setExpandedId] = useState<string | null>(null)
 
   const connections = useMemo(() => {
     return Array.isArray(data?.connections) ? data.connections : []
@@ -71,27 +54,15 @@ export function ConnectionsModal({
   const uploadSpeed = connections.reduce((sum, item) => sum + Number(item.uploadSpeed || 0), 0)
   const downloadSpeed = connections.reduce((sum, item) => sum + Number(item.downloadSpeed || 0), 0)
 
-  // 三维聚合：站点 / 进程 / 出口，全部归一为 GroupRow 后走同一套筛选排序
-  const rows = useMemo(() => buildGroupRows(dimension, connections), [dimension, connections])
-  const searchedRows = useMemo(
-    () => filterGroupRows(rows, { query, path: 'all' }),
-    [rows, query],
+  const visibleConnections = useMemo(
+    () => sortConnections(filterConnectionsByPath(connections, path)),
+    [connections, path],
   )
-  const visibleRows = useMemo(
-    () => sortGroupRows(filterGroupRows(searchedRows, { path })),
-    [path, searchedRows],
-  )
-  const pathCounts = useMemo(() => pathCountsForRows(searchedRows), [searchedRows])
+  const pathCounts = useMemo(() => pathCountsForConnections(connections), [connections])
   const maxSpeed = useMemo(
-    () => visibleRows.reduce((max, row) => Math.max(max, row.downloadSpeed + row.uploadSpeed), 0),
-    [visibleRows],
+    () => visibleConnections.reduce((max, connection) => Math.max(max, connectionSpeed(connection)), 0),
+    [visibleConnections],
   )
-  // 维度切换后展开态按旧维度 id 已无意义，收起避免错位
-  const handleDimensionChange = (next: ConnectionDimension) => {
-    setDimension(next)
-    setExpandedId(null)
-  }
-  const DimensionIcon = DIMENSION_ICONS[dimension]
 
   if (!open) return null
 
@@ -113,7 +84,7 @@ export function ConnectionsModal({
             {status.running && (
               <span className="badge connections-live-badge">
                 <i />
-                {rows.length} 个{DIMENSION_LABELS[dimension]} · {connections.length} 条链接
+                {connections.length} 条链接
               </span>
             )}
           </div>
@@ -131,11 +102,11 @@ export function ConnectionsModal({
             <div className="connection-stat-grid">
               <div className="connection-stat">
                 <span className="connection-stat-label">
-                  <DimensionIcon size={ICON.xs} />
-                  {DIMENSION_LABELS[dimension]}
+                  <Link2 size={ICON.xs} />
+                  链接
                 </span>
                 <strong className="connection-stat-value">
-                  <AnimatedValue value={rows.length} />
+                  <AnimatedValue value={connections.length} />
                 </strong>
               </div>
               <div className="connection-stat">
@@ -176,32 +147,24 @@ export function ConnectionsModal({
 
             <div className="connections-main">
               <ConnectionsToolbar
-                dimension={dimension}
-                onDimensionChange={handleDimensionChange}
-                query={query}
-                onQueryChange={setQuery}
                 path={path}
                 onPathChange={setPath}
                 counts={pathCounts}
-                resultCount={visibleRows.length}
-                totalCount={rows.length}
               />
 
-              {visibleRows.length > 0 ? (
+              {visibleConnections.length > 0 ? (
                 <div className="conn-rows">
-                  {visibleRows.map((row) => (
+                  {visibleConnections.map((connection) => (
                     <ConnectionRow
-                      key={row.id}
-                      row={row}
+                      key={connection.id}
+                      connection={connection}
                       maxSpeed={maxSpeed}
-                      expanded={expandedId === row.id}
-                      onToggle={() => setExpandedId(expandedId === row.id ? null : row.id)}
                     />
                   ))}
                 </div>
               ) : (
                 <div className="connections-empty inline">
-                  {loading && connections.length === 0 ? '加载中…' : `暂无匹配${DIMENSION_LABELS[dimension]}`}
+                  {loading && connections.length === 0 ? '加载中…' : '暂无匹配链接'}
                 </div>
               )}
             </div>

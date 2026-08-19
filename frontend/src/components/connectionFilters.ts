@@ -1,7 +1,15 @@
-import type { ClashConnection, ConnectionGroup, EnrichedConnection, GroupRow } from '../types/clash'
+import type { ClashConnection, ConnectionGroup, EnrichedConnection } from '../types/clash'
 import { signatureFromClashRule } from '../ruleActivity'
 import { ruleFieldLabel, ruleTargetLabel } from '../ruleFormat'
+import { formatUptime } from '../utils'
 import { connectionDomain } from './siteIcons'
+
+/** 链接存活时长：「3m 20s」；无法解析 start 时返回 -- */
+export function connectionDuration(connection: ClashConnection): string {
+  const startedAt = Date.parse(connection.start || '')
+  if (!Number.isFinite(startedAt)) return '--'
+  return formatUptime(Math.max(0.1, (Date.now() - startedAt) / 1000))
+}
 
 export interface PathFilterOption {
   value: string
@@ -14,12 +22,6 @@ export const PATH_FILTERS: PathFilterOption[] = [
   { value: 'direct', label: '直连' },
 ]
 
-/** 链接统计的聚合维度选项（ConnectionsToolbar 的维度切换器） */
-export const DIMENSION_FILTERS: PathFilterOption[] = [
-  { value: 'site', label: '站点' },
-  { value: 'process', label: '进程' },
-  { value: 'outbound', label: '出口' },
-]
 
 export function isDirectOutbound(outbound: string): boolean {
   return String(outbound || '').toLowerCase() === 'direct'
@@ -98,22 +100,6 @@ export function groupSpeed(group: Pick<ConnectionGroup, 'downloadSpeed' | 'uploa
   return Number(group.downloadSpeed || 0) + Number(group.uploadSpeed || 0)
 }
 
-export function groupMatchesQuery(group: ConnectionGroup, query: string): boolean {
-  const needle = query.trim().toLowerCase()
-  if (!needle) return true
-  return [
-    group.domain,
-    group.rule,
-    group.ruleLabel,
-    group.outbound,
-    ...(Array.isArray(group.connections) ? group.connections.flatMap((connection) => [
-      connection.id,
-      connection.rule,
-      connection.rulePayload,
-      ...(Array.isArray(connection.chains) ? connection.chains : []),
-    ]) : []),
-  ].filter(Boolean).join(' ').toLowerCase().includes(needle)
-}
 
 export interface PathCounts {
   all: number
@@ -121,27 +107,8 @@ export interface PathCounts {
   direct: number
 }
 
-export function pathCountsFor(groups: ConnectionGroup[]): PathCounts {
-  return groups.reduce((counts, group) => {
-    counts.all += 1
-    if (isDirectOutbound(group.outbound)) counts.direct += 1
-    else counts.proxy += 1
-    return counts
-  }, { all: 0, proxy: 0, direct: 0 })
-}
 
-export interface ConnectionFilter {
-  query?: string
-  path?: string
-}
 
-export function filterConnectionGroups(groups: ConnectionGroup[], { query = '', path = 'all' }: ConnectionFilter = {}): ConnectionGroup[] {
-  return groups.filter((group) => {
-    if (path === 'direct' && !isDirectOutbound(group.outbound)) return false
-    if (path === 'proxy' && isDirectOutbound(group.outbound)) return false
-    return groupMatchesQuery(group, query)
-  })
-}
 
 // 链接统计固定按速度排序（排序选择器已移除）
 export function sortConnectionGroups(groups: ConnectionGroup[]): ConnectionGroup[] {
@@ -150,12 +117,43 @@ export function sortConnectionGroups(groups: ConnectionGroup[]): ConnectionGroup
   )
 }
 
-function connectionRule(connection: ClashConnection): string {
+// ---- 链接级工具：面板以链接为单位 ----
+
+/** 链接速率（上下行合计） */
+export function connectionSpeed(connection: EnrichedConnection): number {
+  return Number(connection.downloadSpeed || 0) + Number(connection.uploadSpeed || 0)
+}
+
+/** 直连/代理计数（出口取 chains 首跳） */
+export function pathCountsForConnections(connections: EnrichedConnection[]): PathCounts {
+  return connections.reduce((counts, connection) => {
+    counts.all += 1
+    if (isDirectOutbound(connectionOutbound(connection))) counts.direct += 1
+    else counts.proxy += 1
+    return counts
+  }, { all: 0, proxy: 0, direct: 0 })
+}
+
+export function filterConnectionsByPath(connections: EnrichedConnection[], path = 'all'): EnrichedConnection[] {
+  if (path === 'direct') return connections.filter((c) => isDirectOutbound(connectionOutbound(c)))
+  if (path === 'proxy') return connections.filter((c) => !isDirectOutbound(connectionOutbound(c)))
+  return connections
+}
+
+/** 固定排序：合计速率降序（活跃自然置顶），同速按域名字典序保证稳定 */
+export function sortConnections(connections: EnrichedConnection[]): EnrichedConnection[] {
+  return [...connections].sort(
+    (a, b) => connectionSpeed(b) - connectionSpeed(a)
+      || connectionDomain(a).localeCompare(connectionDomain(b)),
+  )
+}
+
+export function connectionRule(connection: ClashConnection): string {
   const rule = connection.rule || '-'
   return connection.rulePayload ? `${rule} : ${connection.rulePayload}` : rule
 }
 
-function connectionOutbound(connection: ClashConnection): string {
+export function connectionOutbound(connection: ClashConnection): string {
   if (Array.isArray(connection.chains) && connection.chains.length > 0) {
     return connection.chains[0]
   }
@@ -226,138 +224,4 @@ export function groupConnections(connections: EnrichedConnection[]): ConnectionG
         outbound: outbound.value,
       }
     })
-}
-
-// ---- 统一行模型：站点 / 进程 / 出口三个维度都归一为 GroupRow ----
-
-/** 站点视图：groupConnections 的直接投影 */
-export function siteGroupRows(groups: ConnectionGroup[]): GroupRow[] {
-  return groups.map((group) => ({
-    id: group.id,
-    title: group.domain,
-    subtitle: group.ruleLabel + (group.extraRules > 0 ? ` +${group.extraRules}` : ''),
-    mark: group.domain,
-    outbound: group.outbound,
-    count: group.count,
-    downloadSpeed: group.downloadSpeed,
-    uploadSpeed: group.uploadSpeed,
-    download: group.download,
-    upload: group.upload,
-    connections: group.connections,
-  }))
-}
-
-interface GroupAccumulator {
-  title: string
-  domains: Set<string>
-  connections: EnrichedConnection[]
-  downloadSpeed: number
-  uploadSpeed: number
-  download: number
-  upload: number
-}
-
-function accumulateBy(connections: EnrichedConnection[], keyOf: (c: EnrichedConnection) => string): Map<string, GroupAccumulator> {
-  const map = new Map<string, GroupAccumulator>()
-  for (const connection of connections) {
-    const key = keyOf(connection)
-    let acc = map.get(key)
-    if (!acc) {
-      acc = {
-        title: key,
-        domains: new Set(),
-        connections: [],
-        downloadSpeed: 0,
-        uploadSpeed: 0,
-        download: 0,
-        upload: 0,
-      }
-      map.set(key, acc)
-    }
-    acc.connections.push(connection)
-    acc.domains.add(connectionDomain(connection))
-    acc.downloadSpeed += Number(connection.downloadSpeed || 0)
-    acc.uploadSpeed += Number(connection.uploadSpeed || 0)
-    acc.download += Number(connection.download || 0)
-    acc.upload += Number(connection.upload || 0)
-  }
-  return map
-}
-
-function accumulatorToRow(acc: GroupAccumulator): GroupRow {
-  const outbound = majorityValue(acc.connections, connectionOutbound)
-  return {
-    id: acc.title.toLowerCase(),
-    title: acc.title,
-    subtitle: `${acc.domains.size} 个站点`,
-    mark: acc.title,
-    outbound: outbound.value,
-    count: acc.connections.length,
-    downloadSpeed: acc.downloadSpeed,
-    uploadSpeed: acc.uploadSpeed,
-    download: acc.download,
-    upload: acc.upload,
-    connections: acc.connections,
-  }
-}
-
-/** 进程视图：按 processPath 的 basename 聚合（空值归入「未知进程」） */
-export function processGroupRows(connections: EnrichedConnection[]): GroupRow[] {
-  return [...accumulateBy(
-    connections,
-    (c) => processNameOf(c.metadata?.processPath) ?? '未知进程',
-  ).values()].map(accumulatorToRow)
-}
-
-/** 出口视图：按出站（chains 首跳）聚合 */
-export function outboundGroupRows(connections: EnrichedConnection[]): GroupRow[] {
-  return [...accumulateBy(connections, connectionOutbound).values()].map(accumulatorToRow)
-}
-
-export function buildGroupRows(dimension: 'site' | 'process' | 'outbound', connections: EnrichedConnection[]): GroupRow[] {
-  if (dimension === 'process') return processGroupRows(connections)
-  if (dimension === 'outbound') return outboundGroupRows(connections)
-  return siteGroupRows(groupConnections(connections))
-}
-
-export function rowMatchesQuery(row: GroupRow, query: string): boolean {
-  const needle = query.trim().toLowerCase()
-  if (!needle) return true
-  return [
-    row.title,
-    row.subtitle,
-    row.outbound,
-    ...row.connections.flatMap((connection) => [
-      connection.id,
-      connection.rule,
-      connection.rulePayload,
-      connectionDomain(connection),
-      ...(Array.isArray(connection.chains) ? connection.chains : []),
-    ]),
-  ].filter(Boolean).join(' ').toLowerCase().includes(needle)
-}
-
-export function pathCountsForRows(rows: GroupRow[]): PathCounts {
-  return rows.reduce((counts, row) => {
-    counts.all += 1
-    if (isDirectOutbound(row.outbound)) counts.direct += 1
-    else counts.proxy += 1
-    return counts
-  }, { all: 0, proxy: 0, direct: 0 })
-}
-
-export function filterGroupRows(rows: GroupRow[], { query = '', path = 'all' }: ConnectionFilter = {}): GroupRow[] {
-  return rows.filter((row) => {
-    if (path === 'direct' && !isDirectOutbound(row.outbound)) return false
-    if (path === 'proxy' && isDirectOutbound(row.outbound)) return false
-    return rowMatchesQuery(row, query)
-  })
-}
-
-/** 链接统计固定按合计速度排序；同速按标题字典序保证稳定 */
-export function sortGroupRows(rows: GroupRow[]): GroupRow[] {
-  return [...rows].sort(
-    (a, b) => (b.downloadSpeed + b.uploadSpeed) - (a.downloadSpeed + a.uploadSpeed)
-      || a.title.localeCompare(b.title),
-  )
 }

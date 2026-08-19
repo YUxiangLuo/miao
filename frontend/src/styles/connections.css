@@ -222,60 +222,6 @@
     flex-wrap: wrap;
     min-width: 0;
 }
-.connections-search {
-    display: flex;
-    align-items: center;
-    gap: var(--space-2);
-    /* 限宽：不与筛选组抢空间，也不占满右侧空白；space-between 提供与筛选组的间距 */
-    flex: 0 1 var(--search-basis);
-    min-width: var(--search-min-w);
-    padding: 0 var(--space-2);
-    border: var(--bw) solid var(--border-soft);
-    border-radius: var(--r-sm);
-    background: var(--surface-soft);
-    color: var(--text-muted);
-}
-.connections-search input {
-    min-width: 0;
-    width: 100%;
-    /* 与 pills 容器同高（28+3*2+1*2=36px），单行排列时中线重合 */
-    min-height: var(--control-h-input);
-    border: none;
-    outline: none;
-    background: transparent;
-    color: var(--text);
-    font-size: var(--fs-md);
-}
-.connections-search input[type="search"]::-webkit-search-cancel-button {
-    appearance: none;
-}
-.connections-search:focus-within {
-    border-color: var(--accent);
-}
-.connections-search-clear {
-    flex: 0 0 auto;
-    width: var(--size-search-clear);
-    height: var(--size-search-clear);
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    border: none;
-    border-radius: var(--r-pill);
-    background: var(--hover);
-    color: var(--text-muted);
-}
-.connections-search-clear:hover {
-    background: var(--hover-strong);
-    color: var(--text);
-}
-.connections-search-count {
-    flex: 0 0 auto;
-    color: var(--text-subtle);
-    font-size: var(--fs-xs);
-    font-weight: var(--fw-semibold);
-    letter-spacing: var(--ls-wide);
-    white-space: nowrap;
-}
 .connections-pills {
     display: inline-flex;
     align-items: center;
@@ -314,17 +260,6 @@
     font-size: var(--fs-xs);
     font-weight: var(--fw-heavy);
     opacity: var(--o-emphasis);
-}
-.connection-card-grid {
-    flex: 1;
-    min-height: 0;
-    overflow: auto;
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(var(--conn-card-min), 1fr));
-    gap: var(--space-2);
-    padding: var(--space-0);
-    align-content: start;
-    align-items: start;
 }
 .connection-card {
     display: flex;
@@ -647,8 +582,7 @@
 .conn-row.idle {
     opacity: var(--o-dim);
 }
-.conn-row.idle:hover,
-.conn-row.idle.expanded {
+.conn-row.idle:hover {
     opacity: 1;
 }
 .conn-row.active,
@@ -663,16 +597,9 @@
     width: 100%;
     min-height: var(--conn-row-min-h);
     padding: var(--space-1) var(--space-2);
-    border: none;
-    background: transparent;
     color: inherit;
     text-align: left;
     border-radius: var(--r-sm);
-    cursor: pointer;
-}
-.conn-row-main:focus-visible {
-    outline: var(--bw-strong) solid var(--accent);
-    outline-offset: 3px;
 }
 .conn-row-id {
     flex: 1;
@@ -758,14 +685,4 @@
 }
 .conn-row-total .tone-upload {
     color: var(--success);
-}
-.conn-row .connection-card-chevron {
-    align-self: center;
-    margin-top: 0;
-}
-.conn-row.expanded .connection-card-chevron {
-    transform: rotate(180deg);
-}
-.conn-row .connection-card-details {
-    padding: 0 var(--space-2) var(--space-2) calc(var(--size-site-icon) + var(--space-2) * 2);
 }

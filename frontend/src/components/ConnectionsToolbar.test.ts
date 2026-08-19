@@ -1,14 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import {
   displayRuleText,
-  filterConnectionGroups,
+  filterConnectionsByPath,
   humanizeClashRule,
   isDirectOutbound,
-  pathCountsFor,
-  processGroupRows,
-  outboundGroupRows,
+  pathCountsForConnections,
   processNameOf,
   sortConnectionGroups,
+  sortConnections,
 } from './connectionFilters'
 import { connectionGroupMock, connectionMock } from '../testFixtures'
 
@@ -61,27 +60,6 @@ describe('connection filters', () => {
     expect(displayRuleText('')).toBe('-')
     expect(displayRuleText('-')).toBe('-')
   })
-
-  it('counts path chips from the current search set', () => {
-    expect(pathCountsFor(groups)).toEqual({ all: 3, proxy: 2, direct: 1 })
-  })
-
-  it('filters by query across domain, rule, and outbound', () => {
-    expect(filterConnectionGroups(groups, { query: 'bili' }).map((group) => group.domain))
-      .toEqual(['www.bilibili.com'])
-    expect(filterConnectionGroups(groups, { query: 'final' }).map((group) => group.domain))
-      .toEqual(['api.github.com', 'chatgpt.com'])
-    expect(filterConnectionGroups(groups, { query: '兜底' }).map((group) => group.domain))
-      .toEqual(['api.github.com', 'chatgpt.com'])
-    expect(filterConnectionGroups(groups, { query: 'vps-1' })).toHaveLength(2)
-  })
-
-  it('filters by proxy or direct path', () => {
-    expect(filterConnectionGroups(groups, { path: 'direct' }).map((group) => group.domain))
-      .toEqual(['www.bilibili.com'])
-    expect(filterConnectionGroups(groups, { path: 'proxy' }).map((group) => group.domain))
-      .toEqual(['api.github.com', 'chatgpt.com'])
-  })
 })
 
 describe('connection sorting', () => {
@@ -132,49 +110,29 @@ describe('humanizeClashRule', () => {
   })
 })
 
-describe('dimension group rows', () => {
+describe('per-connection path filters', () => {
   const conns = [
-    connectionMock({
-      id: 'a',
-      downloadSpeed: 100,
-      metadata: { host: 'api.github.com', processPath: '/usr/bin/brave (alice)' },
-    }),
-    connectionMock({
-      id: 'b',
-      downloadSpeed: 50,
-      chains: ['direct'],
-      metadata: { host: 'www.bilibili.com', processPath: '/usr/bin/brave (alice)' },
-    }),
-    connectionMock({
-      id: 'c',
-      downloadSpeed: 10,
-      metadata: { host: 'mtalk.google.com', processPath: '/usr/lib/firefox/firefox (alice)' },
-    }),
+    connectionMock({ id: 'a', chains: ['proxy'], downloadSpeed: 100, metadata: { host: 'api.github.com' } }),
+    connectionMock({ id: 'b', chains: ['direct'], downloadSpeed: 50, metadata: { host: 'www.bilibili.com' } }),
+    connectionMock({ id: 'c', chains: ['香港节点'], downloadSpeed: 10, metadata: { host: 'x.com' } }),
   ]
 
-  it('groups by process with domain counts and summed speeds', () => {
-    const rows = processGroupRows(conns)
-    expect(rows).toHaveLength(2)
-    const brave = rows.find((r) => r.title === 'brave')!
-    expect(brave.count).toBe(2)
-    expect(brave.subtitle).toBe('2 个站点')
-    expect(brave.downloadSpeed).toBe(150)
-    const firefox = rows.find((r) => r.title === 'firefox')!
-    expect(firefox.subtitle).toBe('1 个站点')
+  it('counts connections by path', () => {
+    expect(pathCountsForConnections(conns)).toEqual({ all: 3, proxy: 2, direct: 1 })
   })
 
-  it('groups connections without process info into 未知进程', () => {
-    const rows = processGroupRows([connectionMock({ metadata: { host: 'a.dev' } })])
-    expect(rows).toHaveLength(1)
-    expect(rows[0].title).toBe('未知进程')
+  it('filters by direct or proxy path', () => {
+    expect(filterConnectionsByPath(conns, 'direct').map((c) => c.id)).toEqual(['b'])
+    expect(filterConnectionsByPath(conns, 'proxy').map((c) => c.id)).toEqual(['a', 'c'])
+    expect(filterConnectionsByPath(conns, 'all')).toHaveLength(3)
   })
 
-  it('groups by outbound', () => {
-    const rows = outboundGroupRows(conns)
-    const proxy = rows.find((r) => r.title === 'proxy')!
-    const direct = rows.find((r) => r.title === 'direct')!
-    expect(proxy.count).toBe(2)
-    expect(direct.count).toBe(1)
-    expect(direct.subtitle).toBe('1 个站点')
+  it('sorts connections by combined speed then domain', () => {
+    expect(sortConnections(conns).map((c) => c.id)).toEqual(['a', 'b', 'c'])
+    const idle = [
+      connectionMock({ id: 'z', metadata: { host: 'z.dev' } }),
+      connectionMock({ id: 'y', metadata: { host: 'a.dev' } }),
+    ]
+    expect(sortConnections(idle).map((c) => c.id)).toEqual(['y', 'z'])
   })
 })

@@ -65,7 +65,7 @@ describe('modal accessibility', () => {
     expect(onClose).toHaveBeenCalledTimes(1)
   })
 
-  it('exposes a labelled connections dialog with an expandable card', async () => {
+  it('exposes a labelled connections dialog with labelled connection rows', async () => {
     const user = userEvent.setup()
     const onClose = vi.fn()
 
@@ -92,8 +92,8 @@ describe('modal accessibility', () => {
     )
 
     expect(screen.getByRole('dialog', { name: '链接统计' })).toBeInTheDocument()
-    const toggle = screen.getByRole('button', { name: 'example.com 链接详情' })
-    expect(toggle).toHaveAttribute('aria-expanded', 'false')
+    // 链接行不再展开，每条连接以域名命名直接可定位
+    expect(screen.getByLabelText('example.com 链接')).toBeInTheDocument()
 
     await user.keyboard('{Escape}')
     expect(onClose).toHaveBeenCalledTimes(1)

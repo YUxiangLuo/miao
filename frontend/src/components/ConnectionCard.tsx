@@ -1,8 +1,8 @@
 import { ArrowDown, ArrowUp, ChevronDown } from 'lucide-react'
 import { ICON } from '../tokens'
-import { classNames, formatBytes, formatSpeed, formatUptime } from '../utils'
+import { classNames, formatBytes, formatSpeed } from '../utils'
 import { iconForDomain } from './siteIcons'
-import { displayRuleText, groupSpeed } from './connectionFilters'
+import { connectionDuration, displayRuleText, groupSpeed } from './connectionFilters'
 import type { ClashConnection, ConnectionGroup } from '../types/clash'
 
 function connectionRule(connection: ClashConnection): string {
@@ -35,12 +35,6 @@ export function SiteMark({ domain }: { domain: string }) {
       )}
     </div>
   )
-}
-
-function connectionDuration(connection: ClashConnection): string {
-  const startedAt = Date.parse(connection.start || '')
-  if (!Number.isFinite(startedAt)) return '--'
-  return formatUptime(Math.max(0.1, (Date.now() - startedAt) / 1000))
 }
 
 export function ConnectionDetailRow({ connection }: { connection: ClashConnection }) {
