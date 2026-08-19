@@ -34,7 +34,7 @@ const ProxyTile = memo(function ProxyTile({ nodeName, protocol, delay, isActive,
           {isSwitching
             ? <span className="proxy-node-name proxy-node-switching"><LoaderCircle size={ICON.xs} className="spin" /><span>{nodeName}</span></span>
             : isActive
-              ? <div className="proxy-tag"><span className="proxy-tag-dot" /><span>{nodeName}</span></div>
+              ? <div className="proxy-tag"><span>{nodeName}</span></div>
               : <span className="proxy-node-name">{nodeName}</span>}
         </div>
         {protocol && <span className={classNames('badge', 'proxy-proto', protocolTone(protocol))}>{protocol}</span>}

@@ -80,6 +80,21 @@
 .proxy-tile.active {
     background: var(--accent-tint);
     border-color: var(--accent);
+    /* 选中强调：品牌紫呼吸光晕（3s，与 logo 光晕同周期） */
+    animation: tileGlow var(--anim-logo) ease-in-out infinite;
+}
+@keyframes tileGlow {
+    0%, 100% {
+        box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 0%, transparent);
+    }
+    50% {
+        box-shadow: 0 0 18px 2px color-mix(in srgb, var(--accent) 38%, transparent);
+    }
+}
+@media (prefers-reduced-motion: reduce) {
+    .proxy-tile.active {
+        animation: none;
+    }
 }
 .proxy-switch-button {
     flex: 1 1 auto;
@@ -147,13 +162,6 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-}
-.proxy-tag-dot {
-    flex: 0 0 auto;
-    width: var(--size-dot);
-    height: var(--size-dot);
-    border-radius: var(--r-pill);
-    background: var(--success);
 }
 /* 协议 chip：名称下方一行，颜色由 .badge.{tone} 按协议提供 */
 .proxy-proto {
