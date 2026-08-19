@@ -39,6 +39,11 @@
     --accent-tint-text: var(--accent-strong); /* accent-tint-strong 上的文字色 */
     --accent-tint-deep: #201e3a; /* active 节点 tile 内嵌 chip 底 */
     --secondary-hover: #333846; /* 次要按钮 hover 底 */
+    /* 次要按钮（暗色 = 中性灰阶） */
+    --btn-secondary-bg: var(--border-soft);
+    --btn-secondary-text: var(--text-muted);
+    --btn-secondary-hover-bg: var(--secondary-hover);
+    --btn-secondary-hover-text: var(--text);
     --info: #5b8fd4; /* 代理路径：出口 chip、规则字段、下载速率 */
     --info-strong: #8fb3e3; /* info 淡彩底上的文字 */
     --info-tint: #1e2a3a;
@@ -236,6 +241,11 @@
     --accent-tint-text: #ffffff;
     --accent-tint-deep: #d5d0f6;
     --secondary-hover: #e9e7f8;
+    /* 次要按钮（亮色 = 品牌紫淡彩；中性灰在白底上读作禁用） */
+    --btn-secondary-bg: var(--accent-tint);
+    --btn-secondary-text: var(--accent-strong);
+    --btn-secondary-hover-bg: var(--accent-tint-deep);
+    --btn-secondary-hover-text: var(--accent-strong);
     --info: #3570b8;
     --info-strong: #2f5f9e;
     --info-tint: #e8eef7;

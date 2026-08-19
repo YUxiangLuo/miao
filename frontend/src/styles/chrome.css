@@ -245,12 +245,12 @@
     filter: brightness(1.08);
 }
 .btn-secondary {
-    background: var(--border-soft);
-    color: var(--text-muted);
+    background: var(--btn-secondary-bg);
+    color: var(--btn-secondary-text);
 }
 .btn-secondary:hover:not(:disabled) {
-    color: var(--text);
-    background: var(--secondary-hover);
+    color: var(--btn-secondary-hover-text);
+    background: var(--btn-secondary-hover-bg);
 }
 /* ghost：无边框无底，仅 hover 出淡底 */
 .btn-ghost {
