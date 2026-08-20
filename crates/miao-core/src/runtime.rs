@@ -11,14 +11,16 @@ use crate::error::{AppError, AppResult};
 use crate::models::{Config, DEFAULT_PORT};
 use crate::services::{
     config::{
-        fetch_sub_nodes, gen_config, has_config_cache, load_volatile_config_at,
+        cache_compatibility, fetch_sub_nodes, gen_config, has_config_cache,
+        install_prepared_runtime, load_volatile_config_at, mark_legacy_cache_used,
         persist_effective_node_select, record_fresh_snapshot, refresh_subscriptions,
         restore_config_from_cache, runtime_config_matches_node_select, save_config_cache,
-        GenConfigOutcome, RefreshEffect, RefreshPolicy, SubFetchRetry, SubSource,
+        CacheCompatibility, GenConfigOutcome, RefreshEffect, RefreshPolicy, SubFetchRetry,
+        SubSource,
     },
     proxy::spawn_restore_last_proxy,
     singbox::{
-        extract_sing_box, start_sing_internal, stop_sing_internal, validate_sing_box_config,
+        extract_sing_box_to, start_sing_internal, stop_sing_internal, validate_sing_box_config,
     },
 };
 use crate::state::AppState;
@@ -44,6 +46,10 @@ pub struct RuntimeOptions {
     pub volatile_path: Option<PathBuf>,
     /// Tests can skip extracting the embedded kernel when they will not start it.
     pub skip_extract: bool,
+    /// Override all generated sing-box artifacts, including the embedded
+    /// kernel. This makes config transactions fully hermetic in integration
+    /// tests and supports alternate runtime locations without global state.
+    pub runtime_dir: Option<PathBuf>,
     /// Override the log file. Windows defaults to
     /// `%LOCALAPPDATA%\io.github.yuxiangluo.miao\miao.log`.
     pub log_path: Option<PathBuf>,
@@ -125,12 +131,7 @@ pub async fn spawn_server(options: RuntimeOptions) -> AppResult<ServerHandle> {
     #[cfg(windows)]
     crate::services::singbox::ensure_hidden_console();
 
-    if let Ok(current_exe) = std::env::current_exe() {
-        let backup_path = format!("{}.bak", current_exe.display());
-        if std::path::Path::new(&backup_path).exists() {
-            let _ = fs::remove_file(&backup_path);
-        }
-    }
+    crate::services::version::reconcile_pending_upgrade()?;
 
     info!("Reading configuration...");
     let config_path = match options.config_path.clone() {
@@ -149,24 +150,32 @@ pub async fn spawn_server(options: RuntimeOptions) -> AppResult<ServerHandle> {
         }
     };
 
-    let config: Config = match tokio::fs::read_to_string(&config_path).await {
-        Ok(content) => yaml_serde::from_str(&content)?,
-        Err(e) if e.kind() == io::ErrorKind::NotFound => {
-            info!(
-                config_path = ?config_path,
-                "No config file found, using in-memory default configuration"
-            );
-            Config::default()
-        }
-        Err(e) => return Err(e.into()),
-    };
-    let volatile_path = options
-        .volatile_path
+    let stable_config: crate::models::StableConfig =
+        match tokio::fs::read_to_string(&config_path).await {
+            Ok(content) => yaml_serde::from_str(&content)?,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {
+                info!(
+                    config_path = ?config_path,
+                    "No config file found, using in-memory default configuration"
+                );
+                crate::models::StableConfig::default()
+            }
+            Err(e) => return Err(e.into()),
+        };
+    let runtime_dir = options
+        .runtime_dir
         .clone()
-        .unwrap_or_else(crate::services::config::volatile_config_path);
+        .unwrap_or_else(crate::services::singbox::get_sing_box_home);
+    let volatile_path = options.volatile_path.clone().unwrap_or_else(|| {
+        if cfg!(windows) {
+            crate::services::config::volatile_config_path()
+        } else {
+            runtime_dir.join("volatile.yaml")
+        }
+    });
     // 易变层 overlay：node_select/route_mode 的运行值覆盖 config.yaml 解析结果；
     // volatile 文件缺失/损坏时保留 config.yaml 里的同名字段（旧版配置兼容）
-    let config = config.overlay(load_volatile_config_at(&volatile_path).await);
+    let config = stable_config.effective(load_volatile_config_at(&volatile_path).await);
     let requested_port = options.bind_port.or(config.port).unwrap_or(DEFAULT_PORT);
     let subs_count = config.subs.len();
     let nodes_count = config.nodes.len();
@@ -179,12 +188,19 @@ pub async fn spawn_server(options: RuntimeOptions) -> AppResult<ServerHandle> {
     );
 
     if !options.skip_extract {
-        let _ = extract_sing_box()?;
+        let _ = extract_sing_box_to(&runtime_dir)?;
     }
 
+    let runtime_paths = crate::paths::RuntimePaths::new(runtime_dir, &config_path);
     let app_state = Arc::new(
-        AppState::with_config_path(config.clone(), config_path, volatile_path)
-            .map_err(|e| AppError::context("Failed to create HTTP client", e))?,
+        AppState::with_config_layers(
+            stable_config,
+            config.clone(),
+            config_path,
+            volatile_path,
+            runtime_paths,
+        )
+        .map_err(|e| AppError::context("Failed to create HTTP client", e))?,
     );
     let state_for_init = app_state.clone();
 
@@ -257,6 +273,7 @@ async fn initialize_runtime(config: Config, state: Arc<AppState>) {
     if started_from_cache {
         refresh_subscriptions_in_background(&config, &state).await;
     }
+    crate::services::version::mark_upgrade_healthy();
 }
 
 /// 持锁执行的初始化。返回 true = 内核已用缓存配置秒开（快速通道），订阅需改为
@@ -272,32 +289,41 @@ async fn initialize_runtime_locked(config: &Config, state: &Arc<AppState>) -> bo
 
     // 快速通道：存在上次成功运行的缓存配置 → 先起内核（秒开），订阅改为后台刷新。
     // 缓存读取/校验/启动任何一步失败都落回同步拉取路径。
-    if has_config_cache() {
-        let cache_usable = match restore_config_from_cache().await {
-            Ok(()) => match validate_sing_box_config().await {
-                Ok(()) => true,
-                Err(err) => {
-                    warn!(error = %err, "Cached config failed validation, fetching subscriptions");
-                    false
-                }
-            },
-            Err(err) => {
-                warn!(error = %err, "Failed to restore cached config, fetching subscriptions");
+    if has_config_cache(state) {
+        let compatibility = cache_compatibility(state, config).await;
+        let legacy_cache = matches!(compatibility, CacheCompatibility::Legacy);
+        let cache_allowed = match &compatibility {
+            CacheCompatibility::Verified | CacheCompatibility::Legacy => true,
+            CacheCompatibility::Incompatible(reason) => {
+                warn!(reason = %reason, "Cached config provenance check failed; regenerating");
                 false
             }
         };
+        let cache_usable = cache_allowed
+            && match restore_config_from_cache(state).await {
+                Ok(()) => match validate_sing_box_config(state, &state.runtime_paths.active_config)
+                    .await
+                {
+                    Ok(()) => true,
+                    Err(err) => {
+                        warn!(error = %err, "Cached config failed validation, fetching subscriptions");
+                        false
+                    }
+                },
+                Err(err) => {
+                    warn!(error = %err, "Failed to restore cached config, fetching subscriptions");
+                    false
+                }
+            };
 
         if cache_usable {
-            let cache_matches_select = match tokio::fs::read_to_string(
-                crate::services::singbox::get_sing_box_home().join("config.json"),
-            )
-            .await
-            {
-                Ok(content) => serde_json::from_str(&content).ok().is_some_and(|json| {
-                    runtime_config_matches_node_select(&json, config.node_select)
-                }),
-                Err(_) => false,
-            };
+            let cache_matches_select =
+                match tokio::fs::read_to_string(&state.runtime_paths.active_config).await {
+                    Ok(content) => serde_json::from_str(&content).ok().is_some_and(|json| {
+                        runtime_config_matches_node_select(&json, config.node_select)
+                    }),
+                    Err(_) => false,
+                };
             if !cache_matches_select {
                 warn!("Cached config does not match node_select; regenerating");
             } else {
@@ -314,6 +340,9 @@ async fn initialize_runtime_locked(config: &Config, state: &Arc<AppState>) -> bo
                 match start_sing_internal(state).await {
                     Ok(()) => {
                         info!("sing-box started from cached config");
+                        if legacy_cache {
+                            mark_legacy_cache_used(state).await;
+                        }
                         spawn_restore_last_proxy(state);
                         state
                             .initializing
@@ -332,22 +361,43 @@ async fn initialize_runtime_locked(config: &Config, state: &Arc<AppState>) -> bo
     let mut all_subs_failed = false;
     let mut fresh_gen: Option<GenConfigOutcome> = None;
     match gen_config(config, state, SubFetchRetry::Startup).await {
-        Ok(outcome) => {
-            if let Err(err) = persist_effective_node_select(state, outcome.node_select).await {
-                warn!(error = %err, "Failed to persist effective node_select after generate");
+        Ok(outcome) => match install_prepared_runtime(state, &outcome).await {
+            Ok(()) => {
+                if let Err(err) = persist_effective_node_select(state, outcome.node_select).await {
+                    warn!(error = %err, "Failed to persist effective node_select after generate");
+                }
+                if !config.node_select.is_manual() && outcome.node_select.is_manual() {
+                    *state.config_warning.lock().await =
+                        Some("该地区没有可用节点，已切回手动选择".to_string());
+                }
+                if !outcome.has_sub_nodes && !config.subs.is_empty() {
+                    all_subs_failed = true;
+                }
+                fresh_gen = Some(outcome);
             }
-            if !config.node_select.is_manual() && outcome.node_select.is_manual() {
-                *state.config_warning.lock().await =
-                    Some("该地区没有可用节点，已切回手动选择".to_string());
+            Err(e) => {
+                error!(error = %e, "Generated startup config failed validation or installation");
+                match restore_config_from_cache(state).await {
+                    Ok(_) => {
+                        warn!("Using cached config as fallback");
+                        all_subs_failed = true;
+                    }
+                    Err(cache_err) => {
+                        error!(error = %cache_err, "No cached config available");
+                        *state.config_warning.lock().await = Some(
+                            "生成的配置校验失败且无可用缓存，请检查订阅或手动节点".to_string(),
+                        );
+                        state
+                            .initializing
+                            .store(false, std::sync::atomic::Ordering::Relaxed);
+                        return false;
+                    }
+                }
             }
-            if !outcome.has_sub_nodes && !config.subs.is_empty() {
-                all_subs_failed = true;
-            }
-            fresh_gen = Some(outcome);
-        }
+        },
         Err(e) => {
             error!(error = %e, "Failed to generate config");
-            match restore_config_from_cache().await {
+            match restore_config_from_cache(state).await {
                 Ok(_) => {
                     warn!("Using cached config as fallback");
                     all_subs_failed = true;
@@ -376,10 +426,11 @@ async fn initialize_runtime_locked(config: &Config, state: &Arc<AppState>) -> bo
     match start_sing_internal(state).await {
         Ok(_) => {
             info!("sing-box started successfully");
-            save_config_cache().await;
+            save_config_cache(state).await;
             // 启动成功等价于配置可用：把本次拉取的节点集落成快照，供本地语义变更零网络重建
             if let Some(outcome) = &fresh_gen {
-                record_fresh_snapshot(config, outcome).await;
+                record_fresh_snapshot(config, state, outcome).await;
+                *state.skipped_rules.lock().await = outcome.skipped_rules.clone();
             }
             if all_subs_failed && state.config_warning.lock().await.is_none() {
                 warn!("所有订阅获取失败，请检查当前订阅");
@@ -402,7 +453,7 @@ async fn initialize_runtime_locked(config: &Config, state: &Arc<AppState>) -> bo
 /// 或服务被显式停止，则放弃本次刷新。
 /// 机制全部收敛在 services::config::refresh_subscriptions；这里只按 outcome 决定告警与收尾。
 async fn refresh_subscriptions_in_background(config: &Config, state: &Arc<AppState>) {
-    let (node_names, outbounds) = fetch_sub_nodes(config, state, SubFetchRetry::Startup).await;
+    let nodes = fetch_sub_nodes(config, state, SubFetchRetry::Startup).await;
 
     let _config_update = state.config_update.lock().await;
     let current = state.config.read().await.clone();
@@ -424,14 +475,14 @@ async fn refresh_subscriptions_in_background(config: &Config, state: &Arc<AppSta
         &current,
         state,
         RefreshPolicy::Startup,
-        SubSource::Prefetched(node_names, outbounds),
+        SubSource::Prefetched(nodes),
     )
     .await
     {
         Ok(outcome) => match outcome.effect {
             RefreshEffect::Restarted => {
                 info!("sing-box restarted with refreshed subscriptions");
-                save_config_cache().await;
+                save_config_cache(state).await;
                 if !current.node_select.is_manual() && outcome.node_select.is_manual() {
                     *state.config_warning.lock().await =
                         Some("该地区没有可用节点，已切回手动选择".to_string());
@@ -439,6 +490,10 @@ async fn refresh_subscriptions_in_background(config: &Config, state: &Arc<AppSta
                 spawn_restore_last_proxy(state);
             }
             RefreshEffect::SkippedUnchanged => {
+                // This also upgrades a one-time legacy cache marker to a
+                // verified manifest after the freshly generated bytes match
+                // the validated running cache.
+                save_config_cache(state).await;
                 if !current.node_select.is_manual() && outcome.node_select.is_manual() {
                     *state.config_warning.lock().await =
                         Some("该地区没有可用节点，已切回手动选择".to_string());
@@ -742,6 +797,7 @@ mod tests {
             config_path: Some(config_path),
             volatile_path: Some(unique_test_volatile_path()),
             skip_extract: true,
+            runtime_dir: Some(unique_test_runtime_dir()),
             log_path: None,
         })
         .await
@@ -796,6 +852,7 @@ mod tests {
             config_path: Some(unique_test_config_path()),
             volatile_path: Some(unique_test_volatile_path()),
             skip_extract: true,
+            runtime_dir: Some(unique_test_runtime_dir()),
             log_path: None,
         })
         .await
@@ -818,6 +875,7 @@ mod tests {
             config_path: Some(unique_test_config_path()),
             volatile_path: Some(unique_test_volatile_path()),
             skip_extract: true,
+            runtime_dir: Some(unique_test_runtime_dir()),
             log_path: None,
         })
         .await;
@@ -878,6 +936,17 @@ mod tests {
     fn unique_test_volatile_path() -> PathBuf {
         std::env::temp_dir().join(format!(
             "miao-spawn-server-test-volatile-{}-{}.yaml",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ))
+    }
+
+    fn unique_test_runtime_dir() -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "miao-spawn-server-runtime-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)

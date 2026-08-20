@@ -3,22 +3,15 @@ use serde_json::{json, Map, Value as JsonValue};
 use std::sync::{atomic::Ordering, Arc};
 use tracing::warn;
 
-use crate::models::{ApiResponse, DeleteNodeRequest, NodeInfo, NodeRequest};
+use crate::models::{
+    ApiResponse, BatchNodeAdded, BatchNodeFailure, BatchNodeRequest, BatchNodeResult,
+    DeleteNodeRequest, NodeInfo, NodeRequest,
+};
 use crate::responses::{status_error, success, success_no_data, HandlerResult};
-use crate::services::config::apply_config_change;
+use crate::services::config::{apply_config_change, known_rule_targets};
 use crate::services::node_parser::parse_node_json;
 use crate::state::AppState;
 use crate::validation::Validator;
-
-const VALID_NODE_TYPES: &[&str] = &[
-    "hysteria2",
-    "anytls",
-    "ss",
-    "vmess",
-    "vless",
-    "trojan",
-    "tuic",
-];
 
 fn non_empty(value: &Option<String>) -> Option<&str> {
     value
@@ -239,6 +232,15 @@ fn build_node_value(req: &NodeRequest, node_type: &str) -> JsonValue {
     }
 }
 
+fn validated_node_json(req: &NodeRequest) -> Result<(String, String), String> {
+    Validator::validate_node_request(req)?;
+    let node_type = req.node_type.as_deref().unwrap_or("hysteria2");
+    let tag = req.tag.trim().to_string();
+    let node_json = serde_json::to_string(&build_node_value(req, node_type))
+        .map_err(|e| format!("Failed to serialize node: {e}"))?;
+    Ok((tag, node_json))
+}
+
 pub async fn get_nodes(State(state): State<Arc<AppState>>) -> Json<ApiResponse<Vec<NodeInfo>>> {
     let config = state.config.read().await;
 
@@ -283,51 +285,26 @@ pub async fn add_node(
         ));
     }
 
-    Validator::validate_node_request(&req).map_err(|e| status_error(StatusCode::BAD_REQUEST, e))?;
-
-    let node_type = req.node_type.as_deref().unwrap_or("hysteria2");
-
-    // 验证节点类型是否支持
-    if !VALID_NODE_TYPES.contains(&node_type) {
-        return Err(status_error(
-            StatusCode::BAD_REQUEST,
-            format!(
-                "不支持的节点类型: {}，支持的类型: {}",
-                node_type,
-                VALID_NODE_TYPES.join(", ")
-            ),
-        ));
-    }
+    let (tag, node_json) =
+        validated_node_json(&req).map_err(|e| status_error(StatusCode::BAD_REQUEST, e))?;
 
     let _config_update = state.config_update.lock().await;
     let old_config = state.config.read().await.clone();
     let mut new_config = old_config.clone();
 
-    // 检查标签唯一性（大小写不敏感）；存储时会 trim(base_outbound),比较前同样 trim
-    let req_tag_lower = req.tag.trim().to_lowercase();
-    for node_str in &new_config.nodes {
-        if let Ok(v) = serde_json::from_str::<serde_json::Value>(node_str) {
-            if let Some(existing_tag) = v.get("tag").and_then(|t| t.as_str()) {
-                if existing_tag.to_lowercase() == req_tag_lower {
-                    return Err(status_error(
-                        StatusCode::BAD_REQUEST,
-                        format!(
-                            "标签 '{}' 与已存在的节点 '{}' 重复（不区分大小写）",
-                            req.tag, existing_tag
-                        ),
-                    ));
-                }
-            }
+    // 检查所有现有和保留的 runtime tag，防止新增手动节点静默接管订阅规则。
+    let req_tag_lower = tag.to_lowercase();
+    for existing_tag in known_rule_targets(&old_config, &state).await {
+        if existing_tag.to_lowercase() == req_tag_lower {
+            return Err(status_error(
+                StatusCode::BAD_REQUEST,
+                format!(
+                    "标签 '{}' 与已存在或保留的节点 '{}' 重复（不区分大小写）",
+                    tag, existing_tag
+                ),
+            ));
         }
     }
-
-    let node_value = build_node_value(&req, node_type);
-    let node_json = serde_json::to_string(&node_value).map_err(|e| {
-        status_error(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Failed to serialize node: {}", e),
-        )
-    })?;
 
     new_config.nodes.push(node_json);
 
@@ -335,6 +312,64 @@ pub async fn add_node(
         Ok(_) => Ok(success_no_data("Node added")),
         Err(e) => Err(status_error(StatusCode::INTERNAL_SERVER_ERROR, e)),
     }
+}
+
+pub async fn import_nodes(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<BatchNodeRequest>,
+) -> HandlerResult<BatchNodeResult> {
+    if state.initializing.load(Ordering::Relaxed) {
+        return Err(status_error(
+            StatusCode::CONFLICT,
+            "Initialization is still in progress",
+        ));
+    }
+
+    let _config_update = state.config_update.lock().await;
+    let old_config = state.config.read().await.clone();
+    let mut new_config = old_config.clone();
+    let existing = known_rule_targets(&old_config, &state).await;
+    let mut used: std::collections::HashSet<String> =
+        existing.into_iter().map(|tag| tag.to_lowercase()).collect();
+    let mut added = Vec::new();
+    let mut failed = Vec::new();
+
+    for (index, node) in req.nodes.iter().enumerate() {
+        let display_tag = node.tag.trim().to_string();
+        match validated_node_json(node) {
+            Ok((tag, node_json)) => {
+                let normalized = tag.to_lowercase();
+                if used.contains(&normalized) {
+                    failed.push(BatchNodeFailure {
+                        index,
+                        tag,
+                        message: "标签与已存在、保留或本批次节点重复（不区分大小写）".to_string(),
+                    });
+                    continue;
+                }
+                used.insert(normalized);
+                new_config.nodes.push(node_json);
+                added.push(BatchNodeAdded { index, tag });
+            }
+            Err(message) => failed.push(BatchNodeFailure {
+                index,
+                tag: display_tag,
+                message,
+            }),
+        }
+    }
+
+    if added.is_empty() {
+        return Ok(success("No nodes added", BatchNodeResult { added, failed }));
+    }
+
+    apply_config_change(&state, &old_config, &new_config)
+        .await
+        .map_err(|e| status_error(StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    Ok(success(
+        format!("Added {} nodes", added.len()),
+        BatchNodeResult { added, failed },
+    ))
 }
 
 pub async fn delete_node(

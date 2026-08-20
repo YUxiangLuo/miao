@@ -7,7 +7,12 @@ use axum::{
 };
 use serde_json::Value;
 
-use crate::{models::Config, router::build_router, state::AppState};
+use crate::{
+    models::{Config, StableConfig},
+    paths::RuntimePaths,
+    router::build_router,
+    state::AppState,
+};
 
 /// Test thread names look like `foo::bar::baz`; `:` is illegal in Windows paths.
 fn safe_test_path_component(raw: &str) -> String {
@@ -30,9 +35,16 @@ pub fn app_state(config: Config) -> Arc<AppState> {
     );
     let config_path = std::env::temp_dir().join(format!("miao-test-config-{unique}.yaml"));
     let volatile_path = std::env::temp_dir().join(format!("miao-test-volatile-{unique}.yaml"));
+    let runtime_dir = std::env::temp_dir().join(format!("miao-test-runtime-{unique}"));
     Arc::new(
-        AppState::with_config_path(config, config_path, volatile_path)
-            .expect("Failed to create AppState in test"),
+        AppState::with_config_layers(
+            StableConfig::from(&config),
+            config,
+            config_path.clone(),
+            volatile_path,
+            RuntimePaths::new(runtime_dir, &config_path),
+        )
+        .expect("Failed to create AppState in test"),
     )
 }
 

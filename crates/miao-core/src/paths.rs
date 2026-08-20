@@ -17,6 +17,41 @@ use crate::error::{AppError, AppResult};
 pub const CONFIG_FILENAME: &str = "config.yaml";
 pub const ETC_CONFIG_PATH: &str = "/etc/miao/config.yaml";
 
+/// All derived runtime artifacts used by configuration generation. Keeping
+/// these paths in state makes transaction tests hermetic and prevents tests
+/// from ever touching the production sing-box directory.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RuntimePaths {
+    pub runtime_dir: PathBuf,
+    pub active_config: PathBuf,
+    pub config_cache: PathBuf,
+    pub cache_manifest: PathBuf,
+    pub sub_nodes_snapshot: PathBuf,
+    pub node_bindings: PathBuf,
+}
+
+impl RuntimePaths {
+    pub fn new(runtime_dir: PathBuf, config_path: &std::path::Path) -> Self {
+        let node_bindings =
+            if config_path.file_name() == Some(std::ffi::OsStr::new(CONFIG_FILENAME)) {
+                config_path.with_file_name("node-bindings.json")
+            } else {
+                config_path.with_extension("node-bindings.json")
+            };
+        Self {
+            active_config: runtime_dir.join("config.json"),
+            config_cache: runtime_dir.join("config.json.cache"),
+            cache_manifest: runtime_dir.join("config-cache.manifest.json"),
+            sub_nodes_snapshot: runtime_dir.join("sub-nodes.json"),
+            // Bindings belong to a resolved config profile. Deriving the name
+            // from the config path prevents two explicit configs in the same
+            // directory (and parallel tests) from sharing node identities.
+            node_bindings,
+            runtime_dir,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ConfigPathSource {
     Explicit,
@@ -131,7 +166,28 @@ mod tests {
     use std::ffi::OsString;
     use std::path::PathBuf;
 
-    use super::{config_arg_from, resolve_config_path_from_parts, ConfigPathSource};
+    use super::{config_arg_from, resolve_config_path_from_parts, ConfigPathSource, RuntimePaths};
+
+    #[test]
+    fn runtime_bindings_follow_the_resolved_config_profile() {
+        let default = RuntimePaths::new(
+            PathBuf::from("/tmp/runtime"),
+            std::path::Path::new("/etc/miao/config.yaml"),
+        );
+        assert_eq!(
+            default.node_bindings,
+            PathBuf::from("/etc/miao/node-bindings.json")
+        );
+
+        let profile = RuntimePaths::new(
+            PathBuf::from("/tmp/runtime"),
+            std::path::Path::new("/etc/miao/travel.yaml"),
+        );
+        assert_eq!(
+            profile.node_bindings,
+            PathBuf::from("/etc/miao/travel.node-bindings.json")
+        );
+    }
 
     #[test]
     fn config_arg_parses_separate_value() {

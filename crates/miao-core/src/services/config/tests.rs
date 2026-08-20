@@ -87,8 +87,8 @@ fn filter_rules_skips_only_rules_with_missing_outbound() {
 
     let (kept, skipped) = filter_rules_with_missing_outbound(&rules, &available);
 
-    // 失效规则被跳过,其余(含无法解析的)原样保留
-    assert_eq!(kept.len(), 4);
+    // 失效规则与无法解析的规则都会在生成阶段跳过；原始配置仍保持不变
+    assert_eq!(kept.len(), 3);
     assert!(!kept.iter().any(|r| r.contains("gone-node")));
     assert_eq!(
         skipped,
@@ -128,6 +128,13 @@ fn build_sing_box_config_skips_rules_with_missing_node() {
     let rules_json = serde_json::to_string(rules).unwrap();
     assert!(!rules_json.contains("已消失节点"));
     assert!(rules_json.contains("manual-a"));
+    let dns_json = serde_json::to_string(&built["dns"]).unwrap();
+    assert!(!dns_json.contains("已消失节点"));
+    assert!(!built["dns"]["servers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|server| server["detour"] == "已消失节点"));
     assert_eq!(skipped.len(), 1);
     assert_eq!(
         skipped[0].description,

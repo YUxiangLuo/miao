@@ -6,16 +6,21 @@ use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::{Mutex, RwLock};
 
-use crate::models::{Config, GitHubRelease, SubStatus};
+use crate::models::{Config, GitHubRelease, StableConfig, SubStatus};
+use crate::paths::RuntimePaths;
 
 /// 应用状态容器 - 包含所有运行时状态
 /// 通过依赖注入传递，避免全局静态变量
 pub struct AppState {
     pub config: RwLock<Config>, // 使用 RwLock 支持并发读
+    /// Stable YAML model kept separately so volatile preferences never erase
+    /// boot defaults during an unrelated configuration save.
+    pub stable_config: RwLock<StableConfig>,
     pub config_path: PathBuf,
     /// 易变层配置（node_select/route_mode）的落盘位置，与 config_path 分层。
     pub volatile_path: PathBuf,
-    pub config_update: Mutex<()>,
+    pub runtime_paths: RuntimePaths,
+    pub config_update: Arc<Mutex<()>>,
     pub sing_process: Mutex<Option<SingBoxProcess>>,
     /// 每次有意启动/停止 sing-box 都会递增。崩溃看门狗以此识别自己监护的
     /// 那次启动是否已被取代，避免与配置热重启、用户停核等路径打架。
@@ -31,7 +36,8 @@ pub struct AppState {
     pub service_should_run: AtomicBool,
     pub http_client: reqwest::Client,
     pub version_cache: ArcSwap<VersionCache>, // 使用 ArcSwap 实现无锁读取
-    pub upgrading: AtomicBool,                // 防止并发升级
+    #[cfg(not(windows))]
+    pub upgrading: AtomicBool, // 防止并发升级
 }
 
 impl AppState {
@@ -45,10 +51,29 @@ impl AppState {
         )
     }
 
+    #[cfg(test)]
     pub fn with_config_path(
         config: Config,
         config_path: PathBuf,
         volatile_path: PathBuf,
+    ) -> Result<Self, reqwest::Error> {
+        let runtime_paths =
+            RuntimePaths::new(crate::services::singbox::get_sing_box_home(), &config_path);
+        Self::with_config_layers(
+            StableConfig::from(&config),
+            config,
+            config_path,
+            volatile_path,
+            runtime_paths,
+        )
+    }
+
+    pub fn with_config_layers(
+        stable_config: StableConfig,
+        config: Config,
+        config_path: PathBuf,
+        volatile_path: PathBuf,
+        runtime_paths: RuntimePaths,
     ) -> Result<Self, reqwest::Error> {
         // reqwest 默认会读 HTTP_PROXY/HTTPS_PROXY 等环境变量代理。本进程自己
         // 就是代理：订阅拉取、Clash API（127.0.0.1）都不该被 root 环境里的
@@ -60,9 +85,11 @@ impl AppState {
 
         Ok(Self {
             config: RwLock::new(config),
+            stable_config: RwLock::new(stable_config),
             config_path,
             volatile_path,
-            config_update: Mutex::new(()),
+            runtime_paths,
+            config_update: Arc::new(Mutex::new(())),
             sing_process: Mutex::new(None),
             sing_generation: AtomicU64::new(0),
             sub_status: Mutex::new(HashMap::new()),
@@ -75,6 +102,7 @@ impl AppState {
                 release: None,
                 fetched_at: None,
             })),
+            #[cfg(not(windows))]
             upgrading: AtomicBool::new(false),
         })
     }

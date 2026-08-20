@@ -115,35 +115,61 @@ fn summarize_rule_matcher(rule: &serde_json::Value) -> String {
 
 /// 跳过引用不存在出口节点的自定义规则,返回(保留的规则, 失效规则的告警描述)。
 /// 节点可能因订阅刷新改名或消失;跳过而非写入,避免 sing-box check 失败卡死所有配置变更。
+#[cfg(test)]
 pub(super) fn filter_rules_with_missing_outbound(
     custom_rules: &[String],
     available_outbounds: &HashSet<String>,
 ) -> (Vec<String>, Vec<SkippedRule>) {
+    let parsed = parse_custom_rules(custom_rules);
+    let (kept, skipped) = filter_parsed_rules_with_missing_outbound(parsed, available_outbounds);
+    (kept.into_iter().map(|rule| rule.raw).collect(), skipped)
+}
+
+#[derive(Clone, Debug)]
+struct ParsedCustomRule {
+    raw: String,
+    value: serde_json::Value,
+}
+
+fn parse_custom_rules(custom_rules: &[String]) -> Vec<ParsedCustomRule> {
+    custom_rules
+        .iter()
+        .filter_map(|raw| match serde_json::from_str(raw) {
+            Ok(value) => Some(ParsedCustomRule {
+                raw: raw.clone(),
+                value,
+            }),
+            Err(err) => {
+                warn!(rule = %raw, error = %err, "Failed to parse custom rule");
+                None
+            }
+        })
+        .collect()
+}
+
+fn filter_parsed_rules_with_missing_outbound(
+    custom_rules: Vec<ParsedCustomRule>,
+    available_outbounds: &HashSet<String>,
+) -> (Vec<ParsedCustomRule>, Vec<SkippedRule>) {
     let mut kept = Vec::with_capacity(custom_rules.len());
     let mut skipped = Vec::new();
 
-    for rule_str in custom_rules {
-        let missing = serde_json::from_str::<serde_json::Value>(rule_str)
-            .ok()
-            .and_then(|rule| {
-                let outbound = rule.get("outbound")?.as_str()?;
-                if available_outbounds.contains(outbound) {
-                    None
-                } else {
-                    Some((summarize_rule_matcher(&rule), outbound.to_string()))
-                }
-            });
+    for rule in custom_rules {
+        let missing = rule.value.get("outbound").and_then(|value| {
+            let outbound = value.as_str()?;
+            (!available_outbounds.contains(outbound))
+                .then(|| (summarize_rule_matcher(&rule.value), outbound.to_string()))
+        });
 
         match missing {
             Some((summary, outbound)) => {
-                warn!(rule = %rule_str, outbound = %outbound, "Skipping custom rule with missing outbound node");
+                warn!(rule = %rule.raw, outbound = %outbound, "Skipping custom rule with missing outbound node");
                 skipped.push(SkippedRule {
-                    raw: rule_str.clone(),
+                    raw: rule.raw,
                     description: format!("{summary} → {outbound}"),
                 });
             }
-            // 无法解析的规则保留原有行为:交给 parse_custom_rules 跳过并告警
-            None => kept.push(rule_str.clone()),
+            None => kept.push(rule),
         }
     }
 
@@ -174,8 +200,12 @@ pub(super) fn build_sing_box_config(
     let mut available_outbounds: HashSet<String> = node_names.iter().cloned().collect();
     available_outbounds.insert("proxy".to_string());
     available_outbounds.insert("direct".to_string());
+    // Parse once, then use the same typed rules for outbound validation, DNS
+    // derivation and route insertion. This removes three subtly different
+    // interpretations of the same raw compatibility format.
+    let parsed_rules = parse_custom_rules(&config.custom_rules);
     let (custom_rules, skipped_rules) =
-        filter_rules_with_missing_outbound(&config.custom_rules, &available_outbounds);
+        filter_parsed_rules_with_missing_outbound(parsed_rules, &available_outbounds);
 
     let mut sing_box_config = get_config_template();
     apply_proxy_group(&mut sing_box_config, effective_select, &group_names);
@@ -216,18 +246,6 @@ fn apply_proxy_group(
             "interrupt_exist_connections": false
         })
     };
-}
-
-fn parse_custom_rules(custom_rules: &[String]) -> Vec<serde_json::Value> {
-    let mut parsed = Vec::new();
-    for rule_str in custom_rules {
-        if let Ok(rule_json) = serde_json::from_str::<serde_json::Value>(rule_str) {
-            parsed.push(rule_json);
-        } else {
-            warn!("Failed to parse custom rule: {}", rule_str);
-        }
-    }
-    parsed
 }
 
 /// Route rules and DNS rules are evaluated independently by sing-box. Mirror
@@ -295,14 +313,14 @@ fn dns_server_for_outbound(
 }
 
 fn derive_custom_dns_rules(
-    custom_rules: &[String],
+    custom_rules: &[ParsedCustomRule],
     dns_servers: &mut Vec<serde_json::Value>,
 ) -> Vec<serde_json::Value> {
     let mut dns_rules = Vec::new();
     let mut node_dns_servers = Vec::new();
 
-    for rule in parse_custom_rules(custom_rules) {
-        let Some(rule) = rule.as_object() else {
+    for parsed_rule in custom_rules {
+        let Some(rule) = parsed_rule.value.as_object() else {
             continue;
         };
         if rule
@@ -331,7 +349,7 @@ fn derive_custom_dns_rules(
 fn apply_dns_route_mode(
     sing_box_config: &mut serde_json::Value,
     route_mode: RouteMode,
-    custom_rules: &[String],
+    custom_rules: &[ParsedCustomRule],
 ) {
     let Some(dns_servers) = sing_box_config["dns"]["servers"].as_array_mut() else {
         return;
@@ -352,11 +370,11 @@ fn apply_dns_route_mode(
 fn apply_route_mode(
     sing_box_config: &mut serde_json::Value,
     route_mode: RouteMode,
-    custom_rules: &[String],
+    custom_rules: &[ParsedCustomRule],
 ) {
     if let Some(rules) = sing_box_config["route"]["rules"].as_array_mut() {
         // 两种模式下自定义规则都优先生效
-        let insertions = parse_custom_rules(custom_rules);
+        let insertions = custom_rules.iter().map(|rule| rule.value.clone());
         match route_mode {
             RouteMode::Rule => {
                 // Preserve the mandatory pre-routing actions, then let user rules take

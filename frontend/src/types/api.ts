@@ -31,9 +31,17 @@ export interface StatusData {
   pid?: number
   uptime_secs?: number
   warning?: string
+  /** Additive structured form; older backends may omit it. */
+  warnings?: RuntimeWarning[]
   vps_supported: boolean
   platform: string
   mcp: boolean
+}
+
+export interface RuntimeWarning {
+  code: string
+  message: string
+  severity: 'warning' | 'error' | 'info'
 }
 
 /** models/api.rs ConnectivityResult（POST /api/connectivity） */
@@ -167,4 +175,9 @@ export interface NodeRequest {
   tuic_zero_rtt?: boolean
   obfs_type?: string
   obfs_password?: string
+}
+
+export interface BatchNodeResult {
+  added: Array<{ index: number; tag: string }>
+  failed: Array<{ index: number; tag: string; message: string }>
 }

@@ -1,25 +1,39 @@
 use futures::{stream, StreamExt};
+use sha2::{Digest, Sha256};
 use std::sync::Arc;
 use tokio::time::Duration;
 use tracing::{error, info, warn};
 
 use crate::error::AppResult;
 use crate::models::{Config, NodeSelect, SubStatus};
-use crate::services::singbox::get_sing_box_home;
 use crate::services::subscription::fetch_sub;
-use crate::state::AppState;
+use crate::state::{AppState, SkippedRule};
 
+use super::bindings::{assign_subscription_tags, reserved_node_tags, NodeTagBindings};
 use super::builder::build_sing_box_config;
-use super::persist::{
-    read_sub_nodes_snapshot, save_sub_nodes_snapshot, write_file_atomic, SubNodesSnapshot,
-};
+use super::persist::{read_sub_nodes_snapshot, save_sub_nodes_snapshot, SubNodesSnapshot};
 
+#[derive(Clone)]
 pub struct GenConfigOutcome {
+    pub bytes: Vec<u8>,
     pub has_sub_nodes: bool,
     pub node_select: NodeSelect,
+    pub skipped_rules: Vec<SkippedRule>,
     /// 本次真拉取拿到的订阅节点集（非空才 Some）；快照重建为 None。
     /// 校验通过/启动成功后由 record_fresh_snapshot 落盘，供本地语义变更零网络重建。
-    pub fresh_sub_nodes: Option<(Vec<String>, Vec<serde_json::Value>)>,
+    pub fresh_sub_nodes: Option<Vec<FetchedNode>>,
+    pub node_bindings: NodeTagBindings,
+}
+
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct FetchedNode {
+    pub source_id: String,
+    pub name: String,
+    pub outbound: serde_json::Value,
+}
+
+fn subscription_source_id(url: &str) -> String {
+    hex::encode(Sha256::digest(url.as_bytes()))
 }
 
 const MAX_CONCURRENT_SUBS: usize = 5;
@@ -74,8 +88,8 @@ pub async fn gen_config(
     state: &Arc<AppState>,
     retry: SubFetchRetry,
 ) -> AppResult<GenConfigOutcome> {
-    let (node_names, outbounds) = fetch_sub_nodes(config, state, retry).await;
-    gen_config_from_nodes(config, state, node_names, outbounds).await
+    let nodes = fetch_sub_nodes(config, state, retry).await;
+    gen_config_from_nodes(config, state, nodes).await
 }
 
 /// 只拉取订阅节点集（不写盘）：订阅全失败时按 retry 预算退避重试。
@@ -84,18 +98,18 @@ pub async fn fetch_sub_nodes(
     config: &Config,
     state: &Arc<AppState>,
     retry: SubFetchRetry,
-) -> (Vec<String>, Vec<serde_json::Value>) {
+) -> Vec<FetchedNode> {
     let schedule = retry.schedule();
     let mut attempt = 0usize;
     loop {
-        let (node_names, outbounds) = fetch_all_subs(config, state).await;
+        let nodes = fetch_all_subs(config, state).await;
         // 是否值得退避重试：配置了订阅却一个订阅节点都没拿到才算
         // （全部秒败是网络未就绪的典型瞬态）；部分成功/其他错误更像订阅本身坏了
-        if !node_names.is_empty() || config.subs.is_empty() {
-            return (node_names, outbounds);
+        if !nodes.is_empty() || config.subs.is_empty() {
+            return nodes;
         }
         let Some(delay) = schedule.get(attempt) else {
-            return (node_names, outbounds);
+            return nodes;
         };
         attempt += 1;
         info!(
@@ -110,11 +124,10 @@ pub async fn fetch_sub_nodes(
 pub(super) async fn gen_config_from_nodes(
     config: &Config,
     state: &Arc<AppState>,
-    node_names: Vec<String>,
-    outbounds: Vec<serde_json::Value>,
+    nodes: Vec<FetchedNode>,
 ) -> AppResult<GenConfigOutcome> {
-    let fresh = (!node_names.is_empty()).then(|| (node_names.clone(), outbounds.clone()));
-    let mut outcome = build_write_and_record(config, state, node_names, outbounds).await?;
+    let fresh = (!nodes.is_empty()).then(|| nodes.clone());
+    let mut outcome = build_prepared(config, state, nodes).await?;
     outcome.fresh_sub_nodes = fresh;
     Ok(outcome)
 }
@@ -126,11 +139,10 @@ pub async fn gen_config_from_snapshot(
     config: &Config,
     state: &Arc<AppState>,
 ) -> AppResult<GenConfigOutcome> {
-    if let Some(snapshot) = read_sub_nodes_snapshot().await {
+    if let Some(snapshot) = read_sub_nodes_snapshot(state).await {
         if snapshot.matches_subs(&config.subs) {
             info!("Rebuilding config from subscription node snapshot (no network)");
-            return build_write_and_record(config, state, snapshot.node_names, snapshot.outbounds)
-                .await;
+            return build_prepared(config, state, snapshot.into_fetched_nodes()).await;
         }
         warn!("Subscription list changed since snapshot; fetching subscriptions");
     }
@@ -138,27 +150,23 @@ pub async fn gen_config_from_snapshot(
 }
 
 /// 校验通过/启动成功后调用：把本次真拉取的节点集落成快照（best-effort，写失败只告警）。
-pub async fn record_fresh_snapshot(config: &Config, outcome: &GenConfigOutcome) {
-    let Some((node_names, outbounds)) = &outcome.fresh_sub_nodes else {
+pub async fn record_fresh_snapshot(
+    config: &Config,
+    state: &Arc<AppState>,
+    outcome: &GenConfigOutcome,
+) {
+    let Some(nodes) = &outcome.fresh_sub_nodes else {
         return;
     };
-    let snapshot = SubNodesSnapshot {
-        subs: config.subs.clone(),
-        node_names: node_names.clone(),
-        outbounds: outbounds.clone(),
-    };
-    if let Err(err) = save_sub_nodes_snapshot(&snapshot).await {
+    let snapshot = SubNodesSnapshot::from_fetched_nodes(config.subs.clone(), nodes.clone());
+    if let Err(err) = save_sub_nodes_snapshot(state, &snapshot).await {
         warn!(error = %err, "Failed to save subscription nodes snapshot");
     }
 }
 
 /// 并发拉取全部订阅并逐条更新 sub_status；返回合并后的节点名与 outbounds。
-async fn fetch_all_subs(
-    config: &Config,
-    state: &Arc<AppState>,
-) -> (Vec<String>, Vec<serde_json::Value>) {
-    let mut final_outbounds: Vec<serde_json::Value> = vec![];
-    let mut final_node_names: Vec<String> = vec![];
+async fn fetch_all_subs(config: &Config, state: &Arc<AppState>) -> Vec<FetchedNode> {
+    let mut final_nodes = vec![];
 
     {
         let mut status_map = state.sub_status.lock().await;
@@ -232,8 +240,18 @@ async fn fetch_all_subs(
         let status = match result {
             Ok(fetch_result) => {
                 let count = fetch_result.node_names.len();
-                final_node_names.extend(fetch_result.node_names);
-                final_outbounds.extend(fetch_result.outbounds);
+                let source_id = subscription_source_id(&url);
+                final_nodes.extend(
+                    fetch_result
+                        .node_names
+                        .into_iter()
+                        .zip(fetch_result.outbounds)
+                        .map(|(name, outbound)| FetchedNode {
+                            source_id: source_id.clone(),
+                            name,
+                            outbound,
+                        }),
+                );
 
                 let error_info = if !fetch_result.parse_errors.is_empty() {
                     Some(format!(
@@ -265,18 +283,19 @@ async fn fetch_all_subs(
         state.sub_status.lock().await.insert(url, status);
     }
 
-    (final_node_names, final_outbounds)
+    final_nodes
 }
 
-/// 用给定的订阅节点集构建 sing-box 配置并原子写盘；skipped_rules 同步进状态。
-async fn build_write_and_record(
+/// Build a candidate without mutating the active runtime file or diagnostics.
+async fn build_prepared(
     config: &Config,
     state: &Arc<AppState>,
-    final_node_names: Vec<String>,
-    final_outbounds: Vec<serde_json::Value>,
+    nodes: Vec<FetchedNode>,
 ) -> AppResult<GenConfigOutcome> {
     let (my_outbounds, my_names) = collect_manual_outbounds(config);
-    let has_sub_nodes = !final_node_names.is_empty();
+    let has_sub_nodes = !nodes.is_empty();
+    let (final_node_names, final_outbounds, node_bindings) =
+        assign_subscription_tags(state, &my_names, nodes).await;
 
     let (sing_box_config, skipped_rules, node_select) = build_sing_box_config(
         config,
@@ -286,16 +305,13 @@ async fn build_write_and_record(
         final_outbounds,
     )?;
 
-    let sing_box_home = get_sing_box_home();
-    let config_output_loc = sing_box_home.join("config.json");
-    write_file_atomic(&config_output_loc, &serde_json::to_vec(&sing_box_config)?).await?;
-
-    *state.skipped_rules.lock().await = skipped_rules;
-
     Ok(GenConfigOutcome {
+        bytes: serde_json::to_vec(&sing_box_config)?,
         has_sub_nodes,
         node_select,
+        skipped_rules,
         fresh_sub_nodes: None,
+        node_bindings,
     })
 }
 
@@ -338,7 +354,7 @@ pub(super) fn runtime_config_node_tags(config_json: &serde_json::Value) -> Vec<S
 
 /// 自定义规则可选的节点目标:手动节点(配置直读)+ 订阅节点(最近一次生成的运行时配置)。
 /// 仅供规则校验给出友好报错,最终正确性由 sing-box check 保证。
-pub async fn known_rule_targets(config: &Config) -> Vec<String> {
+pub async fn known_rule_targets(config: &Config, state: &AppState) -> Vec<String> {
     use crate::services::node_parser::parse_node_json;
 
     let mut tags: Vec<String> = Vec::new();
@@ -350,7 +366,7 @@ pub async fn known_rule_targets(config: &Config) -> Vec<String> {
         }
     }
 
-    let runtime_config_path = get_sing_box_home().join("config.json");
+    let runtime_config_path = &state.runtime_paths.active_config;
     if let Ok(content) = tokio::fs::read_to_string(&runtime_config_path).await {
         if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
             for tag in runtime_config_node_tags(&json) {
@@ -358,6 +374,12 @@ pub async fn known_rule_targets(config: &Config) -> Vec<String> {
                     tags.push(tag);
                 }
             }
+        }
+    }
+
+    for tag in reserved_node_tags(state).await {
+        if !tags.contains(&tag) {
+            tags.push(tag);
         }
     }
 

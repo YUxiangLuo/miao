@@ -1,4 +1,5 @@
 mod apply;
+mod bindings;
 mod builder;
 mod generate;
 mod persist;
@@ -8,15 +9,16 @@ mod region;
 mod tests;
 
 pub use apply::{
-    apply_config_change, refresh_subscriptions, regenerate_preserving_service_state, RefreshEffect,
-    RefreshPolicy, SubSource,
+    apply_config_change, install_prepared_runtime, refresh_subscriptions,
+    regenerate_preserving_service_state, RefreshEffect, RefreshPolicy, SubSource,
 };
 pub use generate::{
     fetch_sub_nodes, gen_config, known_rule_targets, record_fresh_snapshot, GenConfigOutcome,
     SubFetchRetry,
 };
 pub use persist::{
-    has_config_cache, load_volatile_config_at, persist_effective_node_select,
-    restore_config_from_cache, save_config_cache, save_config_to, volatile_config_path,
+    cache_compatibility, has_config_cache, load_volatile_config_at, mark_legacy_cache_used,
+    persist_effective_node_select, restore_config_from_cache, save_config_cache,
+    save_stable_fields, volatile_config_path, CacheCompatibility,
 };
 pub use region::runtime_config_matches_node_select;

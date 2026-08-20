@@ -19,5 +19,6 @@ pub struct GitHubRelease {
 pub struct GitHubAsset {
     pub name: String,
     pub browser_download_url: String,
+    #[cfg_attr(windows, allow(dead_code))]
     pub size: u64,
 }

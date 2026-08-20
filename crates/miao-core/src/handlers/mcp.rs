@@ -6,7 +6,7 @@ use std::sync::{atomic::Ordering, Arc};
 
 use crate::models::McpRequest;
 use crate::responses::{status_error, success_no_data, HandlerResult};
-use crate::services::config::save_config_to;
+use crate::services::config::save_stable_fields;
 use crate::state::AppState;
 
 /// POST /mcp — MCP（Model Context Protocol）JSON-RPC 端点。
@@ -52,7 +52,7 @@ pub async fn set_mcp(
 
     let mut new_config = old_config.clone();
     new_config.mcp = req.enabled;
-    save_config_to(&state.config_path, &new_config)
+    save_stable_fields(&state, &new_config)
         .await
         .map_err(|e| status_error(StatusCode::INTERNAL_SERVER_ERROR, e))?;
     *state.config.write().await = new_config;

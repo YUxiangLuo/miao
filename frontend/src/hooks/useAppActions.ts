@@ -5,6 +5,7 @@ import { buildNodeRequest } from '../nodeForm'
 import type { useAppData } from './useAppData'
 import type {
   NodeRequest,
+  BatchNodeResult,
   NodeSelect,
   RouteMode,
   RuleInfo,
@@ -242,28 +243,28 @@ export function useAppActions(data: AppData) {
   const handleImportNodes = useCallback(async (payloads: NodeRequest[]) => {
     if (!payloads?.length) return
 
-    const failures: string[] = []
-    let added = 0
-    for (const payload of payloads) {
-      try {
-        await apiCall('nodes', { method: 'POST', body: JSON.stringify(payload) })
-        added += 1
-      } catch (error) {
-        failures.push(`${payload.tag}: ${errorMessage(error)}`)
+    try {
+      const response = await apiCall<BatchNodeResult>(
+        'nodes/import',
+        { method: 'POST', body: JSON.stringify({ nodes: payloads }) },
+        'importNodes',
+      )
+      const result = response.data || { added: [], failed: [] }
+      if (result.added.length > 0) {
+        await fetchNodes()
+        clearDelays()
+        showToast(`已添加 ${result.added.length} 个节点`, 'success')
       }
-    }
-
-    if (added > 0) {
-      await fetchNodes()
-      clearDelays()
-      showToast(`已添加 ${added} 个节点`, 'success')
-    }
-    if (failures.length > 0) {
-      const shown = failures.slice(0, 2).join('; ')
-      const more = failures.length > 2 ? ` 等 ${failures.length} 项` : ''
-      showToast(`导入失败: ${shown}${more}`, 'error')
-    } else {
-      closeNodeModal()
+      if (result.failed.length > 0) {
+        const failures = result.failed.map((item) => `${item.tag}: ${item.message}`)
+        const shown = failures.slice(0, 2).join('; ')
+        const more = failures.length > 2 ? ` 等 ${failures.length} 项` : ''
+        showToast(`导入失败: ${shown}${more}`, 'error')
+      } else {
+        closeNodeModal()
+      }
+    } catch (error) {
+      showToast(errorMessage(error), 'error')
     }
   }, [apiCall, clearDelays, closeNodeModal, fetchNodes, showToast])
 

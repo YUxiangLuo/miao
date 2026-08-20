@@ -1,9 +1,7 @@
 use axum::{extract::State, http::StatusCode, response::Json};
 use serde::Deserialize;
-use std::{
-    sync::{atomic::Ordering, Arc},
-    time::Instant,
-};
+use std::sync::{atomic::Ordering, Arc};
+use std::time::Instant;
 use tokio::time::Duration;
 
 use crate::error::AppError;
@@ -14,57 +12,20 @@ use crate::responses::{status_error, success, success_no_data, HandlerResult};
 use crate::services::{
     config::apply_config_change,
     proxy::spawn_restore_last_proxy,
-    singbox::{start_sing_internal, stop_sing_internal},
+    singbox::{kernel_status, start_sing_internal, stop_sing_internal},
+    status::{legacy_warning, runtime_warnings},
 };
 use crate::state::AppState;
 
 pub async fn get_status(State(state): State<Arc<AppState>>) -> Json<ApiResponse<StatusData>> {
-    // 快速获取进程状态并立即释放锁
-    let (running, pid, uptime_secs) = {
-        let mut lock = state.sing_process.lock().await;
-
-        if let Some(ref mut proc) = *lock {
-            match proc.child.try_wait() {
-                Ok(Some(_)) => {
-                    *lock = None;
-                    (false, None, None)
-                }
-                Ok(None) => {
-                    let uptime = proc.started_at.elapsed().as_secs();
-                    (true, proc.child.id(), Some(uptime))
-                }
-                Err(_) => (false, None, None),
-            }
-        } else {
-            (false, None, None)
-        }
-    }; // sing_process 锁在此处释放
+    let kernel = kernel_status(&state).await;
+    let (running, pid, uptime_secs) = (kernel.running, kernel.pid, kernel.uptime_secs);
 
     let initializing = state
         .initializing
         .load(std::sync::atomic::Ordering::Relaxed);
-    let mut warnings: Vec<String> = Vec::new();
-    if let Some(warning) = state.config_warning.lock().await.clone() {
-        warnings.push(warning);
-    }
-    let skipped_rules = state.skipped_rules.lock().await;
-    if !skipped_rules.is_empty() {
-        warnings.push(format!(
-            "{} 条自定义规则因出口节点不存在已跳过: {}",
-            skipped_rules.len(),
-            skipped_rules
-                .iter()
-                .map(|rule| rule.description.as_str())
-                .collect::<Vec<_>>()
-                .join(";")
-        ));
-    }
-    drop(skipped_rules);
-    let warning = if warnings.is_empty() {
-        None
-    } else {
-        Some(warnings.join(";"))
-    };
+    let warnings = runtime_warnings(&state).await;
+    let warning = legacy_warning(&warnings);
     let (route_mode, mcp, node_select) = {
         let config = state.config.read().await;
         (config.route_mode, config.mcp, config.node_select)
@@ -80,6 +41,7 @@ pub async fn get_status(State(state): State<Arc<AppState>>) -> Json<ApiResponse<
             pid,
             uptime_secs,
             warning,
+            warnings,
             vps_supported: crate::platform::vps_supported(),
             platform: if cfg!(windows) { "windows" } else { "linux" },
             mcp,

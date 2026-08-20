@@ -47,6 +47,22 @@ static VALID_TUIC_CONGESTION_CONTROLS: &[&str] = &["cubic", "new_reno", "bbr"];
 static VALID_TUIC_UDP_RELAY_MODES: &[&str] = &["native", "quic"];
 static VALID_HYSTERIA2_OBFS_TYPES: &[&str] = &["salamander", "gecko"];
 
+/// Canonical fields accepted by the structured custom-rule API. Raw rules in
+/// existing config files remain forward-compatible and may contain more
+/// sing-box matchers.
+pub const CUSTOM_RULE_FIELDS: &[&str] = &[
+    "domain_suffix",
+    "domain",
+    "domain_keyword",
+    "ip_cidr",
+    "source_ip_cidr",
+    "port",
+    "port_range",
+    "protocol",
+    "process_name",
+    "process_path",
+];
+
 use crate::models::{NodeRequest, RuleRequest};
 
 pub struct Validator;
@@ -219,25 +235,13 @@ impl Validator {
 
     /// 校验自定义规则的字段、目标与取值格式;extra_targets 为内置目标之外可用的节点 tag
     pub fn custom_rule(req: &RuleRequest, extra_targets: &[String]) -> Result<(), String> {
-        static VALID_RULE_FIELDS: &[&str] = &[
-            "domain_suffix",
-            "domain",
-            "domain_keyword",
-            "ip_cidr",
-            "source_ip_cidr",
-            "port",
-            "port_range",
-            "protocol",
-            "process_name",
-            "process_path",
-        ];
         static VALID_RULE_TARGETS: &[&str] = &["proxy", "direct", "reject"];
 
-        if !VALID_RULE_FIELDS.contains(&req.field.as_str()) {
+        if !CUSTOM_RULE_FIELDS.contains(&req.field.as_str()) {
             return Err(format!(
                 "不支持的规则字段: {},支持的字段: {}",
                 req.field,
-                VALID_RULE_FIELDS.join(", ")
+                CUSTOM_RULE_FIELDS.join(", ")
             ));
         }
         let target_known = VALID_RULE_TARGETS.contains(&req.target.as_str())

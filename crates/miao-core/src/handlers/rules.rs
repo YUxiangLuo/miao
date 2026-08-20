@@ -5,7 +5,7 @@ use crate::models::{ApiResponse, DeleteRuleRequest, RuleInfo, RuleRequest};
 use crate::responses::{status_error, success, success_no_data, HandlerResult};
 use crate::services::config::{apply_config_change, known_rule_targets};
 use crate::state::AppState;
-use crate::validation::Validator;
+use crate::validation::{Validator, CUSTOM_RULE_FIELDS};
 use serde_json::{json, Map, Value as JsonValue};
 
 /// 由 UI 表单生成规范的 sing-box 规则 JSON(action 格式)
@@ -42,22 +42,9 @@ pub(crate) fn describe_rule(index: usize, raw: &str) -> RuleInfo {
         return info;
     };
 
-    const KNOWN_FIELDS: &[&str] = &[
-        "domain_suffix",
-        "domain",
-        "domain_keyword",
-        "ip_cidr",
-        "source_ip_cidr",
-        "port",
-        "port_range",
-        "protocol",
-        "process_name",
-        "process_path",
-    ];
-
     // 仅单条件规则做结构化展示:零个或多个已知匹配字段(含两个白名单字段的复合规则)
     // 都回退 raw,避免隐藏条件误导用户
-    let matched: Vec<&&str> = KNOWN_FIELDS
+    let matched: Vec<&&str> = CUSTOM_RULE_FIELDS
         .iter()
         .filter(|field| map.contains_key(**field))
         .collect();
@@ -67,9 +54,9 @@ pub(crate) fn describe_rule(index: usize, raw: &str) -> RuleInfo {
     let field = *matched[0];
 
     // 出现匹配字段/action/outbound 之外的键,同样回退 raw
-    let has_unknown_keys = map
-        .keys()
-        .any(|key| !KNOWN_FIELDS.contains(&key.as_str()) && key != "action" && key != "outbound");
+    let has_unknown_keys = map.keys().any(|key| {
+        !CUSTOM_RULE_FIELDS.contains(&key.as_str()) && key != "action" && key != "outbound"
+    });
     if has_unknown_keys {
         return info;
     }
@@ -134,7 +121,9 @@ pub async fn add_rule(
         ));
     }
 
-    let extra_targets = known_rule_targets(&state.config.read().await.clone()).await;
+    let _config_update = state.config_update.lock().await;
+    let old_config = state.config.read().await.clone();
+    let extra_targets = known_rule_targets(&old_config, &state).await;
     Validator::custom_rule(&req, &extra_targets)
         .map_err(|e| status_error(StatusCode::BAD_REQUEST, e))?;
 
@@ -142,8 +131,6 @@ pub async fn add_rule(
     let rule_str = serde_json::to_string(&rule_json)
         .map_err(|e| status_error(StatusCode::INTERNAL_SERVER_ERROR, e))?;
 
-    let _config_update = state.config_update.lock().await;
-    let old_config = state.config.read().await.clone();
     let mut new_config = old_config.clone();
 
     if new_config.custom_rules.contains(&rule_str) {

@@ -1,15 +1,132 @@
+use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
-use tracing::{error, info};
+use std::sync::atomic::{AtomicU64, Ordering};
+use tokio::io::AsyncWriteExt;
+use tracing::{error, info, warn};
 
 use std::sync::Arc;
 
 use crate::error::{AppError, AppResult};
-use crate::models::{Config, NodeSelect, VolatileConfig};
+use crate::models::{Config, NodeSelect, StableConfig, VolatileConfig};
 use crate::services::singbox::get_sing_box_home;
 use crate::state::AppState;
 
-pub(super) fn config_cache_path() -> PathBuf {
-    get_sing_box_home().join("config.json.cache")
+const CACHE_MANIFEST_VERSION: u32 = 1;
+/// Bump only when generated sing-box semantics become incompatible with old
+/// cached bytes. Package releases alone do not invalidate a healthy cache.
+const RUNTIME_CONFIG_SCHEMA_VERSION: u32 = 1;
+
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+struct CacheManifest {
+    manifest_version: u32,
+    runtime_schema_version: u32,
+    input_sha256: String,
+    cache_sha256: String,
+    verified: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum CacheCompatibility {
+    Verified,
+    Legacy,
+    Incompatible(String),
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    hex::encode(Sha256::digest(bytes))
+}
+
+fn runtime_input_sha256(config: &Config) -> AppResult<String> {
+    let value = serde_json::json!({
+        "subs": &config.subs,
+        "nodes": &config.nodes,
+        "custom_rules": &config.custom_rules,
+        "node_select": config.node_select.as_str(),
+        "route_mode": match config.route_mode {
+            crate::models::RouteMode::Rule => "rule",
+            crate::models::RouteMode::Global => "global",
+        },
+    });
+    Ok(sha256_hex(&serde_json::to_vec(&value)?))
+}
+
+pub async fn cache_compatibility(state: &AppState, config: &Config) -> CacheCompatibility {
+    let cache = match tokio::fs::read(&state.runtime_paths.config_cache).await {
+        Ok(bytes) if !bytes.is_empty() => bytes,
+        Ok(_) => return CacheCompatibility::Incompatible("cache is empty".to_string()),
+        Err(err) => return CacheCompatibility::Incompatible(format!("cache unavailable: {err}")),
+    };
+    let manifest_bytes = match tokio::fs::read(&state.runtime_paths.cache_manifest).await {
+        Ok(bytes) => bytes,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            return CacheCompatibility::Legacy;
+        }
+        Err(err) => {
+            return CacheCompatibility::Incompatible(format!("manifest unavailable: {err}"));
+        }
+    };
+    let manifest: CacheManifest = match serde_json::from_slice(&manifest_bytes) {
+        Ok(manifest) => manifest,
+        Err(err) => {
+            return CacheCompatibility::Incompatible(format!("manifest is invalid: {err}"));
+        }
+    };
+    if !manifest.verified {
+        return CacheCompatibility::Incompatible(
+            "legacy cache was already accepted once and remains unverified".to_string(),
+        );
+    }
+    if manifest.manifest_version != CACHE_MANIFEST_VERSION
+        || manifest.runtime_schema_version != RUNTIME_CONFIG_SCHEMA_VERSION
+    {
+        return CacheCompatibility::Incompatible("cache schema is incompatible".to_string());
+    }
+    if manifest.cache_sha256 != sha256_hex(&cache) {
+        return CacheCompatibility::Incompatible("cache content hash does not match".to_string());
+    }
+    let input = match runtime_input_sha256(config) {
+        Ok(input) => input,
+        Err(err) => {
+            return CacheCompatibility::Incompatible(format!(
+                "failed to hash runtime inputs: {err}"
+            ));
+        }
+    };
+    if manifest.input_sha256 != input {
+        return CacheCompatibility::Incompatible(
+            "cache was generated from different configuration inputs".to_string(),
+        );
+    }
+    CacheCompatibility::Verified
+}
+
+async fn write_cache_manifest(state: &AppState, verified: bool) -> AppResult<()> {
+    let cache = tokio::fs::read(&state.runtime_paths.config_cache)
+        .await
+        .map_err(|e| AppError::context("Failed to read config cache for manifest", e))?;
+    let config = state.config.read().await.clone();
+    let manifest = CacheManifest {
+        manifest_version: CACHE_MANIFEST_VERSION,
+        runtime_schema_version: RUNTIME_CONFIG_SCHEMA_VERSION,
+        input_sha256: runtime_input_sha256(&config)?,
+        cache_sha256: sha256_hex(&cache),
+        verified,
+    };
+    write_file_atomic(
+        &state.runtime_paths.cache_manifest,
+        &serde_json::to_vec(&manifest)?,
+    )
+    .await
+}
+
+pub async fn mark_legacy_cache_used(state: &AppState) {
+    if let Err(err) = write_cache_manifest(state, false).await {
+        warn!(error = %err, "Failed to record legacy cache migration marker");
+    }
+}
+
+pub(super) fn config_cache_path(state: &AppState) -> &Path {
+    &state.runtime_paths.config_cache
 }
 
 /// 易变层配置文件位置：unix 放运行时目录（tmpfs，系统重启即回默认）；
@@ -24,28 +141,58 @@ pub fn volatile_config_path() -> PathBuf {
 
 /// 原子写入文件：先写入临时文件，再重命名为目标文件
 pub(super) async fn write_file_atomic(path: &Path, content: &[u8]) -> AppResult<()> {
-    if let Some(parent) = path
+    let parent = path
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
-    {
-        tokio::fs::create_dir_all(parent)
+        .unwrap_or_else(|| Path::new("."));
+    tokio::fs::create_dir_all(parent)
+        .await
+        .map_err(|e| AppError::context("Failed to create config directory", e))?;
+
+    static TEMP_ID: AtomicU64 = AtomicU64::new(0);
+    let id = TEMP_ID.fetch_add(1, Ordering::Relaxed);
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("miao-state");
+    let temp_path = parent.join(format!(".{file_name}.tmp.{}.{}", std::process::id(), id));
+
+    let result = async {
+        let mut file = tokio::fs::OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(&temp_path)
             .await
-            .map_err(|e| AppError::context("Failed to create config directory", e))?;
+            .map_err(|e| AppError::context("Failed to create temp file", e))?;
+        file.write_all(content)
+            .await
+            .map_err(|e| AppError::context("Failed to write temp file", e))?;
+        file.flush()
+            .await
+            .map_err(|e| AppError::context("Failed to flush temp file", e))?;
+        file.sync_all()
+            .await
+            .map_err(|e| AppError::context("Failed to sync temp file", e))?;
+        drop(file);
+        tokio::fs::rename(&temp_path, path)
+            .await
+            .map_err(|e| AppError::context("Failed to atomically rename file", e))?;
+
+        #[cfg(unix)]
+        {
+            let parent = parent.to_path_buf();
+            tokio::task::spawn_blocking(move || std::fs::File::open(parent)?.sync_all())
+                .await
+                .map_err(|e| AppError::message(format!("Failed to join directory sync: {e}")))?
+                .map_err(|e| AppError::context("Failed to sync config directory", e))?;
+        }
+        Ok(())
     }
-
-    let temp_path = path.with_extension("tmp");
-
-    // 先写入临时文件
-    tokio::fs::write(&temp_path, content)
-        .await
-        .map_err(|e| AppError::context("Failed to write temp file", e))?;
-
-    // 原子重命名为最终文件
-    tokio::fs::rename(&temp_path, path)
-        .await
-        .map_err(|e| AppError::context("Failed to atomically rename file", e))?;
-
-    Ok(())
+    .await;
+    if result.is_err() {
+        let _ = tokio::fs::remove_file(&temp_path).await;
+    }
+    result
 }
 
 async fn save_yaml_to(path: &Path, value: &impl serde::Serialize) -> AppResult<()> {
@@ -60,7 +207,12 @@ async fn save_yaml_to(path: &Path, value: &impl serde::Serialize) -> AppResult<(
     write_file_atomic(path, yaml.as_bytes()).await
 }
 
+#[cfg(test)]
 pub async fn save_config_to(path: &Path, config: &Config) -> AppResult<()> {
+    save_stable_to(path, &StableConfig::from(config)).await
+}
+
+pub async fn save_stable_to(path: &Path, config: &StableConfig) -> AppResult<()> {
     save_yaml_to(path, config).await
 }
 
@@ -83,7 +235,12 @@ pub async fn save_config_layered(state: &Arc<AppState>, config: &Config) -> AppR
     // 补偿材料：稳定层旧字节（None = 文件原本不存在）
     let old_stable = tokio::fs::read(&state.config_path).await.ok();
 
-    save_config_to(&state.config_path, config).await?;
+    let stable = state
+        .stable_config
+        .read()
+        .await
+        .with_stable_fields_from(config);
+    save_stable_to(&state.config_path, &stable).await?;
     if let Err(err) = save_volatile_to(&state.volatile_path, &VolatileConfig::from(config)).await {
         let restore = match &old_stable {
             Some(bytes) => write_file_atomic(&state.config_path, bytes).await,
@@ -99,6 +256,20 @@ pub async fn save_config_layered(state: &Arc<AppState>, config: &Config) -> AppR
         }
         return Err(err);
     }
+    *state.stable_config.write().await = stable;
+    Ok(())
+}
+
+/// Persist only the stable fields. Used by settings such as MCP that do not
+/// affect sing-box or the volatile runtime preferences.
+pub async fn save_stable_fields(state: &Arc<AppState>, config: &Config) -> AppResult<()> {
+    let stable = state
+        .stable_config
+        .read()
+        .await
+        .with_stable_fields_from(config);
+    save_stable_to(&state.config_path, &stable).await?;
+    *state.stable_config.write().await = stable;
     Ok(())
 }
 
@@ -119,42 +290,41 @@ pub async fn persist_effective_node_select(
     Ok(())
 }
 
-pub async fn save_config_cache() {
-    save_config_cache_at(
-        &get_sing_box_home().join("config.json"),
-        &config_cache_path(),
-    )
-    .await;
+pub async fn save_config_cache(state: &AppState) {
+    if let Err(err) =
+        save_config_cache_at(&state.runtime_paths.active_config, config_cache_path(state)).await
+    {
+        error!(error = %err, "Failed to save config cache");
+        return;
+    }
+    if let Err(err) = write_cache_manifest(state, true).await {
+        error!(error = %err, "Failed to save config cache manifest");
+    }
 }
 
 /// 原子保存：读当前 config.json 字节，经临时文件 rename 落 cache。
 /// 进程在 copy 中途被杀不会留下半截 cache（回滚/启动快速通道会把它当好配置用）。
-async fn save_config_cache_at(config_path: &Path, cache_path: &Path) {
-    match tokio::fs::read(config_path).await {
-        Ok(bytes) => match write_file_atomic(cache_path, &bytes).await {
-            Ok(()) => info!(path = %cache_path.display(), "Config cache saved"),
-            Err(e) => error!("Failed to save config cache: {}", e),
-        },
-        Err(e) => error!("Failed to read runtime config for cache: {}", e),
-    }
+async fn save_config_cache_at(config_path: &Path, cache_path: &Path) -> AppResult<()> {
+    let bytes = tokio::fs::read(config_path)
+        .await
+        .map_err(|e| AppError::context("Failed to read runtime config for cache", e))?;
+    write_file_atomic(cache_path, &bytes).await?;
+    info!(path = %cache_path.display(), "Config cache saved");
+    Ok(())
 }
 
 /// 上次成功运行的生成配置缓存是否存在（启动快速通道的入场券）
-pub fn has_config_cache() -> bool {
-    config_cache_path().exists()
+pub fn has_config_cache(state: &AppState) -> bool {
+    config_cache_path(state).exists()
 }
 
 /// 读取缓存内容，用于订阅刷新后的变更比对
-pub async fn read_config_cache() -> Option<Vec<u8>> {
-    tokio::fs::read(config_cache_path()).await.ok()
+pub async fn read_config_cache(state: &AppState) -> Option<Vec<u8>> {
+    tokio::fs::read(config_cache_path(state)).await.ok()
 }
 
-pub async fn restore_config_from_cache() -> AppResult<()> {
-    restore_config_from_cache_at(
-        &config_cache_path(),
-        &get_sing_box_home().join("config.json"),
-    )
-    .await
+pub async fn restore_config_from_cache(state: &AppState) -> AppResult<()> {
+    restore_config_from_cache_at(config_cache_path(state), &state.runtime_paths.active_config).await
 }
 
 async fn restore_config_from_cache_at(cache_path: &Path, config_path: &Path) -> AppResult<()> {
@@ -174,8 +344,8 @@ async fn restore_config_from_cache_at(cache_path: &Path, config_path: &Path) -> 
 
 /// 配置变更前把当前 config.json 的字节读进内存：回滚 tier 1 材料。
 /// 它正在跑/刚跑过，必然已知可用；文件不在、读不出或为空都视为没有快照。
-pub async fn snapshot_runtime_config() -> Option<Vec<u8>> {
-    snapshot_runtime_config_at(&get_sing_box_home().join("config.json")).await
+pub async fn snapshot_runtime_config(state: &AppState) -> Option<Vec<u8>> {
+    snapshot_runtime_config_at(&state.runtime_paths.active_config).await
 }
 
 async fn snapshot_runtime_config_at(path: &Path) -> Option<Vec<u8>> {
@@ -186,8 +356,8 @@ async fn snapshot_runtime_config_at(path: &Path) -> Option<Vec<u8>> {
 }
 
 /// 把快照字节原子写回 config.json：回滚是纯本地文件操作，不碰网络。
-pub async fn restore_runtime_config_bytes(bytes: &[u8]) -> AppResult<()> {
-    restore_runtime_config_bytes_at(&get_sing_box_home().join("config.json"), bytes).await
+pub async fn restore_runtime_config_bytes(state: &AppState, bytes: &[u8]) -> AppResult<()> {
+    restore_runtime_config_bytes_at(&state.runtime_paths.active_config, bytes).await
 }
 
 async fn restore_runtime_config_bytes_at(path: &Path, bytes: &[u8]) -> AppResult<()> {
@@ -199,9 +369,13 @@ async fn restore_runtime_config_bytes_at(path: &Path, bytes: &[u8]) -> AppResult
 /// 订阅列表不一致时快照作废（订阅增删后必须真拉取一次重建快照）。
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct SubNodesSnapshot {
+    #[serde(default)]
+    pub version: u32,
     pub subs: Vec<String>,
     pub node_names: Vec<String>,
     pub outbounds: Vec<serde_json::Value>,
+    #[serde(default)]
+    pub source_ids: Vec<String>,
 }
 
 impl SubNodesSnapshot {
@@ -209,18 +383,52 @@ impl SubNodesSnapshot {
     pub fn matches_subs(&self, subs: &[String]) -> bool {
         self.subs == subs
     }
+
+    pub fn from_fetched_nodes(subs: Vec<String>, nodes: Vec<super::generate::FetchedNode>) -> Self {
+        let mut node_names = Vec::with_capacity(nodes.len());
+        let mut outbounds = Vec::with_capacity(nodes.len());
+        let mut source_ids = Vec::with_capacity(nodes.len());
+        for node in nodes {
+            node_names.push(node.name);
+            outbounds.push(node.outbound);
+            source_ids.push(node.source_id);
+        }
+        Self {
+            version: 1,
+            subs,
+            node_names,
+            outbounds,
+            source_ids,
+        }
+    }
+
+    pub fn into_fetched_nodes(self) -> Vec<super::generate::FetchedNode> {
+        let mut source_ids = self.source_ids.into_iter();
+        self.node_names
+            .into_iter()
+            .zip(self.outbounds)
+            .map(|(name, outbound)| super::generate::FetchedNode {
+                source_id: source_ids.next().unwrap_or_else(|| "legacy".to_string()),
+                name,
+                outbound,
+            })
+            .collect()
+    }
 }
 
-pub fn sub_nodes_snapshot_path() -> PathBuf {
-    get_sing_box_home().join("sub-nodes.json")
+pub fn sub_nodes_snapshot_path(state: &AppState) -> &Path {
+    &state.runtime_paths.sub_nodes_snapshot
 }
 
-pub fn has_sub_nodes_snapshot() -> bool {
-    sub_nodes_snapshot_path().exists()
+pub fn has_sub_nodes_snapshot(state: &AppState) -> bool {
+    sub_nodes_snapshot_path(state).exists()
 }
 
-pub async fn save_sub_nodes_snapshot(snapshot: &SubNodesSnapshot) -> AppResult<()> {
-    save_sub_nodes_snapshot_at(&sub_nodes_snapshot_path(), snapshot).await
+pub async fn save_sub_nodes_snapshot(
+    state: &AppState,
+    snapshot: &SubNodesSnapshot,
+) -> AppResult<()> {
+    save_sub_nodes_snapshot_at(sub_nodes_snapshot_path(state), snapshot).await
 }
 
 async fn save_sub_nodes_snapshot_at(path: &Path, snapshot: &SubNodesSnapshot) -> AppResult<()> {
@@ -236,8 +444,8 @@ async fn save_sub_nodes_snapshot_at(path: &Path, snapshot: &SubNodesSnapshot) ->
 }
 
 /// 读取快照；文件缺失、读不出、内容损坏都视为没有快照（调用方退化到拉取路径）
-pub async fn read_sub_nodes_snapshot() -> Option<SubNodesSnapshot> {
-    read_sub_nodes_snapshot_at(&sub_nodes_snapshot_path()).await
+pub async fn read_sub_nodes_snapshot(state: &AppState) -> Option<SubNodesSnapshot> {
+    read_sub_nodes_snapshot_at(sub_nodes_snapshot_path(state)).await
 }
 
 async fn read_sub_nodes_snapshot_at(path: &Path) -> Option<SubNodesSnapshot> {
@@ -248,17 +456,20 @@ async fn read_sub_nodes_snapshot_at(path: &Path) -> Option<SubNodesSnapshot> {
 #[cfg(test)]
 mod tests {
     use super::{
-        config_cache_path, get_sing_box_home, load_volatile_config_at,
-        persist_effective_node_select, read_sub_nodes_snapshot_at, restore_config_from_cache_at,
-        restore_runtime_config_bytes_at, save_config_cache_at, save_config_layered,
-        save_sub_nodes_snapshot_at, save_volatile_to, snapshot_runtime_config_at,
-        volatile_config_path, SubNodesSnapshot,
+        get_sing_box_home, load_volatile_config_at, persist_effective_node_select,
+        read_sub_nodes_snapshot_at, restore_config_from_cache_at, restore_runtime_config_bytes_at,
+        save_config_cache_at, save_config_layered, save_sub_nodes_snapshot_at, save_volatile_to,
+        snapshot_runtime_config_at, volatile_config_path, SubNodesSnapshot,
     };
 
     #[test]
     fn config_cache_lives_under_sing_box_home() {
+        let paths = crate::paths::RuntimePaths::new(
+            get_sing_box_home(),
+            std::path::Path::new("config.yaml"),
+        );
         assert_eq!(
-            config_cache_path(),
+            paths.config_cache,
             get_sing_box_home().join("config.json.cache")
         );
     }
@@ -402,7 +613,7 @@ mod tests {
         );
         save_config_layered(&state, &config).await.unwrap();
         let stable_bytes = tokio::fs::read(&config_path).await.unwrap();
-        assert!(!String::from_utf8_lossy(&stable_bytes).contains("node_select"));
+        assert!(String::from_utf8_lossy(&stable_bytes).contains("node_select: fastest_hk"));
 
         // 稳定层目录设为只读：若再次尝试落盘必失败。
         // 只改易变字段（node_select），整体应成功——证明稳定层被跳过
@@ -452,7 +663,9 @@ mod tests {
         tokio::fs::create_dir_all(&temp_dir).await.unwrap();
 
         tokio::fs::write(&config_path, b"good").await.unwrap();
-        save_config_cache_at(&config_path, &cache_path).await;
+        save_config_cache_at(&config_path, &cache_path)
+            .await
+            .unwrap();
         assert_eq!(tokio::fs::read(&cache_path).await.unwrap(), b"good");
         assert!(!temp_dir.join("config.json.tmp").exists());
 
@@ -463,6 +676,62 @@ mod tests {
         assert_eq!(tokio::fs::read(&config_path).await.unwrap(), b"good");
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn cache_manifest_binds_cache_to_effective_runtime_inputs() {
+        use super::{cache_compatibility, save_config_cache, CacheCompatibility};
+        use crate::{models::Config, test_support::app_state};
+
+        let state = app_state(Config {
+            subs: vec!["https://a.example.com/sub".to_string()],
+            ..Config::default()
+        });
+        tokio::fs::create_dir_all(&state.runtime_paths.runtime_dir)
+            .await
+            .unwrap();
+        tokio::fs::write(&state.runtime_paths.active_config, br#"{"outbounds":[]}"#)
+            .await
+            .unwrap();
+        save_config_cache(&state).await;
+        assert_eq!(
+            cache_compatibility(&state, &state.config.read().await.clone()).await,
+            CacheCompatibility::Verified
+        );
+
+        let mut changed = state.config.read().await.clone();
+        changed.custom_rules.push(
+            r#"{"domain_suffix":"example.com","action":"route","outbound":"direct"}"#.to_string(),
+        );
+        assert!(matches!(
+            cache_compatibility(&state, &changed).await,
+            CacheCompatibility::Incompatible(_)
+        ));
+        let _ = tokio::fs::remove_dir_all(&state.runtime_paths.runtime_dir).await;
+    }
+
+    #[tokio::test]
+    async fn legacy_cache_is_accepted_only_until_migration_marker_is_written() {
+        use super::{cache_compatibility, mark_legacy_cache_used, CacheCompatibility};
+        use crate::{models::Config, test_support::app_state};
+
+        let state = app_state(Config::default());
+        tokio::fs::create_dir_all(&state.runtime_paths.runtime_dir)
+            .await
+            .unwrap();
+        tokio::fs::write(&state.runtime_paths.config_cache, b"legacy")
+            .await
+            .unwrap();
+        assert_eq!(
+            cache_compatibility(&state, &Config::default()).await,
+            CacheCompatibility::Legacy
+        );
+        mark_legacy_cache_used(&state).await;
+        assert!(matches!(
+            cache_compatibility(&state, &Config::default()).await,
+            CacheCompatibility::Incompatible(_)
+        ));
+        let _ = tokio::fs::remove_dir_all(&state.runtime_paths.runtime_dir).await;
     }
 
     #[tokio::test]
@@ -497,9 +766,11 @@ mod tests {
         assert!(read_sub_nodes_snapshot_at(&snapshot_path).await.is_none());
 
         let snapshot = SubNodesSnapshot {
+            version: 0,
             subs: vec!["https://a.example.com".to_string()],
             node_names: vec!["香港 01".to_string()],
             outbounds: vec![serde_json::json!({"type": "trojan", "tag": "香港 01"})],
+            source_ids: vec![],
         };
         save_sub_nodes_snapshot_at(&snapshot_path, &snapshot)
             .await
@@ -557,9 +828,9 @@ mod tests {
             .unwrap();
 
         assert_eq!(state.config.read().await.node_select, NodeSelect::Manual);
-        // 稳定层不含 node_select（已迁入易变层）
+        // 稳定层保留启动默认值；运行选择只写 volatile。
         let yaml = tokio::fs::read_to_string(&state.config_path).await.unwrap();
-        assert!(!yaml.contains("node_select"));
+        assert!(yaml.contains("node_select: fastest_hk"));
         // 易变层落盘且可读回（manual 为默认覆盖）
         let loaded = load_volatile_config_at(&state.volatile_path)
             .await

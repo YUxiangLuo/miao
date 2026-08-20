@@ -53,6 +53,36 @@ pub fn get_sing_box_home() -> PathBuf {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct KernelStatus {
+    pub running: bool,
+    pub pid: Option<u32>,
+    pub uptime_secs: Option<u64>,
+}
+
+pub async fn kernel_status(state: &AppState) -> KernelStatus {
+    let mut lock = state.sing_process.lock().await;
+    let Some(process) = &mut *lock else {
+        return KernelStatus::default();
+    };
+    match process.child.try_wait() {
+        Ok(None) => KernelStatus {
+            running: true,
+            pid: process.child.id(),
+            uptime_secs: Some(process.started_at.elapsed().as_secs()),
+        },
+        Ok(Some(_)) => {
+            *lock = None;
+            KernelStatus::default()
+        }
+        Err(_) => KernelStatus::default(),
+    }
+}
+
+pub async fn is_sing_box_running(state: &AppState) -> bool {
+    kernel_status(state).await.running
+}
+
 fn sing_box_file_name() -> &'static str {
     #[cfg(windows)]
     {
@@ -64,16 +94,15 @@ fn sing_box_file_name() -> &'static str {
     }
 }
 
-pub fn extract_sing_box() -> AppResult<PathBuf> {
-    let sing_box_home = get_sing_box_home();
+pub fn extract_sing_box_to(sing_box_home: &std::path::Path) -> AppResult<PathBuf> {
     if !sing_box_home.exists() {
-        fs::create_dir_all(&sing_box_home)
+        fs::create_dir_all(sing_box_home)
             .map_err(|e| AppError::context("Failed to create sing-box home directory", e))?;
     }
     // 运行时目录含订阅凭证（config.json / sub-nodes.json / cache.db）：仅属主可进，
     // 避免同机其他用户读取。每次启动都执行，顺带修正旧版本留下的宽松权限；
     // 失败只告警——可用性优先，不给异常文件系统添启动故障
-    if let Err(err) = restrict_to_owner(&sing_box_home) {
+    if let Err(err) = restrict_to_owner(sing_box_home) {
         warn!(error = %err, path = ?sing_box_home, "Failed to restrict sing-box home permissions");
     }
 
@@ -109,20 +138,22 @@ pub fn extract_sing_box() -> AppResult<PathBuf> {
             .map_err(|e| AppError::context("Failed to create sing-box dashboard directory", e))?;
     }
 
-    Ok(sing_box_home)
+    Ok(sing_box_home.to_path_buf())
 }
 
-/// 在停止运行中的实例前验证 sing-box 配置，避免不必要的服务中断
-pub async fn validate_sing_box_config() -> AppResult<()> {
-    let sing_box_home = get_sing_box_home();
+/// 在停止运行中的实例前验证 sing-box 配置，避免不必要的服务中断。
+pub async fn validate_sing_box_config(
+    state: &AppState,
+    config_path: &std::path::Path,
+) -> AppResult<()> {
+    let sing_box_home = &state.runtime_paths.runtime_dir;
     let sing_box_path = sing_box_home.join(sing_box_file_name());
-    let config_path = sing_box_home.join("config.json");
 
     let output = tokio::process::Command::new(&sing_box_path)
-        .current_dir(&sing_box_home)
+        .current_dir(sing_box_home)
         .arg("check")
         .arg("-c")
-        .arg(&config_path)
+        .arg(config_path)
         .output()
         .await
         .map_err(|e| AppError::context("Failed to run sing-box config check", e))?;
@@ -186,9 +217,9 @@ async fn spawn_and_probe_sing_box(
         }
     }
 
-    let sing_box_home = get_sing_box_home();
+    let sing_box_home = &state.runtime_paths.runtime_dir;
     let sing_box_path = sing_box_home.join(sing_box_file_name());
-    let config_path = sing_box_home.join("config.json");
+    let config_path = &state.runtime_paths.active_config;
 
     info!(binary = ?sing_box_path, config = ?config_path, "Starting sing-box");
 
@@ -200,10 +231,10 @@ async fn spawn_and_probe_sing_box(
 
     let mut command = tokio::process::Command::new(&sing_box_path);
     command
-        .current_dir(&sing_box_home)
+        .current_dir(sing_box_home)
         .arg("run")
         .arg("-c")
-        .arg(&config_path);
+        .arg(config_path);
 
     #[cfg(windows)]
     command.creation_flags(WINDOWS_CREATE_NEW_PROCESS_GROUP);

@@ -46,7 +46,9 @@ fn main() {
         require_privileges();
     }
 
-    match acquire_single_instance() {
+    // Keep the guard in scope until process exit. On Windows its Drop closes
+    // the mutex handle; on other platforms it is a zero-sized no-op guard.
+    let _instance_guard = match acquire_single_instance() {
         InstanceAcquire::AlreadyRunning => {
             focus_existing_window_or_error();
             return;
@@ -55,11 +57,8 @@ fn main() {
             show_user_error("Miao", "无法创建单实例锁");
             return;
         }
-        InstanceAcquire::Unique(guard) => {
-            // Keep the mutex until process exit so a second launch can see it.
-            std::mem::forget(guard);
-        }
-    }
+        InstanceAcquire::Unique(guard) => guard,
+    };
 
     // 自启任务若指向旧 exe（升级/迁移残留），用当前路径重注册
     autostart_repair_if_stale();

@@ -48,10 +48,20 @@ pub struct StatusData {
     pub uptime_secs: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub warning: Option<String>,
+    /// Structured diagnostics for new clients. `warning` remains above as a
+    /// compatibility projection for existing panel/API consumers.
+    pub warnings: Vec<RuntimeWarning>,
     pub vps_supported: bool,
     pub platform: &'static str,
     /// MCP 端点（POST /mcp）开关状态
     pub mcp: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct RuntimeWarning {
+    pub code: &'static str,
+    pub message: String,
+    pub severity: &'static str,
 }
 
 #[derive(Serialize, Clone)]

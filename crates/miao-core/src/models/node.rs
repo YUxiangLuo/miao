@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 
+#[cfg(not(windows))]
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Hysteria2 {
     #[serde(rename = "type")]
@@ -17,6 +18,7 @@ pub struct Hysteria2 {
     pub tls: Tls,
 }
 
+#[cfg(not(windows))]
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Hysteria2Obfs {
     #[serde(rename = "type")]
@@ -24,6 +26,7 @@ pub struct Hysteria2Obfs {
     pub password: String,
 }
 
+#[cfg(not(windows))]
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Tls {
     pub enabled: bool,
@@ -32,7 +35,7 @@ pub struct Tls {
     pub insecure: bool,
 }
 
-#[derive(Deserialize, Default)]
+#[derive(Clone, Debug, Deserialize, Default)]
 pub struct NodeRequest {
     pub node_type: Option<String>,
     pub tag: String,
@@ -85,6 +88,30 @@ pub struct NodeRequest {
 }
 
 #[derive(Deserialize)]
+pub struct BatchNodeRequest {
+    pub nodes: Vec<NodeRequest>,
+}
+
+#[derive(Serialize)]
+pub struct BatchNodeAdded {
+    pub index: usize,
+    pub tag: String,
+}
+
+#[derive(Serialize)]
+pub struct BatchNodeFailure {
+    pub index: usize,
+    pub tag: String,
+    pub message: String,
+}
+
+#[derive(Serialize)]
+pub struct BatchNodeResult {
+    pub added: Vec<BatchNodeAdded>,
+    pub failed: Vec<BatchNodeFailure>,
+}
+
+#[derive(Deserialize)]
 pub struct DeleteNodeRequest {
     pub tag: String,
 }
@@ -99,7 +126,7 @@ pub struct NodeInfo {
     pub sni: Option<String>,
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(windows)))]
 mod tests {
     use super::{Hysteria2, Hysteria2Obfs, Tls};
 

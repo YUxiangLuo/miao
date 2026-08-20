@@ -13,7 +13,11 @@ use serde_json::{json, Value as JsonValue};
 
 use crate::error::AppResult;
 use crate::models::{LastProxy, NodeSelect, RouteMode};
-use crate::services::config::apply_config_change;
+use crate::services::{
+    config::apply_config_change,
+    singbox::{is_sing_box_running, kernel_status},
+    status::{legacy_warning, runtime_warnings},
+};
 use crate::state::AppState;
 use crate::VERSION;
 
@@ -230,21 +234,6 @@ async fn clash_get(state: &Arc<AppState>, path: &str) -> AppResult<JsonValue> {
     Ok(response.json::<JsonValue>().await?)
 }
 
-async fn sing_box_is_running(state: &Arc<AppState>) -> bool {
-    let mut lock = state.sing_process.lock().await;
-    match &mut *lock {
-        Some(proc) => match proc.child.try_wait() {
-            Ok(Some(_)) => {
-                *lock = None;
-                false
-            }
-            Ok(None) => true,
-            Err(_) => false,
-        },
-        None => false,
-    }
-}
-
 /// 拉 selector 全量信息（all + now）；服务未运行时 Clash API 不可达，返回 Err
 async fn fetch_proxies(state: &Arc<AppState>) -> AppResult<JsonValue> {
     clash_get(state, "/proxies").await
@@ -290,32 +279,14 @@ fn flat_node_pool(proxies: &JsonValue) -> Vec<String> {
 // ── 工具实现 ─────────────────────────────────────────────────────────────
 
 async fn tool_get_status(state: &Arc<AppState>) -> Result<JsonValue, String> {
-    let (running, uptime_secs) = {
-        let mut lock = state.sing_process.lock().await;
-        match &mut *lock {
-            Some(proc) => match proc.child.try_wait() {
-                Ok(None) => (true, Some(proc.started_at.elapsed().as_secs())),
-                Ok(Some(_)) => {
-                    *lock = None;
-                    (false, None)
-                }
-                Err(_) => (false, None),
-            },
-            None => (false, None),
-        }
-    };
+    let kernel = kernel_status(state).await;
+    let (running, uptime_secs) = (kernel.running, kernel.uptime_secs);
 
     let config = state.config.read().await.clone();
     let route_mode = config.route_mode;
 
-    let mut warnings: Vec<String> = Vec::new();
-    if let Some(warning) = state.config_warning.lock().await.clone() {
-        warnings.push(warning);
-    }
-    let skipped = state.skipped_rules.lock().await.len();
-    if skipped > 0 {
-        warnings.push(format!("{skipped} 条自定义规则因出口节点不存在已跳过"));
-    }
+    let warnings = runtime_warnings(state).await;
+    let warning = legacy_warning(&warnings);
 
     // 当前节点与节点数：仅在运行时问 Clash，失败静默降级；
     // 节点数按平铺节点池计（不随 fastest_* 地区过滤收缩）
@@ -341,7 +312,8 @@ async fn tool_get_status(state: &Arc<AppState>) -> Result<JsonValue, String> {
         "current_node": current_node,
         "node_count": node_count,
         "uptime_secs": uptime_secs,
-        "warning": if warnings.is_empty() { JsonValue::Null } else { json!(warnings.join("; ")) },
+        "warning": warning.map(JsonValue::from).unwrap_or(JsonValue::Null),
+        "warnings": warnings,
     }))
 }
 
@@ -361,7 +333,7 @@ async fn tool_list_nodes(state: &Arc<AppState>) -> Result<JsonValue, String> {
         }
     }
 
-    let running = sing_box_is_running(state).await;
+    let running = is_sing_box_running(state).await;
     if running {
         if let Ok(proxies) = fetch_proxies(state).await {
             // 平铺节点池：不随 fastest_* 地区过滤收缩（地区外节点仍是合法 outbound）
@@ -420,7 +392,7 @@ async fn tool_switch_node(state: &Arc<AppState>, args: &JsonValue) -> Result<Jso
     if !state.config.read().await.node_select.is_manual() {
         return Err("当前是地区最快模式，由内核自动选节点；先切回手动选择再指定节点".to_string());
     }
-    if !sing_box_is_running(state).await {
+    if !is_sing_box_running(state).await {
         return Err("服务未运行，无法切换节点".to_string());
     }
 
@@ -463,7 +435,7 @@ async fn tool_switch_node(state: &Arc<AppState>, args: &JsonValue) -> Result<Jso
 }
 
 async fn tool_test_delay(state: &Arc<AppState>, args: &JsonValue) -> Result<JsonValue, String> {
-    if !sing_box_is_running(state).await {
+    if !is_sing_box_running(state).await {
         return Err("服务未运行，无法测速".to_string());
     }
 
@@ -544,7 +516,7 @@ async fn tool_set_route_mode(state: &Arc<AppState>, args: &JsonValue) -> Result<
 
     // 与面板 set_route_mode 同一条链路：配置事务 + 运行时热应用（易变层落盘）
     let _config_update = state.config_update.lock().await;
-    let was_running = sing_box_is_running(state).await;
+    let was_running = is_sing_box_running(state).await;
     let old_config = state.config.read().await.clone();
 
     if old_config.route_mode == requested {
@@ -657,7 +629,7 @@ async fn tool_list_rules(state: &Arc<AppState>) -> Result<JsonValue, String> {
 }
 
 async fn tool_list_connections(state: &Arc<AppState>) -> Result<JsonValue, String> {
-    if !sing_box_is_running(state).await {
+    if !is_sing_box_running(state).await {
         return Err("服务未运行，无活动连接".to_string());
     }
 

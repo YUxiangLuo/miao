@@ -98,7 +98,11 @@ impl<'de> Deserialize<'de> for NodeSelect {
     }
 }
 
-#[derive(Clone, Default, Serialize, Deserialize)]
+/// Runtime-effective configuration.  This is deliberately separate from
+/// [`StableConfig`]: `node_select` and `route_mode` may have been overlaid by
+/// volatile preferences and must never overwrite their boot defaults in
+/// `config.yaml` as a side effect of an unrelated save.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Config {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub port: Option<u16>,
@@ -119,6 +123,29 @@ pub struct Config {
     /// 路由模式：易变层字段——config.yaml 里的值是启动默认值（volatile 缺失时生效），
     /// 运行值落 volatile.yaml，稳定层保存不再携带。
     #[serde(default, skip_serializing)]
+    pub route_mode: RouteMode,
+}
+
+/// The exact semantic model persisted in `config.yaml`.
+///
+/// The YAML shape remains identical to older versions.  In particular the
+/// optional `node_select` and `route_mode` keys continue to mean boot
+/// defaults, used when the volatile layer is absent.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StableConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub port: Option<u16>,
+    #[serde(default)]
+    pub subs: Vec<String>,
+    #[serde(default)]
+    pub nodes: Vec<String>,
+    #[serde(default)]
+    pub custom_rules: Vec<String>,
+    #[serde(default)]
+    pub mcp: bool,
+    #[serde(default, skip_serializing_if = "NodeSelect::serde_is_manual")]
+    pub node_select: NodeSelect,
+    #[serde(default, skip_serializing_if = "RouteMode::serde_is_rule")]
     pub route_mode: RouteMode,
 }
 
@@ -145,6 +172,55 @@ impl From<&Config> for VolatileConfig {
     }
 }
 
+impl From<&Config> for StableConfig {
+    fn from(config: &Config) -> Self {
+        Self {
+            port: config.port,
+            subs: config.subs.clone(),
+            nodes: config.nodes.clone(),
+            custom_rules: config.custom_rules.clone(),
+            mcp: config.mcp,
+            node_select: config.node_select,
+            route_mode: config.route_mode,
+        }
+    }
+}
+
+impl StableConfig {
+    /// Merge the optional volatile preferences into a runtime view.
+    pub fn effective(&self, volatile: Option<VolatileConfig>) -> Config {
+        let mut config = Config {
+            port: self.port,
+            subs: self.subs.clone(),
+            nodes: self.nodes.clone(),
+            custom_rules: self.custom_rules.clone(),
+            mcp: self.mcp,
+            node_select: self.node_select,
+            route_mode: self.route_mode,
+        };
+        if let Some(volatile) = volatile {
+            config.node_select = volatile.node_select;
+            config.route_mode = volatile.route_mode;
+        }
+        config
+    }
+
+    /// Apply low-frequency fields from the effective configuration while
+    /// retaining the boot defaults that came from `config.yaml`.
+    pub fn with_stable_fields_from(&self, config: &Config) -> Self {
+        Self {
+            port: config.port,
+            subs: config.subs.clone(),
+            nodes: config.nodes.clone(),
+            custom_rules: config.custom_rules.clone(),
+            mcp: config.mcp,
+            node_select: self.node_select,
+            route_mode: self.route_mode,
+        }
+    }
+}
+
+#[cfg(test)]
 impl Config {
     /// 用易变层覆盖出运行时合并视图：volatile > config.yaml > 默认。
     /// `None`（易变文件缺失/损坏）时保留 config.yaml 的解析结果。
@@ -322,5 +398,28 @@ nodes: []
         let merged = yaml_config.overlay(None);
         assert_eq!(merged.node_select, NodeSelect::Fastest(Region::Hk));
         assert_eq!(merged.route_mode, RouteMode::Global);
+    }
+
+    #[test]
+    fn stable_config_preserves_boot_defaults_when_effective_preferences_change() {
+        use super::{NodeSelect, Region, RouteMode, StableConfig, VolatileConfig};
+
+        let stable: StableConfig = yaml_serde::from_str(
+            "route_mode: global\nnode_select: fastest_hk\nsubs: []\nnodes: []\n",
+        )
+        .unwrap();
+        let effective = stable.effective(Some(VolatileConfig {
+            node_select: NodeSelect::Manual,
+            route_mode: RouteMode::Rule,
+        }));
+        let mut changed = effective;
+        changed.mcp = true;
+        let saved = stable.with_stable_fields_from(&changed);
+        let yaml = yaml_serde::to_string(&saved).unwrap();
+
+        assert!(yaml.contains("route_mode: global"));
+        assert!(yaml.contains("node_select: fastest_hk"));
+        assert!(yaml.contains("mcp: true"));
+        assert_eq!(saved.node_select, NodeSelect::Fastest(Region::Hk));
     }
 }

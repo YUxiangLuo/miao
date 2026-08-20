@@ -12,7 +12,7 @@ use crate::handlers::vps::deploy_vps;
 use crate::handlers::{
     clash::{proxy_clash_http, proxy_clash_traffic},
     mcp::{handle_mcp, set_mcp},
-    nodes::{add_node, delete_node, get_nodes},
+    nodes::{add_node, delete_node, get_nodes, import_nodes},
     proxy::set_last_proxy,
     rules::{add_rule, delete_rule, get_rules},
     service::{
@@ -51,6 +51,7 @@ pub fn build_router(app_state: Arc<AppState>) -> Router {
         .route("/api/subs/refresh", post(refresh_subs))
         .route("/api/nodes", get(get_nodes))
         .route("/api/nodes", post(add_node))
+        .route("/api/nodes/import", post(import_nodes))
         .route("/api/nodes", delete(delete_node))
         .route("/api/rules", get(get_rules))
         .route("/api/rules", post(add_rule))
@@ -151,6 +152,7 @@ mod tests {
         assert_eq!(json["success"], true);
         assert_eq!(json["message"], "stopped");
         assert_eq!(json["data"]["running"], false);
+        assert_eq!(json["data"]["warnings"], json!([]));
         assert_eq!(
             json["data"]["vps_supported"],
             crate::platform::vps_supported()
@@ -353,6 +355,43 @@ mod tests {
         let json = response_json(response).await;
         assert_eq!(json["success"], false);
         assert!(json["message"].as_str().unwrap().contains("重复"));
+    }
+
+    #[tokio::test]
+    async fn router_batch_import_reports_per_item_validation_failures() {
+        let app = test_app(Config::default()).await;
+        let response = app
+            .oneshot(json_request(
+                "POST",
+                "/api/nodes/import",
+                json!({
+                    "nodes": [
+                        {
+                            "tag": "",
+                            "server": "bad address",
+                            "server_port": 0,
+                            "password": ""
+                        },
+                        {
+                            "node_type": "unsupported",
+                            "tag": "node-b",
+                            "server": "b.example.com",
+                            "server_port": 443,
+                            "password": "password123"
+                        }
+                    ]
+                }),
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let json = response_json(response).await;
+        assert_eq!(json["success"], true);
+        assert_eq!(json["data"]["added"], json!([]));
+        assert_eq!(json["data"]["failed"].as_array().unwrap().len(), 2);
+        assert_eq!(json["data"]["failed"][0]["index"], 0);
+        assert_eq!(json["data"]["failed"][1]["index"], 1);
     }
 
     #[tokio::test]

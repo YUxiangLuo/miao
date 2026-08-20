@@ -1,6 +1,9 @@
 use std::{
     path::Path,
-    sync::{atomic::Ordering, Arc},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
 };
 use tracing::{error, info, warn};
 
@@ -9,19 +12,20 @@ use crate::models::{Config, NodeSelect};
 use crate::services::{
     proxy::spawn_restore_last_proxy,
     singbox::{
-        get_sing_box_home, start_sing_internal, stop_sing_internal, validate_sing_box_config,
+        is_sing_box_running, start_sing_internal, stop_sing_internal, validate_sing_box_config,
     },
 };
 use crate::state::AppState;
 
+use super::bindings::save_node_bindings;
 use super::generate::{
     gen_config, gen_config_from_nodes, gen_config_from_snapshot, record_fresh_snapshot,
-    GenConfigOutcome, SubFetchRetry,
+    FetchedNode, GenConfigOutcome, SubFetchRetry,
 };
 use super::persist::{
-    config_cache_path, has_config_cache, has_sub_nodes_snapshot, persist_effective_node_select,
-    read_config_cache, restore_config_from_cache, restore_runtime_config_bytes, save_config_cache,
-    save_config_layered, snapshot_runtime_config,
+    has_config_cache, has_sub_nodes_snapshot, persist_effective_node_select, read_config_cache,
+    restore_config_from_cache, restore_runtime_config_bytes, save_config_cache,
+    save_config_layered, snapshot_runtime_config, write_file_atomic,
 };
 
 /// 订阅刷新策略：机制（拉取 → 生成 → 校验 → 重启）只有一条，差异显式表达
@@ -46,9 +50,9 @@ pub enum RefreshEffect {
 }
 
 pub struct RefreshOutcome {
-    pub has_sub_nodes: bool,
     pub effect: RefreshEffect,
     pub node_select: NodeSelect,
+    pub generated: Option<GenConfigOutcome>,
 }
 
 /// 生成配置时订阅节点集的来源：真拉取，或优先用上次拉取的快照零网络重建。
@@ -61,7 +65,7 @@ pub enum SubSource {
     SnapshotOrFetch,
     /// 已预拉取的订阅节点集（启动后台刷新：网络等待在配置锁外完成，
     /// 持锁落地阶段只复用结果，不再碰网络）
-    Prefetched(Vec<String>, Vec<serde_json::Value>),
+    Prefetched(Vec<FetchedNode>),
 }
 
 /// 订阅列表没变就是本地语义变更，走快照重建；变了才需要真拉取
@@ -81,14 +85,126 @@ pub(super) fn config_changed_after_refresh(cache: Option<&[u8]>, current: Option
     }
 }
 
-/// Startup 策略决定「保留运行中的缓存配置」时，gen_config 已把新配置写进
-/// config.json（可能是地区筛空后的降级 selector，或未通过校验的版本）。运行中的
-/// 内核不受影响，但崩溃看门狗与手动停/启都直接用磁盘 config.json 起进程——
-/// 把缓存拷回，让磁盘文件与正在运行的内核保持一致。
-async fn restore_cache_over_generated_config() {
-    if let Err(err) = restore_config_from_cache().await {
-        warn!(error = %err, "Failed to restore config.json from cache while keeping the running config");
+fn next_candidate_path(state: &AppState) -> std::path::PathBuf {
+    static CANDIDATE_ID: AtomicU64 = AtomicU64::new(0);
+    let id = CANDIDATE_ID.fetch_add(1, Ordering::Relaxed);
+    state
+        .runtime_paths
+        .runtime_dir
+        .join(format!("config.json.next.{}.{}", std::process::id(), id))
+}
+
+async fn validate_prepared_config(state: &Arc<AppState>, bytes: &[u8]) -> AppResult<()> {
+    let candidate = next_candidate_path(state);
+    write_file_atomic(&candidate, bytes).await?;
+    let result = validate_sing_box_config(state, &candidate).await;
+    if let Err(err) = tokio::fs::remove_file(&candidate).await {
+        if err.kind() != std::io::ErrorKind::NotFound {
+            warn!(path = ?candidate, error = %err, "Failed to remove validated candidate config");
+        }
     }
+    result
+}
+
+/// Validate and install a generated config for startup before any process is
+/// launched. The caller publishes cache/snapshot state only after start.
+pub async fn install_prepared_runtime(
+    state: &Arc<AppState>,
+    outcome: &GenConfigOutcome,
+) -> AppResult<()> {
+    validate_prepared_config(state, &outcome.bytes).await?;
+    let old_runtime = tokio::fs::read(&state.runtime_paths.active_config)
+        .await
+        .ok();
+    let old_bindings = tokio::fs::read(&state.runtime_paths.node_bindings)
+        .await
+        .ok();
+    let commit = async {
+        write_file_atomic(&state.runtime_paths.active_config, &outcome.bytes).await?;
+        save_node_bindings(state, &outcome.node_bindings).await
+    }
+    .await;
+    if let Err(commit_err) = commit {
+        let runtime_rollback =
+            restore_file_snapshot(&state.runtime_paths.active_config, old_runtime.as_deref()).await;
+        let bindings_rollback =
+            restore_file_snapshot(&state.runtime_paths.node_bindings, old_bindings.as_deref())
+                .await;
+        if let Err(rollback_err) = runtime_rollback.and(bindings_rollback) {
+            return Err(AppError::message(format!(
+                "{}. Prepared config rollback failed: {}",
+                commit_err, rollback_err
+            )));
+        }
+        return Err(commit_err);
+    }
+    Ok(())
+}
+
+async fn restore_file_snapshot(path: &Path, bytes: Option<&[u8]>) -> AppResult<()> {
+    match bytes {
+        Some(bytes) => write_file_atomic(path, bytes).await,
+        None => match tokio::fs::remove_file(path).await {
+            Ok(()) => Ok(()),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(err) => Err(AppError::context("Failed to remove transaction file", err)),
+        },
+    }
+}
+
+async fn restore_after_activation_failure(
+    state: &Arc<AppState>,
+    old_runtime: Option<&[u8]>,
+    old_bindings: Option<&[u8]>,
+) -> AppResult<()> {
+    stop_sing_internal(state).await;
+    restore_file_snapshot(&state.runtime_paths.node_bindings, old_bindings).await?;
+    match old_runtime {
+        Some(bytes) => {
+            write_file_atomic(&state.runtime_paths.active_config, bytes).await?;
+            start_sing_internal(state)
+                .await
+                .map_err(|e| AppError::context("Failed to restart previous sing-box config", e))
+        }
+        None => restore_file_snapshot(&state.runtime_paths.active_config, None).await,
+    }
+}
+
+async fn activate_running_config(
+    state: &Arc<AppState>,
+    outcome: &GenConfigOutcome,
+) -> AppResult<()> {
+    let old_runtime = snapshot_runtime_config(state).await;
+    let old_bindings = tokio::fs::read(&state.runtime_paths.node_bindings)
+        .await
+        .ok();
+    stop_sing_internal(state).await;
+
+    let activate_result = async {
+        write_file_atomic(&state.runtime_paths.active_config, &outcome.bytes).await?;
+        start_sing_internal(state)
+            .await
+            .map_err(|e| AppError::context("Failed to restart sing-box", e))?;
+        save_node_bindings(state, &outcome.node_bindings).await
+    }
+    .await;
+
+    if let Err(activate_err) = activate_result {
+        return match restore_after_activation_failure(
+            state,
+            old_runtime.as_deref(),
+            old_bindings.as_deref(),
+        )
+        .await
+        {
+            Ok(()) => Err(activate_err),
+            Err(rollback_err) => Err(AppError::message(format!(
+                "{}. Runtime rollback failed: {}",
+                activate_err, rollback_err
+            ))),
+        };
+    }
+    Ok(())
 }
 
 /// 订阅刷新统一管线：获取节点集（source 决定真拉取还是快照重建）→ 生成配置 →（策略门控）→ 校验 → 重启内核。
@@ -108,50 +224,43 @@ pub async fn refresh_subscriptions(
         SubFetchRetry::None
     };
 
-    let cache_bytes = read_config_cache().await;
+    let cache_bytes = read_config_cache(state).await;
     let generated = match source {
         SubSource::Fetch => gen_config(config, state, retry).await,
         SubSource::SnapshotOrFetch => gen_config_from_snapshot(config, state).await,
-        SubSource::Prefetched(node_names, outbounds) => {
-            gen_config_from_nodes(config, state, node_names, outbounds).await
-        }
+        SubSource::Prefetched(nodes) => gen_config_from_nodes(config, state, nodes).await,
     }
     .map_err(|e| AppError::context("Failed to regenerate config", e))?;
     info!("Config regenerated successfully");
 
     if startup && !generated.has_sub_nodes && !config.subs.is_empty() {
-        restore_cache_over_generated_config().await;
         return Ok(RefreshOutcome {
-            has_sub_nodes: generated.has_sub_nodes,
             effect: RefreshEffect::KeptRunningOnTotalFailure,
             node_select: generated.node_select,
+            generated: None,
         });
     }
 
-    if startup {
-        let current_bytes = tokio::fs::read(get_sing_box_home().join("config.json"))
-            .await
-            .ok();
-        if !config_changed_after_refresh(cache_bytes.as_deref(), current_bytes.as_deref()) {
-            info!("Subscriptions unchanged after refresh; sing-box keeps running");
-            // 内容无变化等价于缓存那份（已通过校验）：顺带补齐快照
-            record_fresh_snapshot(config, &generated).await;
-            persist_effective_node_select(state, generated.node_select).await?;
-            return Ok(RefreshOutcome {
-                has_sub_nodes: generated.has_sub_nodes,
-                effect: RefreshEffect::SkippedUnchanged,
-                node_select: generated.node_select,
-            });
-        }
+    if startup && !config_changed_after_refresh(cache_bytes.as_deref(), Some(&generated.bytes)) {
+        info!("Subscriptions unchanged after refresh; sing-box keeps running");
+        // 内容无变化等价于缓存那份（已通过校验）：顺带补齐快照
+        save_node_bindings(state, &generated.node_bindings).await?;
+        record_fresh_snapshot(config, state, &generated).await;
+        persist_effective_node_select(state, generated.node_select).await?;
+        *state.skipped_rules.lock().await = generated.skipped_rules.clone();
+        return Ok(RefreshOutcome {
+            effect: RefreshEffect::SkippedUnchanged,
+            node_select: generated.node_select,
+            generated: Some(generated),
+        });
     }
 
-    if let Err(e) = validate_sing_box_config().await {
+    if let Err(e) = validate_prepared_config(state, &generated.bytes).await {
         if startup {
-            restore_cache_over_generated_config().await;
             return Ok(RefreshOutcome {
-                has_sub_nodes: generated.has_sub_nodes,
                 effect: RefreshEffect::KeptRunningOnValidationFailure,
                 node_select: generated.node_select,
+                generated: None,
             });
         }
         return Err(AppError::context(
@@ -159,25 +268,21 @@ pub async fn refresh_subscriptions(
             e,
         ));
     }
-    // 校验通过才落快照：防止未通过校验的节点污染快照、拖累后续快照重建
-    record_fresh_snapshot(config, &generated).await;
-
-    stop_sing_internal(state).await;
-    start_sing_internal(state)
-        .await
-        .map_err(|e| AppError::context("Failed to restart sing-box", e))?;
+    activate_running_config(state, &generated).await?;
     info!("sing-box restarted successfully");
     // ManualInApply 的 node_select 由外层 apply_config_change 事务一并提交
     if !matches!(policy, RefreshPolicy::ManualInApply) {
+        record_fresh_snapshot(config, state, &generated).await;
+        *state.skipped_rules.lock().await = generated.skipped_rules.clone();
         if let Err(err) = persist_effective_node_select(state, generated.node_select).await {
             warn!(error = %err, "Failed to persist effective node_select after restart");
         }
     }
 
     Ok(RefreshOutcome {
-        has_sub_nodes: generated.has_sub_nodes,
         effect: RefreshEffect::Restarted,
         node_select: generated.node_select,
+        generated: Some(generated),
     })
 }
 
@@ -188,11 +293,9 @@ pub(super) async fn regenerate_and_restart_runtime(
     source: SubSource,
 ) -> AppResult<GenConfigOutcome> {
     let outcome = refresh_subscriptions(config, state, policy, source).await?;
-    Ok(GenConfigOutcome {
-        has_sub_nodes: outcome.has_sub_nodes,
-        node_select: outcome.node_select,
-        fresh_sub_nodes: None,
-    })
+    outcome
+        .generated
+        .ok_or_else(|| AppError::message("Runtime refresh kept the previous configuration"))
 }
 
 pub async fn regenerate_preserving_service_state(
@@ -208,7 +311,7 @@ pub async fn regenerate_preserving_service_state(
     }
 
     // 回滚 tier 1 材料：刷新前正在运行/最近可用的运行时配置字节
-    let snapshot = snapshot_runtime_config().await;
+    let snapshot = snapshot_runtime_config(state).await;
 
     if should_run {
         match regenerate_and_restart_runtime(config, state, RefreshPolicy::Manual, SubSource::Fetch)
@@ -236,6 +339,8 @@ pub async fn regenerate_preserving_service_state(
         match regenerate_without_restart_runtime(config, state, SubSource::Fetch).await {
             Ok(outcome) => {
                 persist_effective_node_select(state, outcome.node_select).await?;
+                record_fresh_snapshot(config, state, &outcome).await;
+                *state.skipped_rules.lock().await = outcome.skipped_rules.clone();
                 update_config_warning(config, state, outcome.has_sub_nodes).await;
             }
             Err(err) => {
@@ -260,7 +365,7 @@ pub(super) async fn finalize_started_config(
 }
 
 async fn update_config_warning(config: &Config, state: &Arc<AppState>, has_sub_nodes: bool) {
-    save_config_cache().await;
+    save_config_cache(state).await;
 
     let effective = state.config.read().await.node_select;
     *state.config_warning.lock().await = if !config.node_select.is_manual() && effective.is_manual()
@@ -283,18 +388,14 @@ pub(super) async fn regenerate_without_restart_runtime(
     let outcome = match source {
         SubSource::Fetch => gen_config(config, state, SubFetchRetry::None).await,
         SubSource::SnapshotOrFetch => gen_config_from_snapshot(config, state).await,
-        SubSource::Prefetched(node_names, outbounds) => {
-            gen_config_from_nodes(config, state, node_names, outbounds).await
-        }
+        SubSource::Prefetched(nodes) => gen_config_from_nodes(config, state, nodes).await,
     }
     .map_err(|e| AppError::context("Failed to regenerate config", e))?;
     info!("Config regenerated successfully");
 
-    validate_sing_box_config()
+    install_prepared_runtime(state, &outcome)
         .await
-        .map_err(|e| AppError::context("Config validation failed", e))?;
-    // 校验通过才落快照（快照重建时 fresh 为 None，是 no-op）
-    record_fresh_snapshot(config, &outcome).await;
+        .map_err(|e| AppError::context("Config validation or installation failed", e))?;
 
     Ok(outcome)
 }
@@ -334,15 +435,22 @@ async fn remove_runtime_config_files_at(
     }
 }
 
-async fn remove_runtime_config_files() {
-    let runtime_config_path = get_sing_box_home().join("config.json");
-    let cache_path = config_cache_path();
-    let sub_nodes_path = super::persist::sub_nodes_snapshot_path();
-    remove_runtime_config_files_at(&runtime_config_path, &cache_path, &sub_nodes_path).await;
+async fn remove_runtime_config_files(state: &AppState) {
+    remove_runtime_config_files_at(
+        &state.runtime_paths.active_config,
+        &state.runtime_paths.config_cache,
+        &state.runtime_paths.sub_nodes_snapshot,
+    )
+    .await;
+    if let Err(err) = tokio::fs::remove_file(&state.runtime_paths.cache_manifest).await {
+        if err.kind() != std::io::ErrorKind::NotFound {
+            warn!(error = %err, "Failed to remove stale cache manifest");
+        }
+    }
 }
 
 async fn clear_runtime_config(state: &Arc<AppState>) {
-    remove_runtime_config_files().await;
+    remove_runtime_config_files(state).await;
     state.sub_status.lock().await.clear();
     *state.config_warning.lock().await = None;
 }
@@ -374,15 +482,12 @@ async fn persist_config_without_usable_nodes(
     state: &Arc<AppState>,
     persisted_config: Config,
 ) -> AppResult<()> {
-    let runtime_config_path = get_sing_box_home().join("config.json");
-    let cache_path = config_cache_path();
-    let sub_nodes_path = super::persist::sub_nodes_snapshot_path();
     persist_config_without_usable_nodes_at(
         state,
         persisted_config,
-        &runtime_config_path,
-        &cache_path,
-        &sub_nodes_path,
+        &state.runtime_paths.active_config,
+        &state.runtime_paths.config_cache,
+        &state.runtime_paths.sub_nodes_snapshot,
     )
     .await
 }
@@ -424,7 +529,7 @@ pub async fn apply_config_change(
     }
 
     // 回滚 tier 1 材料：变更前正在运行/最近可用的运行时配置字节（config.json）
-    let snapshot = snapshot_runtime_config().await;
+    let snapshot = snapshot_runtime_config(state).await;
     // 订阅列表没变就是本地语义变更（节点选择/路由模式/规则/手动节点），走快照零网络重建
     let source = sub_source_for(old_config, new_config);
 
@@ -448,6 +553,8 @@ pub async fn apply_config_change(
             match save_config_layered(state, &persisted_new_config).await {
                 Ok(()) => {
                     *state.config.write().await = persisted_new_config;
+                    record_fresh_snapshot(new_config, state, &outcome).await;
+                    *state.skipped_rules.lock().await = outcome.skipped_rules.clone();
                     if should_run {
                         finalize_started_config(new_config, state, outcome.has_sub_nodes).await;
                     } else {
@@ -480,7 +587,7 @@ pub async fn apply_config_change(
         Err(apply_err) if apply_err.is_no_usable_nodes() => {
             // 有本地可用材料（运行时快照/cache/节点集快照）时，订阅全失败不再停核清场：
             // 回滚到变更前状态，把订阅故障作为普通变更失败报给用户
-            if snapshot.is_some() || has_config_cache() || has_sub_nodes_snapshot() {
+            if snapshot.is_some() || has_config_cache(state) || has_sub_nodes_snapshot(state) {
                 warn!(error = %apply_err, "All subscriptions failed during config change; keeping previous runtime state");
                 match restore_previous_config(old_config, state, should_run, snapshot.as_deref())
                     .await
@@ -517,28 +624,13 @@ pub async fn apply_config_change(
     }
 }
 
-async fn sing_box_is_running(state: &Arc<AppState>) -> bool {
-    let mut lock = state.sing_process.lock().await;
-    match &mut *lock {
-        Some(proc) => match proc.child.try_wait() {
-            Ok(Some(_)) => {
-                *lock = None;
-                false
-            }
-            Ok(None) => true,
-            Err(_) => false,
-        },
-        None => false,
-    }
-}
-
 /// 只用本地材料把磁盘 config.json 恢复到变更前状态：优先内存快照，其次缓存。
 /// Ok(true)=已恢复；Ok(false)=本地无材料；Err=有材料但写回失败（磁盘 I/O 故障，
 /// 此时重新生成同样会卡在写盘，调用方直接上报即可）。
-async fn restore_disk_config(snapshot: Option<&[u8]>) -> AppResult<bool> {
+async fn restore_disk_config(state: &Arc<AppState>, snapshot: Option<&[u8]>) -> AppResult<bool> {
     let mut last_err = None;
     if let Some(bytes) = snapshot {
-        match restore_runtime_config_bytes(bytes).await {
+        match restore_runtime_config_bytes(state, bytes).await {
             Ok(()) => return Ok(true),
             Err(err) => {
                 warn!(error = %err, "Failed to restore runtime config from snapshot, trying cache");
@@ -546,8 +638,8 @@ async fn restore_disk_config(snapshot: Option<&[u8]>) -> AppResult<bool> {
             }
         }
     }
-    if has_config_cache() {
-        match restore_config_from_cache().await {
+    if has_config_cache(state) {
+        match restore_config_from_cache(state).await {
             Ok(()) => return Ok(true),
             Err(err) => {
                 warn!(error = %err, "Failed to restore runtime config from cache");
@@ -566,9 +658,9 @@ async fn restore_previous_running_config(
     state: &Arc<AppState>,
     snapshot: Option<&[u8]>,
 ) -> AppResult<()> {
-    if sing_box_is_running(state).await {
+    if is_sing_box_running(state).await {
         // 内核还在跑变更前配置：回滚只是让磁盘重新等于运行中的状态，纯本地操作
-        match restore_disk_config(snapshot).await {
+        match restore_disk_config(state, snapshot).await {
             Ok(true) => return Ok(()),
             Ok(false) => {
                 // 本地没有任何材料（新装/清场后）：才退化到重新生成（网络）
@@ -593,16 +685,17 @@ async fn restart_with_previous_config(
 
     // 本地材料分层（快照 → 缓存）：写回 → 校验 → 启动，全程不碰网络。
     // 校验挡掉损坏的材料，也兜住内核升级后旧配置不再合法的情况（落到下一层/重新生成）。
-    let cache = read_config_cache().await;
+    let cache = read_config_cache(state).await;
     for (source, bytes) in [("snapshot", snapshot), ("cache", cache.as_deref())]
         .into_iter()
         .filter_map(|(source, bytes)| bytes.map(|b| (source, b)))
     {
-        if let Err(err) = restore_runtime_config_bytes(bytes).await {
+        if let Err(err) = restore_runtime_config_bytes(state, bytes).await {
             warn!(error = %err, source = source, "Failed to write back runtime config, trying next source");
             continue;
         }
-        if let Err(err) = validate_sing_box_config().await {
+        if let Err(err) = validate_sing_box_config(state, &state.runtime_paths.active_config).await
+        {
             warn!(error = %err, source = source, "Restored runtime config failed validation, trying next source");
             continue;
         }
@@ -638,7 +731,7 @@ async fn restore_previous_stopped_config(
 
     // 服务本就处于停止态：只需把磁盘修回变更前配置，不起进程；
     // 本地无材料才退化到重新生成（网络）
-    match restore_disk_config(snapshot).await {
+    match restore_disk_config(state, snapshot).await {
         Ok(true) => Ok(()),
         Ok(false) => {
             let outcome =
