@@ -88,13 +88,6 @@
     font-size: var(--fs-md);
     font-weight: var(--fw-semibold);
 }
-/* 徽标基元由 .badge 提供，这里只保留计数色 */
-.home-connections-count {
-    min-width: var(--count-min-w);
-    background: var(--surface-green-soft);
-    color: var(--success);
-    text-align: center;
-}
 .home-connections-all {
     border: none;
     background: none;

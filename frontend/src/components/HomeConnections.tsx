@@ -88,7 +88,6 @@ export function HomeConnections({ status, data, onOpenAll }: HomeConnectionsProp
         <div className="home-connections-title">
           <Activity size={ICON.sm} className="section-icon" />
           <span>活跃链接</span>
-          <span className="badge home-connections-count">{activeGroups.length}</span>
         </div>
         <button type="button" className="home-connections-all" onClick={onOpenAll}>
           查看全部

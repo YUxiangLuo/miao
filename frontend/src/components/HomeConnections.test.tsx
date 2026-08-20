@@ -51,7 +51,6 @@ describe('HomeConnections', () => {
     )
 
     expect(screen.getByText('暂无活跃链接')).toBeInTheDocument()
-    expect(screen.getByText('0')).toBeInTheDocument()
   })
 
   it('hides idle connections and lists active site cards by speed', () => {
@@ -75,7 +74,6 @@ describe('HomeConnections', () => {
     expect(screen.queryByText('idle.dev')).not.toBeInTheDocument()
     const domains = screen.getAllByText(/\.dev$/).map((node) => node.textContent)
     expect(domains).toEqual(['fast.dev', 'slow.dev'])
-    expect(screen.getByText('2')).toBeInTheDocument()
     // 出口 chip：直连显示 direct，代理显示链路第一节
     expect(screen.getAllByText('proxy').length).toBeGreaterThan(0)
   })
