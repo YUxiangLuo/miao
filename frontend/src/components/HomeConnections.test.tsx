@@ -125,4 +125,128 @@ describe('HomeConnections', () => {
     expect(screen.getByText('K')).toBeInTheDocument()
     expect(screen.queryByText('A')).not.toBeInTheDocument()
   })
+
+  it('staggers card entrance via the --i custom property', () => {
+    const { container } = render(
+      <HomeConnections
+        status={statusMock({ running: true })}
+        data={{
+          uploadTotal: 0,
+          downloadTotal: 0,
+          connections: [
+            connection({ id: 'a', downloadSpeed: 900, metadata: { host: 'fast.dev' } }),
+            connection({ id: 'b', downloadSpeed: 10, metadata: { host: 'slow.dev' } }),
+          ],
+        }}
+        onOpenAll={vi.fn()}
+      />,
+    )
+
+    const cards = container.querySelectorAll<HTMLElement>('.home-site-card')
+    expect([...cards].map((card) => card.style.getPropertyValue('--i'))).toEqual(['0', '1'])
+  })
+
+  it('prepends newly appeared groups to the front', () => {
+    const { rerender } = render(
+      <HomeConnections
+        status={statusMock({ running: true })}
+        data={{
+          uploadTotal: 0,
+          downloadTotal: 0,
+          connections: [
+            connection({ id: 'a', downloadSpeed: 900, metadata: { host: 'fast.dev' } }),
+            connection({ id: 'b', downloadSpeed: 10, metadata: { host: 'slow.dev' } }),
+          ],
+        }}
+        onOpenAll={vi.fn()}
+      />,
+    )
+
+    // 新组速率再低也排最前（速率降序只决定同一轮首次落位）
+    rerender(
+      <HomeConnections
+        status={statusMock({ running: true })}
+        data={{
+          uploadTotal: 0,
+          downloadTotal: 0,
+          connections: [
+            connection({ id: 'a', downloadSpeed: 900, metadata: { host: 'fast.dev' } }),
+            connection({ id: 'b', downloadSpeed: 10, metadata: { host: 'slow.dev' } }),
+            connection({ id: 'c', downloadSpeed: 5, metadata: { host: 'new.dev' } }),
+          ],
+        }}
+        onOpenAll={vi.fn()}
+      />,
+    )
+
+    const domains = screen.getAllByText(/\.dev$/).map((node) => node.textContent)
+    expect(domains).toEqual(['new.dev', 'fast.dev', 'slow.dev'])
+  })
+
+  it('keeps card positions stable when speeds change between polls', () => {
+    const { rerender } = render(
+      <HomeConnections
+        status={statusMock({ running: true })}
+        data={{
+          uploadTotal: 0,
+          downloadTotal: 0,
+          connections: [
+            connection({ id: 'a', downloadSpeed: 900, metadata: { host: 'fast.dev' } }),
+            connection({ id: 'b', downloadSpeed: 10, metadata: { host: 'slow.dev' } }),
+          ],
+        }}
+        onOpenAll={vi.fn()}
+      />,
+    )
+
+    // 速率倒挂也不重排——位置只随「出现/消失」变化
+    rerender(
+      <HomeConnections
+        status={statusMock({ running: true })}
+        data={{
+          uploadTotal: 0,
+          downloadTotal: 0,
+          connections: [
+            connection({ id: 'a', downloadSpeed: 10, metadata: { host: 'fast.dev' } }),
+            connection({ id: 'b', downloadSpeed: 900, metadata: { host: 'slow.dev' } }),
+          ],
+        }}
+        onOpenAll={vi.fn()}
+      />,
+    )
+
+    const domains = screen.getAllByText(/\.dev$/).map((node) => node.textContent)
+    expect(domains).toEqual(['fast.dev', 'slow.dev'])
+  })
+
+  it('treats a vanished-and-returned group as new (front again)', () => {
+    const props = {
+      status: statusMock({ running: true }),
+      onOpenAll: vi.fn(),
+    }
+    const withBoth = {
+      uploadTotal: 0,
+      downloadTotal: 0,
+      connections: [
+        connection({ id: 'a', downloadSpeed: 900, metadata: { host: 'fast.dev' } }),
+        connection({ id: 'b', downloadSpeed: 10, metadata: { host: 'slow.dev' } }),
+      ],
+    }
+    const { rerender } = render(<HomeConnections {...props} data={withBoth} />)
+
+    rerender(
+      <HomeConnections
+        {...props}
+        data={{
+          uploadTotal: 0,
+          downloadTotal: 0,
+          connections: [connection({ id: 'a', downloadSpeed: 900, metadata: { host: 'fast.dev' } })],
+        }}
+      />,
+    )
+    rerender(<HomeConnections {...props} data={withBoth} />)
+
+    const domains = screen.getAllByText(/\.dev$/).map((node) => node.textContent)
+    expect(domains).toEqual(['slow.dev', 'fast.dev'])
+  })
 })

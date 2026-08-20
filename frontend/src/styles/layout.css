@@ -115,7 +115,9 @@
     display: flex;
     gap: var(--space-2);
 }
-/* 圆角正方形卡：favicon 主视觉 + 主域名 + 出口 chip */
+/* 圆角正方形卡：favicon 主视觉 + 主域名 + 出口 chip。
+   入场：从负 margin 折叠态（不占位）展开 + 淡入上浮，按 --i 交错——
+   margin 动画让右侧卡片随展开平滑滑动，而不是卡片挂载瞬间整体右跳 */
 .home-site-card {
     flex: 0 0 auto;
     width: var(--home-site-card);
@@ -130,6 +132,20 @@
     border: var(--bw) solid var(--border);
     background: var(--raised);
     overflow: hidden;
+    animation: siteEnter var(--anim-fade) var(--ease) backwards;
+    animation-delay: calc(var(--stagger-step) * var(--i, 0));
+}
+@keyframes siteEnter {
+    from {
+        opacity: 0;
+        margin-right: calc(-1 * (var(--home-site-card) + var(--space-2)));
+        transform: translateY(3px);
+    }
+}
+@media (prefers-reduced-motion: reduce) {
+    .home-site-card {
+        animation: none;
+    }
 }
 .home-site-icon {
     flex: 0 0 auto;
@@ -170,6 +186,18 @@
     justify-content: center;
     height: 100%;
     color: var(--text-subtle);
+    /* 卡片消失/出现时空态接手或让位，淡入柔化硬切换（无 margin 戏法：空态块占满整行） */
+    animation: emptyFade var(--anim-fade) var(--ease) backwards;
+}
+@keyframes emptyFade {
+    from {
+        opacity: 0;
+    }
+}
+@media (prefers-reduced-motion: reduce) {
+    .home-connections-empty {
+        animation: none;
+    }
 }
 
 /* ── 桌面双列（>1180px）几何：板块位置钉死，高度随视口伸缩 ─────────────
