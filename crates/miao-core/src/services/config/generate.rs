@@ -294,8 +294,9 @@ async fn build_prepared(
 ) -> AppResult<GenConfigOutcome> {
     let (my_outbounds, my_names) = collect_manual_outbounds(config);
     let has_sub_nodes = !nodes.is_empty();
+    let reserved_rule_tags = custom_rule_outbound_tags(&config.custom_rules);
     let (final_node_names, final_outbounds, node_bindings) =
-        assign_subscription_tags(state, &my_names, nodes).await;
+        assign_subscription_tags(state, &my_names, &reserved_rule_tags, nodes).await;
 
     let (sing_box_config, skipped_rules, node_select) = build_sing_box_config(
         config,
@@ -313,6 +314,22 @@ async fn build_prepared(
         fresh_sub_nodes: None,
         node_bindings,
     })
+}
+
+fn custom_rule_outbound_tags(custom_rules: &[String]) -> Vec<String> {
+    let mut tags = Vec::new();
+    for raw in custom_rules {
+        let Some(tag) = serde_json::from_str::<serde_json::Value>(raw)
+            .ok()
+            .and_then(|rule| rule.get("outbound")?.as_str().map(str::to_string))
+        else {
+            continue;
+        };
+        if !tags.contains(&tag) {
+            tags.push(tag);
+        }
+    }
+    tags
 }
 
 pub(super) fn collect_manual_outbounds(config: &Config) -> (Vec<serde_json::Value>, Vec<String>) {
@@ -366,6 +383,15 @@ pub async fn known_rule_targets(config: &Config, state: &AppState) -> Vec<String
         }
     }
 
+    // Existing rules reserve their target even while the node is absent. This
+    // is the fail-closed fallback when node-bindings.json is missing or invalid:
+    // a future same-name node must not silently inherit a dormant rule.
+    for tag in custom_rule_outbound_tags(&config.custom_rules) {
+        if !tags.contains(&tag) {
+            tags.push(tag);
+        }
+    }
+
     let runtime_config_path = &state.runtime_paths.active_config;
     if let Ok(content) = tokio::fs::read_to_string(&runtime_config_path).await {
         if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
@@ -388,11 +414,27 @@ pub async fn known_rule_targets(config: &Config, state: &AppState) -> Vec<String
 
 #[cfg(test)]
 mod tests {
-    use super::{SubFetchRetry, STARTUP_RETRY_SCHEDULE};
+    use super::{known_rule_targets, SubFetchRetry, STARTUP_RETRY_SCHEDULE};
     use crate::models::Config;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
     use tokio::time::Duration;
+
+    #[tokio::test]
+    async fn dormant_custom_rule_target_remains_reserved_without_bindings() {
+        let config = Config {
+            custom_rules: vec![
+                r#"{"domain_suffix":"example.com","action":"route","outbound":"gone-node"}"#
+                    .to_string(),
+            ],
+            ..Config::default()
+        };
+        let state = crate::test_support::app_state(config.clone());
+
+        let targets = known_rule_targets(&config, &state).await;
+
+        assert!(targets.contains(&"gone-node".to_string()));
+    }
 
     #[test]
     fn startup_retry_schedule_is_bounded_under_a_minute() {

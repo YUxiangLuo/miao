@@ -113,12 +113,8 @@ pub async fn install_prepared_runtime(
     outcome: &GenConfigOutcome,
 ) -> AppResult<()> {
     validate_prepared_config(state, &outcome.bytes).await?;
-    let old_runtime = tokio::fs::read(&state.runtime_paths.active_config)
-        .await
-        .ok();
-    let old_bindings = tokio::fs::read(&state.runtime_paths.node_bindings)
-        .await
-        .ok();
+    let old_runtime = read_file_snapshot(&state.runtime_paths.active_config).await?;
+    let old_bindings = read_file_snapshot(&state.runtime_paths.node_bindings).await?;
     let commit = async {
         write_file_atomic(&state.runtime_paths.active_config, &outcome.bytes).await?;
         save_node_bindings(state, &outcome.node_bindings).await
@@ -152,6 +148,17 @@ async fn restore_file_snapshot(path: &Path, bytes: Option<&[u8]>) -> AppResult<(
     }
 }
 
+async fn read_file_snapshot(path: &Path) -> AppResult<Option<Vec<u8>>> {
+    match tokio::fs::read(path).await {
+        Ok(bytes) => Ok(Some(bytes)),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(err) => Err(AppError::context(
+            format!("Failed to snapshot transaction file {}", path.display()),
+            err,
+        )),
+    }
+}
+
 async fn restore_after_activation_failure(
     state: &Arc<AppState>,
     old_runtime: Option<&[u8]>,
@@ -175,9 +182,7 @@ async fn activate_running_config(
     outcome: &GenConfigOutcome,
 ) -> AppResult<()> {
     let old_runtime = snapshot_runtime_config(state).await;
-    let old_bindings = tokio::fs::read(&state.runtime_paths.node_bindings)
-        .await
-        .ok();
+    let old_bindings = read_file_snapshot(&state.runtime_paths.node_bindings).await?;
     stop_sing_internal(state).await;
 
     let activate_result = async {
@@ -497,6 +502,7 @@ async fn restore_previous_config(
     state: &Arc<AppState>,
     should_run: bool,
     snapshot: Option<&[u8]>,
+    force_restart: bool,
 ) -> AppResult<()> {
     if !has_configured_sources(old_config) {
         stop_sing_internal(state).await;
@@ -504,10 +510,39 @@ async fn restore_previous_config(
         return Ok(());
     }
 
-    if should_run {
+    if should_run && force_restart {
+        restart_with_previous_config(old_config, state, snapshot).await
+    } else if should_run {
         restore_previous_running_config(old_config, state, snapshot).await
     } else {
         restore_previous_stopped_config(old_config, state, snapshot).await
+    }
+}
+
+async fn restore_after_persist_failure(
+    old_config: &Config,
+    state: &Arc<AppState>,
+    should_run: bool,
+    runtime_snapshot: Option<&[u8]>,
+    bindings_snapshot: Option<&[u8]>,
+) -> AppResult<()> {
+    // A successful apply has already replaced the running process when the
+    // service is desired. Seeing a live child cannot distinguish old from new,
+    // so this rollback must force a restart from the previous bytes.
+    let runtime_restore =
+        restore_previous_config(old_config, state, should_run, runtime_snapshot, true).await;
+    // Bindings commit together with config.json. Restore them even if runtime
+    // recovery failed so the next successful transaction starts from old state.
+    let bindings_restore =
+        restore_file_snapshot(&state.runtime_paths.node_bindings, bindings_snapshot).await;
+
+    match (runtime_restore, bindings_restore) {
+        (Ok(()), Ok(())) => Ok(()),
+        (Err(runtime_err), Ok(())) => Err(runtime_err),
+        (Ok(()), Err(bindings_err)) => Err(bindings_err),
+        (Err(runtime_err), Err(bindings_err)) => Err(AppError::message(format!(
+            "Runtime rollback failed: {runtime_err}. Bindings rollback failed: {bindings_err}"
+        ))),
     }
 }
 
@@ -530,6 +565,9 @@ pub async fn apply_config_change(
 
     // 回滚 tier 1 材料：变更前正在运行/最近可用的运行时配置字节（config.json）
     let snapshot = snapshot_runtime_config(state).await;
+    // node-bindings.json 与运行时配置共同提交；旧值读不出时不要开始一个
+    // 无法完整回滚的事务。
+    let bindings_snapshot = read_file_snapshot(&state.runtime_paths.node_bindings).await?;
     // 订阅列表没变就是本地语义变更（节点选择/路由模式/规则/手动节点），走快照零网络重建
     let source = sub_source_for(old_config, new_config);
 
@@ -564,11 +602,12 @@ pub async fn apply_config_change(
                 }
                 Err(save_err) => {
                     error!(error = %save_err, "Runtime config applied but persistent config write failed, attempting runtime rollback");
-                    match restore_previous_config(
+                    match restore_after_persist_failure(
                         old_config,
                         state,
                         should_run,
                         snapshot.as_deref(),
+                        bindings_snapshot.as_deref(),
                     )
                     .await
                     {
@@ -589,8 +628,14 @@ pub async fn apply_config_change(
             // 回滚到变更前状态，把订阅故障作为普通变更失败报给用户
             if snapshot.is_some() || has_config_cache(state) || has_sub_nodes_snapshot(state) {
                 warn!(error = %apply_err, "All subscriptions failed during config change; keeping previous runtime state");
-                match restore_previous_config(old_config, state, should_run, snapshot.as_deref())
-                    .await
+                match restore_previous_config(
+                    old_config,
+                    state,
+                    should_run,
+                    snapshot.as_deref(),
+                    false,
+                )
+                .await
                 {
                     Ok(()) => Err(AppError::context(
                         "所有订阅获取失败，已保留当前运行配置",
@@ -609,7 +654,8 @@ pub async fn apply_config_change(
         }
         Err(apply_err) => {
             error!(error = %apply_err, "Failed to apply runtime config change, attempting runtime rollback");
-            match restore_previous_config(old_config, state, should_run, snapshot.as_deref()).await
+            match restore_previous_config(old_config, state, should_run, snapshot.as_deref(), false)
+                .await
             {
                 Ok(()) => Err(AppError::context(
                     "Failed to apply config change; restored previous runtime config",
@@ -740,5 +786,112 @@ async fn restore_previous_stopped_config(
             Ok(())
         }
         Err(err) => Err(err),
+    }
+}
+
+#[cfg(all(test, unix))]
+mod transaction_tests {
+    use std::{os::unix::fs::PermissionsExt, sync::atomic::Ordering, sync::Arc};
+
+    use crate::{
+        models::{Config, StableConfig},
+        paths::RuntimePaths,
+        services::singbox::{is_sing_box_running, start_sing_internal, stop_sing_internal},
+        state::AppState,
+    };
+
+    use super::apply_config_change;
+
+    fn manual_node(tag: &str) -> String {
+        serde_json::json!({
+            "type": "hysteria2",
+            "tag": tag,
+            "server": "127.0.0.1",
+            "server_port": 443,
+            "password": "secret"
+        })
+        .to_string()
+    }
+
+    #[tokio::test]
+    async fn persistent_save_failure_restarts_previous_runtime_and_restores_bindings() {
+        let unique = format!(
+            "miao-transaction-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+        let root = std::env::temp_dir().join(unique);
+        let runtime_dir = root.join("runtime");
+        let config_path = root.join("config.yaml");
+        let volatile_path = root.join("volatile.yaml");
+        tokio::fs::create_dir_all(&runtime_dir).await.unwrap();
+        // A directory at the target path deterministically makes the stable
+        // config commit fail after runtime activation, even when tests run as root.
+        tokio::fs::create_dir_all(&config_path).await.unwrap();
+
+        let fake_kernel = runtime_dir.join("sing-box");
+        tokio::fs::write(
+            &fake_kernel,
+            b"#!/bin/sh\nif [ \"$1\" = check ]; then exit 0; fi\nif [ \"$1\" = run ]; then exec sleep 300; fi\nexit 1\n",
+        )
+        .await
+        .unwrap();
+        std::fs::set_permissions(&fake_kernel, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let old_config = Config {
+            nodes: vec![manual_node("old-node")],
+            ..Config::default()
+        };
+        let runtime_paths = RuntimePaths::new(runtime_dir, &config_path);
+        let state = Arc::new(
+            AppState::with_config_layers(
+                StableConfig::from(&old_config),
+                old_config.clone(),
+                config_path,
+                volatile_path,
+                runtime_paths,
+            )
+            .unwrap(),
+        );
+        let old_runtime = br#"{"marker":"old-runtime"}"#;
+        let old_bindings = br#"{"marker":"old-bindings"}"#;
+        tokio::fs::write(&state.runtime_paths.active_config, old_runtime)
+            .await
+            .unwrap();
+        tokio::fs::write(&state.runtime_paths.node_bindings, old_bindings)
+            .await
+            .unwrap();
+        start_sing_internal(&state).await.unwrap();
+        assert_eq!(state.sing_generation.load(Ordering::Relaxed), 1);
+
+        let mut new_config = old_config.clone();
+        new_config.nodes.push(manual_node("new-node"));
+        let result = apply_config_change(&state, &old_config, &new_config).await;
+
+        assert!(result.is_err(), "the persistent config commit must fail");
+        assert_eq!(
+            tokio::fs::read(&state.runtime_paths.active_config)
+                .await
+                .unwrap(),
+            old_runtime
+        );
+        assert_eq!(
+            tokio::fs::read(&state.runtime_paths.node_bindings)
+                .await
+                .unwrap(),
+            old_bindings
+        );
+        assert!(is_sing_box_running(&state).await);
+        assert!(
+            state.sing_generation.load(Ordering::Relaxed) >= 5,
+            "old runtime must be restarted after the new runtime was activated"
+        );
+        assert_eq!(*state.config.read().await, old_config);
+
+        stop_sing_internal(&state).await;
+        let _ = tokio::fs::remove_dir_all(root).await;
     }
 }

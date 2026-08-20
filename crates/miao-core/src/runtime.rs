@@ -276,6 +276,41 @@ async fn initialize_runtime(config: Config, state: Arc<AppState>) {
     crate::services::version::mark_upgrade_healthy();
 }
 
+/// Check cache provenance and runtime semantics before copying it into the
+/// active slot. `Ok(true)` identifies the one-time legacy compatibility path.
+async fn prepare_compatible_startup_cache(
+    config: &Config,
+    state: &Arc<AppState>,
+) -> AppResult<bool> {
+    let compatibility = cache_compatibility(state, config).await;
+    let legacy = match compatibility {
+        CacheCompatibility::Verified => false,
+        CacheCompatibility::Legacy => true,
+        CacheCompatibility::Incompatible(reason) => {
+            return Err(AppError::message(format!(
+                "Cached config provenance check failed: {reason}"
+            )));
+        }
+    };
+
+    // Validate and inspect the cache in place. A rejected cache must not
+    // overwrite config.json, which is also the rollback snapshot source.
+    validate_sing_box_config(state, &state.runtime_paths.config_cache).await?;
+    let content = tokio::fs::read_to_string(&state.runtime_paths.config_cache)
+        .await
+        .map_err(|e| AppError::context("Failed to read cached config", e))?;
+    let json: serde_json::Value = serde_json::from_str(&content)
+        .map_err(|e| AppError::context("Cached config is invalid JSON", e))?;
+    if !runtime_config_matches_node_select(&json, config.node_select) {
+        return Err(AppError::message(
+            "Cached config does not match the effective node_select",
+        ));
+    }
+
+    restore_config_from_cache(state).await?;
+    Ok(legacy)
+}
+
 /// 持锁执行的初始化。返回 true = 内核已用缓存配置秒开（快速通道），订阅需改为
 /// 后台刷新；false = 无需后台刷新（无配置/已走同步拉取路径）。
 async fn initialize_runtime_locked(config: &Config, state: &Arc<AppState>) -> bool {
@@ -290,43 +325,8 @@ async fn initialize_runtime_locked(config: &Config, state: &Arc<AppState>) -> bo
     // 快速通道：存在上次成功运行的缓存配置 → 先起内核（秒开），订阅改为后台刷新。
     // 缓存读取/校验/启动任何一步失败都落回同步拉取路径。
     if has_config_cache(state) {
-        let compatibility = cache_compatibility(state, config).await;
-        let legacy_cache = matches!(compatibility, CacheCompatibility::Legacy);
-        let cache_allowed = match &compatibility {
-            CacheCompatibility::Verified | CacheCompatibility::Legacy => true,
-            CacheCompatibility::Incompatible(reason) => {
-                warn!(reason = %reason, "Cached config provenance check failed; regenerating");
-                false
-            }
-        };
-        let cache_usable = cache_allowed
-            && match restore_config_from_cache(state).await {
-                Ok(()) => match validate_sing_box_config(state, &state.runtime_paths.active_config)
-                    .await
-                {
-                    Ok(()) => true,
-                    Err(err) => {
-                        warn!(error = %err, "Cached config failed validation, fetching subscriptions");
-                        false
-                    }
-                },
-                Err(err) => {
-                    warn!(error = %err, "Failed to restore cached config, fetching subscriptions");
-                    false
-                }
-            };
-
-        if cache_usable {
-            let cache_matches_select =
-                match tokio::fs::read_to_string(&state.runtime_paths.active_config).await {
-                    Ok(content) => serde_json::from_str(&content).ok().is_some_and(|json| {
-                        runtime_config_matches_node_select(&json, config.node_select)
-                    }),
-                    Err(_) => false,
-                };
-            if !cache_matches_select {
-                warn!("Cached config does not match node_select; regenerating");
-            } else {
+        match prepare_compatible_startup_cache(config, state).await {
+            Ok(legacy_cache) => {
                 #[cfg(not(windows))]
                 {
                     info!("Checking dependencies...");
@@ -354,12 +354,16 @@ async fn initialize_runtime_locked(config: &Config, state: &Arc<AppState>) -> bo
                     }
                 }
             }
+            Err(err) => {
+                warn!(error = %err, "Cached config is not eligible for startup; regenerating");
+            }
         }
     }
 
     info!("Generating initial config...");
     let mut all_subs_failed = false;
     let mut fresh_gen: Option<GenConfigOutcome> = None;
+    let mut fallback_cache_legacy: Option<bool> = None;
     match gen_config(config, state, SubFetchRetry::Startup).await {
         Ok(outcome) => match install_prepared_runtime(state, &outcome).await {
             Ok(()) => {
@@ -377,10 +381,11 @@ async fn initialize_runtime_locked(config: &Config, state: &Arc<AppState>) -> bo
             }
             Err(e) => {
                 error!(error = %e, "Generated startup config failed validation or installation");
-                match restore_config_from_cache(state).await {
-                    Ok(_) => {
+                match prepare_compatible_startup_cache(config, state).await {
+                    Ok(legacy_cache) => {
                         warn!("Using cached config as fallback");
                         all_subs_failed = true;
+                        fallback_cache_legacy = Some(legacy_cache);
                     }
                     Err(cache_err) => {
                         error!(error = %cache_err, "No cached config available");
@@ -397,10 +402,11 @@ async fn initialize_runtime_locked(config: &Config, state: &Arc<AppState>) -> bo
         },
         Err(e) => {
             error!(error = %e, "Failed to generate config");
-            match restore_config_from_cache(state).await {
-                Ok(_) => {
+            match prepare_compatible_startup_cache(config, state).await {
+                Ok(legacy_cache) => {
                     warn!("Using cached config as fallback");
                     all_subs_failed = true;
+                    fallback_cache_legacy = Some(legacy_cache);
                 }
                 Err(cache_err) => {
                     error!(error = %cache_err, "No cached config available");
@@ -426,7 +432,13 @@ async fn initialize_runtime_locked(config: &Config, state: &Arc<AppState>) -> bo
     match start_sing_internal(state).await {
         Ok(_) => {
             info!("sing-box started successfully");
-            save_config_cache(state).await;
+            match fallback_cache_legacy {
+                Some(true) => mark_legacy_cache_used(state).await,
+                Some(false) => {
+                    // The verified cache and manifest are already current.
+                }
+                None => save_config_cache(state).await,
+            }
             // 启动成功等价于配置可用：把本次拉取的节点集落成快照，供本地语义变更零网络重建
             if let Some(outcome) = &fresh_gen {
                 record_fresh_snapshot(config, state, outcome).await;
@@ -729,7 +741,45 @@ async fn open_onboarding_browser(url: String) {
 mod tests {
     use std::path::PathBuf;
 
-    use super::{panel_bind_addr, spawn_server, RuntimeOptions};
+    use super::{panel_bind_addr, prepare_compatible_startup_cache, spawn_server, RuntimeOptions};
+
+    #[tokio::test]
+    async fn incompatible_cache_is_rejected_before_it_replaces_active_config() {
+        use crate::{models::Config, services::config::save_config_cache, test_support::app_state};
+
+        let original = Config {
+            subs: vec!["https://old.example/sub".to_string()],
+            ..Config::default()
+        };
+        let state = app_state(original);
+        tokio::fs::create_dir_all(&state.runtime_paths.runtime_dir)
+            .await
+            .unwrap();
+        tokio::fs::write(&state.runtime_paths.active_config, br#"{"outbounds":[]}"#)
+            .await
+            .unwrap();
+        save_config_cache(&state).await;
+
+        let active_before_fallback = br#"{"marker":"active-before-fallback"}"#;
+        tokio::fs::write(&state.runtime_paths.active_config, active_before_fallback)
+            .await
+            .unwrap();
+        let changed = Config {
+            subs: vec!["https://new.example/sub".to_string()],
+            ..Config::default()
+        };
+
+        let result = prepare_compatible_startup_cache(&changed, &state).await;
+
+        assert!(result.is_err());
+        assert_eq!(
+            tokio::fs::read(&state.runtime_paths.active_config)
+                .await
+                .unwrap(),
+            active_before_fallback
+        );
+        let _ = tokio::fs::remove_dir_all(&state.runtime_paths.runtime_dir).await;
+    }
 
     /// Hold a port the panel would bind. Windows needs SO_EXCLUSIVEADDRUSE so
     /// Tokio's SO_REUSEADDR cannot hijack it.

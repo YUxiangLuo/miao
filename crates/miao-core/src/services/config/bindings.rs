@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use sha2::{Digest, Sha256};
+use tracing::warn;
 
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
@@ -95,25 +96,41 @@ fn make_unique_tag(base: &str, used: &mut HashSet<String>) -> String {
     unreachable!("unbounded duplicate tag search should find a value")
 }
 
-async fn load_bindings(state: &AppState) -> Option<NodeTagBindings> {
-    let bytes = tokio::fs::read(&state.runtime_paths.node_bindings)
-        .await
-        .ok()?;
-    let parsed: NodeTagBindings = serde_json::from_slice(&bytes).ok()?;
-    (parsed.version == BINDINGS_VERSION).then_some(parsed)
+async fn load_bindings(state: &AppState) -> AppResult<Option<NodeTagBindings>> {
+    let bytes = match tokio::fs::read(&state.runtime_paths.node_bindings).await {
+        Ok(bytes) => bytes,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(err) => {
+            return Err(AppError::context(
+                "Failed to read stable node tag bindings",
+                err,
+            ));
+        }
+    };
+    let parsed: NodeTagBindings = serde_json::from_slice(&bytes)
+        .map_err(|e| AppError::context("Stable node tag bindings are invalid", e))?;
+    if parsed.version != BINDINGS_VERSION {
+        return Err(AppError::message(format!(
+            "Unsupported stable node tag bindings version {}",
+            parsed.version
+        )));
+    }
+    Ok(Some(parsed))
 }
 
 pub async fn reserved_node_tags(state: &AppState) -> Vec<String> {
-    load_bindings(state)
-        .await
-        .map(|bindings| {
-            bindings
-                .bindings
-                .into_iter()
-                .map(|binding| binding.tag)
-                .collect()
-        })
-        .unwrap_or_default()
+    match load_bindings(state).await {
+        Ok(Some(bindings)) => bindings
+            .bindings
+            .into_iter()
+            .map(|binding| binding.tag)
+            .collect(),
+        Ok(None) => Vec::new(),
+        Err(err) => {
+            warn!(error = %err, "Ignoring unusable stable node tag bindings");
+            Vec::new()
+        }
+    }
 }
 
 async fn active_tag_by_fingerprint(state: &AppState) -> HashMap<Vec<u8>, Vec<String>> {
@@ -145,12 +162,23 @@ async fn active_tag_by_fingerprint(state: &AppState) -> HashMap<Vec<u8>, Vec<Str
 pub async fn assign_subscription_tags(
     state: &Arc<AppState>,
     manual_tags: &[String],
+    reserved_rule_tags: &[String],
     nodes: Vec<FetchedNode>,
 ) -> (Vec<String>, Vec<serde_json::Value>, NodeTagBindings) {
-    let mut bindings = load_bindings(state).await.unwrap_or_default();
+    let mut bindings = match load_bindings(state).await {
+        Ok(Some(bindings)) => bindings,
+        Ok(None) => NodeTagBindings::default(),
+        Err(err) => {
+            // Continue for compatibility, but custom-rule targets below remain
+            // reserved so losing this auxiliary file cannot silently retarget a rule.
+            warn!(error = %err, "Rebuilding unusable stable node tag bindings safely");
+            NodeTagBindings::default()
+        }
+    };
     let mut used: HashSet<String> = manual_tags.iter().cloned().collect();
     used.insert("proxy".to_string());
     used.insert("direct".to_string());
+    used.extend(reserved_rule_tags.iter().cloned());
     used.extend(bindings.bindings.iter().map(|binding| binding.tag.clone()));
 
     let mut fingerprint_occurrences: HashMap<(String, Vec<u8>), usize> = HashMap::new();
@@ -259,7 +287,7 @@ pub async fn save_node_bindings(state: &AppState, bindings: &NodeTagBindings) ->
 
 #[cfg(test)]
 mod tests {
-    use super::{assign_subscription_tags, save_node_bindings, FetchedNode};
+    use super::{assign_subscription_tags, load_bindings, save_node_bindings, FetchedNode};
     use crate::{models::Config, test_support::app_state};
 
     fn node(name: &str, server: &str) -> FetchedNode {
@@ -282,6 +310,7 @@ mod tests {
         let (_, first, bindings) = assign_subscription_tags(
             &state,
             &[],
+            &[],
             vec![
                 node("Hong Kong", "a.example.com"),
                 node("Hong Kong", "b.example.com"),
@@ -294,6 +323,7 @@ mod tests {
 
         let (_, reordered, _) = assign_subscription_tags(
             &state,
+            &[],
             &[],
             vec![
                 node("Hong Kong", "b.example.com"),
@@ -311,12 +341,14 @@ mod tests {
         let (_, _, bindings) = assign_subscription_tags(
             &state,
             &[],
+            &[],
             vec![node("same", "a.example.com"), node("same", "b.example.com")],
         )
         .await;
         save_node_bindings(&state, &bindings).await.unwrap();
         let (_, outbounds, _) = assign_subscription_tags(
             &state,
+            &[],
             &[],
             vec![node("same", "a.example.com"), node("same", "c.example.com")],
         )
@@ -329,13 +361,37 @@ mod tests {
     async fn unique_endpoint_keeps_tag_when_credentials_rotate() {
         let state = app_state(Config::default());
         let original = node("stable-name", "a.example.com");
-        let (_, _, bindings) = assign_subscription_tags(&state, &[], vec![original]).await;
+        let (_, _, bindings) = assign_subscription_tags(&state, &[], &[], vec![original]).await;
         save_node_bindings(&state, &bindings).await.unwrap();
 
         let mut rotated = node("renamed-by-provider", "a.example.com");
         rotated.outbound["password"] = serde_json::json!("rotated-secret");
-        let (_, outbounds, _) = assign_subscription_tags(&state, &[], vec![rotated]).await;
+        let (_, outbounds, _) = assign_subscription_tags(&state, &[], &[], vec![rotated]).await;
 
         assert_eq!(outbounds[0]["tag"], "stable-name");
+    }
+
+    #[tokio::test]
+    async fn invalid_bindings_fail_closed_for_dormant_rule_targets() {
+        let state = app_state(Config::default());
+        if let Some(parent) = state.runtime_paths.node_bindings.parent() {
+            tokio::fs::create_dir_all(parent).await.unwrap();
+        }
+        tokio::fs::write(&state.runtime_paths.node_bindings, b"not-json")
+            .await
+            .unwrap();
+        assert!(load_bindings(&state).await.is_err());
+
+        let reserved = vec!["disappeared-node".to_string()];
+        let (_, outbounds, _) = assign_subscription_tags(
+            &state,
+            &[],
+            &reserved,
+            vec![node("disappeared-node", "new.example.com")],
+        )
+        .await;
+
+        assert_eq!(outbounds[0]["tag"], "disappeared-node (2)");
+        let _ = tokio::fs::remove_file(&state.runtime_paths.node_bindings).await;
     }
 }
