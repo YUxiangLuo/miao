@@ -14,7 +14,7 @@ use serde_json::{json, Value as JsonValue};
 use crate::error::AppResult;
 use crate::models::{LastProxy, NodeSelect, RouteMode};
 use crate::services::{
-    config::apply_config_change,
+    config::{apply_config_change, RuntimeUpdate},
     singbox::{is_sing_box_running, kernel_status},
     status::{legacy_warning, runtime_warnings},
 };
@@ -83,7 +83,7 @@ fn discover_result() -> JsonValue {
         "serverInfo": { "name": "miao", "version": VERSION },
         // 给调用者的使用说明：客户端连接时读取。核心目的——防「自伤」：
         // agent 的出网流量很可能正经过本代理，破坏性操作会断它自己的网
-        "instructions": "miao 是本机/路由器的透明代理控制面。你（调用者）的出网流量很可能正经过它：停止或重启内核、切换路由模式都会造成秒级网络中断——包括你自己的连接。执行此类操作前请先向用户说明并确认。切换节点是毫秒级操作，但已建立的连接会重置。",
+        "instructions": "miao 是本机/路由器的透明代理控制面。你（调用者）的出网流量很可能正经过它：停止内核或更新运行配置可能造成短暂网络中断、重置连接——包括你自己的连接。执行此类操作前请先向用户说明并确认。切换节点是毫秒级操作，但已建立的连接也会重置。",
     })
 }
 
@@ -121,7 +121,7 @@ fn tools_catalog() -> JsonValue {
     json!([
         {
             "name": "get_status",
-            "description": "服务状态：内核是否在跑、路由模式（分流/全局）、当前节点、运行时长、告警",
+            "description": "服务状态：内核进程、数据面是否就绪、启动/重载阶段、路由模式、当前节点、运行时长与告警",
             "inputSchema": { "type": "object", "properties": {} },
         },
         {
@@ -142,7 +142,7 @@ fn tools_catalog() -> JsonValue {
         },
         {
             "name": "set_node_select",
-            "description": "节点选择策略：manual=手动选择（配合 switch_node 指定具体节点），fastest_hk/jp/tw/sg/us=内核自动选该地区延迟最低节点。纯本地语义变更（快照重建，不拉订阅），但会热重启内核，连接秒级中断",
+            "description": "节点选择策略：manual=手动选择（配合 switch_node 指定具体节点），fastest_hk/jp/tw/sg/us=内核自动选该地区延迟最低节点。纯本地语义变更（快照重建，不拉订阅）；Unix 原进程热重载，Windows 重启内核，已有连接可能重置",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -166,7 +166,7 @@ fn tools_catalog() -> JsonValue {
         },
         {
             "name": "set_route_mode",
-            "description": "切换路由模式：rule=规则分流（国内直连/国外代理），global=全局代理。写入易变层配置，OpenWrt/Linux 系统重启后回到 config.yaml 的启动默认值。注意：会热重启内核，所有连接（可能包括你自己的）秒级中断，操作前请先向用户确认",
+            "description": "切换路由模式：rule=规则分流（国内直连/国外代理），global=全局代理。写入易变层配置，OpenWrt/Linux 系统重启后回到 config.yaml 的启动默认值。Unix 原进程热重载，Windows 重启内核；已有连接（可能包括你自己的）可能重置，操作前请先向用户确认",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -177,7 +177,7 @@ fn tools_catalog() -> JsonValue {
         },
         {
             "name": "refresh_subscriptions",
-            "description": "真拉取全部订阅刷新节点池。有变化才热重启内核（连接秒级中断，可能包括你自己的）；全部订阅失败时保留当前运行配置并告警",
+            "description": "真拉取全部订阅刷新节点池。生成结果有变化才更新运行配置（Unix 原进程热重载，Windows 重启内核，已有连接可能重置）；全部订阅失败时保留当前运行配置并告警",
             "inputSchema": { "type": "object", "properties": {} },
         },
         {
@@ -278,9 +278,14 @@ fn flat_node_pool(proxies: &JsonValue) -> Vec<String> {
 
 // ── 工具实现 ─────────────────────────────────────────────────────────────
 
+async fn runtime_is_ready(state: &Arc<AppState>) -> bool {
+    state.runtime_ready.load(Ordering::Relaxed) && is_sing_box_running(state).await
+}
+
 async fn tool_get_status(state: &Arc<AppState>) -> Result<JsonValue, String> {
     let kernel = kernel_status(state).await;
     let (running, uptime_secs) = (kernel.running, kernel.uptime_secs);
+    let ready = running && state.runtime_ready.load(Ordering::Relaxed);
 
     let config = state.config.read().await.clone();
     let route_mode = config.route_mode;
@@ -292,7 +297,7 @@ async fn tool_get_status(state: &Arc<AppState>) -> Result<JsonValue, String> {
     // 节点数按平铺节点池计（不随 fastest_* 地区过滤收缩）
     let mut current_node = JsonValue::Null;
     let mut node_count = config.nodes.len();
-    if running {
+    if ready {
         if let Ok(proxies) = fetch_proxies(state).await {
             let pool = flat_node_pool(&proxies);
             if !pool.is_empty() {
@@ -306,6 +311,8 @@ async fn tool_get_status(state: &Arc<AppState>) -> Result<JsonValue, String> {
 
     Ok(json!({
         "running": running,
+        "ready": ready,
+        "phase": state.runtime_phase(),
         "initializing": state.initializing.load(Ordering::Relaxed),
         "route_mode": route_mode,
         "node_select": config.node_select,
@@ -334,7 +341,8 @@ async fn tool_list_nodes(state: &Arc<AppState>) -> Result<JsonValue, String> {
     }
 
     let running = is_sing_box_running(state).await;
-    if running {
+    let ready = running && state.runtime_ready.load(Ordering::Relaxed);
+    if ready {
         if let Ok(proxies) = fetch_proxies(state).await {
             // 平铺节点池：不随 fastest_* 地区过滤收缩（地区外节点仍是合法 outbound）
             let pool = flat_node_pool(&proxies);
@@ -356,12 +364,12 @@ async fn tool_list_nodes(state: &Arc<AppState>) -> Result<JsonValue, String> {
                         })
                     })
                     .collect();
-                return Ok(json!({ "running": true, "nodes": nodes }));
+                return Ok(json!({ "running": true, "ready": true, "nodes": nodes }));
             }
         }
     }
 
-    // 未运行（或 Clash 不可达）：只能给出手动节点
+    // 未就绪（或 Clash 不可达）：只能给出手动节点
     let nodes: Vec<JsonValue> = manual_types
         .iter()
         .map(|(tag, node_type)| {
@@ -374,9 +382,10 @@ async fn tool_list_nodes(state: &Arc<AppState>) -> Result<JsonValue, String> {
         })
         .collect();
     Ok(json!({
-        "running": false,
+        "running": running,
+        "ready": ready,
         "nodes": nodes,
-        "note": "服务未运行，仅列出手动节点；订阅节点需运行后可见",
+        "note": "代理数据面尚未就绪，仅列出手动节点；订阅节点需就绪后可见",
     }))
 }
 
@@ -392,8 +401,8 @@ async fn tool_switch_node(state: &Arc<AppState>, args: &JsonValue) -> Result<Jso
     if !state.config.read().await.node_select.is_manual() {
         return Err("当前是地区最快模式，由内核自动选节点；先切回手动选择再指定节点".to_string());
     }
-    if !is_sing_box_running(state).await {
-        return Err("服务未运行，无法切换节点".to_string());
+    if !runtime_is_ready(state).await {
+        return Err("服务未运行或代理数据面尚未就绪，无法切换节点".to_string());
     }
 
     let proxies = fetch_proxies(state)
@@ -435,8 +444,8 @@ async fn tool_switch_node(state: &Arc<AppState>, args: &JsonValue) -> Result<Jso
 }
 
 async fn tool_test_delay(state: &Arc<AppState>, args: &JsonValue) -> Result<JsonValue, String> {
-    if !is_sing_box_running(state).await {
-        return Err("服务未运行，无法测速".to_string());
+    if !runtime_is_ready(state).await {
+        return Err("代理数据面尚未就绪，无法测速".to_string());
     }
 
     if let Some(name) = args.get("name").and_then(JsonValue::as_str) {
@@ -516,7 +525,6 @@ async fn tool_set_route_mode(state: &Arc<AppState>, args: &JsonValue) -> Result<
 
     // 与面板 set_route_mode 同一条链路：配置事务 + 运行时热应用（易变层落盘）
     let _config_update = state.config_update.lock().await;
-    let was_running = is_sing_box_running(state).await;
     let old_config = state.config.read().await.clone();
 
     if old_config.route_mode == requested {
@@ -526,14 +534,19 @@ async fn tool_set_route_mode(state: &Arc<AppState>, args: &JsonValue) -> Result<
     let mut new_config = old_config.clone();
     new_config.route_mode = requested;
 
-    apply_config_change(state, &old_config, &new_config)
+    let effect = apply_config_change(state, &old_config, &new_config)
         .await
         .map_err(|e| format!("切换路由模式失败: {e}"))?;
+    let runtime_update = effect.runtime_update();
+    let runtime_updated = runtime_update.updated();
 
     Ok(json!({
         "route_mode": mode,
         "changed": true,
-        "restarted": was_running,
+        "runtime_updated": runtime_updated,
+        "started": runtime_update == RuntimeUpdate::Started,
+        "reloaded": runtime_update == RuntimeUpdate::Reloaded,
+        "restarted": runtime_update == RuntimeUpdate::Restarted,
         "note": "已写入易变层配置；OpenWrt/Linux 系统重启后回到 config.yaml 的启动默认值（未设置则规则分流）",
     }))
 }
@@ -566,9 +579,11 @@ async fn tool_set_node_select(
     let mut new_config = old_config.clone();
     new_config.node_select = node_select;
 
-    apply_config_change(state, &old_config, &new_config)
+    let effect = apply_config_change(state, &old_config, &new_config)
         .await
         .map_err(|e| format!("切换节点选择失败: {e}"))?;
+    let runtime_update = effect.runtime_update();
+    let runtime_updated = runtime_update.updated();
 
     let effective = state.config.read().await.node_select;
     let note = if !node_select.is_manual() && effective.is_manual() {
@@ -580,11 +595,15 @@ async fn tool_set_node_select(
         "node_select": effective.as_str(),
         "requested": raw,
         "changed": true,
+        "runtime_updated": runtime_updated,
+        "started": runtime_update == RuntimeUpdate::Started,
+        "reloaded": runtime_update == RuntimeUpdate::Reloaded,
+        "restarted": runtime_update == RuntimeUpdate::Restarted,
         "note": note,
     }))
 }
 
-/// 与面板「刷新订阅」同一条链路：真拉取 → 生成 → 校验 → 有变化才热重启；
+/// 与面板「刷新订阅」同一条链路：真拉取 → 生成 → 校验 → 有变化才更新运行配置；
 /// 全部订阅失败时保留当前运行配置。
 async fn tool_refresh_subscriptions(state: &Arc<AppState>) -> Result<JsonValue, String> {
     if state.initializing.load(Ordering::Relaxed) {
@@ -597,14 +616,19 @@ async fn tool_refresh_subscriptions(state: &Arc<AppState>) -> Result<JsonValue, 
     let _config_update = state.config_update.lock().await;
     let config = state.config.read().await.clone();
 
-    let restarted = crate::services::config::regenerate_preserving_service_state(&config, state)
-        .await
-        .map_err(|e| format!("刷新订阅失败: {e}"))?;
+    let runtime_update =
+        crate::services::config::regenerate_preserving_service_state(&config, state)
+            .await
+            .map_err(|e| format!("刷新订阅失败: {e}"))?;
+    let runtime_updated = runtime_update.updated();
 
     let warning = state.config_warning.lock().await.clone();
     Ok(json!({
         "refreshed": true,
-        "restarted": restarted,
+        "runtime_updated": runtime_updated,
+        "started": runtime_update == RuntimeUpdate::Started,
+        "reloaded": runtime_update == RuntimeUpdate::Reloaded,
+        "restarted": runtime_update == RuntimeUpdate::Restarted,
         "warning": warning.map(JsonValue::from).unwrap_or(JsonValue::Null),
     }))
 }
@@ -629,8 +653,8 @@ async fn tool_list_rules(state: &Arc<AppState>) -> Result<JsonValue, String> {
 }
 
 async fn tool_list_connections(state: &Arc<AppState>) -> Result<JsonValue, String> {
-    if !is_sing_box_running(state).await {
-        return Err("服务未运行，无活动连接".to_string());
+    if !runtime_is_ready(state).await {
+        return Err("代理数据面尚未就绪，无可用活动连接".to_string());
     }
 
     let payload = clash_get(state, "/connections")

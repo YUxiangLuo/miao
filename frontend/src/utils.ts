@@ -4,8 +4,6 @@ import type { NodeType } from './types/api'
 
 export const API_HEADERS = { 'Content-Type': 'application/json' } as const
 export const POLL_INTERVAL = 3000
-// 启动初始化期（内核正在拉起的几秒内）用更快轮询，让就绪状态近乎即时可见
-export const POLL_INTERVAL_STARTUP = 500
 // /api/status 连续失败多少次判定为后端不可达：触发断线提示，并阻止把宕机误判成引导页
 export const STATUS_FAILURE_THRESHOLD = 3
 

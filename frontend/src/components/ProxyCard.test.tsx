@@ -9,6 +9,8 @@ import type { ClashProxy } from '../types/clash'
 function statusMock(node_select: StatusData['node_select']): StatusData {
   return {
     running: true,
+    ready: true,
+    phase: 'ready',
     initializing: false,
     node_select,
     route_mode: 'rule',

@@ -321,7 +321,7 @@ export function useAppActions(data: AppData) {
       return
     }
 
-    if (!status.running) {
+    if (!status.ready) {
       showToast('sing-box 未运行，暂不检测更新', 'info')
       return
     }
@@ -367,7 +367,7 @@ export function useAppActions(data: AppData) {
         setUpgrading(false)
       }
     })
-  }, [status.running, versionInfo, fetchVersion, showToast, openConfirm, setUpgrading])
+  }, [status.ready, versionInfo, fetchVersion, showToast, openConfirm, setUpgrading])
 
   const handleOpenDeleteNodeConfirm = useCallback((tag: string) => {
     openConfirm('删除节点', `确定要删除节点 "${tag}" 吗？`, () => handleDeleteNode(tag))

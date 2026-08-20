@@ -7,7 +7,7 @@ export type PollTask = () => unknown
 /**
  * 统一轮询管理 hook
  * 合并多个定时任务到单个定时器，减少资源消耗。
- * interval 变化时会重建定时器并立即补跑一轮（启动期加速轮询靠它生效）。
+ * interval 变化时会重建定时器并立即补跑一轮。
  */
 export function usePolling(tasks: PollTask[], enabled = true, interval = POLL_INTERVAL) {
   const tasksRef = useRef(tasks)

@@ -43,7 +43,10 @@ export function useWebSocket<T = unknown>(url: string, onMessage: (data: T) => v
       wsRef.current.onerror = null
       wsRef.current.onmessage = null
       wsRef.current.onopen = null
-      if (wsRef.current.readyState === WebSocket.OPEN) {
+      if (
+        wsRef.current.readyState === WebSocket.CONNECTING
+        || wsRef.current.readyState === WebSocket.OPEN
+      ) {
         wsRef.current.close(1000, 'Normal closure')
       }
       wsRef.current = null
@@ -74,11 +77,12 @@ export function useWebSocket<T = unknown>(url: string, onMessage: (data: T) => v
         }
       }
 
-      ws.onclose = (event) => {
+      ws.onclose = () => {
         wsRef.current = null
 
-        // 正常关闭（代码 1000）或禁用状态时不重连
-        if (event.code === 1000 || !enabledRef.current) {
+        // cleanup 会先移除 onclose，因此能走到这里的关闭都来自远端。
+        // sing-box 重载可能正常关闭(code 1000)上游；只要功能仍启用就应重连。
+        if (!enabledRef.current) {
           return
         }
 

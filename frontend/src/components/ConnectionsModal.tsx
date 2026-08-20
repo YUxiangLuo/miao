@@ -71,8 +71,8 @@ export function ConnectionsModal({
           </div>
         </header>
 
-        {!status.running ? (
-          <div className="connections-empty">服务未运行，暂无链接统计。</div>
+        {!status.ready ? (
+          <div className="connections-empty">代理数据面尚未就绪，暂无链接统计。</div>
         ) : (
           <div className="connections-body">
             <ConnectionStats connections={connections} />

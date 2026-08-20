@@ -13,22 +13,30 @@ interface SubRowProps {
 }
 
 const SubRow = memo(function SubRow({ sub, onDelete, disabled }: SubRowProps) {
+  const state = sub.state || (sub.success ? 'ready' : 'failed')
+  const pending = state === 'pending' || state === 'refreshing'
   return (
     <div className="list-row">
-      <div className={classNames('status-icon-badge', sub.success ? 'success' : 'error')}>
-        {sub.success 
-          ? <Check size={ICON.xs} /> 
-          : <CircleX size={ICON.xs} />}
+      <div className={classNames('status-icon-badge', pending ? 'info' : sub.success ? 'success' : 'error')}>
+        {pending
+          ? <RefreshCw size={ICON.xs} className={state === 'refreshing' ? 'spin' : undefined} />
+          : sub.success
+            ? <Check size={ICON.xs} />
+            : <CircleX size={ICON.xs} />}
       </div>
       <div className="list-row-content">
         <div className="list-row-title">{maskSubscription(sub.url)}</div>
         <div
-          className={classNames('list-row-meta', !sub.success && 'error')}
-          title={sub.success ? undefined : sub.error}
+          className={classNames('list-row-meta', state === 'failed' && 'error')}
+          title={state === 'failed' ? sub.error : undefined}
         >
-          {sub.success
-            ? `${sub.node_count} 个节点`
-            : sub.error || '获取失败'}
+          {state === 'pending'
+            ? '等待首次获取'
+            : state === 'refreshing'
+              ? sub.success ? `正在刷新，上次获取 ${sub.node_count} 个节点` : '正在获取订阅'
+              : sub.success
+                ? `${sub.node_count} 个节点`
+                : sub.error || '获取失败'}
         </div>
       </div>
       <button

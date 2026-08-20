@@ -1,6 +1,6 @@
 import { act, renderHook } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { POLL_INTERVAL, POLL_INTERVAL_STARTUP } from '../utils'
+import { POLL_INTERVAL } from '../utils'
 import { usePolling } from './usePolling'
 
 describe('usePolling', () => {
@@ -54,8 +54,9 @@ describe('usePolling', () => {
     expect(healthyTask).toHaveBeenCalledTimes(2)
   })
 
-  it('runs immediately and polls faster when the interval shrinks (startup acceleration)', async () => {
+  it('runs immediately and adopts a changed interval', async () => {
     const task = vi.fn(() => Promise.resolve())
+    const customInterval = 1_000
     const { rerender } = renderHook(
       ({ interval }) => usePolling([task], true, interval),
       { initialProps: { interval: POLL_INTERVAL } },
@@ -63,12 +64,11 @@ describe('usePolling', () => {
     await act(async () => Promise.resolve())
     expect(task).toHaveBeenCalledTimes(1)
 
-    // 间隔切到启动档：立即补跑一轮，并按新间隔轮询
-    rerender({ interval: POLL_INTERVAL_STARTUP })
+    rerender({ interval: customInterval })
     await act(async () => Promise.resolve())
     expect(task).toHaveBeenCalledTimes(2)
 
-    act(() => vi.advanceTimersByTime(POLL_INTERVAL_STARTUP))
+    act(() => vi.advanceTimersByTime(customInterval))
     await act(async () => Promise.resolve())
     expect(task).toHaveBeenCalledTimes(3)
   })

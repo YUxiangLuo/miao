@@ -1,7 +1,7 @@
 use axum::{extract::State, http::StatusCode, response::Json};
 use std::sync::{atomic::Ordering, Arc};
 
-use crate::models::{ApiResponse, SubRequest, SubStatus};
+use crate::models::{ApiResponse, SubRequest, SubStatus, SubscriptionState};
 use crate::responses::{status_error, success, success_no_data, HandlerResult};
 use crate::services::config::{apply_config_change, regenerate_preserving_service_state};
 use crate::state::AppState;
@@ -17,8 +17,9 @@ pub async fn get_subs(State(state): State<Arc<AppState>>) -> Json<ApiResponse<Ve
         .map(|url| {
             status_map.get(url).cloned().unwrap_or(SubStatus {
                 url: url.clone(),
-                success: true,
+                success: false,
                 node_count: 0,
+                state: SubscriptionState::Pending,
                 error: None,
             })
         })
@@ -106,10 +107,10 @@ pub async fn refresh_subs(State(state): State<Arc<AppState>>) -> HandlerResult {
     drop(config);
 
     match regenerate_preserving_service_state(&config_clone, &state).await {
-        Ok(true) => Ok(success_no_data(
-            "Subscriptions refreshed and sing-box restarted",
+        Ok(update) if update.updated() => Ok(success_no_data(
+            "Subscriptions refreshed and runtime updated",
         )),
-        Ok(false) => Ok(success_no_data("Subscriptions refreshed")),
+        Ok(_) => Ok(success_no_data("Subscriptions refreshed")),
         Err(e) => Err(status_error(StatusCode::INTERNAL_SERVER_ERROR, e)),
     }
 }
@@ -119,7 +120,11 @@ mod tests {
     use axum::{extract::State, response::Json};
 
     use super::get_subs;
-    use crate::{error::AppError, models::Config, test_support::app_state};
+    use crate::{
+        error::AppError,
+        models::{Config, SubscriptionState},
+        test_support::app_state,
+    };
 
     #[test]
     fn app_error_context_message_stays_user_visible() {
@@ -153,7 +158,8 @@ mod tests {
         let subs = response.data.unwrap();
         assert_eq!(subs.len(), 1);
         assert_eq!(subs[0].url, "https://example.com/sub");
-        assert!(subs[0].success);
+        assert!(!subs[0].success);
+        assert_eq!(subs[0].state, SubscriptionState::Pending);
         assert_eq!(subs[0].node_count, 0);
         assert!(subs[0].error.is_none());
     }

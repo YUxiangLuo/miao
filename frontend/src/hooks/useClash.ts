@@ -17,7 +17,7 @@ export function isClashProxyGroup(type: string | undefined): boolean {
   return type === 'Selector' || type === 'URLTest'
 }
 
-export function useProxies(status: Pick<StatusData, 'running'>) {
+export function useProxies(status: Pick<StatusData, 'ready'>) {
   const [proxies, setProxies] = useState<ClashProxies>({})
   const clashApiBase = useMemo(() => '/api/clash', [])
 
@@ -43,13 +43,13 @@ export function useProxies(status: Pick<StatusData, 'running'>) {
   const primaryGroup = primaryGroupName ? selectorGroups[primaryGroupName] : null
 
   useEffect(() => {
-    if (!status.running) setProxies({})
-  }, [status.running])
+    if (!status.ready) setProxies({})
+  }, [status.ready])
 
   return { proxies, fetchProxies, selectorGroups, primaryGroupName, primaryGroup }
 }
 
-export function useTraffic(status: Pick<StatusData, 'running'>) {
+export function useTraffic(status: Pick<StatusData, 'ready'>) {
   const [traffic, setTraffic] = useState<Partial<ClashTraffic>>({})
 
   const trafficUrl = useMemo(() => {
@@ -63,25 +63,25 @@ export function useTraffic(status: Pick<StatusData, 'running'>) {
     }
   }, [])
 
-  const { close: closeSockets } = useWebSocket<ClashTraffic>(trafficUrl, handleMessage, status.running)
+  const { close: closeSockets } = useWebSocket<ClashTraffic>(trafficUrl, handleMessage, Boolean(status.ready))
 
   useEffect(() => {
-    if (!status.running) setTraffic({})
-  }, [status.running])
+    if (!status.ready) setTraffic({})
+  }, [status.ready])
 
   return { traffic, closeSockets }
 }
 
 const EMPTY_CONNECTIONS: ConnectionsInfo = { uploadTotal: 0, downloadTotal: 0, connections: [] }
 
-export function useConnections(status: Pick<StatusData, 'running'>, clashApiBase: string) {
+export function useConnections(status: Pick<StatusData, 'ready'>, clashApiBase: string) {
   const [connectionsInfo, setConnectionsInfo] = useState<ConnectionsInfo>(EMPTY_CONNECTIONS)
   const [connectionsLoading, setConnectionsLoading] = useState(false)
   const [connectionsError, setConnectionsError] = useState('')
   const lastConnectionsRef = useRef<{ at: number; connections: Map<string, ClashConnection> }>({ at: 0, connections: new Map() })
 
   const fetchConnections = useCallback(async (): Promise<ClashConnectionsPayload | null> => {
-    if (!status.running) {
+    if (!status.ready) {
       setConnectionsInfo(EMPTY_CONNECTIONS)
       setConnectionsError('')
       return null
@@ -126,16 +126,16 @@ export function useConnections(status: Pick<StatusData, 'running'>, clashApiBase
     } finally {
       setConnectionsLoading(false)
     }
-  }, [clashApiBase, status.running])
+  }, [clashApiBase, status.ready])
 
   useEffect(() => {
-    if (!status.running) {
+    if (!status.ready) {
       setConnectionsInfo(EMPTY_CONNECTIONS)
       setConnectionsError('')
       setConnectionsLoading(false)
       lastConnectionsRef.current = { at: 0, connections: new Map() }
     }
-  }, [status.running])
+  }, [status.ready])
 
   return {
     connectionsInfo,

@@ -8,7 +8,7 @@ use std::{
 use tracing::{error, info, warn};
 
 use crate::error::{AppError, AppResult};
-use crate::models::{Config, NodeSelect};
+use crate::models::{Config, NodeSelect, RuntimePhase};
 use crate::services::{
     proxy::spawn_restore_last_proxy,
     singbox::{
@@ -43,14 +43,55 @@ pub enum RefreshPolicy {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RefreshEffect {
-    Restarted,
+    Activated,
     SkippedUnchanged,
     KeptRunningOnTotalFailure,
     KeptRunningOnValidationFailure,
 }
 
+/// How an accepted runtime update changed the managed process. Keeping this
+/// separate from "bytes changed" lets API/MCP callers report the real impact
+/// instead of inferring it from the operating system.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum RuntimeUpdate {
+    #[default]
+    None,
+    Started,
+    Reloaded,
+    Restarted,
+}
+
+impl RuntimeUpdate {
+    pub fn updated(self) -> bool {
+        self != Self::None
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ConfigApplyEffect {
+    /// Different runtime bytes were activated by starting, reloading or
+    /// replacing the managed process.
+    Activated(RuntimeUpdate),
+    /// Runtime bytes were prepared while the service was intentionally stopped.
+    Regenerated,
+    /// The persisted input changed, but generated runtime bytes were identical.
+    Unchanged,
+    /// No usable source remains, so runtime artifacts were cleared.
+    Cleared,
+}
+
+impl ConfigApplyEffect {
+    pub(crate) fn runtime_update(self) -> RuntimeUpdate {
+        match self {
+            Self::Activated(update) => update,
+            Self::Regenerated | Self::Unchanged | Self::Cleared => RuntimeUpdate::None,
+        }
+    }
+}
+
 pub struct RefreshOutcome {
     pub effect: RefreshEffect,
+    pub runtime_update: RuntimeUpdate,
     pub node_select: NodeSelect,
     pub generated: Option<GenConfigOutcome>,
 }
@@ -159,6 +200,7 @@ async fn read_file_snapshot(path: &Path) -> AppResult<Option<Vec<u8>>> {
     }
 }
 
+#[cfg(not(unix))]
 async fn restore_after_activation_failure(
     state: &Arc<AppState>,
     old_runtime: Option<&[u8]>,
@@ -180,36 +222,112 @@ async fn restore_after_activation_failure(
 async fn activate_running_config(
     state: &Arc<AppState>,
     outcome: &GenConfigOutcome,
-) -> AppResult<()> {
+) -> AppResult<RuntimeUpdate> {
     let old_runtime = snapshot_runtime_config(state).await;
     let old_bindings = read_file_snapshot(&state.runtime_paths.node_bindings).await?;
-    stop_sing_internal(state).await;
+    let was_running = is_sing_box_running(state).await;
 
-    let activate_result = async {
-        write_file_atomic(&state.runtime_paths.active_config, &outcome.bytes).await?;
-        start_sing_internal(state)
-            .await
-            .map_err(|e| AppError::context("Failed to restart sing-box", e))?;
-        save_node_bindings(state, &outcome.node_bindings).await
-    }
-    .await;
+    #[cfg(unix)]
+    {
+        use crate::services::singbox::reload_sing_internal;
 
-    if let Err(activate_err) = activate_result {
-        return match restore_after_activation_failure(
-            state,
-            old_runtime.as_deref(),
-            old_bindings.as_deref(),
-        )
-        .await
-        {
-            Ok(()) => Err(activate_err),
-            Err(rollback_err) => Err(AppError::message(format!(
-                "{}. Runtime rollback failed: {}",
-                activate_err, rollback_err
-            ))),
+        // Commit both files before asking sing-box to reload. If either write
+        // fails, the running process is still untouched and rollback is purely
+        // local. Once SIGHUP is sent, any failure restores the old files and
+        // reactivates them before returning.
+        let commit = async {
+            write_file_atomic(&state.runtime_paths.active_config, &outcome.bytes).await?;
+            save_node_bindings(state, &outcome.node_bindings).await
+        }
+        .await;
+        if let Err(commit_err) = commit {
+            let runtime_rollback =
+                restore_file_snapshot(&state.runtime_paths.active_config, old_runtime.as_deref())
+                    .await;
+            let bindings_rollback =
+                restore_file_snapshot(&state.runtime_paths.node_bindings, old_bindings.as_deref())
+                    .await;
+            if let Err(rollback_err) = runtime_rollback.and(bindings_rollback) {
+                return Err(AppError::message(format!(
+                    "{}. Runtime file rollback failed: {}",
+                    commit_err, rollback_err
+                )));
+            }
+            return Err(commit_err);
+        }
+
+        let (activation, runtime_update) = if was_running {
+            (reload_sing_internal(state).await, RuntimeUpdate::Reloaded)
+        } else {
+            (start_sing_internal(state).await, RuntimeUpdate::Started)
         };
+        if let Err(reload_err) = activation {
+            let restore_files = async {
+                restore_file_snapshot(&state.runtime_paths.active_config, old_runtime.as_deref())
+                    .await?;
+                restore_file_snapshot(&state.runtime_paths.node_bindings, old_bindings.as_deref())
+                    .await
+            }
+            .await;
+            if let Err(restore_err) = restore_files {
+                return Err(AppError::message(format!(
+                    "{}. Runtime file rollback failed: {}",
+                    reload_err, restore_err
+                )));
+            }
+
+            // A failed reload may still be inside sing-box's close/recreate
+            // loop. Do not queue another SIGHUP into that ambiguous state;
+            // failure recovery may interrupt once, then starts the known-good
+            // previous bytes deterministically.
+            stop_sing_internal(state).await;
+            let reactivate = start_sing_internal(state).await;
+            return match reactivate {
+                Ok(()) => Err(reload_err),
+                Err(rollback_err) => Err(AppError::message(format!(
+                    "{}. Runtime rollback failed: {}",
+                    reload_err, rollback_err
+                ))),
+            };
+        }
+
+        Ok(runtime_update)
     }
-    Ok(())
+
+    #[cfg(not(unix))]
+    {
+        stop_sing_internal(state).await;
+
+        let activate_result = async {
+            write_file_atomic(&state.runtime_paths.active_config, &outcome.bytes).await?;
+            start_sing_internal(state)
+                .await
+                .map_err(|e| AppError::context("Failed to restart sing-box", e))?;
+            save_node_bindings(state, &outcome.node_bindings).await
+        }
+        .await;
+
+        if let Err(activate_err) = activate_result {
+            return match restore_after_activation_failure(
+                state,
+                old_runtime.as_deref(),
+                old_bindings.as_deref(),
+            )
+            .await
+            {
+                Ok(()) => Err(activate_err),
+                Err(rollback_err) => Err(AppError::message(format!(
+                    "{}. Runtime rollback failed: {}",
+                    activate_err, rollback_err
+                ))),
+            };
+        }
+        Ok(if was_running {
+            RuntimeUpdate::Restarted
+        } else {
+            RuntimeUpdate::Started
+        })
+    }
 }
 
 /// 订阅刷新统一管线：获取节点集（source 决定真拉取还是快照重建）→ 生成配置 →（策略门控）→ 校验 → 重启内核。
@@ -229,7 +347,7 @@ pub async fn refresh_subscriptions(
         SubFetchRetry::None
     };
 
-    let cache_bytes = read_config_cache(state).await;
+    let active_bytes = snapshot_runtime_config(state).await;
     let generated = match source {
         SubSource::Fetch => gen_config(config, state, retry).await,
         SubSource::SnapshotOrFetch => gen_config_from_snapshot(config, state).await,
@@ -241,20 +359,30 @@ pub async fn refresh_subscriptions(
     if startup && !generated.has_sub_nodes && !config.subs.is_empty() {
         return Ok(RefreshOutcome {
             effect: RefreshEffect::KeptRunningOnTotalFailure,
+            runtime_update: RuntimeUpdate::None,
             node_select: generated.node_select,
             generated: None,
         });
     }
 
-    if startup && !config_changed_after_refresh(cache_bytes.as_deref(), Some(&generated.bytes)) {
-        info!("Subscriptions unchanged after refresh; sing-box keeps running");
-        // 内容无变化等价于缓存那份（已通过校验）：顺带补齐快照
+    let runtime_ready =
+        state.runtime_ready.load(Ordering::Relaxed) && is_sing_box_running(state).await;
+    if runtime_ready
+        && !config_changed_after_refresh(active_bytes.as_deref(), Some(&generated.bytes))
+    {
+        info!("Generated runtime config is unchanged; sing-box keeps running");
         save_node_bindings(state, &generated.node_bindings).await?;
-        record_fresh_snapshot(config, state, &generated).await;
-        persist_effective_node_select(state, generated.node_select).await?;
-        *state.skipped_rules.lock().await = generated.skipped_rules.clone();
+        // ManualInApply belongs to the outer configuration transaction. Do not
+        // publish diagnostics or effective preferences before that transaction
+        // has durably committed.
+        if !matches!(policy, RefreshPolicy::ManualInApply) {
+            record_fresh_snapshot(config, state, &generated).await;
+            persist_effective_node_select(state, generated.node_select).await?;
+            *state.skipped_rules.lock().await = generated.skipped_rules.clone();
+        }
         return Ok(RefreshOutcome {
             effect: RefreshEffect::SkippedUnchanged,
+            runtime_update: RuntimeUpdate::None,
             node_select: generated.node_select,
             generated: Some(generated),
         });
@@ -264,6 +392,7 @@ pub async fn refresh_subscriptions(
         if startup {
             return Ok(RefreshOutcome {
                 effect: RefreshEffect::KeptRunningOnValidationFailure,
+                runtime_update: RuntimeUpdate::None,
                 node_select: generated.node_select,
                 generated: None,
             });
@@ -273,8 +402,11 @@ pub async fn refresh_subscriptions(
             e,
         ));
     }
-    activate_running_config(state, &generated).await?;
-    info!("sing-box restarted successfully");
+    let runtime_update = activate_running_config(state, &generated).await?;
+    info!(
+        ?runtime_update,
+        "sing-box runtime config activated successfully"
+    );
     // ManualInApply 的 node_select 由外层 apply_config_change 事务一并提交
     if !matches!(policy, RefreshPolicy::ManualInApply) {
         record_fresh_snapshot(config, state, &generated).await;
@@ -285,7 +417,8 @@ pub async fn refresh_subscriptions(
     }
 
     Ok(RefreshOutcome {
-        effect: RefreshEffect::Restarted,
+        effect: RefreshEffect::Activated,
+        runtime_update,
         node_select: generated.node_select,
         generated: Some(generated),
     })
@@ -296,34 +429,53 @@ pub(super) async fn regenerate_and_restart_runtime(
     state: &Arc<AppState>,
     policy: RefreshPolicy,
     source: SubSource,
-) -> AppResult<GenConfigOutcome> {
+) -> AppResult<RefreshOutcome> {
     let outcome = refresh_subscriptions(config, state, policy, source).await?;
-    outcome
-        .generated
-        .ok_or_else(|| AppError::message("Runtime refresh kept the previous configuration"))
+    if outcome.generated.is_none() {
+        return Err(AppError::message(
+            "Runtime refresh kept the previous configuration",
+        ));
+    }
+    Ok(outcome)
 }
 
 pub async fn regenerate_preserving_service_state(
     config: &Config,
     state: &Arc<AppState>,
-) -> AppResult<bool> {
+) -> AppResult<RuntimeUpdate> {
+    // This is an explicit foreground refresh. Any startup fetch that began
+    // earlier with the same subscription URLs must not publish after it.
+    state.sub_refresh_generation.fetch_add(1, Ordering::Relaxed);
     let should_run = state.service_should_run.load(Ordering::Relaxed);
+    state.set_runtime_phase(RuntimePhase::ApplyingConfig);
 
     if config_apply_mode(config, should_run) == ConfigApplyMode::Clear {
         stop_sing_internal(state).await;
         clear_runtime_config(state).await;
-        return Ok(false);
+        return Ok(RuntimeUpdate::None);
     }
 
     // 回滚 tier 1 材料：刷新前正在运行/最近可用的运行时配置字节
     let snapshot = snapshot_runtime_config(state).await;
 
-    if should_run {
+    let runtime_update = if should_run {
         match regenerate_and_restart_runtime(config, state, RefreshPolicy::Manual, SubSource::Fetch)
             .await
         {
-            Ok(outcome) => {
-                finalize_started_config(config, state, outcome.has_sub_nodes).await;
+            Ok(refresh) => {
+                let outcome = refresh
+                    .generated
+                    .as_ref()
+                    .expect("checked generated outcome");
+                if refresh.effect == RefreshEffect::Activated {
+                    finalize_started_config(config, state, outcome.has_sub_nodes).await;
+                    refresh.runtime_update
+                } else {
+                    update_config_warning(config, state, outcome.has_sub_nodes).await;
+                    state.runtime_ready.store(true, Ordering::Relaxed);
+                    state.set_runtime_phase(RuntimePhase::Ready);
+                    RuntimeUpdate::None
+                }
             }
             Err(err) => {
                 // 校验失败时磁盘已是未通过校验的新配置而内核还在跑旧配置；
@@ -347,6 +499,7 @@ pub async fn regenerate_preserving_service_state(
                 record_fresh_snapshot(config, state, &outcome).await;
                 *state.skipped_rules.lock().await = outcome.skipped_rules.clone();
                 update_config_warning(config, state, outcome.has_sub_nodes).await;
+                state.set_runtime_phase(RuntimePhase::Stopped);
             }
             Err(err) => {
                 error!(error = %err, "Failed to regenerate config, restoring previous runtime config");
@@ -354,9 +507,10 @@ pub async fn regenerate_preserving_service_state(
                 return Err(err);
             }
         }
-    }
+        RuntimeUpdate::None
+    };
 
-    Ok(should_run)
+    Ok(runtime_update)
 }
 
 pub(super) async fn finalize_started_config(
@@ -525,12 +679,19 @@ async fn restore_after_persist_failure(
     should_run: bool,
     runtime_snapshot: Option<&[u8]>,
     bindings_snapshot: Option<&[u8]>,
+    force_restart: bool,
 ) -> AppResult<()> {
     // A successful apply has already replaced the running process when the
     // service is desired. Seeing a live child cannot distinguish old from new,
     // so this rollback must force a restart from the previous bytes.
-    let runtime_restore =
-        restore_previous_config(old_config, state, should_run, runtime_snapshot, true).await;
+    let runtime_restore = restore_previous_config(
+        old_config,
+        state,
+        should_run,
+        runtime_snapshot,
+        force_restart,
+    )
+    .await;
     // Bindings commit together with config.json. Restore them even if runtime
     // recovery failed so the next successful transaction starts from old state.
     let bindings_restore =
@@ -550,17 +711,22 @@ pub async fn apply_config_change(
     state: &Arc<AppState>,
     old_config: &Config,
     new_config: &Config,
-) -> AppResult<()> {
+) -> AppResult<ConfigApplyEffect> {
     let should_run = state.service_should_run.load(Ordering::Relaxed);
     let apply_mode = config_apply_mode(new_config, should_run);
+    let previous_phase = state.runtime_phase();
 
     if apply_mode == ConfigApplyMode::Clear {
-        save_config_layered(state, new_config).await?;
+        state.set_runtime_phase(RuntimePhase::ApplyingConfig);
+        if let Err(err) = save_config_layered(state, new_config).await {
+            state.set_runtime_phase(previous_phase);
+            return Err(err);
+        }
         stop_sing_internal(state).await;
         clear_runtime_config(state).await;
         *state.config.write().await = new_config.clone();
         *state.skipped_rules.lock().await = Vec::new();
-        return Ok(());
+        return Ok(ConfigApplyEffect::Cleared);
     }
 
     // 回滚 tier 1 材料：变更前正在运行/最近可用的运行时配置字节（config.json）
@@ -570,20 +736,35 @@ pub async fn apply_config_change(
     let bindings_snapshot = read_file_snapshot(&state.runtime_paths.node_bindings).await?;
     // 订阅列表没变就是本地语义变更（节点选择/路由模式/规则/手动节点），走快照零网络重建
     let source = sub_source_for(old_config, new_config);
+    if matches!(&source, SubSource::Fetch) {
+        state.sub_refresh_generation.fetch_add(1, Ordering::Relaxed);
+    }
+    state.set_runtime_phase(RuntimePhase::ApplyingConfig);
 
-    let apply_result = match apply_mode {
+    let apply_result: AppResult<(GenConfigOutcome, RuntimeUpdate)> = match apply_mode {
         ConfigApplyMode::Restart => {
             regenerate_and_restart_runtime(new_config, state, RefreshPolicy::ManualInApply, source)
                 .await
+                .and_then(|refresh| {
+                    let runtime_update = refresh.runtime_update;
+                    refresh
+                        .generated
+                        .map(|outcome| (outcome, runtime_update))
+                        .ok_or_else(|| {
+                            AppError::message("Runtime refresh kept the previous configuration")
+                        })
+                })
         }
         ConfigApplyMode::RegenerateOnly => {
-            regenerate_without_restart_runtime(new_config, state, source).await
+            regenerate_without_restart_runtime(new_config, state, source)
+                .await
+                .map(|outcome| (outcome, RuntimeUpdate::None))
         }
         ConfigApplyMode::Clear => unreachable!("clear mode handled above"),
     };
 
     match apply_result {
-        Ok(outcome) => {
+        Ok((outcome, runtime_update)) => {
             let persisted_new_config = Config {
                 node_select: outcome.node_select,
                 ..new_config.clone()
@@ -594,11 +775,26 @@ pub async fn apply_config_change(
                     record_fresh_snapshot(new_config, state, &outcome).await;
                     *state.skipped_rules.lock().await = outcome.skipped_rules.clone();
                     if should_run {
-                        finalize_started_config(new_config, state, outcome.has_sub_nodes).await;
+                        if runtime_update.updated() {
+                            finalize_started_config(new_config, state, outcome.has_sub_nodes).await;
+                        } else {
+                            update_config_warning(new_config, state, outcome.has_sub_nodes).await;
+                            state.runtime_ready.store(true, Ordering::Relaxed);
+                            state.set_runtime_phase(RuntimePhase::Ready);
+                        }
                     } else {
                         update_config_warning(new_config, state, outcome.has_sub_nodes).await;
+                        state.set_runtime_phase(RuntimePhase::Stopped);
                     }
-                    Ok(())
+                    Ok(if should_run {
+                        if runtime_update.updated() {
+                            ConfigApplyEffect::Activated(runtime_update)
+                        } else {
+                            ConfigApplyEffect::Unchanged
+                        }
+                    } else {
+                        ConfigApplyEffect::Regenerated
+                    })
                 }
                 Err(save_err) => {
                     error!(error = %save_err, "Runtime config applied but persistent config write failed, attempting runtime rollback");
@@ -608,6 +804,7 @@ pub async fn apply_config_change(
                         should_run,
                         snapshot.as_deref(),
                         bindings_snapshot.as_deref(),
+                        runtime_update.updated(),
                     )
                     .await
                     {
@@ -649,7 +846,9 @@ pub async fn apply_config_change(
             } else {
                 // 本地没有任何可用材料（新装/清场后）：没有可回退的状态，维持落盘+停核
                 warn!(error = %apply_err, "Config change left no usable nodes; persisting it and stopping sing-box");
-                persist_config_without_usable_nodes(state, new_config.clone()).await
+                persist_config_without_usable_nodes(state, new_config.clone())
+                    .await
+                    .map(|()| ConfigApplyEffect::Cleared)
             }
         }
         Err(apply_err) => {
@@ -707,12 +906,18 @@ async fn restore_previous_running_config(
     if is_sing_box_running(state).await {
         // 内核还在跑变更前配置：回滚只是让磁盘重新等于运行中的状态，纯本地操作
         match restore_disk_config(state, snapshot).await {
-            Ok(true) => return Ok(()),
+            Ok(true) => {
+                state.runtime_ready.store(true, Ordering::Relaxed);
+                state.set_runtime_phase(RuntimePhase::Ready);
+                return Ok(());
+            }
             Ok(false) => {
                 // 本地没有任何材料（新装/清场后）：才退化到重新生成（网络）
                 let outcome =
                     regenerate_without_restart_runtime(old_config, state, SubSource::Fetch).await?;
                 update_config_warning(old_config, state, outcome.has_sub_nodes).await;
+                state.runtime_ready.store(true, Ordering::Relaxed);
+                state.set_runtime_phase(RuntimePhase::Ready);
                 return Ok(());
             }
             Err(err) => return Err(err),
@@ -727,6 +932,7 @@ async fn restart_with_previous_config(
     state: &Arc<AppState>,
     snapshot: Option<&[u8]>,
 ) -> AppResult<()> {
+    #[cfg(not(unix))]
     stop_sing_internal(state).await;
 
     // 本地材料分层（快照 → 缓存）：写回 → 校验 → 启动，全程不碰网络。
@@ -745,18 +951,29 @@ async fn restart_with_previous_config(
             warn!(error = %err, source = source, "Restored runtime config failed validation, trying next source");
             continue;
         }
-        match start_sing_internal(state).await {
+        #[cfg(unix)]
+        let activation = if is_sing_box_running(state).await {
+            crate::services::singbox::reload_sing_internal(state).await
+        } else {
+            start_sing_internal(state).await
+        };
+        #[cfg(not(unix))]
+        let activation = start_sing_internal(state).await;
+
+        match activation {
             Ok(()) => {
                 finalize_started_config(old_config, state, true).await;
                 return Ok(());
             }
             Err(err) => {
-                warn!(error = %err, source = source, "Failed to start sing-box from restored config, trying next source");
+                warn!(error = %err, source = source, "Failed to activate restored config, trying next source");
             }
         }
     }
 
     // 本地材料全部不可用/失败，才退化到重新生成（网络）
+    // Unix 热重载可能留下一个存活但不健康的进程；同步再启动前统一收口。
+    stop_sing_internal(state).await;
     let outcome = regenerate_without_restart_runtime(old_config, state, SubSource::Fetch).await?;
     start_sing_internal(state)
         .await
@@ -772,17 +989,22 @@ async fn restore_previous_stopped_config(
 ) -> AppResult<()> {
     if !has_configured_sources(old_config) {
         clear_runtime_config(state).await;
+        state.set_runtime_phase(RuntimePhase::Stopped);
         return Ok(());
     }
 
     // 服务本就处于停止态：只需把磁盘修回变更前配置，不起进程；
     // 本地无材料才退化到重新生成（网络）
     match restore_disk_config(state, snapshot).await {
-        Ok(true) => Ok(()),
+        Ok(true) => {
+            state.set_runtime_phase(RuntimePhase::Stopped);
+            Ok(())
+        }
         Ok(false) => {
             let outcome =
                 regenerate_without_restart_runtime(old_config, state, SubSource::Fetch).await?;
             update_config_warning(old_config, state, outcome.has_sub_nodes).await;
+            state.set_runtime_phase(RuntimePhase::Stopped);
             Ok(())
         }
         Err(err) => Err(err),
@@ -800,7 +1022,10 @@ mod transaction_tests {
         state::AppState,
     };
 
-    use super::apply_config_change;
+    use super::{
+        apply_config_change, regenerate_preserving_service_state,
+        regenerate_without_restart_runtime, RuntimeUpdate, SubSource,
+    };
 
     fn manual_node(tag: &str) -> String {
         serde_json::json!({
@@ -814,7 +1039,7 @@ mod transaction_tests {
     }
 
     #[tokio::test]
-    async fn persistent_save_failure_restarts_previous_runtime_and_restores_bindings() {
+    async fn persistent_save_failure_reactivates_previous_runtime_and_restores_bindings() {
         let unique = format!(
             "miao-transaction-{}-{}",
             std::process::id(),
@@ -835,7 +1060,7 @@ mod transaction_tests {
         let fake_kernel = runtime_dir.join("sing-box");
         tokio::fs::write(
             &fake_kernel,
-            b"#!/bin/sh\nif [ \"$1\" = check ]; then exit 0; fi\nif [ \"$1\" = run ]; then exec sleep 300; fi\nexit 1\n",
+            b"#!/bin/sh\nif [ \"$1\" = check ]; then exit 0; fi\nif [ \"$1\" = run ]; then trap ':' HUP; while :; do sleep 1; done; fi\nexit 1\n",
         )
         .await
         .unwrap();
@@ -866,6 +1091,13 @@ mod transaction_tests {
             .unwrap();
         start_sing_internal(&state).await.unwrap();
         assert_eq!(state.sing_generation.load(Ordering::Relaxed), 1);
+        let original_pid = state
+            .sing_process
+            .lock()
+            .await
+            .as_ref()
+            .and_then(|process| process.child.id())
+            .unwrap();
 
         let mut new_config = old_config.clone();
         new_config.nodes.push(manual_node("new-node"));
@@ -885,11 +1117,78 @@ mod transaction_tests {
             old_bindings
         );
         assert!(is_sing_box_running(&state).await);
+        assert_eq!(
+            state
+                .sing_process
+                .lock()
+                .await
+                .as_ref()
+                .and_then(|process| process.child.id()),
+            Some(original_pid),
+            "Unix rollback should reactivate the previous config without replacing the process"
+        );
         assert!(
-            state.sing_generation.load(Ordering::Relaxed) >= 5,
-            "old runtime must be restarted after the new runtime was activated"
+            state.sing_generation.load(Ordering::Relaxed) >= 3,
+            "both activation and rollback must retire their previous watchers"
         );
         assert_eq!(*state.config.read().await, old_config);
+
+        stop_sing_internal(&state).await;
+        let _ = tokio::fs::remove_dir_all(root).await;
+    }
+
+    #[tokio::test]
+    async fn unchanged_runtime_bytes_still_start_a_missing_desired_process() {
+        let unique = format!(
+            "miao-unchanged-start-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+        let root = std::env::temp_dir().join(unique);
+        let runtime_dir = root.join("runtime");
+        let config_path = root.join("config.yaml");
+        let volatile_path = root.join("volatile.yaml");
+        tokio::fs::create_dir_all(&runtime_dir).await.unwrap();
+        let fake_kernel = runtime_dir.join("sing-box");
+        tokio::fs::write(
+            &fake_kernel,
+            b"#!/bin/sh\nif [ \"$1\" = check ]; then exit 0; fi\nif [ \"$1\" = run ]; then trap ':' HUP; while :; do sleep 1; done; fi\nexit 1\n",
+        )
+        .await
+        .unwrap();
+        std::fs::set_permissions(&fake_kernel, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let config = Config {
+            nodes: vec![manual_node("only-node")],
+            ..Config::default()
+        };
+        let runtime_paths = RuntimePaths::new(runtime_dir, &config_path);
+        let state = Arc::new(
+            AppState::with_config_layers(
+                StableConfig::from(&config),
+                config.clone(),
+                config_path,
+                volatile_path,
+                runtime_paths,
+            )
+            .unwrap(),
+        );
+
+        regenerate_without_restart_runtime(&config, &state, SubSource::Fetch)
+            .await
+            .unwrap();
+        assert!(!is_sing_box_running(&state).await);
+
+        let runtime_update = regenerate_preserving_service_state(&config, &state)
+            .await
+            .unwrap();
+
+        assert_eq!(runtime_update, RuntimeUpdate::Started);
+        assert!(is_sing_box_running(&state).await);
+        assert!(state.runtime_ready.load(Ordering::Relaxed));
 
         stop_sing_internal(&state).await;
         let _ = tokio::fs::remove_dir_all(root).await;

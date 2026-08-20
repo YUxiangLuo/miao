@@ -4,9 +4,14 @@ import type { RuleInfo, StatusData } from './types/api'
 import type { ConnectionGroup, EnrichedConnection } from './types/clash'
 
 export function statusMock(overrides: Partial<StatusData> = {}): StatusData {
+  const running = overrides.running ?? false
+  const initializing = overrides.initializing ?? false
+  const ready = overrides.ready ?? (running && !initializing)
   return {
-    running: false,
-    initializing: false,
+    running,
+    ready,
+    phase: overrides.phase ?? (ready ? 'ready' : initializing ? 'initializing' : 'stopped'),
+    initializing,
     route_mode: 'rule',
     node_select: 'manual',
     vps_supported: true,

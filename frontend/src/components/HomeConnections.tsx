@@ -77,7 +77,7 @@ export function HomeConnections({ status, data, onOpenAll }: HomeConnectionsProp
     return orderRef.current.map((id) => byId.get(id)!)
   }, [activeGroups])
 
-  const hasActive = status.running && activeGroups.length > 0
+  const hasActive = Boolean(status.ready) && activeGroups.length > 0
 
   // 始终渲染占位:不出现时不渲染会让 .content-grid 变成 last-child 而撑高,
   // 导致活跃链接出现时主内容区高度突变、右列突然出现滚动条。

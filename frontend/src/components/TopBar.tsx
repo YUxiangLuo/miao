@@ -69,8 +69,8 @@ export function TopBar({
           type="button"
           className="traffic-chip"
           onClick={onOpenConnections}
-          disabled={!status.running}
-          title={status.running ? '查看链接统计' : '启动服务后可查看链接统计'}
+          disabled={!status.ready}
+          title={status.ready ? '查看链接统计' : '代理就绪后可查看链接统计'}
         >
           <div className="traffic-item">
             <ArrowUp size={ICON.sm} className="traffic-icon up" />

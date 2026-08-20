@@ -1,11 +1,11 @@
 use futures::{stream, StreamExt};
 use sha2::{Digest, Sha256};
-use std::sync::Arc;
-use tokio::time::Duration;
+use std::sync::{atomic::Ordering, Arc};
+use tokio::time::{Duration, Instant};
 use tracing::{error, info, warn};
 
 use crate::error::AppResult;
-use crate::models::{Config, NodeSelect, SubStatus};
+use crate::models::{Config, NodeSelect, SubStatus, SubscriptionState};
 use crate::services::subscription::fetch_sub;
 use crate::state::{AppState, SkippedRule};
 
@@ -50,17 +50,32 @@ pub enum SubFetchRetry {
     Startup,
 }
 
-/// Startup 预算的退避序列：总等待 50s，与 install.sh ExecStartPre 的 60s 路由等待对齐
+/// 启动刷新拥有一个绝对截止时间。快速失败时仍通过短退避跨过 DHCP/默认路由
+/// 尚未就绪的窗口；单个卡死请求和订阅数量都不能把总等待无限放大。
+const STARTUP_FETCH_BUDGET: Duration = Duration::from_secs(20);
 const STARTUP_RETRY_SCHEDULE: &[Duration] = &[
+    Duration::from_secs(2),
     Duration::from_secs(5),
-    Duration::from_secs(15),
-    Duration::from_secs(30),
+    Duration::from_secs(10),
 ];
 
 /// 测试里缩短以保持用例快速（与 singbox.rs 的 KERNEL_WATCH_INTERVAL 同款手法）
 #[cfg(test)]
 const STARTUP_RETRY_SCHEDULE_TEST: &[Duration] =
     &[Duration::from_millis(50), Duration::from_millis(100)];
+
+#[cfg(test)]
+const STARTUP_FETCH_BUDGET_TEST: Duration = Duration::from_secs(2);
+
+#[cfg(not(test))]
+fn startup_fetch_budget() -> Duration {
+    STARTUP_FETCH_BUDGET
+}
+
+#[cfg(test)]
+fn startup_fetch_budget() -> Duration {
+    STARTUP_FETCH_BUDGET_TEST
+}
 
 #[cfg(not(test))]
 fn startup_retry_schedule() -> &'static [Duration] {
@@ -99,10 +114,50 @@ pub async fn fetch_sub_nodes(
     state: &Arc<AppState>,
     retry: SubFetchRetry,
 ) -> Vec<FetchedNode> {
+    fetch_sub_nodes_inner(config, state, retry, None).await
+}
+
+/// Startup background work uses an optimistic generation while network I/O is
+/// outside the config lock. Once a foreground subscription operation advances
+/// that generation, the stale fetch stops publishing per-subscription status
+/// and its caller will discard the fetched nodes as well.
+pub async fn fetch_sub_nodes_if_current(
+    config: &Config,
+    state: &Arc<AppState>,
+    retry: SubFetchRetry,
+    expected_generation: u64,
+) -> Vec<FetchedNode> {
+    fetch_sub_nodes_inner(config, state, retry, Some(expected_generation)).await
+}
+
+fn refresh_generation_is_current(state: &AppState, expected_generation: Option<u64>) -> bool {
+    expected_generation
+        .is_none_or(|expected| state.sub_refresh_generation.load(Ordering::Relaxed) == expected)
+}
+
+async fn fetch_sub_nodes_inner(
+    config: &Config,
+    state: &Arc<AppState>,
+    retry: SubFetchRetry,
+    expected_generation: Option<u64>,
+) -> Vec<FetchedNode> {
     let schedule = retry.schedule();
+    let deadline =
+        matches!(retry, SubFetchRetry::Startup).then(|| Instant::now() + startup_fetch_budget());
     let mut attempt = 0usize;
     loop {
-        let nodes = fetch_all_subs(config, state).await;
+        if !refresh_generation_is_current(state, expected_generation) {
+            return Vec::new();
+        }
+        if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+            warn!("Startup subscription refresh budget exhausted");
+            return Vec::new();
+        }
+
+        let nodes = fetch_all_subs(config, state, deadline, expected_generation).await;
+        if !refresh_generation_is_current(state, expected_generation) {
+            return Vec::new();
+        }
         // 是否值得退避重试：配置了订阅却一个订阅节点都没拿到才算
         // （全部秒败是网络未就绪的典型瞬态）；部分成功/其他错误更像订阅本身坏了
         if !nodes.is_empty() || config.subs.is_empty() {
@@ -111,6 +166,10 @@ pub async fn fetch_sub_nodes(
         let Some(delay) = schedule.get(attempt) else {
             return nodes;
         };
+        if deadline.is_some_and(|deadline| Instant::now() + *delay >= deadline) {
+            warn!("Startup subscription refresh budget exhausted before next retry");
+            return nodes;
+        }
         attempt += 1;
         info!(
             delay_ms = delay.as_millis(),
@@ -121,7 +180,7 @@ pub async fn fetch_sub_nodes(
 }
 
 /// 用已获取的订阅节点集构建并写出配置：gen_config 与预拉取（Prefetched）共用。
-pub(super) async fn gen_config_from_nodes(
+pub async fn gen_config_from_nodes(
     config: &Config,
     state: &Arc<AppState>,
     nodes: Vec<FetchedNode>,
@@ -165,12 +224,32 @@ pub async fn record_fresh_snapshot(
 }
 
 /// 并发拉取全部订阅并逐条更新 sub_status；返回合并后的节点名与 outbounds。
-async fn fetch_all_subs(config: &Config, state: &Arc<AppState>) -> Vec<FetchedNode> {
+async fn fetch_all_subs(
+    config: &Config,
+    state: &Arc<AppState>,
+    deadline: Option<Instant>,
+    expected_generation: Option<u64>,
+) -> Vec<FetchedNode> {
     let mut final_nodes = vec![];
 
     {
         let mut status_map = state.sub_status.lock().await;
+        // Re-check after acquiring the status lock. A foreground refresh may
+        // have advanced the generation while this task was waiting for it.
+        if !refresh_generation_is_current(state, expected_generation) {
+            return final_nodes;
+        }
         status_map.retain(|url, _| config.subs.contains(url));
+        for url in &config.subs {
+            let status = status_map.entry(url.clone()).or_insert_with(|| SubStatus {
+                url: url.clone(),
+                success: false,
+                node_count: 0,
+                state: SubscriptionState::Pending,
+                error: None,
+            });
+            status.state = SubscriptionState::Refreshing;
+        }
     }
 
     let sub_futures: Vec<_> = config
@@ -181,8 +260,11 @@ async fn fetch_all_subs(config: &Config, state: &Arc<AppState>) -> Vec<FetchedNo
             let client = state.http_client.clone();
             async move {
                 info!(url = %sub, "Fetching subscription");
-                let result =
-                    tokio::time::timeout(Duration::from_secs(30), fetch_sub(&sub, &client)).await;
+                let request_budget = deadline
+                    .map(|deadline| deadline.saturating_duration_since(Instant::now()))
+                    .unwrap_or(Duration::from_secs(30))
+                    .min(Duration::from_secs(30));
+                let result = tokio::time::timeout(request_budget, fetch_sub(&sub, &client)).await;
 
                 match result {
                     Ok(Ok(fetch_result)) => {
@@ -213,8 +295,13 @@ async fn fetch_all_subs(config: &Config, state: &Arc<AppState>) -> Vec<FetchedNo
                         (sub.clone(), Err(e.to_string()))
                     }
                     Err(_) => {
-                        error!(url = %sub, timeout_secs = 30, "Subscription fetch timed out");
-                        (sub.clone(), Err("Request timeout".to_string()))
+                        error!(url = %sub, timeout_ms = request_budget.as_millis(), "Subscription fetch timed out");
+                        let message = if deadline.is_some() {
+                            "Startup refresh budget exhausted"
+                        } else {
+                            "Request timeout"
+                        };
+                        (sub.clone(), Err(message.to_string()))
                     }
                 }
             }
@@ -237,6 +324,9 @@ async fn fetch_all_subs(config: &Config, state: &Arc<AppState>) -> Vec<FetchedNo
     });
 
     for (url, result) in results {
+        if !refresh_generation_is_current(state, expected_generation) {
+            break;
+        }
         let status = match result {
             Ok(fetch_result) => {
                 let count = fetch_result.node_names.len();
@@ -270,6 +360,11 @@ async fn fetch_all_subs(config: &Config, state: &Arc<AppState>) -> Vec<FetchedNo
                     url: url.clone(),
                     success: count > 0,
                     node_count: count,
+                    state: if count > 0 {
+                        SubscriptionState::Ready
+                    } else {
+                        SubscriptionState::Failed
+                    },
                     error: error_info,
                 }
             }
@@ -277,10 +372,18 @@ async fn fetch_all_subs(config: &Config, state: &Arc<AppState>) -> Vec<FetchedNo
                 url: url.clone(),
                 success: false,
                 node_count: 0,
+                state: SubscriptionState::Failed,
                 error: Some(e),
             },
         };
-        state.sub_status.lock().await.insert(url, status);
+        let mut status_map = state.sub_status.lock().await;
+        // Keep the generation check and status publication in the same
+        // critical section so stale startup work cannot overwrite a newer
+        // foreground result after waiting for this lock.
+        if !refresh_generation_is_current(state, expected_generation) {
+            break;
+        }
+        status_map.insert(url, status);
     }
 
     final_nodes
@@ -414,7 +517,7 @@ pub async fn known_rule_targets(config: &Config, state: &AppState) -> Vec<String
 
 #[cfg(test)]
 mod tests {
-    use super::{known_rule_targets, SubFetchRetry, STARTUP_RETRY_SCHEDULE};
+    use super::{known_rule_targets, SubFetchRetry, STARTUP_FETCH_BUDGET, STARTUP_RETRY_SCHEDULE};
     use crate::models::Config;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
@@ -437,15 +540,16 @@ mod tests {
     }
 
     #[test]
-    fn startup_retry_schedule_is_bounded_under_a_minute() {
+    fn startup_retry_schedule_fits_inside_the_absolute_budget() {
         assert_eq!(
             STARTUP_RETRY_SCHEDULE,
             &[
+                Duration::from_secs(2),
                 Duration::from_secs(5),
-                Duration::from_secs(15),
-                Duration::from_secs(30)
+                Duration::from_secs(10)
             ]
         );
+        assert!(STARTUP_RETRY_SCHEDULE.iter().sum::<Duration>() < STARTUP_FETCH_BUDGET);
     }
 
     /// 本地「计数拒答」订阅服务器：每接受一个 TCP 连接就计数并立即挂断，

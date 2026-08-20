@@ -7,6 +7,7 @@ use tokio::time::{sleep, Duration};
 use tracing::{error, info, warn};
 
 use crate::error::{AppError, AppResult};
+use crate::models::RuntimePhase;
 use crate::state::{AppState, SingBoxProcess};
 
 #[cfg(all(windows, target_arch = "x86_64"))]
@@ -73,6 +74,12 @@ pub async fn kernel_status(state: &AppState) -> KernelStatus {
         },
         Ok(Some(_)) => {
             *lock = None;
+            state.runtime_ready.store(false, Ordering::Relaxed);
+            state.set_runtime_phase(if state.service_should_run.load(Ordering::Relaxed) {
+                RuntimePhase::Failed
+            } else {
+                RuntimePhase::Stopped
+            });
             KernelStatus::default()
         }
         Err(_) => KernelStatus::default(),
@@ -184,13 +191,206 @@ pub async fn start_sing_internal(state: &Arc<AppState>) -> AppResult<()> {
                 return Err(AppError::AlreadyRunning);
             }
         }
+        state.runtime_ready.store(false, Ordering::Relaxed);
+        state.set_runtime_phase(RuntimePhase::Starting);
         // Retire any watcher from the previous start before this spawn begins.
         state.sing_generation.fetch_add(1, Ordering::Relaxed) + 1
     };
 
-    spawn_and_probe_sing_box(state, generation).await?;
+    if let Err(err) = spawn_and_probe_sing_box(state, generation).await {
+        state.runtime_ready.store(false, Ordering::Relaxed);
+        state.set_runtime_phase(RuntimePhase::Failed);
+        return Err(err);
+    }
+    state.runtime_ready.store(true, Ordering::Relaxed);
+    state.set_runtime_phase(RuntimePhase::Ready);
     spawn_crash_watcher(state.clone(), generation);
     clear_kernel_give_up_warning(state).await;
+    Ok(())
+}
+
+/// Reload the active config in place on Unix. sing-box officially wires
+/// SIGHUP to its reload path; miao still verifies that the same process stays
+/// alive and the data plane becomes healthy before publishing `ready` again.
+#[cfg(unix)]
+pub async fn reload_sing_internal(state: &Arc<AppState>) -> AppResult<()> {
+    use nix::sys::signal::{kill, Signal};
+    use nix::unistd::Pid;
+
+    state.runtime_ready.store(false, Ordering::Relaxed);
+    state.set_runtime_phase(RuntimePhase::Reloading);
+
+    let (pid, generation) = {
+        let mut lock = state.sing_process.lock().await;
+        let Some(process) = lock.as_mut() else {
+            state.set_runtime_phase(RuntimePhase::Failed);
+            return Err(AppError::message("sing-box is not running"));
+        };
+        let exit_status = match process.child.try_wait() {
+            Ok(status) => status,
+            Err(err) => {
+                state.set_runtime_phase(RuntimePhase::Failed);
+                return Err(AppError::context(
+                    "Failed to check sing-box before reload",
+                    err,
+                ));
+            }
+        };
+        if let Some(status) = exit_status {
+            *lock = None;
+            state.set_runtime_phase(RuntimePhase::Failed);
+            return Err(AppError::message(format!(
+                "sing-box exited before reload with code {}",
+                status.code().unwrap_or(-1)
+            )));
+        }
+        let Some(pid) = process.child.id() else {
+            state.set_runtime_phase(RuntimePhase::Failed);
+            return Err(AppError::message("sing-box process ID is unavailable"));
+        };
+        // Retire the previous watcher while preserving the child itself. A
+        // fresh watcher is attached only after reload health is established.
+        let generation = state.sing_generation.fetch_add(1, Ordering::Relaxed) + 1;
+        (pid, generation)
+    };
+
+    if let Err(err) = kill(Pid::from_raw(pid as i32), Signal::SIGHUP) {
+        if is_sing_box_running(state).await {
+            state.runtime_ready.store(true, Ordering::Relaxed);
+            state.set_runtime_phase(RuntimePhase::Ready);
+            spawn_crash_watcher(state.clone(), generation);
+        } else {
+            state.runtime_ready.store(false, Ordering::Relaxed);
+            state.set_runtime_phase(RuntimePhase::Failed);
+        }
+        return Err(AppError::message(format!(
+            "Failed to signal sing-box reload: {err}"
+        )));
+    }
+
+    if let Err(err) = wait_for_sing_box_reload_ready(state, generation, pid).await {
+        state.runtime_ready.store(false, Ordering::Relaxed);
+        state.set_runtime_phase(RuntimePhase::Failed);
+        return Err(err);
+    }
+
+    state.runtime_ready.store(true, Ordering::Relaxed);
+    state.set_runtime_phase(RuntimePhase::Ready);
+    spawn_crash_watcher(state.clone(), generation);
+    clear_kernel_give_up_warning(state).await;
+    info!(pid, "sing-box configuration reloaded in place");
+    Ok(())
+}
+
+#[cfg(all(unix, not(test)))]
+async fn wait_for_sing_box_reload_ready(
+    state: &Arc<AppState>,
+    expected_generation: u64,
+    expected_pid: u32,
+) -> AppResult<()> {
+    const PROBE_INTERVAL: Duration = Duration::from_millis(25);
+    const RELOAD_SETTLE_TIME: Duration = Duration::from_millis(500);
+    const RELOAD_TIMEOUT: Duration = Duration::from_secs(5);
+    const CLASH_PROBE_TIMEOUT: Duration = Duration::from_millis(250);
+
+    let started = Instant::now();
+    let mut consecutive_ready = 0u8;
+    loop {
+        sleep(PROBE_INTERVAL).await;
+        let mut lock = state.sing_process.lock().await;
+        if !start_still_current(state, expected_generation) {
+            return Err(AppError::message("sing-box reload was cancelled"));
+        }
+        let Some(process) = lock.as_mut() else {
+            return Err(AppError::message("sing-box exited during reload"));
+        };
+        if process.child.id() != Some(expected_pid) {
+            return Err(AppError::message(
+                "sing-box process changed unexpectedly during reload",
+            ));
+        }
+        if let Some(status) = process
+            .child
+            .try_wait()
+            .map_err(|e| AppError::context("Failed to check sing-box reload status", e))?
+        {
+            *lock = None;
+            return Err(AppError::message(format!(
+                "sing-box exited during reload with code {}",
+                status.code().unwrap_or(-1)
+            )));
+        }
+        drop(lock);
+
+        let tun_ready = {
+            #[cfg(target_os = "linux")]
+            {
+                std::path::Path::new("/sys/class/net/sing-tun").exists()
+            }
+            #[cfg(not(target_os = "linux"))]
+            {
+                true
+            }
+        };
+        let clash_ready = if started.elapsed() >= RELOAD_SETTLE_TIME {
+            state
+                .http_client
+                .get("http://127.0.0.1:6262/version")
+                .timeout(CLASH_PROBE_TIMEOUT)
+                .send()
+                .await
+                .is_ok_and(|response| response.status().is_success())
+        } else {
+            false
+        };
+
+        if tun_ready && clash_ready {
+            consecutive_ready += 1;
+            if consecutive_ready >= 2 {
+                return Ok(());
+            }
+        } else {
+            consecutive_ready = 0;
+        }
+
+        if started.elapsed() >= RELOAD_TIMEOUT {
+            return Err(AppError::message(
+                "sing-box data plane did not become ready within 5 seconds after reload",
+            ));
+        }
+    }
+}
+
+#[cfg(all(unix, test))]
+async fn wait_for_sing_box_reload_ready(
+    state: &Arc<AppState>,
+    expected_generation: u64,
+    expected_pid: u32,
+) -> AppResult<()> {
+    sleep(Duration::from_millis(50)).await;
+    let mut lock = state.sing_process.lock().await;
+    if !start_still_current(state, expected_generation) {
+        return Err(AppError::message("sing-box reload was cancelled"));
+    }
+    let Some(process) = lock.as_mut() else {
+        return Err(AppError::message("sing-box exited during reload"));
+    };
+    if process.child.id() != Some(expected_pid) {
+        return Err(AppError::message(
+            "sing-box process changed unexpectedly during reload",
+        ));
+    }
+    if let Some(status) = process
+        .child
+        .try_wait()
+        .map_err(|e| AppError::context("Failed to check sing-box reload status", e))?
+    {
+        *lock = None;
+        return Err(AppError::message(format!(
+            "sing-box exited during reload with code {}",
+            status.code().unwrap_or(-1)
+        )));
+    }
     Ok(())
 }
 
@@ -283,8 +483,91 @@ async fn spawn_and_probe_sing_box(
     });
     drop(lock);
 
-    sleep(Duration::from_millis(500)).await;
+    wait_for_sing_box_ready(state, expected_generation).await
+}
 
+#[cfg(not(test))]
+async fn wait_for_sing_box_ready(state: &Arc<AppState>, expected_generation: u64) -> AppResult<()> {
+    const PROBE_INTERVAL: Duration = Duration::from_millis(25);
+    const MIN_STABLE_TIME: Duration = Duration::from_millis(100);
+    const STARTUP_TIMEOUT: Duration = Duration::from_secs(3);
+    const CLASH_PROBE_TIMEOUT: Duration = Duration::from_millis(250);
+
+    let started = Instant::now();
+    let mut consecutive_ready = 0u8;
+    loop {
+        sleep(PROBE_INTERVAL).await;
+        let mut lock = state.sing_process.lock().await;
+        if !start_still_current(state, expected_generation) {
+            return Err(AppError::message("sing-box start was cancelled"));
+        }
+        let Some(proc) = lock.as_mut() else {
+            return Err(AppError::message("sing-box start was cancelled"));
+        };
+        if let Some(exit_status) = proc
+            .child
+            .try_wait()
+            .map_err(|e| AppError::context("Failed to check sing-box startup status", e))?
+        {
+            *lock = None;
+            #[cfg(windows)]
+            cleanup_stale_tun_adapter();
+            let code = exit_status.code().unwrap_or(-1);
+            return Err(AppError::message(format!(
+                "sing-box exited during startup with code {code}"
+            )));
+        }
+        drop(lock);
+
+        let tun_ready = {
+            #[cfg(target_os = "linux")]
+            {
+                std::path::Path::new("/sys/class/net/sing-tun").exists()
+            }
+            #[cfg(not(target_os = "linux"))]
+            {
+                true
+            }
+        };
+        let clash_ready = if started.elapsed() >= MIN_STABLE_TIME {
+            state
+                .http_client
+                .get("http://127.0.0.1:6262/version")
+                .timeout(CLASH_PROBE_TIMEOUT)
+                .send()
+                .await
+                .is_ok_and(|response| response.status().is_success())
+        } else {
+            false
+        };
+
+        if tun_ready && clash_ready {
+            consecutive_ready += 1;
+            if consecutive_ready >= 2 {
+                info!(
+                    elapsed_ms = started.elapsed().as_millis(),
+                    "sing-box data plane is ready"
+                );
+                return Ok(());
+            }
+        } else {
+            consecutive_ready = 0;
+        }
+
+        if started.elapsed() >= STARTUP_TIMEOUT {
+            terminate_failed_start(state, expected_generation).await;
+            return Err(AppError::message(
+                "sing-box process started but its data plane did not become ready within 3 seconds",
+            ));
+        }
+    }
+}
+
+/// Hermetic transaction tests use a minimal fake child without a Clash API or
+/// TUN device. Production builds use the data-plane probe above.
+#[cfg(test)]
+async fn wait_for_sing_box_ready(state: &Arc<AppState>, expected_generation: u64) -> AppResult<()> {
+    sleep(Duration::from_millis(50)).await;
     let mut lock = state.sing_process.lock().await;
     if !start_still_current(state, expected_generation) {
         return Err(AppError::message("sing-box start was cancelled"));
@@ -298,19 +581,33 @@ async fn spawn_and_probe_sing_box(
         .map_err(|e| AppError::context("Failed to check sing-box startup status", e))?
     {
         *lock = None;
-        #[cfg(windows)]
-        cleanup_stale_tun_adapter();
-        let code = exit_status.code().unwrap_or(-1);
         return Err(AppError::message(format!(
-            "sing-box exited immediately with code {}",
-            code
+            "sing-box exited during startup with code {}",
+            exit_status.code().unwrap_or(-1)
         )));
     }
-
     Ok(())
 }
 
+async fn terminate_failed_start(state: &Arc<AppState>, expected_generation: u64) {
+    let mut lock = state.sing_process.lock().await;
+    if state.sing_generation.load(Ordering::Relaxed) != expected_generation {
+        return;
+    }
+    if let Some(proc) = lock.as_mut() {
+        if proc.child.try_wait().ok().flatten().is_none() {
+            request_graceful_exit(&mut proc.child).await;
+        }
+    }
+    *lock = None;
+    // Do not retire this generation here. During initial startup no watcher
+    // exists yet; during crash recovery the existing watcher must keep the
+    // same generation so it can consume the remaining retry budget.
+}
+
 pub async fn stop_sing_internal(state: &Arc<AppState>) {
+    state.runtime_ready.store(false, Ordering::Relaxed);
+    state.set_runtime_phase(RuntimePhase::Stopping);
     let mut lock = state.sing_process.lock().await;
     if let Some(ref mut proc) = *lock {
         if proc.child.try_wait().ok().flatten().is_none() {
@@ -320,6 +617,7 @@ pub async fn stop_sing_internal(state: &Arc<AppState>) {
     *lock = None;
     // 让正在监护的崩溃看门狗退出：这是一次有意停止。
     state.sing_generation.fetch_add(1, Ordering::Relaxed);
+    state.set_runtime_phase(RuntimePhase::Stopped);
 }
 
 /// 崩溃看门狗的巡检间隔。测试里缩短以保持用例快速。
@@ -379,11 +677,13 @@ async fn watch_sing_box(state: Arc<AppState>, generation: u64) {
                     Ok(Some(status)) => {
                         warn!(exit_code = ?status.code(), "sing-box exited unexpectedly");
                         *lock = None;
+                        state.runtime_ready.store(false, Ordering::Relaxed);
                         true
                     }
                     Err(err) => {
                         warn!(error = %err, "Failed to poll sing-box process state");
                         *lock = None;
+                        state.runtime_ready.store(false, Ordering::Relaxed);
                         true
                     }
                 },
@@ -404,10 +704,13 @@ async fn watch_sing_box(state: Arc<AppState>, generation: u64) {
         restarts += 1;
         if restarts > MAX_KERNEL_RESTARTS {
             error!("sing-box kept crashing; giving up on automatic restarts");
+            state.runtime_ready.store(false, Ordering::Relaxed);
+            state.set_runtime_phase(RuntimePhase::Failed);
             *state.config_warning.lock().await = Some(KERNEL_GIVE_UP_WARNING.to_string());
             return;
         }
 
+        state.set_runtime_phase(RuntimePhase::Starting);
         sleep(restart_backoff(restarts)).await;
         if state.sing_generation.load(Ordering::Relaxed) != generation
             || !state.service_should_run.load(Ordering::Relaxed)
@@ -415,9 +718,24 @@ async fn watch_sing_box(state: Arc<AppState>, generation: u64) {
             return;
         }
 
+        // Serialize crash recovery with user-driven config transactions. If a
+        // settings update wins the lock during backoff, its new generation
+        // retires this watcher before it can spawn the old bytes concurrently.
+        let _config_update = state.config_update.lock().await;
+        if state.sing_generation.load(Ordering::Relaxed) != generation
+            || !state.service_should_run.load(Ordering::Relaxed)
+        {
+            return;
+        }
+
         match spawn_and_probe_sing_box(&state, generation).await {
-            Ok(()) => info!(restarts, "sing-box restarted after an unexpected exit"),
+            Ok(()) => {
+                state.runtime_ready.store(true, Ordering::Relaxed);
+                state.set_runtime_phase(RuntimePhase::Ready);
+                info!(restarts, "sing-box restarted after an unexpected exit");
+            }
             Err(err) => {
+                state.runtime_ready.store(false, Ordering::Relaxed);
                 warn!(error = %err, "Failed to restart sing-box after an unexpected exit")
             }
         }
@@ -694,6 +1012,31 @@ mod tests {
 
     #[cfg(unix)]
     #[tokio::test]
+    async fn failed_probe_cleanup_keeps_the_watcher_generation_retryable() {
+        use std::sync::atomic::Ordering;
+        use std::time::Instant;
+
+        let state = crate::test_support::app_state(crate::models::Config::default());
+        let child = tokio::process::Command::new("sleep")
+            .arg("30")
+            .kill_on_drop(true)
+            .spawn()
+            .expect("spawn dummy child");
+        *state.sing_process.lock().await = Some(crate::state::SingBoxProcess {
+            child,
+            started_at: Instant::now(),
+        });
+        state.sing_generation.store(4, Ordering::Relaxed);
+
+        super::terminate_failed_start(&state, 4).await;
+
+        assert!(state.sing_process.lock().await.is_none());
+        assert_eq!(state.sing_generation.load(Ordering::Relaxed), 4);
+        assert!(super::start_still_current(&state, 4));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
     async fn watcher_exits_when_its_generation_is_stale() {
         use std::time::Instant;
 
@@ -743,6 +1086,47 @@ mod tests {
         .await
         .expect("watcher should exit when service should not run");
         assert!(state.config_warning.lock().await.is_none());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn reload_keeps_the_existing_process() {
+        use crate::models::RuntimePhase;
+        use std::sync::atomic::Ordering;
+        use std::time::Instant;
+
+        let state = crate::test_support::app_state(crate::models::Config::default());
+        let child = tokio::process::Command::new("sh")
+            .args(["-c", "trap ':' HUP; while :; do sleep 1; done"])
+            .kill_on_drop(true)
+            .spawn()
+            .expect("spawn reload-aware child");
+        let pid = child.id().expect("child pid");
+        *state.sing_process.lock().await = Some(crate::state::SingBoxProcess {
+            child,
+            started_at: Instant::now(),
+        });
+        state
+            .sing_generation
+            .store(7, std::sync::atomic::Ordering::Relaxed);
+        state.runtime_ready.store(true, Ordering::Relaxed);
+        // Let the shell install its trap before delivering SIGHUP.
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        super::reload_sing_internal(&state)
+            .await
+            .expect("reload should keep a signal-aware child alive");
+
+        let mut lock = state.sing_process.lock().await;
+        let process = lock.as_mut().expect("child remains tracked");
+        assert_eq!(process.child.id(), Some(pid));
+        assert!(process.child.try_wait().expect("poll child").is_none());
+        drop(lock);
+        assert!(state.runtime_ready.load(Ordering::Relaxed));
+        assert_eq!(state.runtime_phase(), RuntimePhase::Ready);
+        assert_eq!(state.sing_generation.load(Ordering::Relaxed), 8);
+
+        super::stop_sing_internal(&state).await;
     }
 
     #[cfg(unix)]

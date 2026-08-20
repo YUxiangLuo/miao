@@ -11,11 +11,30 @@ import {
   NodeModal,
   ToastStack,
 } from './index'
-import { WifiOff } from 'lucide-react'
+import { LoaderCircle, TriangleAlert, WifiOff } from 'lucide-react'
 import { ICON } from '../tokens'
 import type { useAppController } from '../hooks/useAppController'
 
+const PHASE_MESSAGE = {
+  initializing: '正在初始化运行环境…',
+  extracting: '正在准备 sing-box 内核…',
+  validating: '正在校验代理配置…',
+  fetching_subscriptions: '正在获取订阅并生成配置…',
+  starting: '正在启动代理服务…',
+  refreshing_subscriptions: '代理已就绪，正在后台刷新订阅…',
+  applying_config: '当前代理继续运行，正在验证新设置…',
+  reloading: '正在快速重载代理配置…',
+  stopping: '正在停止代理服务…',
+  failed: '代理服务未能就绪，请查看页面告警或日志。',
+} as const
+
 export function DashboardScreen({ app }: { app: ReturnType<typeof useAppController> }) {
+  const phase = app.status.phase
+  const phaseMessage = phase && phase in PHASE_MESSAGE
+    ? PHASE_MESSAGE[phase as keyof typeof PHASE_MESSAGE]
+    : ''
+  const phaseFailed = phase === 'failed'
+
   return (
     <div className="shell">
       <main className="workspace">
@@ -23,6 +42,15 @@ export function DashboardScreen({ app }: { app: ReturnType<typeof useAppControll
           <div className="offline-banner" role="alert">
             <WifiOff size={ICON.sm} />
             <span>与后端服务的连接已断开，正在自动重试…</span>
+          </div>
+        )}
+
+        {!app.backendUnreachable && phaseMessage && (
+          <div className={phaseFailed ? 'runtime-banner failed' : 'runtime-banner'} role="status">
+            {phaseFailed
+              ? <TriangleAlert size={ICON.sm} />
+              : <LoaderCircle size={ICON.sm} className="spin" />}
+            <span>{phaseMessage}</span>
           </div>
         )}
 
@@ -91,7 +119,7 @@ export function DashboardScreen({ app }: { app: ReturnType<typeof useAppControll
               testingNodes={app.testingNodes}
               onTestNodes={() => {
                 // 仅服务运行时测速有意义；候选 = 手动节点 ∪ 代理组节点
-                if (app.status.running && app.ruleNodeNames.length > 0) {
+                if (app.status.ready && app.ruleNodeNames.length > 0) {
                   app.handleTestGroupDelays(app.primaryGroupName || 'proxy', app.ruleNodeNames)
                 }
               }}

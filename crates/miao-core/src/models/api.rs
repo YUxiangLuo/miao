@@ -2,6 +2,47 @@ use serde::{Deserialize, Serialize};
 
 use crate::models::config::{NodeSelect, RouteMode};
 
+/// User-visible runtime lifecycle. `running` remains the process-presence
+/// compatibility field; this phase and `ready` describe whether the data plane
+/// can actually be used and what work is currently happening.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+#[repr(u8)]
+pub enum RuntimePhase {
+    #[default]
+    Initializing = 0,
+    Extracting = 1,
+    Validating = 2,
+    FetchingSubscriptions = 3,
+    Starting = 4,
+    Ready = 5,
+    RefreshingSubscriptions = 6,
+    ApplyingConfig = 7,
+    Reloading = 8,
+    Stopping = 9,
+    Stopped = 10,
+    Failed = 11,
+}
+
+impl RuntimePhase {
+    pub fn from_u8(value: u8) -> Self {
+        match value {
+            1 => Self::Extracting,
+            2 => Self::Validating,
+            3 => Self::FetchingSubscriptions,
+            4 => Self::Starting,
+            5 => Self::Ready,
+            6 => Self::RefreshingSubscriptions,
+            7 => Self::ApplyingConfig,
+            8 => Self::Reloading,
+            9 => Self::Stopping,
+            10 => Self::Stopped,
+            11 => Self::Failed,
+            _ => Self::Initializing,
+        }
+    }
+}
+
 #[derive(Serialize)]
 pub struct ApiResponse<T: Serialize> {
     pub success: bool,
@@ -39,6 +80,10 @@ impl<T: Serialize> ApiResponse<T> {
 #[derive(Serialize)]
 pub struct StatusData {
     pub running: bool,
+    /// True only after the managed sing-box instance passed its startup
+    /// readiness check. A spawned process may be `running` while this is false.
+    pub ready: bool,
+    pub phase: RuntimePhase,
     pub initializing: bool,
     pub route_mode: RouteMode,
     pub node_select: NodeSelect,
@@ -138,6 +183,17 @@ pub struct SubStatus {
     pub url: String,
     pub success: bool,
     pub node_count: usize,
+    pub state: SubscriptionState,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SubscriptionState {
+    #[default]
+    Pending,
+    Refreshing,
+    Ready,
+    Failed,
 }

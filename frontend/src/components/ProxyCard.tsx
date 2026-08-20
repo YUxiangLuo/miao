@@ -111,7 +111,7 @@ export function ProxyCard({
 }: ProxyCardProps) {
   const nodeSelect = status.node_select || 'manual'
   const isFastest = nodeSelect.startsWith('fastest_')
-  // 受控 select 在 apply 期间停在用户选择上:status.node_select 要等热重启后的
+  // 受控 select 在 apply 期间停在用户选择上:status.node_select 要等配置激活后的
   // fetchStatus 才更新,直接受控会弹回旧值;处理器结束(成功或失败)后回到服务端真值
   const [pendingSelect, setPendingSelect] = useState('')
 
@@ -172,7 +172,7 @@ export function ProxyCard({
             size="sm" 
             icon={<Zap size={ICON.xs} />} 
             loading={testingGroup === primaryGroupName} 
-            disabled={!primaryGroup || !status.running} 
+            disabled={!primaryGroup || !status.ready}
             onClick={() => primaryGroup && onTestGroupDelays(primaryGroupName, primaryGroup.all!)}
           >
             测试延迟

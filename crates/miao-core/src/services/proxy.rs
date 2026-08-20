@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Instant;
 
 use tokio::time::{sleep, Duration};
 use tracing::{error, info, warn};
@@ -107,8 +108,8 @@ async fn load_last_proxy() -> Option<LastProxy> {
     }
 }
 
-/// 内核（重）启动后调用：捕获当前 sing_generation 并派生恢复任务。
-/// 连续两次热重启会各派生一个任务；旧任务在落地前发现自己监护的启动
+/// 内核启动或配置重载后调用：捕获当前 sing_generation 并派生恢复任务。
+/// 连续两次运行配置激活会各派生一个任务；旧任务在落地前发现自己监护的代次
 /// 已被取代即放弃，避免陈旧的 PUT 覆盖更新那次启动的选择。
 pub fn spawn_restore_last_proxy(state: &Arc<AppState>) {
     let generation = state
@@ -132,14 +133,6 @@ async fn restore_last_proxy(state: &Arc<AppState>, generation: u64) {
         return;
     }
 
-    // 等内核与 Clash API 就绪（启发式）
-    sleep(Duration::from_secs(1)).await;
-
-    if is_superseded(state, generation) {
-        info!("Skipping last-proxy restore: superseded by a newer sing-box start");
-        return;
-    }
-
     if !state.config.read().await.node_select.is_manual() {
         info!("Skipping last-proxy restore while urltest node_select is active");
         return;
@@ -160,18 +153,26 @@ async fn restore_last_proxy(state: &Arc<AppState>, generation: u64) {
         "http://127.0.0.1:6262/proxies/{}",
         urlencoding::encode(&proxy.group)
     );
-    let group_info = match state
-        .http_client
-        .get(&url)
-        .timeout(Duration::from_secs(5))
-        .send()
-        .await
-    {
-        Ok(res) => match res.json::<serde_json::Value>().await {
-            Ok(v) => v,
-            Err(_) => return,
-        },
-        Err(_) => return,
+    let deadline = Instant::now() + Duration::from_secs(2);
+    let group_info = loop {
+        if is_superseded(state, generation) {
+            info!("Skipping last-proxy restore: superseded by a newer sing-box start");
+            return;
+        }
+        match state
+            .http_client
+            .get(&url)
+            .timeout(Duration::from_millis(300))
+            .send()
+            .await
+        {
+            Ok(res) if res.status().is_success() => match res.json::<serde_json::Value>().await {
+                Ok(value) => break value,
+                Err(_) => return,
+            },
+            _ if Instant::now() < deadline => sleep(Duration::from_millis(50)).await,
+            _ => return,
+        }
     };
 
     let all_nodes = group_info.get("all").and_then(|v| v.as_array());
@@ -188,6 +189,11 @@ async fn restore_last_proxy(state: &Arc<AppState>, generation: u64) {
         return;
     }
 
+    if group_info.get("now").and_then(|value| value.as_str()) == Some(&proxy.name) {
+        info!("Last proxy is already selected: {}", proxy.name);
+        return;
+    }
+
     // GET 往返可能耗时数秒：PUT 前最后确认一次这次启动仍是最新的
     if is_superseded(state, generation) {
         return;
@@ -196,7 +202,7 @@ async fn restore_last_proxy(state: &Arc<AppState>, generation: u64) {
     match state
         .http_client
         .put(&url)
-        .timeout(Duration::from_secs(5))
+        .timeout(Duration::from_secs(1))
         .json(&serde_json::json!({ "name": proxy.name }))
         .send()
         .await

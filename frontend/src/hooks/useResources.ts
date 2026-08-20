@@ -5,6 +5,8 @@ import type { ApiResponse, NodeInfo, RuleInfo, StatusData, SubStatus, VersionInf
 // （消费方判断 `!== false`）；platform 兜底与 ruleFieldOptions 的默认参数一致。
 const INITIAL_STATUS: StatusData = {
   running: false,
+  ready: false,
+  phase: 'initializing',
   initializing: false,
   route_mode: 'rule',
   node_select: 'manual',
@@ -25,7 +27,9 @@ export function useStatus() {
       const response = await fetch('/api/status')
       const payload: ApiResponse<StatusData> = await response.json()
       if (payload.success && payload.data) {
-        setStatus(payload.data)
+        const ready = payload.data.ready ?? (payload.data.running && !payload.data.initializing)
+        const phase = payload.data.phase ?? (ready ? 'ready' : payload.data.initializing ? 'initializing' : 'stopped')
+        setStatus({ ...payload.data, ready, phase })
         setStatusLoaded(true)
         setStatusFailures(0)
         return

@@ -7,8 +7,6 @@ import { useDesktopLayout } from './useDesktopLayout'
 import {
   EMPTY_NODE_FORM,
   nodeTypeDefaults,
-  POLL_INTERVAL,
-  POLL_INTERVAL_STARTUP,
   STATUS_FAILURE_THRESHOLD,
   type NodeForm,
 } from '../utils'
@@ -79,11 +77,11 @@ export function useAppData() {
   const autoTestedNodeRef = useRef('')
   const currentNodeName = primaryGroup?.now || ''
   useEffect(() => {
-    if (!status.running || status.initializing || !currentNodeName) return
+    if (!status.ready || status.initializing || !currentNodeName) return
     if (currentNodeName === autoTestedNodeRef.current) return
     autoTestedNodeRef.current = currentNodeName
     testDelay(clashApiBase, currentNodeName)
-  }, [status.running, status.initializing, currentNodeName, clashApiBase, testDelay])
+  }, [status.ready, status.initializing, currentNodeName, clashApiBase, testDelay])
 
   const resetNodeForm = useCallback(() => {
     setNodeType('hysteria2')
@@ -91,9 +89,10 @@ export function useAppData() {
   }, [])
 
   // 首次加载：获取初始状态后再决定显示 onboarding 还是 dashboard
-  // 同时拉取代理组，避免服务运行时首屏短暂显示“等待服务启动”
+  // Clash API 不属于首屏关键路径：内核未就绪或 API 卡顿时不能拖住整个面板。
+  // status/subs/nodes/rules 都由 miao 本身直接提供，足够决定首屏结构。
   useEffect(() => {
-    Promise.all([fetchStatus(), fetchSubs(), fetchNodes(), fetchRules(), fetchProxies()])
+    Promise.all([fetchStatus(), fetchSubs(), fetchNodes(), fetchRules()])
       .finally(() => setFirstLoadDone(true))
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -110,24 +109,29 @@ export function useAppData() {
 
   const pollingTasks = useMemo<PollTask[]>(() => {
     const tasks: PollTask[] = [fetchStatus, fetchSubs, fetchNodes, fetchRules]
-    if (status.running) {
+    if (status.ready) {
       tasks.push(fetchProxies)
     }
     return tasks
-  }, [fetchStatus, fetchSubs, fetchNodes, fetchRules, fetchProxies, status.running])
+  }, [fetchStatus, fetchSubs, fetchNodes, fetchRules, fetchProxies, status.ready])
+
+  // ready 由 false 变为 true 时立即补取 Clash 数据，不能等下一轮常规轮询；
+  // 这样后端提前展示面板后，数据面一就绪节点列表就会立刻出现。
+  useEffect(() => {
+    if (status.ready) fetchProxies()
+  }, [status.ready, fetchProxies])
 
   const connectionPollingTasks = useMemo(() => [fetchConnections], [fetchConnections])
 
-  // 初始化期（内核正在拉起）加速轮询，就绪状态近乎即时呈现；平时 3s
-  usePolling(pollingTasks, true, status.initializing ? POLL_INTERVAL_STARTUP : POLL_INTERVAL)
+  usePolling(pollingTasks)
   usePolling(
     connectionPollingTasks,
-    status.running && (showConnectionsModal || isDesktop || rules.length > 0),
+    Boolean(status.ready) && (showConnectionsModal || isDesktop || rules.length > 0),
   )
 
   useEffect(() => {
     fetchVersion()
-  }, [status.running, fetchVersion])
+  }, [status.ready, fetchVersion])
 
   useEffect(() => {
     return () => closeSockets()
@@ -140,10 +144,10 @@ export function useAppData() {
   }, [status.warning, showToast])
 
   useEffect(() => {
-    if (!status.running) {
+    if (!status.ready) {
       clearDelays()
     }
-  }, [status.running, clearDelays])
+  }, [status.ready, clearDelays])
 
   useEffect(() => {
     if (!isDesktop) setShowConnectionsModal(false)

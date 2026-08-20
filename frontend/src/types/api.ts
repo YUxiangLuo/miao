@@ -12,6 +12,20 @@ export type NodeSelect =
   | 'fastest_sg'
   | 'fastest_us'
 
+export type RuntimePhase =
+  | 'initializing'
+  | 'extracting'
+  | 'validating'
+  | 'fetching_subscriptions'
+  | 'starting'
+  | 'ready'
+  | 'refreshing_subscriptions'
+  | 'applying_config'
+  | 'reloading'
+  | 'stopping'
+  | 'stopped'
+  | 'failed'
+
 /** handlers/nodes.rs VALID_NODE_TYPES */
 export type NodeType = 'hysteria2' | 'anytls' | 'ss' | 'vmess' | 'vless' | 'trojan' | 'tuic'
 
@@ -25,6 +39,9 @@ export interface ApiResponse<T = unknown> {
 /** models/api.rs StatusData（GET /api/status） */
 export interface StatusData {
   running: boolean
+  /** Additive fields; fallbacks in useStatus keep older backends usable. */
+  ready?: boolean
+  phase?: RuntimePhase
   initializing: boolean
   route_mode: RouteMode
   node_select: NodeSelect
@@ -77,6 +94,7 @@ export interface SubStatus {
   url: string
   success: boolean
   node_count: number
+  state?: 'pending' | 'refreshing' | 'ready' | 'failed'
   error?: string
 }
 

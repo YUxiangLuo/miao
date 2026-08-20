@@ -111,15 +111,12 @@ log "写入 systemd 单元 $UNIT_PATH"
 cat > "$UNIT_PATH" <<'EOF'
 [Unit]
 Description=Miao transparent proxy (embedded sing-box)
-After=network-online.target
-Wants=network-online.target
+After=network.target
 
 [Service]
 Type=simple
-# network-online.target 只保证链路在线(实测:IPv6LL/DHCPv6 即放行,IPv4 默认路由可能晚数秒才到,
-# 启动即拉订阅会在无路由时秒败)。启动前最多等 60s 真实路由(v4 或 v6),等不到也照常启动:
-# miao 会以降级配置运行,订阅随后可在面板手动刷新
-ExecStartPre=/bin/sh -c 'command -v ip >/dev/null || exit 0; for i in $(seq 1 30); do ip route get 223.5.5.5 >/dev/null 2>&1 && exit 0; ip -6 route get 2606:4700:4700::1111 >/dev/null 2>&1 && exit 0; sleep 2; done'
+# 面板必须先可访问；网络/DHCP 尚未就绪时由 miao 的后台订阅重试负责，
+# 不在 ExecStartPre 中阻塞整个进程和控制面板。
 ExecStart=/usr/local/bin/miao
 WorkingDirectory=/etc/miao
 Restart=on-failure
