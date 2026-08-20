@@ -229,6 +229,11 @@
     background: var(--surface-green-soft);
     color: var(--success);
 }
+/* 自然宽 + 不收缩：右侧数字区是定宽子列（各行恒等），chip 右边缘被挤到同一
+   位置自然右对齐成列；空间不足时截断域名列（min-width:0），不裁 badge */
+.connection-outbound-chip {
+    flex: 0 0 auto;
+}
 .conn-row-total-label {
     color: var(--text-subtle);
     font-size: var(--fs-xs);
@@ -311,14 +316,17 @@
     font-size: var(--fs-sm);
 }
 .conn-row-speed {
-    flex: 0 0 var(--conn-speed-w);
+    flex: 0 0 auto;
     display: flex;
     align-items: center;
     justify-content: flex-end;
     gap: var(--space-2);
     color: var(--text-muted);
 }
+/* 数字子列定宽右对齐：下行/上行各自成一列，区块宽度由子列推导恒等 */
 .conn-row-speed small {
+    flex: 0 0 var(--conn-num-w);
+    justify-content: flex-end;
     display: inline-flex;
     align-items: center;
     gap: 3px;
@@ -330,8 +338,18 @@
 }
 .conn-row-speed .tone-upload {
     color: var(--accent-strong);
-}/* 速率比例条：蓝段=下载、绿段=上传（与数字同色），总长 = 总速率相对占比 */
+}
+/* 累计区：与速率同款定宽数字子列；「累计」标签为恒定文本，不参与对齐 */
+.conn-row-total {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: var(--space-2);
+}
 .conn-row-total small {
+    flex: 0 0 var(--conn-num-w);
+    justify-content: flex-end;
     display: inline-flex;
     align-items: center;
     gap: 3px;
