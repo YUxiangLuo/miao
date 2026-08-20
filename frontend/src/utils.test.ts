@@ -42,11 +42,11 @@ describe('formatters', () => {
     // 常见协议显式映射（大小写不敏感）
     expect(protocolTone('Hysteria2')).toBe('accent')
     expect(protocolTone('AnyTLS')).toBe('info')
-    expect(protocolTone('VLESS')).toBe('success')
+    expect(protocolTone('VLESS')).toBe('neutral')
     expect(protocolTone('vmess')).toBe('warning')
     expect(protocolTone('trojan')).toBe('neutral')
-    // 未知协议哈希到非红色调之一且结果稳定
-    const tones = ['info', 'success', 'warning', 'accent']
+    // 未知协议哈希到非红/绿色调之一且结果稳定（绿专属直连）
+    const tones = ['info', 'warning', 'accent']
     expect(tones).toContain(protocolTone('ShadowTLS'))
     expect(protocolTone('ShadowTLS')).toBe(protocolTone('shadowtls'))
     expect(protocolTone('')).toBe(protocolTone(undefined))

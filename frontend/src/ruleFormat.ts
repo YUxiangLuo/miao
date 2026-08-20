@@ -68,13 +68,13 @@ export function ruleFieldLabel(field: string): string {
 }
 
 // 规则字段 chip 色调（.badge 变体之一）：按字段族着色，与节点协议 chip 同体系；
-// 不用红色系（danger 保留给警示语义）
+// 不用红/绿（danger 保留给警示语义，success 专属直连）
 const RULE_FIELD_TONES: Record<string, BadgeTone> = {
   domain: 'info',
   domain_suffix: 'info',
   domain_keyword: 'info',
-  ip_cidr: 'success',
-  source_ip_cidr: 'success',
+  ip_cidr: 'neutral',
+  source_ip_cidr: 'neutral',
   port: 'warning',
   port_range: 'warning',
   protocol: 'neutral',
