@@ -13,7 +13,7 @@ interface NodeRowProps {
 
 const NodeRow = memo(function NodeRow({ node, onDelete, disabled }: NodeRowProps) {
   return (
-    <div className="list-row">
+    <div className="list-row node-row">
       <div className="list-row-content">
         <div className="list-row-title structured">
           <span className="rule-value" title={node.tag}>{node.tag}</span>
