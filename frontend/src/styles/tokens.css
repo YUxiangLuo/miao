@@ -110,7 +110,9 @@
     --anim-live: 2s; /* 活跃点/徽标呼吸 */
     --anim-rule: 1.6s; /* 规则命中脉冲 */
     --anim-logo: 3s; /* logo 光晕呼吸 */
-    --anim-fade: 0.35s; /* 数值刷新淡入 */
+    --anim-fade: 0.35s; /* 数值刷新淡入（兼作卡片入场时长） */
+    --anim-arrive: 0.9s; /* 节点切换到位脉冲（JS 镜像 ARRIVE_MS 在 tokens.ts） */
+    --stagger-step: 0.024s; /* 卡片入场交错步进：delay = step × --i（--i 封顶 STAGGER_CAP 在 tokens.ts） */
 
     /* ── 5. 层级 ─────────────────────────────────────────────────────── */
     --z-base: 0; /* 卡片内绝对定位层 */

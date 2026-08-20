@@ -1,8 +1,10 @@
 import { act, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ProxyCard } from './ProxyCard'
+import { ARRIVE_MS } from '../tokens'
 import type { StatusData } from '../types/api'
+import type { ClashProxy } from '../types/clash'
 
 function statusMock(node_select: StatusData['node_select']): StatusData {
   return {
@@ -231,5 +233,108 @@ describe('ProxyCard accessibility', () => {
     // 处理器结束后回到服务端真值（本例 status 未变，等效失败回弹）
     await act(async () => { settle?.() })
     expect(select).toHaveValue('manual')
+  })
+})
+
+describe('ProxyCard switch arrival animation', () => {
+  const baseProps = {
+    primaryGroupName: 'proxy',
+    switchingNode: '',
+    nodeSelectPending: false,
+    delays: {},
+    testingNodes: {},
+    testingGroup: '',
+    onTestDelay: vi.fn(),
+    onTestGroupDelays: vi.fn(),
+    onSwitchProxy: vi.fn(),
+    onSetNodeSelect: vi.fn(),
+    onOpenAddNode: vi.fn(),
+  }
+
+  function groupMock(now: string, all: string[]): ClashProxy {
+    return { type: 'Selector', now, all }
+  }
+
+  function renderCard(primaryGroup: ClashProxy | null) {
+    return render(
+      <ProxyCard {...baseProps} status={statusMock('manual')} primaryGroup={primaryGroup} />,
+    )
+  }
+
+  function rerenderCard(
+    rerender: (ui: React.ReactElement) => void,
+    primaryGroup: ClashProxy | null,
+  ) {
+    rerender(
+      <ProxyCard {...baseProps} status={statusMock('manual')} primaryGroup={primaryGroup} />,
+    )
+  }
+
+  const activeTile = (name: string) =>
+    screen.getByRole('button', { name: `当前节点 ${name}` }).closest('.proxy-tile')
+
+  beforeEach(() => {
+    vi.useFakeTimers()
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('marks the newly active tile with arrive after a switch, then clears it', () => {
+    const { container, rerender } = renderCard(groupMock('node-a', ['node-a', 'node-b']))
+
+    // 自动/手动切换同路径：now 变化后新选中 tile 拿到 .arrive
+    rerenderCard(rerender, groupMock('node-b', ['node-a', 'node-b']))
+    expect(activeTile('node-b')).toHaveClass('arrive')
+    expect(container.querySelectorAll('.proxy-tile.arrive')).toHaveLength(1)
+
+    // ARRIVE_MS 后移除，交棒给 CSS 的 tileGlow 呼吸
+    act(() => {
+      vi.advanceTimersByTime(ARRIVE_MS)
+    })
+    expect(activeTile('node-b')).not.toHaveClass('arrive')
+  })
+
+  it('does not mark arrival on first render', () => {
+    const { container } = renderCard(groupMock('node-a', ['node-a', 'node-b']))
+    expect(activeTile('node-a')).not.toHaveClass('arrive')
+    expect(container.querySelectorAll('.proxy-tile.arrive')).toHaveLength(0)
+  })
+
+  it('ignores list rebuilds where the previous node is gone', () => {
+    // 刷新订阅后候选列表重建：now 落在全新节点上不算切换
+    const { container, rerender } = renderCard(groupMock('node-a', ['node-a', 'node-b']))
+    rerenderCard(rerender, groupMock('node-c', ['node-c', 'node-d']))
+    expect(container.querySelectorAll('.proxy-tile.arrive')).toHaveLength(0)
+  })
+
+  it('keeps the pending arrival across re-polls with the same now', () => {
+    // 轮询每次产生新的 all 数组身份，effect 会重跑——但不许碰未决的脉冲定时器
+    const { rerender } = renderCard(groupMock('node-a', ['node-a', 'node-b']))
+    rerenderCard(rerender, groupMock('node-b', ['node-a', 'node-b']))
+    expect(activeTile('node-b')).toHaveClass('arrive')
+
+    act(() => {
+      vi.advanceTimersByTime(ARRIVE_MS / 2)
+    })
+    rerenderCard(rerender, groupMock('node-b', ['node-a', 'node-b']))
+    act(() => {
+      vi.advanceTimersByTime(ARRIVE_MS / 2 - 1)
+    })
+    expect(activeTile('node-b')).toHaveClass('arrive')
+
+    act(() => {
+      vi.advanceTimersByTime(1)
+    })
+    expect(activeTile('node-b')).not.toHaveClass('arrive')
+  })
+
+  it('ignores transient proxy wipeouts (poll failure recovery)', () => {
+    // 轮询失败时 proxies 被清空为 null，恢复后 now「变回」原节点不应误报
+    const { container, rerender } = renderCard(groupMock('node-a', ['node-a', 'node-b']))
+    rerenderCard(rerender, null)
+    rerenderCard(rerender, groupMock('node-a', ['node-a', 'node-b']))
+    expect(container.querySelectorAll('.proxy-tile.arrive')).toHaveLength(0)
   })
 })

@@ -15,3 +15,11 @@ export const CONNECTIONS_MODAL_MIN_WIDTH = 841
 // 主题：localStorage 键 + PWA theme-color（与 tokens.css 的 --bg 双主题值同步）
 export const THEME_KEY = 'miao-theme'
 export const THEME_META = { dark: '#1a1d22', light: '#ffffff' }
+
+// 节点切换到位脉冲时长（与 tokens.css 的 --anim-arrive 同步）：
+// 动画结束 ≈ React 移除 .arrive class，交棒给 .active 的 tileGlow 呼吸。
+export const ARRIVE_MS = 900
+
+// 入场交错序号 --i 的上限（与 tokens.css 的 --stagger-step 配合）：
+// 大订阅下末位 tile 的入场延迟封顶在 ~0.3s，不会等数秒才出现。
+export const STAGGER_CAP = 12

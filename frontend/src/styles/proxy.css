@@ -59,7 +59,18 @@
     background: var(--raised);
     color: var(--text);
     text-align: left;
-    transition: transform var(--dur) var(--ease), border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
+    transition: transform var(--dur) var(--ease), border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease), background-color var(--dur) var(--ease);
+    /* 入场：淡入 + 3px 上浮，按 --i 交错（步进 --stagger-step，封顶见 tokens.ts）。
+       仅挂载时播放一次，轮询只更新 props 不 remount，不会重放；
+       播放期间 transform 由动画接管，悬停浮起短暂让位 */
+    animation: tileEnter var(--anim-fade) var(--ease) backwards;
+    animation-delay: calc(var(--stagger-step) * var(--i, 0));
+}
+@keyframes tileEnter {
+    from {
+        opacity: 0;
+        transform: translateY(3px);
+    }
 }
 /* 悬停浮起：上移 2px + 小阴影；选中态只加强描边，浮起照常有 */
 .proxy-tile:hover {
@@ -75,13 +86,18 @@
 @media (prefers-reduced-motion: reduce) {
     .proxy-tile {
         transition: none;
+        animation: none;
     }
 }
 .proxy-tile.active {
     background: var(--accent-tint);
     border-color: var(--accent);
-    /* 选中强调：品牌紫呼吸光晕（3s，与 logo 光晕同周期） */
-    animation: tileGlow var(--anim-logo) ease-in-out infinite;
+    /* 选中强调：品牌紫呼吸光晕（3s，与 logo 光晕同周期）。
+       tileEnter 在三态（普通/选中/到位）的动画列表里始终同名、同参数、同 delay
+       居首位——浏览器按动画名匹配保留已播完的入场动画：取消选中时它不会重放
+       （旧 tile 不再消失再出现），背景与描边由 transition 快速褪去 */
+    animation: tileEnter var(--anim-fade) var(--ease) backwards, tileGlow var(--anim-logo) ease-in-out infinite;
+    animation-delay: calc(var(--stagger-step) * var(--i, 0)), calc(var(--stagger-step) * var(--i, 0));
 }
 @keyframes tileGlow {
     0%, 100% {
@@ -93,6 +109,27 @@
 }
 @media (prefers-reduced-motion: reduce) {
     .proxy-tile.active {
+        animation: none;
+    }
+}
+/* 切换到位脉冲：now 变化时 React 给新选中 tile 加 .arrive，脉冲回落后移除
+   class 交棒 tileGlow（时长与 tokens.ts 的 ARRIVE_MS / tokens.css 的 --anim-arrive 同步）。
+   特异性高于 .proxy-tile.active，脉冲期间覆盖呼吸光晕；
+   tileEnter 保持与另两态完全一致（同名匹配防重放） */
+.proxy-tile.active.arrive {
+    animation: tileEnter var(--anim-fade) var(--ease) backwards, tileArrive var(--anim-arrive) var(--ease);
+    animation-delay: calc(var(--stagger-step) * var(--i, 0)), calc(var(--stagger-step) * var(--i, 0));
+}
+@keyframes tileArrive {
+    0% {
+        box-shadow: 0 0 22px 4px color-mix(in srgb, var(--accent) 55%, transparent);
+    }
+    100% {
+        box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 0%, transparent);
+    }
+}
+@media (prefers-reduced-motion: reduce) {
+    .proxy-tile.active.arrive {
         animation: none;
     }
 }

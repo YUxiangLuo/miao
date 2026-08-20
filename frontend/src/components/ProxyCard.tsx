@@ -1,6 +1,7 @@
-import { memo, useState } from 'react'
+import { memo, useEffect, useRef, useState } from 'react'
+import type { CSSProperties } from 'react'
 import { Waypoints, Zap, LoaderCircle, Plus } from 'lucide-react'
-import { ICON } from '../tokens'
+import { ARRIVE_MS, ICON, STAGGER_CAP } from '../tokens'
 import { Button, SectionCard } from './ui'
 import { 
   classNames, 
@@ -25,17 +26,22 @@ export interface ProxyTileProps {
   protocol?: string
   delay?: number
   isActive: boolean
+  isArriving: boolean
   isTesting: boolean
   isSwitching: boolean
   switchDisabled: boolean
+  index: number
   onSwitchProxy: (group: string, nodeName: string) => void
   onTestDelay: (nodeName: string) => void
   group: string
 }
 
-const ProxyTile = memo(function ProxyTile({ nodeName, protocol, delay, isActive, isTesting, isSwitching, switchDisabled, onSwitchProxy, onTestDelay, group }: ProxyTileProps) {
+const ProxyTile = memo(function ProxyTile({ nodeName, protocol, delay, isActive, isArriving, isTesting, isSwitching, switchDisabled, index, onSwitchProxy, onTestDelay, group }: ProxyTileProps) {
   return (
-    <div className={classNames('proxy-tile', isActive && 'active')}>
+    <div
+      className={classNames('proxy-tile', isActive && 'active', isArriving && 'arrive')}
+      style={{ '--i': Math.min(index, STAGGER_CAP) } as CSSProperties}
+    >
       <button
         type="button"
         className="proxy-switch-button"
@@ -109,6 +115,32 @@ export function ProxyCard({
   // fetchStatus 才更新,直接受控会弹回旧值;处理器结束(成功或失败)后回到服务端真值
   const [pendingSelect, setPendingSelect] = useState('')
 
+  // 切换到位检测：primaryGroup.now 变化（手动切换成功后的 refetch、自动模式
+  // 轮询发现 URLTest 换节点，走同一条路径）时给新选中 tile 加 .arrive 脉冲，
+  // ARRIVE_MS 后移除并交棒给 tileGlow 呼吸。
+  // 守卫：首次填充（prev 为空）与轮询闪断恢复（旧节点须仍在候选列表内）不触发。
+  const [arrivedNode, setArrivedNode] = useState('')
+  const switchRef = useRef<{ now: string; timer: number }>({ now: '', timer: 0 })
+  const groupNow = primaryGroup?.now ?? ''
+  const groupAll = primaryGroup?.all
+
+  useEffect(() => {
+    const prev = switchRef.current
+    const all = groupAll ?? []
+    const isSwitch = Boolean(
+      prev.now && groupNow && prev.now !== groupNow &&
+      all.includes(prev.now) && all.includes(groupNow),
+    )
+    prev.now = groupNow
+    if (!isSwitch) return
+    window.clearTimeout(prev.timer)
+    setArrivedNode(groupNow)
+    prev.timer = window.setTimeout(() => setArrivedNode(''), ARRIVE_MS)
+  }, [groupNow, groupAll])
+
+  // 卸载时清掉未决的脉冲清除定时器
+  useEffect(() => () => window.clearTimeout(switchRef.current.timer), [])
+
   return (
     <SectionCard
       bodyClassName="panel-body-tight"
@@ -152,16 +184,18 @@ export function ProxyCard({
         {primaryGroup ? (
           <div className="proxy-grid">
             {/* primaryGroup 是 Selector/URLTest 分组，必有 all 候选列表 */}
-            {primaryGroup.all!.map((nodeName: string) => (
+            {primaryGroup.all!.map((nodeName: string, index: number) => (
               <ProxyTile
                 key={nodeName}
                 nodeName={nodeName}
                 protocol={nodeProtocols[nodeName]}
                 delay={delays[nodeName]}
                 isActive={primaryGroup.now === nodeName}
+                isArriving={arrivedNode === nodeName}
                 isTesting={Boolean(testingNodes[nodeName])}
                 isSwitching={switchingNode === nodeName}
                 switchDisabled={Boolean(switchingNode) || isFastest}
+                index={index}
                 group={primaryGroupName}
                 onSwitchProxy={onSwitchProxy}
                 onTestDelay={onTestDelay}
@@ -169,6 +203,7 @@ export function ProxyCard({
             ))}
             <button
               className="proxy-tile add-tile"
+              style={{ '--i': Math.min(primaryGroup.all!.length, STAGGER_CAP) } as CSSProperties}
               onClick={onOpenAddNode}
               disabled={status.initializing}
             >
