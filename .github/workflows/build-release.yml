@@ -56,10 +56,20 @@ jobs:
         with:
           targets: ${{ matrix.rust_target }}
 
+      - name: Detect sing-box Go version
+        shell: bash
+        run: |
+          # 内核跟默认分支 HEAD，Go 版本也跟随其 go.mod 声明——
+          # 不跟 stable 频道（1.27 曾改 std 内嵌 http2 导致 linkname 断链）
+          GO_VER=$(curl -fsSL https://raw.githubusercontent.com/SagerNet/sing-box/HEAD/go.mod \
+            | grep -E '^go [0-9]+\.[0-9]+' | head -1 | awk '{print $2}')
+          echo "sing-box go.mod requires go $GO_VER"
+          echo "GO_VER=$GO_VER" >> "$GITHUB_ENV"
+
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: stable
+          go-version: ${{ env.GO_VER }}
 
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
@@ -109,10 +119,18 @@ jobs:
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Detect sing-box Go version
+        shell: bash
+        run: |
+          GO_VER=$(curl -fsSL https://raw.githubusercontent.com/SagerNet/sing-box/HEAD/go.mod \
+            | grep -E '^go [0-9]+\.[0-9]+' | head -1 | awk '{print $2}')
+          echo "sing-box go.mod requires go $GO_VER"
+          echo "GO_VER=$GO_VER" >> "$GITHUB_ENV"
+
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: stable
+          go-version: ${{ env.GO_VER }}
 
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
