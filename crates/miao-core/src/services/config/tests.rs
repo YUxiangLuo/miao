@@ -232,6 +232,12 @@ fn build_sing_box_config_merges_nodes_and_valid_custom_rules() {
     assert_eq!(rules[1]["action"], "hijack-dns");
     assert_eq!(rules[2]["domain_suffix"][0], "example.com");
     assert_eq!(rules[3]["ip_is_private"], true);
+
+    let dns_rules = built["dns"]["rules"].as_array().unwrap();
+    assert_eq!(dns_rules.len(), 2);
+    assert_eq!(dns_rules[0]["domain_suffix"], json!(["example.com"]));
+    assert_eq!(dns_rules[0]["server"], "cfdns");
+    assert_eq!(dns_rules[1]["rule_set"], json!(["chinasite"]));
 }
 
 #[test]
@@ -275,8 +281,66 @@ fn build_sing_box_config_global_mode_removes_split_rules() {
     assert!(rules[..2].iter().all(|rule| rule.get("outbound").is_none()));
 
     let dns_rules = built["dns"]["rules"].as_array().unwrap();
-    assert!(dns_rules.is_empty());
+    // 全局模式只移除内置中国分流；自定义直连规则的 DNS 策略仍保留。
+    assert_eq!(dns_rules.len(), 1);
+    assert_eq!(dns_rules[0]["domain_suffix"], json!(["example.com"]));
+    assert_eq!(dns_rules[0]["server"], "local");
     assert_eq!(built["route"]["final"], "proxy");
+}
+
+#[test]
+fn build_sing_box_config_mirrors_safe_custom_rules_to_dns() {
+    let config = Config {
+        custom_rules: vec![
+            r#"{"domain_keyword":"openai","action":"route","outbound":"manual-a"}"#.to_string(),
+            r#"{"domain_suffix":["example.com"],"action":"route","outbound":"manual-a"}"#
+                .to_string(),
+            r#"{"process_name":"curl","action":"route","outbound":"direct"}"#.to_string(),
+            // The destination port describes the data connection, not its DNS query.
+            r#"{"port":443,"action":"route","outbound":"manual-a"}"#.to_string(),
+            // Do not broaden a compound raw rule by dropping its unsupported matcher.
+            r#"{"domain":"mixed.example","port":443,"action":"route","outbound":"manual-a"}"#
+                .to_string(),
+        ],
+        ..Default::default()
+    };
+    let my_outbounds = vec![json!({
+        "type": "hysteria2",
+        "tag": "manual-a",
+        "server": "manual.example.com",
+        "server_port": 443,
+        "password": "secret"
+    })];
+
+    let (built, _skipped, _) = build_sing_box_config(
+        &config,
+        vec!["manual-a".to_string()],
+        my_outbounds,
+        vec![],
+        vec![],
+    )
+    .unwrap();
+
+    let dns_servers = built["dns"]["servers"].as_array().unwrap();
+    let node_servers: Vec<_> = dns_servers
+        .iter()
+        .filter(|server| server["tag"] == "custom-node-dns-1")
+        .collect();
+    assert_eq!(node_servers.len(), 1);
+    assert_eq!(node_servers[0]["type"], "https");
+    assert_eq!(node_servers[0]["server"], "1.1.1.1");
+    assert_eq!(node_servers[0]["detour"], "manual-a");
+
+    let dns_rules = built["dns"]["rules"].as_array().unwrap();
+    assert_eq!(dns_rules.len(), 4);
+    assert_eq!(dns_rules[0]["domain_keyword"], "openai");
+    assert_eq!(dns_rules[0]["server"], "custom-node-dns-1");
+    assert_eq!(dns_rules[1]["domain_suffix"], json!(["example.com"]));
+    assert_eq!(dns_rules[1]["server"], "custom-node-dns-1");
+    assert_eq!(dns_rules[2]["process_name"], "curl");
+    assert_eq!(dns_rules[2]["server"], "local");
+    assert_eq!(dns_rules[3]["rule_set"], json!(["chinasite"]));
+    assert!(dns_rules.iter().all(|rule| rule.get("port").is_none()));
 }
 
 #[test]
@@ -704,6 +768,7 @@ fn build_sing_box_config_splits_direct_route_rules() {
     assert_eq!(dns_rules[0]["server"], "local");
 
     assert_eq!(built["dns"]["disable_cache"], false);
+    assert_eq!(built["dns"]["reverse_mapping"], true);
     assert_eq!(built["dns"]["cache_capacity"], 4096);
     assert_eq!(built["dns"]["optimistic"]["enabled"], true);
     assert_eq!(built["dns"]["optimistic"]["timeout"], "8h");

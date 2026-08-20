@@ -230,6 +230,125 @@ fn parse_custom_rules(custom_rules: &[String]) -> Vec<serde_json::Value> {
     parsed
 }
 
+/// Route rules and DNS rules are evaluated independently by sing-box. Mirror
+/// the subset of custom route matchers whose meaning is stable during a DNS
+/// request, so a rule that pins traffic to an outbound also resolves through
+/// that outbound.
+///
+/// Destination ports/IPs and sniffed protocols describe the future data
+/// connection, not the DNS request, so copying them would silently broaden or
+/// change the rule. Raw compound rules containing any such field are skipped.
+const DNS_MIRROR_MATCHERS: &[&str] = &[
+    "domain",
+    "domain_suffix",
+    "domain_keyword",
+    "domain_regex",
+    "source_ip_cidr",
+    "source_ip_is_private",
+    "process_name",
+    "process_path",
+    "process_path_regex",
+    "package_name",
+    "package_name_regex",
+];
+
+fn mirrored_dns_matchers(
+    rule: &serde_json::Map<String, serde_json::Value>,
+) -> Option<serde_json::Map<String, serde_json::Value>> {
+    let mut matchers = serde_json::Map::new();
+    for (key, value) in rule {
+        if matches!(key.as_str(), "action" | "outbound") {
+            continue;
+        }
+        if !DNS_MIRROR_MATCHERS.contains(&key.as_str()) {
+            return None;
+        }
+        matchers.insert(key.clone(), value.clone());
+    }
+    (!matchers.is_empty()).then_some(matchers)
+}
+
+fn dns_server_for_outbound(
+    outbound: &str,
+    dns_servers: &mut Vec<serde_json::Value>,
+    node_dns_servers: &mut Vec<(String, String)>,
+) -> String {
+    match outbound {
+        "direct" => "local".to_string(),
+        "proxy" => "cfdns".to_string(),
+        node => {
+            if let Some((_, server)) = node_dns_servers.iter().find(|(name, _)| name == node) {
+                return server.clone();
+            }
+
+            let server = format!("custom-node-dns-{}", node_dns_servers.len() + 1);
+            dns_servers.push(serde_json::json!({
+                "type": "https",
+                "tag": server,
+                "server": "1.1.1.1",
+                "detour": node
+            }));
+            node_dns_servers.push((node.to_string(), server.clone()));
+            server
+        }
+    }
+}
+
+fn derive_custom_dns_rules(
+    custom_rules: &[String],
+    dns_servers: &mut Vec<serde_json::Value>,
+) -> Vec<serde_json::Value> {
+    let mut dns_rules = Vec::new();
+    let mut node_dns_servers = Vec::new();
+
+    for rule in parse_custom_rules(custom_rules) {
+        let Some(rule) = rule.as_object() else {
+            continue;
+        };
+        if rule
+            .get("action")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|action| action != "route")
+        {
+            continue;
+        }
+        let Some(outbound) = rule.get("outbound").and_then(serde_json::Value::as_str) else {
+            continue;
+        };
+        let Some(mut dns_rule) = mirrored_dns_matchers(rule) else {
+            continue;
+        };
+
+        let server = dns_server_for_outbound(outbound, dns_servers, &mut node_dns_servers);
+        dns_rule.insert("action".to_string(), serde_json::json!("route"));
+        dns_rule.insert("server".to_string(), serde_json::json!(server));
+        dns_rules.push(serde_json::Value::Object(dns_rule));
+    }
+
+    dns_rules
+}
+
+fn apply_dns_route_mode(
+    sing_box_config: &mut serde_json::Value,
+    route_mode: RouteMode,
+    custom_rules: &[String],
+) {
+    let Some(dns_servers) = sing_box_config["dns"]["servers"].as_array_mut() else {
+        return;
+    };
+    let custom_dns_rules = derive_custom_dns_rules(custom_rules, dns_servers);
+    let Some(dns_rules) = sing_box_config["dns"]["rules"].as_array_mut() else {
+        return;
+    };
+
+    if route_mode == RouteMode::Global {
+        // Global mode removes only the built-in China split. Custom routing is
+        // still active, so its derived DNS policy must remain active too.
+        dns_rules.clear();
+    }
+    dns_rules.splice(0..0, custom_dns_rules);
+}
+
 fn apply_route_mode(
     sing_box_config: &mut serde_json::Value,
     route_mode: RouteMode,
@@ -253,11 +372,7 @@ fn apply_route_mode(
         }
     }
 
-    if route_mode == RouteMode::Global {
-        if let Some(dns_rules) = sing_box_config["dns"]["rules"].as_array_mut() {
-            dns_rules.clear();
-        }
-    }
+    apply_dns_route_mode(sing_box_config, route_mode, custom_rules);
 }
 
 pub(super) fn tun_inbound() -> serde_json::Value {
@@ -290,6 +405,7 @@ fn get_config_template() -> serde_json::Value {
         "dns": {
             "final": "cfdns",
             "strategy": "ipv4_only",
+            "reverse_mapping": true,
             "disable_cache": false,
             "cache_capacity": 4096,
             "optimistic": {"enabled": true, "timeout": "8h"},
