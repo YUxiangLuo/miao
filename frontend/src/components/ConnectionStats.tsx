@@ -1,12 +1,11 @@
 import { ArrowDown, ArrowUp } from 'lucide-react'
-import { ICON } from '../tokens'
+import { ICON, PATH_ICON_CELL } from '../tokens'
 import { formatBytes, formatSpeed } from '../utils'
+import { useElementWidth } from '../hooks/useElementWidth'
 import type { EnrichedConnection } from '../types/clash'
 import { domainsForPath, splitConnectionStats, uniqueIconDomains, type PathStats } from './connectionFilters'
 import { AnimatedValue, SiteMark } from './connectionUi'
-
-/** favicon 条最多展示的图标数，超出折叠为 +N */
-const MAX_ICONS = 8
+import { foldIcons, MAX_ICONS } from './iconFold'
 
 function PathCard({ tone, label, stats, domains }: {
   tone: 'info' | 'success'
@@ -16,16 +15,20 @@ function PathCard({ tone, label, stats, domains }: {
   domains: string[]
 }) {
   const unique = uniqueIconDomains(domains)
-  const shown = unique.slice(0, MAX_ICONS)
-  const overflow = unique.length - shown.length
+  // 图标尺寸恒定，单行放不下才折 +N：实测图标区宽度决定单行容量
+  const { ref, width } = useElementWidth<HTMLDivElement>()
+  const fit = Number.isFinite(width) ? Math.max(1, Math.floor(width / PATH_ICON_CELL)) : MAX_ICONS
+  const plan = foldIcons(unique.length, fit)
+  const shown = unique.slice(0, plan.shown)
 
   return (
     <div className="path-card">
-      <div className="path-card-head">
+      <div className="path-id">
         <span className={`badge ${tone}`}>{label}</span>
         <span className="path-count">{stats.count} 条链接</span>
       </div>
-      <div className="path-speed">
+      {/* 速率列：上下行堆叠，/s 单位自说明，无需标签 */}
+      <div className="path-col speed">
         <small className="tone-download">
           <ArrowDown size={ICON.sm} />
           <AnimatedValue value={formatSpeed(stats.downloadSpeed)} />
@@ -35,8 +38,8 @@ function PathCard({ tone, label, stats, domains }: {
           <AnimatedValue value={formatSpeed(stats.uploadSpeed)} />
         </small>
       </div>
-      <div className="path-total">
-        <span className="path-total-label">累计</span>
+      {/* 累计列：与速率列平行的上下行（小字号次要指标，裸字节数即累计量） */}
+      <div className="path-col total">
         <small className="tone-download">
           <ArrowDown size={ICON.xs} />
           <AnimatedValue value={formatBytes(stats.download)} />
@@ -46,11 +49,11 @@ function PathCard({ tone, label, stats, domains }: {
           <AnimatedValue value={formatBytes(stats.upload)} />
         </small>
       </div>
-      <div className="path-icons">
+      <div ref={ref} className="path-icons">
         {shown.map((domain) => (
-          <SiteMark key={domain} domain={domain} small />
+          <SiteMark key={domain} domain={domain} />
         ))}
-        {overflow > 0 && <span className="path-icons-more">+{overflow}</span>}
+        {plan.more > 0 && <span className="path-icons-more">+{plan.more}</span>}
       </div>
     </div>
   )

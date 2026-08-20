@@ -152,8 +152,8 @@
     --size-status-badge: 28px; /* 订阅状态圆形图标 */
     --size-icon-btn: 32px;
     --size-site-icon: 32px;
-    --size-site-icon-sm: 20px; /* 统计卡 favicon 条的小图标 */
     --size-site-icon-lg: 64px; /* 首页活跃链接正方形卡的站点图标（主视觉，占卡片近半高） */
+    --size-path-icon-lg: 48px; /* 通道卡 favicon 放大档：与两行主内容块（速率上下行）同高 */
     --topbar-divider-h: 32px;
     --badge-min-w: 20px; /* 计数徽标 */
 
@@ -185,6 +185,7 @@
     --conn-card-min: 280px; /* 连接卡网格最小列宽 */
     --conn-row-min-h: 56px; /* 链接统计行最小高度 */
     --conn-num-w: 5rem; /* 链接统计行数字子列定宽（速率/累计的上下行共用，右对齐成列） */
+    --path-num-w: 5.5rem; /* 通道卡列宽（身份/速率/累计三列共用，跨两卡列位一致） */
     --tile-min-h: 88px; /* 节点 tile 最小高度 */
     --size-tile-test: 64px; /* 节点 tile 正方形测速按钮边长（四位数延迟 + ms 不换行） */
 

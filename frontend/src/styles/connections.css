@@ -191,14 +191,7 @@
     font-size: var(--fs-md);
     font-weight: var(--fw-heavy);
 }
-.site-icon.sm {
-    width: var(--size-site-icon-sm);
-    height: var(--size-site-icon-sm);
-    border-radius: var(--r-sm);
-}
-.site-icon.sm.letter {
-    font-size: var(--fs-xs);
-}/* 徽标基元由 .badge 提供，这里只保留配色与截断 */
+/* 徽标基元由 .badge 提供，这里只保留配色与截断 */
 .connection-outbound-chip,
 .connection-count-chip {
     flex: 0 1 auto;
@@ -345,8 +338,9 @@
     color: var(--accent-strong);
 }
 /* ── 直连/代理双通道汇总卡 ────────────────────────────────────────
-   每条 lane：路径 chip + 速率对（主指标）+ 累计对（次要）+ 链接数，
-   底部占比条 = 本通道占两通道合计速率的份额（代理蓝/直连绿）。 */
+   横向四区带：身份列（badge/计数）| 速率列（大字号上下行）| 累计列
+   （小字号上下行）| favicon 栅格。三列定宽（--path-num-w），
+   两张卡的列位 x 一致；卡片只有两行高。 */
 .path-stats {
     flex: 0 0 auto;
     display: grid;
@@ -355,86 +349,91 @@
 }
 .path-card {
     display: flex;
-    flex-direction: column;
-    gap: var(--space-2);
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--space-3);
     min-width: 0;
     padding: var(--space-2) var(--space-3);
     border-radius: var(--r-md);
     background: var(--surface-soft);
     border: var(--bw) solid var(--border-soft);
 }
-.path-card-head {
+.path-id {
+    flex: 0 0 var(--path-num-w);
     display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--space-2);
-}
-.path-card-head .badge {
-    justify-content: center;
-    min-width: var(--badge-min-w);
-}
-.path-speed {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--space-3);
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--space-1);
     min-width: 0;
 }
-.path-speed small {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--space-1);
-    font-size: var(--fs-lg);
-    font-weight: var(--fw-semibold);
-    font-variant-numeric: var(--font-numeric);
-    white-space: nowrap;
-}
-.path-speed .tone-download {
-    color: var(--info-strong);
-}
-.path-speed .tone-upload {
-    color: var(--accent-strong);
-}
-.path-total {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--space-2);
-    color: var(--text-muted);
-    font-size: var(--fs-sm);
-    white-space: nowrap;
-}
-.path-total-label {
-    color: var(--text-subtle);
-}
-.path-total small {
-    display: inline-flex;
-    align-items: center;
-    gap: 3px;
-    font-variant-numeric: var(--font-numeric);
-}
-.path-total .tone-download {
-    color: var(--info-strong);
-}
-.path-total .tone-upload {
-    color: var(--accent-strong);
-}
-.path-icons {
-    display: flex;
-    align-items: center;
-    gap: var(--space-1);
-    min-height: var(--size-site-icon-sm);
-    overflow: hidden;
-}
-.path-icons .site-icon {
-    flex: 0 0 auto;
-}
-.path-icons-more {
-    color: var(--text-subtle);
-    font-size: var(--fs-sm);
-    font-variant-numeric: var(--font-numeric);
-    white-space: nowrap;
+.path-id .badge {
+    justify-content: center;
+    min-width: var(--badge-min-w);
 }
 .path-count {
     color: var(--text-muted);
     font-size: var(--fs-sm);
+    white-space: nowrap;
+}
+/* 指标列：定宽上下行堆叠；速率大字号（/s 自说明），累计小字号裸值。
+   身份列同宽（.path-id），两卡内各列与跨卡列位均一致 */
+.path-col {
+    flex: 0 0 var(--path-num-w);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-0);
+    min-width: 0;
+}
+.path-col small {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    white-space: nowrap;
+    font-variant-numeric: var(--font-numeric);
+}
+.path-col.speed small {
+    font-size: var(--fs-lg);
+    font-weight: var(--fw-semibold);
+}
+.path-col.total small {
+    font-size: var(--fs-sm);
+}
+.path-col .tone-download {
+    color: var(--info-strong);
+}
+.path-col .tone-upload {
+    color: var(--accent-strong);
+}
+/* favicon 栅格：吃掉卡片剩余宽度，靠右对齐、垂直居中。
+   图标尺寸恒定（--size-path-icon-lg，与两行主内容块同高）；
+   单行容量由 JS 实测（useElementWidth + PATH_ICON_CELL），放不下折 +N */
+.path-icons {
+    flex: 1;
+    min-width: 0;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, var(--size-path-icon-lg));
+    gap: var(--space-2);
+    justify-content: end;
+    align-content: center;
+}
+.path-icons .site-icon {
+    width: var(--size-path-icon-lg);
+    height: var(--size-path-icon-lg);
+    border-radius: var(--r-md);
+}
+.path-icons .site-icon svg {
+    width: 60%;
+    height: 60%;
+}
+.path-icons .site-icon.letter {
+    font-size: var(--fs-xl);
+}
+.path-icons-more {
+    display: inline-flex;
+    align-items: center;
+    height: var(--size-path-icon-lg);
+    color: var(--text-subtle);
+    font-size: var(--fs-sm);
+    font-variant-numeric: var(--font-numeric);
     white-space: nowrap;
 }
