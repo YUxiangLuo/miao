@@ -40,11 +40,6 @@ export function ConnectionRow({ connection }: ConnectionRowProps) {
 
   const combined = connectionSpeed(connection)
   const active = combined > 0
-  // 双段比例条：蓝段=下载、绿段=上传（与正上方两组数字同色）。
-  // 每行恒满宽：段宽 = 各自 ÷ 本行合计——表达上下行构成而非绝对量
-  // （量级由数字与排序承担；按全场面最大值归一会让大多数行常年只见一截）
-  const downShare = combined > 0 ? connection.downloadSpeed / combined : 0
-  const upShare = combined > 0 ? connection.uploadSpeed / combined : 0
 
   return (
     <article
@@ -69,10 +64,6 @@ export function ConnectionRow({ connection }: ConnectionRowProps) {
             <ArrowUp size={ICON.xs} />
             <AnimatedValue value={formatSpeed(connection.uploadSpeed)} />
           </small>
-          <i className="conn-speed-bar" aria-hidden="true">
-            <i className="seg-down" style={{ width: `${Math.round(downShare * 100)}%` }} />
-            <i className="seg-up" style={{ width: `${Math.round(upShare * 100)}%` }} />
-          </i>
         </span>
         <span className="conn-row-total">
           <span className="conn-row-total-label">累计</span>

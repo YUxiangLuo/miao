@@ -8,8 +8,10 @@ import {
   processNameOf,
   sortConnectionGroups,
   sortConnections,
+  uniqueIconDomains,
 } from './connectionFilters'
 import { connectionGroupMock, connectionMock } from '../testFixtures'
+
 
 const groups = [
   connectionGroupMock({
@@ -107,6 +109,15 @@ describe('humanizeClashRule', () => {
     expect(humanizeClashRule('')).toBeNull()
     expect(humanizeClashRule('RuleSet')).toBeNull()
     expect(humanizeClashRule('Match')).toBeNull()
+  })
+})
+
+describe('uniqueIconDomains', () => {
+  it('dedupes by brand id and by fallback letter', () => {
+    expect(uniqueIconDomains(['x.com', 'api.x.com', 'github.com', 'api.github.com']))
+      .toEqual(['x.com', 'github.com'])
+    // 不同字母的未收录域名不折叠，同字母折叠
+    expect(uniqueIconDomains(['alpha.dev', 'beta.dev', 'blob.dev'])).toEqual(['alpha.dev', 'beta.dev'])
   })
 })
 

@@ -2,7 +2,7 @@ import type { ClashConnection, ConnectionGroup, EnrichedConnection } from '../ty
 import { signatureFromClashRule } from '../ruleActivity'
 import { ruleFieldLabel, ruleTargetLabel } from '../ruleFormat'
 import { formatUptime } from '../utils'
-import { connectionDomain } from './siteIcons'
+import { connectionDomain, iconForDomain } from './siteIcons'
 
 /** 链接存活时长：「3m 20s」；无法解析 start 时返回 -- */
 export function connectionDuration(connection: ClashConnection): string {
@@ -164,6 +164,37 @@ export interface SplitStats {
 }
 
 const EMPTY_PATH_STATS: PathStats = { count: 0, downloadSpeed: 0, uploadSpeed: 0, download: 0, upload: 0 }
+
+/** favicon 条去重：同一品牌/同一首字母只出现一次（api.x.com 与 x.com 都是 X 标） */
+export function uniqueIconDomains(domains: string[]): string[] {
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const domain of domains) {
+    const icon = iconForDomain(domain)
+    const key = 'letter' in icon ? `letter:${icon.letter}` : icon.id
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push(domain)
+  }
+  return out
+}
+
+/** 通道内去重域名榜，按当前速率降序（统计卡 favicon 条用） */
+export function domainsForPath(connections: EnrichedConnection[], direct: boolean): string[] {
+  const sorted = sortConnections(
+    connections.filter((c) => isDirectOutbound(connectionOutbound(c)) === direct),
+  )
+  const seen = new Set<string>()
+  const domains: string[] = []
+  for (const connection of sorted) {
+    const domain = connectionDomain(connection)
+    const key = domain.toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    domains.push(domain)
+  }
+  return domains
+}
 
 /**
  * 把存活连接按出口分为直连/代理两通道并各自汇总。

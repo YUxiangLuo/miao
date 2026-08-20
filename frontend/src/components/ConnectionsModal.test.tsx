@@ -68,35 +68,30 @@ describe('ConnectionsModal connection list', () => {
     expect(subtitle).toHaveTextContent('TCP/443')
   })
 
-  it('splits speed and cumulative traffic into proxy and direct lanes', () => {
+  it('splits speed and cumulative traffic into proxy and direct cards with favicons', () => {
     renderModal([
       connection({ id: 'a', chains: ['proxy'], downloadSpeed: 2048, uploadSpeed: 1024, download: 2048, upload: 1024 }),
       connection({ id: 'b', chains: ['direct'], downloadSpeed: 512, download: 4096, metadata: { host: 'www.bilibili.com' } }),
     ])
 
     const stats = document.querySelector('.path-stats') as HTMLElement
-    const lanes = stats.querySelectorAll('.path-lane')
-    const [proxyLane, directLane] = lanes
+    const [proxyCard, directCard] = stats.querySelectorAll('.path-card')
 
-    // 代理通道：速率与累计只含代理连接；计数 1
-    expect(proxyLane).toHaveTextContent('代理')
-    expect(proxyLane).toHaveTextContent('2.0 KB/s')
-    expect(proxyLane).toHaveTextContent('1.0 KB/s')
-    expect(proxyLane).toHaveTextContent('2.0 KB')
-    expect(proxyLane).toHaveTextContent('1.0 KB')
-    expect(proxyLane).toHaveTextContent('1 条链接')
+    // 代理卡：速率与累计只含代理连接；计数 1；favicon 条含 github 图标
+    expect(proxyCard).toHaveTextContent('代理')
+    expect(proxyCard).toHaveTextContent('2.0 KB/s')
+    expect(proxyCard).toHaveTextContent('1.0 KB/s')
+    expect(proxyCard).toHaveTextContent('2.0 KB')
+    expect(proxyCard).toHaveTextContent('1.0 KB')
+    expect(proxyCard).toHaveTextContent('1 条链接')
+    expect(proxyCard.querySelector('.path-icons [data-site="github"]')).not.toBeNull()
 
-    // 直连通道：512 B/s 与 4.0 KB，计数 1
-    expect(directLane).toHaveTextContent('直连')
-    expect(directLane).toHaveTextContent('512 B/s')
-    expect(directLane).toHaveTextContent('4.0 KB')
-    expect(directLane).toHaveTextContent('1 条链接')
-
-    // 占比条：代理 (2048+1024)/3584 ≈ 86%，直连 512/3584 ≈ 14%
-    const proxyBar = proxyLane.querySelector('.path-share > i') as HTMLElement
-    const directBar = directLane.querySelector('.path-share > i') as HTMLElement
-    expect(proxyBar.style.width).toBe('86%')
-    expect(directBar.style.width).toBe('14%')
+    // 直连卡：512 B/s 与 4.0 KB，计数 1；favicon 条含 bilibili 图标
+    expect(directCard).toHaveTextContent('直连')
+    expect(directCard).toHaveTextContent('512 B/s')
+    expect(directCard).toHaveTextContent('4.0 KB')
+    expect(directCard).toHaveTextContent('1 条链接')
+    expect(directCard.querySelector('.path-icons [data-site="bilibili"]')).not.toBeNull()
   })
 
   it('shows a friendly label for the final fallback rule', () => {
@@ -159,18 +154,4 @@ describe('ConnectionsModal connection list', () => {
     expect(screen.getByLabelText('idle.dev 链接').className).toContain('idle')
   })
 
-  it('renders the speed bar as full-width download/upload segments matching the numbers', () => {
-    renderModal([
-      connection({ id: 'a', downloadSpeed: 300, uploadSpeed: 100 }),
-      connection({ id: 'b', downloadSpeed: 50, metadata: { host: 'only-down.dev' } }),
-    ])
-
-    // 每行恒满宽：段宽 = 本行内上下行占比，不随全场最大值缩放
-    const rowA = screen.getByLabelText('api.github.com 链接')
-    expect((rowA.querySelector('.seg-down') as HTMLElement).style.width).toBe('75%')
-    expect((rowA.querySelector('.seg-up') as HTMLElement).style.width).toBe('25%')
-    const rowB = screen.getByLabelText('only-down.dev 链接')
-    expect((rowB.querySelector('.seg-down') as HTMLElement).style.width).toBe('100%')
-    expect((rowB.querySelector('.seg-up') as HTMLElement).style.width).toBe('0%')
-  })
 })

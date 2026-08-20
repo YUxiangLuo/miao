@@ -207,6 +207,14 @@
     color: var(--info-strong);
     font-size: var(--fs-md);
     font-weight: var(--fw-heavy);
+}
+.site-icon.sm {
+    width: var(--size-site-icon-sm);
+    height: var(--size-site-icon-sm);
+    border-radius: var(--r-sm);
+}
+.site-icon.sm.letter {
+    font-size: var(--fs-xs);
 }/* 徽标基元由 .badge 提供，这里只保留配色与截断 */
 .connection-outbound-chip,
 .connection-count-chip {
@@ -304,10 +312,10 @@
 }
 .conn-row-speed {
     flex: 0 0 var(--conn-speed-w);
-    display: grid;
-    grid-template-columns: 1fr 1fr;
+    display: flex;
     align-items: center;
-    column-gap: var(--space-2);
+    justify-content: flex-end;
+    gap: var(--space-2);
     color: var(--text-muted);
 }
 .conn-row-speed small {
@@ -323,33 +331,6 @@
 .conn-row-speed .tone-upload {
     color: var(--accent-strong);
 }/* 速率比例条：蓝段=下载、绿段=上传（与数字同色），总长 = 总速率相对占比 */
-.conn-speed-bar {
-    grid-column: 1 / -1;
-    display: flex;
-    height: var(--conn-bar-h);
-    border-radius: var(--r-pill);
-    background: var(--hover);
-    overflow: hidden;
-}
-.conn-speed-bar > i {
-    display: block;
-    height: 100%;
-    transition: width var(--dur-slow) var(--ease);
-}
-.conn-speed-bar .seg-down {
-    background: var(--info);
-}
-.conn-speed-bar .seg-up {
-    background: var(--accent);
-}
-.conn-row-total {
-    flex: 0 0 var(--conn-total-w);
-    display: inline-flex;
-    align-items: center;
-    gap: var(--space-1);
-    color: var(--text-muted);
-    white-space: nowrap;
-}
 .conn-row-total small {
     display: inline-flex;
     align-items: center;
@@ -367,23 +348,27 @@
    底部占比条 = 本通道占两通道合计速率的份额（代理蓝/直连绿）。 */
 .path-stats {
     flex: 0 0 auto;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-2);
+}
+.path-card {
     display: flex;
     flex-direction: column;
     gap: var(--space-2);
-    padding: var(--space-2);
+    min-width: 0;
+    padding: var(--space-2) var(--space-3);
     border-radius: var(--r-md);
     background: var(--surface-soft);
     border: var(--bw) solid var(--border-soft);
 }
-.path-lane {
-    display: grid;
-    grid-template-columns: auto minmax(0, 1fr) auto auto;
+.path-card-head {
+    display: flex;
     align-items: center;
-    column-gap: var(--space-3);
-    row-gap: var(--space-1);
-    min-width: 0;
+    justify-content: space-between;
+    gap: var(--space-2);
 }
-.path-chip {
+.path-card-head .badge {
     justify-content: center;
     min-width: var(--badge-min-w);
 }
@@ -431,28 +416,24 @@
 .path-total .tone-upload {
     color: var(--accent-strong);
 }
+.path-icons {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
+    min-height: var(--size-site-icon-sm);
+    overflow: hidden;
+}
+.path-icons .site-icon {
+    flex: 0 0 auto;
+}
+.path-icons-more {
+    color: var(--text-subtle);
+    font-size: var(--fs-sm);
+    font-variant-numeric: var(--font-numeric);
+    white-space: nowrap;
+}
 .path-count {
     color: var(--text-muted);
     font-size: var(--fs-sm);
     white-space: nowrap;
-    justify-self: end;
-}
-.path-share {
-    grid-column: 1 / -1;
-    display: block;
-    height: var(--conn-bar-h);
-    border-radius: var(--r-pill);
-    background: var(--hover);
-    overflow: hidden;
-}
-.path-share > i {
-    display: block;
-    height: 100%;
-    transition: width var(--dur-slow) var(--ease);
-}
-.path-share.info > i {
-    background: var(--info);
-}
-.path-share.success > i {
-    background: var(--success);
 }

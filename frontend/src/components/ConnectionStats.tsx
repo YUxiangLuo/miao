@@ -2,26 +2,30 @@ import { ArrowDown, ArrowUp } from 'lucide-react'
 import { ICON } from '../tokens'
 import { formatBytes, formatSpeed } from '../utils'
 import type { EnrichedConnection } from '../types/clash'
-import { splitConnectionStats, type PathStats } from './connectionFilters'
-import { AnimatedValue } from './connectionUi'
+import { domainsForPath, splitConnectionStats, uniqueIconDomains, type PathStats } from './connectionFilters'
+import { AnimatedValue, SiteMark } from './connectionUi'
 
-function laneShare(lane: PathStats, other: PathStats): number {
-  const mine = lane.downloadSpeed + lane.uploadSpeed
-  const total = mine + other.downloadSpeed + other.uploadSpeed
-  return total > 0 ? mine / total : 0
-}
+/** favicon 条最多展示的图标数，超出折叠为 +N */
+const MAX_ICONS = 8
 
-function PathLane({ tone, label, stats, share }: {
+function PathCard({ tone, label, stats, domains }: {
   tone: 'info' | 'success'
   label: string
   stats: PathStats
-  /** 本通道占两通道合计速率的比例（0-1） */
-  share: number
+  /** 本通道去重域名榜（已按速率降序） */
+  domains: string[]
 }) {
+  const unique = uniqueIconDomains(domains)
+  const shown = unique.slice(0, MAX_ICONS)
+  const overflow = unique.length - shown.length
+
   return (
-    <div className="path-lane">
-      <span className={`badge ${tone} path-chip`}>{label}</span>
-      <span className="path-speed">
+    <div className="path-card">
+      <div className="path-card-head">
+        <span className={`badge ${tone}`}>{label}</span>
+        <span className="path-count">{stats.count} 条链接</span>
+      </div>
+      <div className="path-speed">
         <small className="tone-download">
           <ArrowDown size={ICON.sm} />
           <AnimatedValue value={formatSpeed(stats.downloadSpeed)} />
@@ -30,8 +34,8 @@ function PathLane({ tone, label, stats, share }: {
           <ArrowUp size={ICON.sm} />
           <AnimatedValue value={formatSpeed(stats.uploadSpeed)} />
         </small>
-      </span>
-      <span className="path-total">
+      </div>
+      <div className="path-total">
         <span className="path-total-label">累计</span>
         <small className="tone-download">
           <ArrowDown size={ICON.xs} />
@@ -41,31 +45,33 @@ function PathLane({ tone, label, stats, share }: {
           <ArrowUp size={ICON.xs} />
           <AnimatedValue value={formatBytes(stats.upload)} />
         </small>
-      </span>
-      <span className="path-count">{stats.count} 条链接</span>
-      <i className={`path-share ${tone}`} aria-hidden="true">
-        <i style={{ width: `${Math.round(share * 100)}%` }} />
-      </i>
+      </div>
+      <div className="path-icons">
+        {shown.map((domain) => (
+          <SiteMark key={domain} domain={domain} small />
+        ))}
+        {overflow > 0 && <span className="path-icons-more">+{overflow}</span>}
+      </div>
     </div>
   )
 }
 
-/** 直连 / 代理双通道汇总卡：速率、累计流量、链接数与占比条 */
+/** 直连 / 代理双通道统计卡：速率、累计流量、链接数与通道内站点 favicon 条 */
 export function ConnectionStats({ connections }: { connections: EnrichedConnection[] }) {
   const stats = splitConnectionStats(connections)
   return (
     <div className="path-stats">
-      <PathLane
+      <PathCard
         tone="info"
         label="代理"
         stats={stats.proxy}
-        share={laneShare(stats.proxy, stats.direct)}
+        domains={domainsForPath(connections, false)}
       />
-      <PathLane
+      <PathCard
         tone="success"
         label="直连"
         stats={stats.direct}
-        share={laneShare(stats.direct, stats.proxy)}
+        domains={domainsForPath(connections, true)}
       />
     </div>
   )
