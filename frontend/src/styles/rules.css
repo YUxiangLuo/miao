@@ -61,6 +61,14 @@
         animation: none;
     }
 }
+@keyframes livePulse {
+    0%, 100% {
+        opacity: 1;
+    }
+    50% {
+        opacity: 0.3;
+    }
+}
 
 
 /* ---- 全屏规则工作台（RuleModal v2） ---- */

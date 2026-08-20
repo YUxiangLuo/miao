@@ -63,12 +63,6 @@ export function ConnectionsModal({
           <div className="connections-header-title">
             <Activity size={ICON.lg} className="icon-accent" />
             <h3 id={titleId}>链接统计</h3>
-            {status.running && (
-              <span className="badge connections-live-badge">
-                <i />
-                {connections.length} 条链接
-              </span>
-            )}
           </div>
           <div className="connections-header-actions">
             <button className="icon-button" onClick={onClose} title="关闭 (Esc)" aria-label="关闭链接统计">

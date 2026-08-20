@@ -68,24 +68,7 @@
     color: var(--text-strong);
     font-size: var(--fs-xl);
     white-space: nowrap;
-}/* 徽标基元由 .badge 提供，这里只保留 LIVE 绿配色与描边 */
-.connections-live-badge {
-    border: var(--bw) solid color-mix(in srgb, var(--success) 35%, transparent);
-    background: var(--surface-green-soft);
-    color: var(--success);
 }
-.connections-live-badge i {
-    width: var(--size-dot);
-    height: var(--size-dot);
-    border-radius: var(--r-pill);
-    background: currentColor;
-    animation: livePulse var(--anim-live) ease-in-out infinite;
-}@keyframes livePulse {
-    0%, 100% {
-        opacity: 1;
-    }    50% {
-        opacity: 0.3;
-    }}
 .connections-header-actions {
     display: flex;
     align-items: center;

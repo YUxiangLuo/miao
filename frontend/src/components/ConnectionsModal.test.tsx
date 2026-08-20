@@ -42,7 +42,6 @@ describe('ConnectionsModal connection list', () => {
 
     // 同域名的三条连接各占一行，不再聚合成站点卡
     expect(screen.getAllByText('api.github.com')).toHaveLength(3)
-    expect(document.querySelector('.connections-live-badge')).toHaveTextContent('3 条链接')
   })
 
   it('shows humanized rule, process, network and duration in the row subtitle', () => {
