@@ -11,14 +11,7 @@ use crate::responses::{status_error, success, success_no_data, HandlerResult};
 use crate::services::config::{apply_config_change, known_rule_targets};
 use crate::services::node_parser::parse_node_json;
 use crate::state::AppState;
-use crate::validation::Validator;
-
-fn non_empty(value: &Option<String>) -> Option<&str> {
-    value
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-}
+use crate::validation::{non_empty, Validator};
 
 fn insert_optional_string(obj: &mut Map<String, JsonValue>, key: &str, value: Option<&str>) {
     if let Some(value) = value {

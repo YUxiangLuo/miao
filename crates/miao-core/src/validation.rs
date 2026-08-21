@@ -3,7 +3,7 @@ use std::sync::LazyLock;
 
 static VALID_TAG_REGEX: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^[\p{L}\p{N}\-_\s]{1,64}$").unwrap());
-static UUID_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+pub(crate) static UUID_REGEX: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
         .unwrap()
 });
@@ -27,9 +27,10 @@ static VALID_SS_CIPHERS: &[&str] = &[
     "chacha20-ietf-poly1305",
 ];
 
-static VALID_VMESS_CIPHERS: &[&str] = &["auto", "none", "zero", "aes-128-gcm", "chacha20-poly1305"];
+pub(crate) static VALID_VMESS_CIPHERS: &[&str] =
+    &["auto", "none", "zero", "aes-128-gcm", "chacha20-poly1305"];
 static VALID_TRANSPORT_TYPES: &[&str] = &["tcp", "ws", "http", "h2", "grpc"];
-static VALID_CLIENT_FINGERPRINTS: &[&str] = &[
+pub(crate) static VALID_CLIENT_FINGERPRINTS: &[&str] = &[
     "chrome",
     "firefox",
     "edge",
@@ -41,10 +42,10 @@ static VALID_CLIENT_FINGERPRINTS: &[&str] = &[
     "random",
     "randomized",
 ];
-static VALID_PACKET_ENCODINGS: &[&str] = &["packetaddr", "xudp"];
-static VALID_VLESS_FLOWS: &[&str] = &["xtls-rprx-vision"];
-static VALID_TUIC_CONGESTION_CONTROLS: &[&str] = &["cubic", "new_reno", "bbr"];
-static VALID_TUIC_UDP_RELAY_MODES: &[&str] = &["native", "quic"];
+pub(crate) static VALID_PACKET_ENCODINGS: &[&str] = &["packetaddr", "xudp"];
+pub(crate) static VALID_VLESS_FLOWS: &[&str] = &["xtls-rprx-vision"];
+pub(crate) static VALID_TUIC_CONGESTION_CONTROLS: &[&str] = &["cubic", "new_reno", "bbr"];
+pub(crate) static VALID_TUIC_UDP_RELAY_MODES: &[&str] = &["native", "quic"];
 static VALID_HYSTERIA2_OBFS_TYPES: &[&str] = &["salamander", "gecko"];
 
 /// Canonical fields accepted by the structured custom-rule API. Raw rules in
@@ -67,7 +68,7 @@ use crate::models::{NodeRequest, RuleRequest};
 
 pub struct Validator;
 
-fn non_empty(value: &Option<String>) -> Option<&str> {
+pub(crate) fn non_empty(value: &Option<String>) -> Option<&str> {
     value
         .as_deref()
         .map(str::trim)

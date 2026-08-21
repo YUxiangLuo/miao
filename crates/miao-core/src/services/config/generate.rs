@@ -109,7 +109,7 @@ pub async fn gen_config(
 
 /// 只拉取订阅节点集（不写盘）：订阅全失败时按 retry 预算退避重试。
 /// 供「先拉取、后持锁落地」的调用方（启动后台刷新）把网络等待移出配置锁。
-pub async fn fetch_sub_nodes(
+async fn fetch_sub_nodes(
     config: &Config,
     state: &Arc<AppState>,
     retry: SubFetchRetry,
@@ -579,7 +579,7 @@ mod tests {
         };
         let state = crate::test_support::app_state(config.clone());
 
-        // 无手动节点时 gen_config_once 在写盘前返回 NoUsableNodes，不触碰 /tmp/miao-sing-box
+        // 无手动节点时 gen_config 返回 NoUsableNodes，不写 config.json
         let err = match tokio::time::timeout(
             Duration::from_secs(5),
             super::gen_config(&config, &state, SubFetchRetry::Startup),

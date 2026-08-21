@@ -14,16 +14,14 @@ use serde_json::{json, Value as JsonValue};
 use crate::error::AppResult;
 use crate::models::{LastProxy, NodeSelect, RouteMode};
 use crate::services::{
-    config::{apply_config_change, RuntimeUpdate},
-    singbox::{is_sing_box_running, kernel_status},
+    config::{RuntimeUpdate, REGION_FALLBACK},
+    singbox::{is_sing_box_running, kernel_status, CLASH_API_BASE},
     status::{legacy_warning, runtime_warnings},
 };
 use crate::state::AppState;
 use crate::VERSION;
 
 pub const MCP_PROTOCOL_VERSION: &str = "2026-07-28";
-
-const CLASH_API_BASE: &str = "http://127.0.0.1:6262";
 /// 配置模板里唯一的 selector；全部节点的容器，对外不暴露
 const SELECTOR_TAG: &str = "proxy";
 const DELAY_TIMEOUT_MS: u64 = 3000;
@@ -528,31 +526,25 @@ async fn tool_set_route_mode(state: &Arc<AppState>, args: &JsonValue) -> Result<
         return Err("初始化进行中，稍后再试".to_string());
     }
 
-    // 与面板 set_route_mode 同一条链路：配置事务 + 运行时热应用（易变层落盘）
-    let _config_update = state.config_update.lock().await;
-    let old_config = state.config.read().await.clone();
-
-    if old_config.route_mode == requested {
-        return Ok(json!({ "route_mode": mode, "changed": false }));
-    }
-
-    let mut new_config = old_config.clone();
-    new_config.route_mode = requested;
-
-    let effect = apply_config_change(state, &old_config, &new_config)
+    let (previous, runtime_update) = crate::services::config::apply_route_mode(state, requested)
         .await
         .map_err(|e| format!("切换路由模式失败: {e}"))?;
-    let runtime_update = effect.runtime_update();
     let runtime_updated = runtime_update.updated();
+    let changed = previous != requested;
+    let note = if changed {
+        "已写入易变层配置；OpenWrt/Linux 系统重启后回到 config.yaml 的启动默认值（未设置则规则分流）"
+    } else {
+        "未变化"
+    };
 
     Ok(json!({
         "route_mode": mode,
-        "changed": true,
+        "changed": changed,
         "runtime_updated": runtime_updated,
         "started": runtime_update == RuntimeUpdate::Started,
         "reloaded": runtime_update == RuntimeUpdate::Reloaded,
         "restarted": runtime_update == RuntimeUpdate::Restarted,
-        "note": "已写入易变层配置；OpenWrt/Linux 系统重启后回到 config.yaml 的启动默认值（未设置则规则分流）",
+        "note": note,
     }))
 }
 
@@ -575,31 +567,22 @@ async fn tool_set_node_select(
         return Err("初始化进行中，稍后再试".to_string());
     }
 
-    let _config_update = state.config_update.lock().await;
-    let old_config = state.config.read().await.clone();
-    if old_config.node_select == node_select {
-        return Ok(json!({ "node_select": raw, "changed": false }));
-    }
-
-    let mut new_config = old_config.clone();
-    new_config.node_select = node_select;
-
-    let effect = apply_config_change(state, &old_config, &new_config)
-        .await
-        .map_err(|e| format!("切换节点选择失败: {e}"))?;
-    let runtime_update = effect.runtime_update();
+    let (previous, effective, runtime_update) =
+        crate::services::config::apply_node_select(state, node_select)
+            .await
+            .map_err(|e| format!("切换节点选择失败: {e}"))?;
     let runtime_updated = runtime_update.updated();
-
-    let effective = state.config.read().await.node_select;
     let note = if !node_select.is_manual() && effective.is_manual() {
-        "该地区没有可用节点，已切回手动选择"
+        REGION_FALLBACK
+    } else if previous == node_select {
+        "未变化"
     } else {
         "已写入易变层配置"
     };
     Ok(json!({
         "node_select": effective.as_str(),
         "requested": raw,
-        "changed": true,
+        "changed": previous != node_select,
         "runtime_updated": runtime_updated,
         "started": runtime_update == RuntimeUpdate::Started,
         "reloaded": runtime_update == RuntimeUpdate::Reloaded,
@@ -1004,6 +987,25 @@ mod tests {
         let payload: JsonValue = serde_json::from_str(text).unwrap();
         assert_eq!(payload["node_select"], "manual");
         assert_eq!(payload["changed"], false);
+        assert_eq!(payload["note"], "未变化");
+    }
+
+    #[tokio::test]
+    async fn set_route_mode_is_idempotent_without_touching_runtime() {
+        let response = call(
+            &state(Config::default()),
+            json!({
+                "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                "params": { "name": "set_route_mode", "arguments": { "mode": "rule" } },
+            }),
+        )
+        .await;
+        let text = response["result"]["content"][0]["text"].as_str().unwrap();
+        let payload: JsonValue = serde_json::from_str(text).unwrap();
+        assert_eq!(payload["route_mode"], "rule");
+        assert_eq!(payload["changed"], false);
+        assert_eq!(payload["note"], "未变化");
+        assert_eq!(payload["runtime_updated"], false);
     }
 
     #[tokio::test]

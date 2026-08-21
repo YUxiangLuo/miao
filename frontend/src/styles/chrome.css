@@ -293,10 +293,6 @@
 .list-row:last-child {
     border-bottom: none;
 }
-.list-leading-icon {
-    color: var(--accent);
-    flex: 0 0 auto;
-}
 /* 手动节点行无前导元素，文本顶边略显局促：补一档微距做光学调整（+4px） */
 .list-row.node-row {
     padding-left: calc(var(--space-3) + var(--space-0));
@@ -356,6 +352,10 @@
 .status-icon-badge.error {
     background: var(--surface-red);
     color: var(--danger);
+}
+.status-icon-badge.info {
+    background: var(--info-tint);
+    color: var(--info);
 }
 .empty-block {
     padding: var(--space-3);

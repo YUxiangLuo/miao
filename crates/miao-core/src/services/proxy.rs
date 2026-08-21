@@ -148,10 +148,10 @@ async fn restore_last_proxy(state: &Arc<AppState>, generation: u64) {
         proxy.group, proxy.name
     );
 
-    let url = format!(
-        "http://127.0.0.1:6262/proxies/{}",
+    let url = crate::services::singbox::clash_api_url(&format!(
+        "/proxies/{}",
         urlencoding::encode(&proxy.group)
-    );
+    ));
     let deadline = Instant::now() + Duration::from_secs(2);
     let group_info = loop {
         if is_superseded(state, generation) {

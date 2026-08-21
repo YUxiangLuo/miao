@@ -143,7 +143,7 @@ export function TopBar({
           type="button"
           className={classNames('version-chip', versionInfo.has_update && 'has-update')}
           onClick={onUpgradeClick}
-          disabled={upgrading || status.initializing}
+          disabled={upgrading}
         >
           {upgrading && <LoaderCircle size={ICON.xs} className="spin" />}
           {!upgrading && versionInfo.has_update && <span className="version-dot" />}

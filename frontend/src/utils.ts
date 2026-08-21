@@ -3,6 +3,7 @@
 import type { NodeType } from './types/api'
 
 export const API_HEADERS = { 'Content-Type': 'application/json' } as const
+export const CLASH_API_BASE = '/api/clash'
 export const POLL_INTERVAL = 3000
 // /api/status 连续失败多少次判定为后端不可达：触发断线提示，并阻止把宕机误判成引导页
 export const STATUS_FAILURE_THRESHOLD = 3
@@ -250,20 +251,6 @@ export function protocolTone(protocol: string | null | undefined): BadgeTone {
   let hash = 0
   for (const ch of key) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0
   return PROTOCOL_TONE_FALLBACKS[hash % PROTOCOL_TONE_FALLBACKS.length]
-}
-
-export function protocolLabel(type: string): string {
-  const map: Record<string, string> = {
-    hysteria2: 'hysteria2',
-    anytls: 'anytls',
-    vmess: 'vmess',
-    vless: 'vless',
-    trojan: 'trojan',
-    tuic: 'tuic',
-    shadowsocks: 'shadowsocks',
-    ss: 'shadowsocks',
-  }
-  return map[type] || type || 'unknown'
 }
 
 export function maskSubscription(url: string): string {

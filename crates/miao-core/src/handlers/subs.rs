@@ -102,11 +102,9 @@ pub async fn refresh_subs(State(state): State<Arc<AppState>>) -> HandlerResult {
     }
 
     let _config_update = state.config_update.lock().await;
-    let config = state.config.read().await;
-    let config_clone = config.clone();
-    drop(config);
+    let config = state.config.read().await.clone();
 
-    match regenerate_preserving_service_state(&config_clone, &state).await {
+    match regenerate_preserving_service_state(&config, &state).await {
         Ok(update) if update.updated() => Ok(success_no_data(
             "Subscriptions refreshed and runtime updated",
         )),

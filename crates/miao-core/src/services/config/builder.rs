@@ -7,7 +7,7 @@ use crate::state::SkippedRule;
 
 use super::region::{group_member_names, resolve_node_select};
 
-fn make_unique_tag(tag: &str, used: &mut HashSet<String>) -> String {
+pub(super) fn make_unique_tag(tag: &str, used: &mut HashSet<String>) -> String {
     let base = if tag.trim().is_empty() { "node" } else { tag };
     if used.insert(base.to_string()) {
         return base.to_string();
@@ -413,7 +413,7 @@ fn get_config_template() -> serde_json::Value {
     serde_json::json!({
         "log": {"disabled": false, "timestamp": true, "level": "info"},
         "experimental": {
-            "clash_api": {"external_controller": "127.0.0.1:6262"},
+            "clash_api": {"external_controller": crate::services::singbox::CLASH_API_HOST},
             "cache_file": {
                 "enabled": true,
                 "path": "cache.db",

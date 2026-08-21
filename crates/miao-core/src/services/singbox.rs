@@ -43,6 +43,14 @@ const SITE_RULE_BINARY: &[u8] = include_bytes!(concat!(
     "/../../embedded/geosite-geolocation-cn.srs"
 ));
 
+pub const CLASH_API_HOST: &str = "127.0.0.1:6262";
+pub const CLASH_API_BASE: &str = "http://127.0.0.1:6262";
+pub const CLASH_TRAFFIC_WS: &str = "ws://127.0.0.1:6262/traffic";
+
+pub fn clash_api_url(path: &str) -> String {
+    format!("{CLASH_API_BASE}{path}")
+}
+
 pub fn get_sing_box_home() -> PathBuf {
     #[cfg(windows)]
     {
@@ -177,6 +185,14 @@ pub async fn validate_sing_box_config(
 }
 
 pub async fn start_sing_internal(state: &Arc<AppState>) -> AppResult<()> {
+    // Every first-start path (cache, snapshot, manuals, recover/activate,
+    // REST start) shares this so a subscription-only OpenWrt boot still
+    // installs kmod-tun / kmod-nft-queue. Non-OpenWrt returns immediately.
+    #[cfg(not(windows))]
+    if let Err(err) = crate::services::openwrt::check_and_install_openwrt_dependencies().await {
+        error!(error = %err, "Failed to check or install OpenWrt dependencies");
+    }
+
     let generation = {
         let mut lock = state.sing_process.lock().await;
         if let Some(ref mut proc) = *lock {
@@ -335,7 +351,7 @@ async fn wait_for_sing_box_reload_ready(
         let clash_ready = if started.elapsed() >= RELOAD_SETTLE_TIME {
             state
                 .http_client
-                .get("http://127.0.0.1:6262/version")
+                .get(clash_api_url("/version"))
                 .timeout(CLASH_PROBE_TIMEOUT)
                 .send()
                 .await
@@ -534,7 +550,7 @@ async fn wait_for_sing_box_ready(state: &Arc<AppState>, expected_generation: u64
         let clash_ready = if started.elapsed() >= MIN_STABLE_TIME {
             state
                 .http_client
-                .get("http://127.0.0.1:6262/version")
+                .get(clash_api_url("/version"))
                 .timeout(CLASH_PROBE_TIMEOUT)
                 .send()
                 .await

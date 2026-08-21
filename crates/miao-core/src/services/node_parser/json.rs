@@ -8,16 +8,6 @@ pub struct NodeDisplayInfo {
     pub sni: Option<String>,
 }
 
-impl std::fmt::Display for NodeDisplayInfo {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{} ({}:{}) [{}]",
-            self.tag, self.server, self.server_port, self.node_type
-        )
-    }
-}
-
 /// 解析单个节点 JSON 字符串，返回验证后的 Value 和显示信息
 pub fn parse_node_json(node_str: &str) -> Result<(NodeDisplayInfo, serde_json::Value), String> {
     let v: serde_json::Value =

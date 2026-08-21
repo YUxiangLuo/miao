@@ -211,7 +211,13 @@ export function ProxyCard({
               <span>添加节点</span>
             </button>
           </div>
-        ) : <div className="empty-block">服务未运行，暂时无法读取代理组。</div>}
+        ) : (
+          <div className="empty-block">
+            {status.running && !status.ready
+              ? '代理正在启动，节点列表稍后出现'
+              : '服务未运行，暂时无法读取代理组。'}
+          </div>
+        )}
       </div>
     </SectionCard>
   )

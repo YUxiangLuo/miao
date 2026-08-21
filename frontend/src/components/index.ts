@@ -1,5 +1,7 @@
 export { ToastStack } from './ui'
-export { ConfirmModal, NodeModal, ConnectionsModal } from './modals'
+export { ConfirmModal } from './ConfirmModal'
+export { NodeModal } from './NodeModal'
+export { ConnectionsModal } from './ConnectionsModal'
 export { TopBar } from './TopBar'
 export { ProxyCard } from './ProxyCard'
 export { NodesCard } from './NodesCard'

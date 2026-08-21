@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { CLASH_API_BASE } from '../utils'
 import { useWebSocket } from './useWebSocket'
 import type { StatusData } from '../types/api'
 import type {
@@ -19,7 +20,7 @@ export function isClashProxyGroup(type: string | undefined): boolean {
 
 export function useProxies(status: Pick<StatusData, 'ready'>) {
   const [proxies, setProxies] = useState<ClashProxies>({})
-  const clashApiBase = useMemo(() => '/api/clash', [])
+  const clashApiBase = CLASH_API_BASE
 
   const fetchProxies = useCallback(async () => {
     try {
@@ -46,7 +47,7 @@ export function useProxies(status: Pick<StatusData, 'ready'>) {
     if (!status.ready) setProxies({})
   }, [status.ready])
 
-  return { proxies, fetchProxies, selectorGroups, primaryGroupName, primaryGroup }
+  return { proxies, fetchProxies, primaryGroupName, primaryGroup }
 }
 
 export function useTraffic(status: Pick<StatusData, 'ready'>) {

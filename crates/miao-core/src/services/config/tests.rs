@@ -15,11 +15,11 @@ use std::collections::HashSet;
 use crate::state::SkippedRule;
 
 #[test]
-fn refresh_restart_decision_compares_bytes() {
-    // 内容一致不重启，避免无意义断流
+fn refresh_activate_decision_compares_bytes() {
+    // 内容一致不激活，避免无意义断流
     assert!(!config_changed_after_refresh(Some(b"same"), Some(b"same")));
     assert!(config_changed_after_refresh(Some(b"old"), Some(b"new")));
-    // 读不出内容时保守重启
+    // 读不出内容时保守激活
     assert!(config_changed_after_refresh(None, Some(b"new")));
     assert!(config_changed_after_refresh(Some(b"old"), None));
 }
@@ -508,7 +508,7 @@ fn config_change_preserves_explicitly_stopped_service() {
 }
 
 #[test]
-fn config_change_restarts_service_when_it_is_desired() {
+fn config_change_activates_service_when_it_is_desired() {
     let config = Config {
         subs: vec!["https://example.com/sub".to_string()],
         ..Config::default()
@@ -862,7 +862,7 @@ fn build_sing_box_config_binds_clash_api_to_localhost() {
 
     assert_eq!(
         built["experimental"]["clash_api"]["external_controller"],
-        "127.0.0.1:6262"
+        crate::services::singbox::CLASH_API_HOST
     );
 }
 

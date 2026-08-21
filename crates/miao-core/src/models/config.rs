@@ -25,7 +25,8 @@ impl<'de> Deserialize<'de> for RouteMode {
     }
 }
 
-/// 节点池选择策略，写入 config.yaml。
+/// 节点池选择策略。运行值写易变层 `volatile.yaml`；
+/// `config.yaml` 里的同名字段只是 volatile 缺失时的启动默认值。
 /// `manual`：selector 全量节点；`fastest_*`：按地区筛进 urltest。
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum NodeSelect {

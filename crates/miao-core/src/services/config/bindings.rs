@@ -7,6 +7,7 @@ use tracing::warn;
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
 
+use super::builder::make_unique_tag;
 use super::generate::FetchedNode;
 use super::persist::write_file_atomic;
 
@@ -80,20 +81,6 @@ fn affinity_key(node: &FetchedNode) -> String {
     });
     let bytes = serde_json::to_vec(&value).unwrap_or_default();
     sha256_parts(&[&bytes])
-}
-
-fn make_unique_tag(base: &str, used: &mut HashSet<String>) -> String {
-    let base = if base.trim().is_empty() { "node" } else { base };
-    if used.insert(base.to_string()) {
-        return base.to_string();
-    }
-    for index in 2.. {
-        let candidate = format!("{base} ({index})");
-        if used.insert(candidate.clone()) {
-            return candidate;
-        }
-    }
-    unreachable!("unbounded duplicate tag search should find a value")
 }
 
 async fn load_bindings(state: &AppState) -> AppResult<Option<NodeTagBindings>> {

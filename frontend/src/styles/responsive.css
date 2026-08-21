@@ -89,12 +89,6 @@
     .toast {
         min-width: 0;
     }
-    .connection-stat-grid {
-        grid-template-columns: minmax(0, 1fr);
-    }
-    .connection-card-grid {
-        grid-template-columns: minmax(0, 1fr);
-    }
     .onboarding-card {
         margin: 0 var(--space-3);
     }

@@ -78,6 +78,4 @@ export function usePolling(tasks: PollTask[], enabled = true, interval = POLL_IN
     }
   }, [enabled, interval, runTasks])
 
-  // 返回手动触发函数
-  return { triggerPoll: runTasks }
 }

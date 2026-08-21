@@ -1,28 +1,8 @@
-use regex::Regex;
-use std::sync::LazyLock;
+use crate::validation::{
+    UUID_REGEX, VALID_CLIENT_FINGERPRINTS, VALID_PACKET_ENCODINGS, VALID_TUIC_CONGESTION_CONTROLS,
+    VALID_TUIC_UDP_RELAY_MODES, VALID_VLESS_FLOWS, VALID_VMESS_CIPHERS,
+};
 
-static UUID_REGEX: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
-        .unwrap()
-});
-static VALID_VMESS_SECURITIES: &[&str] =
-    &["auto", "none", "zero", "aes-128-gcm", "chacha20-poly1305"];
-static VALID_PACKET_ENCODINGS: &[&str] = &["packetaddr", "xudp"];
-static VALID_VLESS_FLOWS: &[&str] = &["xtls-rprx-vision"];
-static VALID_CLIENT_FINGERPRINTS: &[&str] = &[
-    "chrome",
-    "firefox",
-    "edge",
-    "safari",
-    "360",
-    "qq",
-    "ios",
-    "android",
-    "random",
-    "randomized",
-];
-static VALID_TUIC_CONGESTION_CONTROLS: &[&str] = &["cubic", "new_reno", "bbr"];
-static VALID_TUIC_UDP_RELAY_MODES: &[&str] = &["native", "quic"];
 pub(super) fn validate_uuid(uuid: &str) -> Result<(), String> {
     if UUID_REGEX.is_match(uuid) {
         Ok(())
@@ -32,7 +12,7 @@ pub(super) fn validate_uuid(uuid: &str) -> Result<(), String> {
 }
 
 pub(super) fn validate_vmess_security(security: &str) -> Result<(), String> {
-    if VALID_VMESS_SECURITIES.contains(&security) {
+    if VALID_VMESS_CIPHERS.contains(&security) {
         Ok(())
     } else {
         Err(format!("unsupported VMess security '{}'", security))

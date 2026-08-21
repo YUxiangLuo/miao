@@ -416,7 +416,7 @@ impl SubNodesSnapshot {
     }
 }
 
-pub fn sub_nodes_snapshot_path(state: &AppState) -> &Path {
+fn sub_nodes_snapshot_path(state: &AppState) -> &Path {
     &state.runtime_paths.sub_nodes_snapshot
 }
 

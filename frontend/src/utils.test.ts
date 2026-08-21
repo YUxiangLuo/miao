@@ -5,7 +5,6 @@ import {
   formatSpeed,
   formatUptime,
   maskSubscription,
-  protocolLabel,
   protocolTone,
   validateHysteria2Obfs,
   validateNodeTag,
@@ -28,13 +27,7 @@ describe('formatters', () => {
     expect(formatDelay(-1)).toBe('超时')
   })
 
-  it('normalizes protocol labels and subscription display text', () => {
-    expect(protocolLabel('ss')).toBe('shadowsocks')
-    expect(protocolLabel('vmess')).toBe('vmess')
-    expect(protocolLabel('vless')).toBe('vless')
-    expect(protocolLabel('trojan')).toBe('trojan')
-    expect(protocolLabel('tuic')).toBe('tuic')
-    expect(protocolLabel('hysteria2')).toBe('hysteria2')
+  it('masks subscription display text', () => {
     expect(maskSubscription('https://example.com/path/to/token123456')).toBe('example.com...en123456')
   })
 

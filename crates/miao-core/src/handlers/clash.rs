@@ -14,10 +14,8 @@ use tokio::time::Duration;
 use tokio_tungstenite::{connect_async, tungstenite::Message as TungsteniteMessage};
 use tracing::warn;
 
+use crate::services::singbox::{CLASH_API_BASE, CLASH_TRAFFIC_WS};
 use crate::state::AppState;
-
-const CLASH_API_BASE: &str = "http://127.0.0.1:6262";
-const CLASH_TRAFFIC_WS: &str = "ws://127.0.0.1:6262/traffic";
 
 fn clash_target_url(uri: &axum::http::Uri) -> String {
     let path_and_query = uri.path_and_query().map(|pq| pq.as_str()).unwrap_or("/");
@@ -147,7 +145,10 @@ mod tests {
 
         assert_eq!(
             clash_target_url(&uri),
-            "http://127.0.0.1:6262/proxies/node%201/delay?timeout=3000&url=http://example.com"
+            format!(
+                "{}/proxies/node%201/delay?timeout=3000&url=http://example.com",
+                crate::services::singbox::CLASH_API_BASE
+            )
         );
     }
 }

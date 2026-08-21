@@ -66,8 +66,15 @@ impl AppState {
         config_path: PathBuf,
         volatile_path: PathBuf,
     ) -> Result<Self, reqwest::Error> {
-        let runtime_paths =
-            RuntimePaths::new(crate::services::singbox::get_sing_box_home(), &config_path);
+        let runtime_dir = std::env::temp_dir().join(format!(
+            "miao-appstate-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        let runtime_paths = RuntimePaths::new(runtime_dir, &config_path);
         Self::with_config_layers(
             StableConfig::from(&config),
             config,

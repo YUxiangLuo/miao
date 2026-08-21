@@ -14,7 +14,7 @@ import type {
   VpsDeployResponse,
 } from '../types/api'
 
-export type AppData = ReturnType<typeof useAppData>
+type AppData = ReturnType<typeof useAppData>
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
@@ -321,11 +321,6 @@ export function useAppActions(data: AppData) {
       return
     }
 
-    if (!status.ready) {
-      showToast('sing-box 未运行，暂不检测更新', 'info')
-      return
-    }
-
     if (!versionInfo.has_update) {
       const fresh = await fetchVersion()
       if (fresh?.has_update) {
@@ -367,7 +362,7 @@ export function useAppActions(data: AppData) {
         setUpgrading(false)
       }
     })
-  }, [status.ready, versionInfo, fetchVersion, showToast, openConfirm, setUpgrading])
+  }, [versionInfo, fetchVersion, showToast, openConfirm, setUpgrading])
 
   const handleOpenDeleteNodeConfirm = useCallback((tag: string) => {
     openConfirm('删除节点', `确定要删除节点 "${tag}" 吗？`, () => handleDeleteNode(tag))

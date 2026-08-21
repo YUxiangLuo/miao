@@ -170,11 +170,6 @@
     opacity: var(--o-emphasis);
 }/* 活跃连接：中性浮起（描边提亮一档 + 弱填充），"正在传输"的信号由脉冲活点
    承担——大面积绿块会让整条带变成噪声墙，安静的面板里绿色只属于小焦点 */
-.connection-card.active,
-.connection-card.active:hover {
-    border-color: var(--border-strong);
-    background: var(--hover-subtle);
-}
 .site-icon {
     flex: 0 0 auto;
     width: var(--size-site-icon);
@@ -192,8 +187,7 @@
     font-weight: var(--fw-heavy);
 }
 /* 徽标基元由 .badge 提供，这里只保留配色与截断 */
-.connection-outbound-chip,
-.connection-count-chip {
+.connection-outbound-chip {
     flex: 0 1 auto;
     min-width: 0;
     background: var(--info-tint);

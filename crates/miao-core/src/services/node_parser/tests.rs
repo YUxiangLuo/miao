@@ -687,17 +687,3 @@ proxies:
     assert_eq!(result.errors.len(), 1);
     assert!(result.errors[0].contains("ss-no-cipher"));
 }
-
-#[test]
-fn parse_node_json_display_format() {
-    let info = NodeDisplayInfo {
-        tag: "Test Node".to_string(),
-        server: "192.168.1.1".to_string(),
-        server_port: 8388,
-        node_type: "shadowsocks".to_string(),
-        sni: None,
-    };
-
-    let display = format!("{}", info);
-    assert_eq!(display, "Test Node (192.168.1.1:8388) [shadowsocks]");
-}

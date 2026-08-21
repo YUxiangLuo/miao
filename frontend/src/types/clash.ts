@@ -2,9 +2,6 @@
 // 字段以 sing-box Clash API 实际返回 + 前端实际消费面（hooks/useClash.ts、
 // components/Connections*.tsx、siteIcons.ts）为准，未消费字段保持宽松。
 
-/** 分组类型：useClash.isClashProxyGroup 依赖这两个字面量 */
-export type ClashGroupType = 'Selector' | 'URLTest'
-
 export interface ClashProxy {
   /** 节点协议（Hysteria2/AnyTLS/VLESS…）或分组类型（Selector/URLTest） */
   type: string

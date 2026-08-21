@@ -11,12 +11,14 @@ use crate::error::{AppError, AppResult};
 use crate::models::{Config, RuntimePhase, DEFAULT_PORT};
 use crate::services::{
     config::{
-        cache_compatibility, fetch_sub_nodes_if_current, gen_config, gen_config_from_nodes,
-        has_config_cache, install_prepared_runtime, load_volatile_config_at,
-        mark_legacy_cache_used, persist_effective_node_select, read_sub_nodes_snapshot,
-        record_fresh_snapshot, refresh_subscriptions, restore_config_from_cache,
-        runtime_config_matches_node_select, save_config_cache, CacheCompatibility,
-        GenConfigOutcome, RefreshEffect, RefreshPolicy, SubFetchRetry, SubSource,
+        cache_compatibility, fetch_sub_nodes_if_current, gen_config_from_nodes, has_config_cache,
+        install_prepared_runtime, load_volatile_config_at, mark_legacy_cache_used,
+        persist_effective_node_select, read_sub_nodes_snapshot, refresh_subscriptions,
+        restore_config_from_cache, runtime_config_matches_node_select, save_config_cache,
+        CacheCompatibility, GenConfigOutcome, RefreshEffect, RefreshPolicy, SubFetchRetry,
+        SubSource, ALL_SUBS_FAILED_KEEP_CACHE, ALL_SUBS_FAILED_RETRY, DATA_PLANE_RETRYING,
+        REFRESH_FAILED_KEEP_CACHE, REFRESH_VALIDATION_FAILED, REGION_FALLBACK,
+        STARTUP_VALIDATION_RETRY, SUBS_REFRESHING_MANUAL,
     },
     proxy::spawn_restore_last_proxy,
     singbox::{
@@ -313,8 +315,7 @@ async fn initialize_runtime(config: Config, state: Arc<AppState>, extract_runtim
     crate::services::version::mark_upgrade_healthy();
 
     state.set_runtime_phase(RuntimePhase::Initializing);
-    // config_update 锁只覆盖「起内核」的本地操作；快速通道成功后的订阅后台刷新
-    // 移出锁外拉取（见 refresh_subscriptions_in_background），网络退避不再阻塞面板写操作
+    // config_update 只覆盖本地启核。订阅 HTTP 一律在锁外拉取。
     let started_from_local_state = {
         let _config_update = state.config_update.lock().await;
         initialize_runtime_locked(&config, &state).await
@@ -323,7 +324,10 @@ async fn initialize_runtime(config: Config, state: Arc<AppState>, extract_runtim
     if started_from_local_state {
         refresh_subscriptions_in_background(&config, &state).await;
     } else if should_retry_failed_startup(&state).await {
-        retry_failed_startup(&state).await;
+        recover_data_plane_once(&state).await;
+        if should_retry_failed_startup(&state).await {
+            retry_failed_startup(&state).await;
+        }
     }
 }
 
@@ -372,16 +376,33 @@ async fn prepare_compatible_startup_cache(
     Ok(legacy)
 }
 
-#[cfg(not(windows))]
-async fn check_startup_dependencies() {
-    info!("Checking dependencies...");
-    if let Err(err) = crate::services::openwrt::check_and_install_openwrt_dependencies().await {
-        error!(error = %err, "Failed to check or install OpenWrt dependencies");
+/// Restore a compatible cache into the active slot and start sing-box.
+/// Used when startup recovery cannot activate a freshly generated config.
+async fn try_start_compatible_cache(config: &Config, state: &Arc<AppState>) -> bool {
+    if !has_config_cache(state) {
+        return false;
+    }
+    match prepare_compatible_startup_cache(config, state).await {
+        Ok(legacy_cache) => match start_sing_internal(state).await {
+            Ok(()) => {
+                info!("sing-box started from cached config during startup recovery");
+                if legacy_cache {
+                    mark_legacy_cache_used(state).await;
+                }
+                spawn_restore_last_proxy(state);
+                true
+            }
+            Err(err) => {
+                warn!(error = %err, "Failed to start sing-box from cache during startup recovery");
+                false
+            }
+        },
+        Err(err) => {
+            warn!(error = %err, "Cached config is not eligible during startup recovery");
+            false
+        }
     }
 }
-
-#[cfg(windows)]
-async fn check_startup_dependencies() {}
 
 /// Install, validate and start a config rebuilt entirely from local node
 /// material. A successful local start becomes the new verified exact cache;
@@ -398,7 +419,6 @@ async fn start_prepared_local_runtime(
         warn!(error = %err, "Failed to persist effective node_select after local startup rebuild");
     }
 
-    check_startup_dependencies().await;
     start_sing_internal(state).await?;
     info!(source, "sing-box started from local startup material");
 
@@ -406,9 +426,9 @@ async fn start_prepared_local_runtime(
     *state.skipped_rules.lock().await = outcome.skipped_rules.clone();
     *state.config_warning.lock().await =
         if !config.node_select.is_manual() && outcome.node_select.is_manual() {
-            Some("该地区没有可用节点，已切回手动选择".to_string())
+            Some(REGION_FALLBACK.to_string())
         } else if !outcome.has_sub_nodes && !config.subs.is_empty() {
-            Some("订阅正在后台刷新，暂时使用手动节点".to_string())
+            Some(SUBS_REFRESHING_MANUAL.to_string())
         } else {
             None
         };
@@ -419,8 +439,8 @@ async fn start_prepared_local_runtime(
     Ok(())
 }
 
-/// 持锁执行的初始化。返回 true = 内核已用本地材料快速启动，订阅需改为
-/// 后台刷新；false = 无需后台刷新（无配置/无订阅/已走同步拉取路径）。
+/// 持锁执行的本地初始化。返回 true = 内核已用本地材料快速启动，订阅需改为
+/// 后台刷新；false = 无配置或本地材料未能启动（订阅拉取在锁外进行）。
 async fn initialize_runtime_locked(config: &Config, state: &Arc<AppState>) -> bool {
     if config.subs.is_empty() && config.nodes.is_empty() {
         info!("No subscriptions or nodes configured, waiting for onboarding");
@@ -435,13 +455,12 @@ async fn initialize_runtime_locked(config: &Config, state: &Arc<AppState>) -> bo
     }
 
     // 快速通道：存在上次成功运行的缓存配置 → 先起内核（秒开），订阅改为后台刷新。
-    // 缓存读取/校验/启动任何一步失败都落回同步拉取路径。
+    // 缓存读取/校验/启动失败则继续本地 snapshot/manuals；本地材料全部失败才
+    // 标记 Failed 并返回。HTTP 拉取在锁外 recover_data_plane_once 进行。
     if has_config_cache(state) {
         state.set_runtime_phase(RuntimePhase::Validating);
         match prepare_compatible_startup_cache(config, state).await {
             Ok(legacy_cache) => {
-                check_startup_dependencies().await;
-
                 match start_sing_internal(state).await {
                     Ok(()) => {
                         info!("sing-box started from cached config");
@@ -508,108 +527,10 @@ async fn initialize_runtime_locked(config: &Config, state: &Arc<AppState>) -> bo
         }
     }
 
-    info!("Generating initial config...");
-    state.set_runtime_phase(RuntimePhase::FetchingSubscriptions);
-    let mut all_subs_failed = false;
-    let mut fresh_gen: Option<GenConfigOutcome> = None;
-    let mut fallback_cache_legacy: Option<bool> = None;
-    match gen_config(config, state, SubFetchRetry::Startup).await {
-        Ok(outcome) => match install_prepared_runtime(state, &outcome).await {
-            Ok(()) => {
-                if let Err(err) = persist_effective_node_select(state, outcome.node_select).await {
-                    warn!(error = %err, "Failed to persist effective node_select after generate");
-                }
-                if !config.node_select.is_manual() && outcome.node_select.is_manual() {
-                    *state.config_warning.lock().await =
-                        Some("该地区没有可用节点，已切回手动选择".to_string());
-                }
-                if !outcome.has_sub_nodes && !config.subs.is_empty() {
-                    all_subs_failed = true;
-                }
-                fresh_gen = Some(outcome);
-            }
-            Err(e) => {
-                error!(error = %e, "Generated startup config failed validation or installation");
-                match prepare_compatible_startup_cache(config, state).await {
-                    Ok(legacy_cache) => {
-                        warn!("Using cached config as fallback");
-                        all_subs_failed = true;
-                        fallback_cache_legacy = Some(legacy_cache);
-                    }
-                    Err(cache_err) => {
-                        error!(error = %cache_err, "No cached config available");
-                        *state.config_warning.lock().await = Some(
-                            "生成的配置校验失败且无可用缓存，请检查订阅或手动节点".to_string(),
-                        );
-                        state
-                            .runtime_ready
-                            .store(false, std::sync::atomic::Ordering::Relaxed);
-                        state.set_runtime_phase(RuntimePhase::Failed);
-                        state
-                            .initializing
-                            .store(false, std::sync::atomic::Ordering::Relaxed);
-                        return false;
-                    }
-                }
-            }
-        },
-        Err(e) => {
-            error!(error = %e, "Failed to generate config");
-            match prepare_compatible_startup_cache(config, state).await {
-                Ok(legacy_cache) => {
-                    warn!("Using cached config as fallback");
-                    all_subs_failed = true;
-                    fallback_cache_legacy = Some(legacy_cache);
-                }
-                Err(cache_err) => {
-                    error!(error = %cache_err, "No cached config available");
-                    *state.config_warning.lock().await =
-                        Some("所有订阅获取失败且无可用缓存，请添加订阅或手动节点".to_string());
-                    state
-                        .runtime_ready
-                        .store(false, std::sync::atomic::Ordering::Relaxed);
-                    state.set_runtime_phase(RuntimePhase::Failed);
-                    state
-                        .initializing
-                        .store(false, std::sync::atomic::Ordering::Relaxed);
-                    return false;
-                }
-            }
-        }
-    }
-
-    check_startup_dependencies().await;
-
-    match start_sing_internal(state).await {
-        Ok(_) => {
-            info!("sing-box started successfully");
-            match fallback_cache_legacy {
-                Some(true) => mark_legacy_cache_used(state).await,
-                Some(false) => {
-                    // The verified cache and manifest are already current.
-                }
-                None => save_config_cache(state).await,
-            }
-            // 启动成功等价于配置可用：把本次拉取的节点集落成快照，供本地语义变更零网络重建
-            if let Some(outcome) = &fresh_gen {
-                record_fresh_snapshot(config, state, outcome).await;
-                *state.skipped_rules.lock().await = outcome.skipped_rules.clone();
-            }
-            if all_subs_failed && state.config_warning.lock().await.is_none() {
-                warn!("所有订阅获取失败，请检查当前订阅");
-                *state.config_warning.lock().await =
-                    Some("所有订阅获取失败，请检查当前订阅".to_string());
-            }
-            spawn_restore_last_proxy(state);
-        }
-        Err(e) => {
-            state
-                .runtime_ready
-                .store(false, std::sync::atomic::Ordering::Relaxed);
-            state.set_runtime_phase(RuntimePhase::Failed);
-            error!("Failed to start sing-box: {}", e);
-        }
-    }
+    state
+        .runtime_ready
+        .store(false, std::sync::atomic::Ordering::Relaxed);
+    state.set_runtime_phase(RuntimePhase::Failed);
     state
         .initializing
         .store(false, std::sync::atomic::Ordering::Relaxed);
@@ -666,7 +587,7 @@ async fn refresh_subscriptions_in_background(config: &Config, state: &Arc<AppSta
                 save_config_cache(state).await;
                 *state.config_warning.lock().await =
                     if !config.node_select.is_manual() && outcome.node_select.is_manual() {
-                        Some("该地区没有可用节点，已切回手动选择".to_string())
+                        Some(REGION_FALLBACK.to_string())
                     } else {
                         None
                     };
@@ -679,26 +600,23 @@ async fn refresh_subscriptions_in_background(config: &Config, state: &Arc<AppSta
                 save_config_cache(state).await;
                 *state.config_warning.lock().await =
                     if !config.node_select.is_manual() && outcome.node_select.is_manual() {
-                        Some("该地区没有可用节点，已切回手动选择".to_string())
+                        Some(REGION_FALLBACK.to_string())
                     } else {
                         None
                     };
             }
             RefreshEffect::KeptRunningOnTotalFailure => {
-                warn!("所有订阅获取失败，继续使用缓存配置运行");
-                *state.config_warning.lock().await =
-                    Some("所有订阅获取失败，继续使用缓存配置运行".to_string());
+                warn!("{ALL_SUBS_FAILED_KEEP_CACHE}");
+                *state.config_warning.lock().await = Some(ALL_SUBS_FAILED_KEEP_CACHE.to_string());
             }
             RefreshEffect::KeptRunningOnValidationFailure => {
                 error!("Refreshed config failed validation; keeping cached config");
-                *state.config_warning.lock().await =
-                    Some("订阅刷新后的配置校验失败，继续使用缓存配置运行".to_string());
+                *state.config_warning.lock().await = Some(REFRESH_VALIDATION_FAILED.to_string());
             }
         },
         Err(err) => {
             warn!(error = %err, "Background subscription refresh failed");
-            *state.config_warning.lock().await =
-                Some("订阅刷新失败，继续使用缓存配置运行".to_string());
+            *state.config_warning.lock().await = Some(REFRESH_FAILED_KEEP_CACHE.to_string());
         }
     }
     if state.runtime_phase() == background_phase {
@@ -722,6 +640,101 @@ fn next_startup_recovery_delay(current: Duration) -> Duration {
         .min(STARTUP_RECOVERY_MAX_DELAY)
 }
 
+/// One fetch-outside-lock + install-under-lock attempt. Returns true when the
+/// data plane is ready or the service is no longer desired.
+async fn recover_data_plane_once(state: &Arc<AppState>) -> bool {
+    if !should_retry_failed_startup(state).await {
+        return true;
+    }
+    if is_sing_box_running(state).await && state.runtime_ready.load(Ordering::Relaxed) {
+        state.set_runtime_phase(RuntimePhase::Ready);
+        return true;
+    }
+
+    let config = state.config.read().await.clone();
+    let refresh_generation = state.sub_refresh_generation.load(Ordering::Relaxed);
+    if state.runtime_phase() == RuntimePhase::Failed {
+        state.set_runtime_phase(if config.subs.is_empty() {
+            RuntimePhase::Validating
+        } else {
+            RuntimePhase::FetchingSubscriptions
+        });
+    }
+    let nodes =
+        fetch_sub_nodes_if_current(&config, state, SubFetchRetry::Startup, refresh_generation)
+            .await;
+
+    let _config_update = state.config_update.lock().await;
+    if !state.service_should_run.load(Ordering::Relaxed) {
+        return true;
+    }
+    if state.sub_refresh_generation.load(Ordering::Relaxed) != refresh_generation {
+        info!("Startup recovery was superseded by a foreground subscription operation");
+        return state.runtime_ready.load(Ordering::Relaxed) && is_sing_box_running(state).await;
+    }
+
+    let current = state.config.read().await.clone();
+    if current.subs != config.subs {
+        info!("Subscriptions changed during startup recovery; discarding stale fetch");
+        return state.runtime_ready.load(Ordering::Relaxed) && is_sing_box_running(state).await;
+    }
+    if state.runtime_ready.load(Ordering::Relaxed) && is_sing_box_running(state).await {
+        state.set_runtime_phase(RuntimePhase::Ready);
+        return true;
+    }
+
+    match refresh_subscriptions(
+        &current,
+        state,
+        RefreshPolicy::Startup,
+        SubSource::Prefetched(nodes),
+    )
+    .await
+    {
+        Ok(outcome) => match outcome.effect {
+            RefreshEffect::Activated => {
+                info!(?outcome.runtime_update, "Initial data plane recovered in the background");
+                save_config_cache(state).await;
+                *state.config_warning.lock().await =
+                    if !current.node_select.is_manual() && outcome.node_select.is_manual() {
+                        Some(REGION_FALLBACK.to_string())
+                    } else {
+                        None
+                    };
+                spawn_restore_last_proxy(state);
+                return true;
+            }
+            RefreshEffect::SkippedUnchanged => {
+                if state.runtime_ready.load(Ordering::Relaxed) && is_sing_box_running(state).await {
+                    save_config_cache(state).await;
+                    state.set_runtime_phase(RuntimePhase::Ready);
+                    return true;
+                }
+                warn!("Startup recovery produced unchanged bytes without a ready data plane");
+            }
+            RefreshEffect::KeptRunningOnTotalFailure => {
+                warn!("Startup recovery still cannot fetch any subscription nodes");
+                *state.config_warning.lock().await = Some(ALL_SUBS_FAILED_RETRY.to_string());
+            }
+            RefreshEffect::KeptRunningOnValidationFailure => {
+                error!("Startup recovery generated an invalid configuration");
+                *state.config_warning.lock().await = Some(STARTUP_VALIDATION_RETRY.to_string());
+            }
+        },
+        Err(err) => {
+            warn!(error = %err, "Startup data-plane recovery attempt failed");
+            *state.config_warning.lock().await = Some(DATA_PLANE_RETRYING.to_string());
+        }
+    }
+    if try_start_compatible_cache(&current, state).await {
+        return true;
+    }
+    if !state.runtime_ready.load(Ordering::Relaxed) {
+        state.set_runtime_phase(RuntimePhase::Failed);
+    }
+    false
+}
+
 /// Keep repairing an unavailable initial data plane without blocking panel
 /// mutations on subscription network I/O. Foreground subscription operations
 /// advance `sub_refresh_generation`, so their result always wins.
@@ -729,100 +742,8 @@ async fn retry_failed_startup(state: &Arc<AppState>) {
     let mut delay = STARTUP_RECOVERY_INITIAL_DELAY;
     loop {
         tokio::time::sleep(delay).await;
-
-        if !should_retry_failed_startup(state).await {
+        if recover_data_plane_once(state).await {
             return;
-        }
-        if is_sing_box_running(state).await && state.runtime_ready.load(Ordering::Relaxed) {
-            state.set_runtime_phase(RuntimePhase::Ready);
-            return;
-        }
-
-        let config = state.config.read().await.clone();
-        let refresh_generation = state.sub_refresh_generation.load(Ordering::Relaxed);
-        if state.runtime_phase() == RuntimePhase::Failed {
-            state.set_runtime_phase(if config.subs.is_empty() {
-                RuntimePhase::Validating
-            } else {
-                RuntimePhase::FetchingSubscriptions
-            });
-        }
-        let nodes =
-            fetch_sub_nodes_if_current(&config, state, SubFetchRetry::Startup, refresh_generation)
-                .await;
-
-        let _config_update = state.config_update.lock().await;
-        if !state.service_should_run.load(Ordering::Relaxed) {
-            return;
-        }
-        if state.sub_refresh_generation.load(Ordering::Relaxed) != refresh_generation {
-            info!("Startup recovery was superseded by a foreground subscription operation");
-            if state.runtime_ready.load(Ordering::Relaxed) && is_sing_box_running(state).await {
-                state.set_runtime_phase(RuntimePhase::Ready);
-                return;
-            }
-            delay = next_startup_recovery_delay(delay);
-            continue;
-        }
-
-        let current = state.config.read().await.clone();
-        if current.subs != config.subs {
-            info!("Subscriptions changed during startup recovery; discarding stale fetch");
-            delay = STARTUP_RECOVERY_INITIAL_DELAY;
-            continue;
-        }
-        if state.runtime_ready.load(Ordering::Relaxed) && is_sing_box_running(state).await {
-            state.set_runtime_phase(RuntimePhase::Ready);
-            return;
-        }
-
-        match refresh_subscriptions(
-            &current,
-            state,
-            RefreshPolicy::Startup,
-            SubSource::Prefetched(nodes),
-        )
-        .await
-        {
-            Ok(outcome) if outcome.effect == RefreshEffect::Activated => {
-                info!(?outcome.runtime_update, "Initial data plane recovered in the background");
-                save_config_cache(state).await;
-                *state.config_warning.lock().await =
-                    if !current.node_select.is_manual() && outcome.node_select.is_manual() {
-                        Some("该地区没有可用节点，已切回手动选择".to_string())
-                    } else {
-                        None
-                    };
-                spawn_restore_last_proxy(state);
-                return;
-            }
-            Ok(outcome) if outcome.effect == RefreshEffect::SkippedUnchanged => {
-                if state.runtime_ready.load(Ordering::Relaxed) && is_sing_box_running(state).await {
-                    save_config_cache(state).await;
-                    state.set_runtime_phase(RuntimePhase::Ready);
-                    return;
-                }
-                warn!("Startup recovery produced unchanged bytes without a ready data plane");
-            }
-            Ok(outcome) if outcome.effect == RefreshEffect::KeptRunningOnTotalFailure => {
-                warn!("Startup recovery still cannot fetch any subscription nodes");
-                *state.config_warning.lock().await =
-                    Some("所有订阅获取失败，网络恢复后将自动重试".to_string());
-            }
-            Ok(outcome) if outcome.effect == RefreshEffect::KeptRunningOnValidationFailure => {
-                error!("Startup recovery generated an invalid configuration");
-                *state.config_warning.lock().await =
-                    Some("订阅配置校验失败，修复订阅后将自动重试".to_string());
-            }
-            Ok(_) => {}
-            Err(err) => {
-                warn!(error = %err, "Startup data-plane recovery attempt failed");
-                *state.config_warning.lock().await =
-                    Some("代理服务仍未就绪，正在后台自动重试".to_string());
-            }
-        }
-        if !state.runtime_ready.load(Ordering::Relaxed) {
-            state.set_runtime_phase(RuntimePhase::Failed);
         }
         delay = next_startup_recovery_delay(delay);
     }
@@ -1040,8 +961,8 @@ mod tests {
     use std::path::PathBuf;
 
     use super::{
-        initialize_runtime_locked, panel_bind_addr, prepare_compatible_startup_cache, spawn_server,
-        RuntimeOptions,
+        initialize_runtime_locked, panel_bind_addr, prepare_compatible_startup_cache,
+        recover_data_plane_once, spawn_server, RuntimeOptions,
     };
 
     #[tokio::test]
@@ -1158,6 +1079,17 @@ proxies:
         let addr = listener.local_addr().unwrap();
         tokio::spawn(async move {
             axum::serve(listener, app).await.unwrap();
+        });
+        format!("http://{addr}/sub")
+    }
+
+    async fn refusing_sub_url() -> String {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            while let Ok((socket, _)) = listener.accept().await {
+                drop(socket);
+            }
         });
         format!("http://{addr}/sub")
     }
@@ -1286,6 +1218,37 @@ proxies:
 
     #[cfg(unix)]
     #[tokio::test]
+    async fn local_startup_does_not_fetch_subscriptions_under_the_config_lock() {
+        let accepted = std::sync::Arc::new(tokio::sync::Notify::new());
+        let release = std::sync::Arc::new(tokio::sync::Notify::new());
+        let subscription = subscription_server(Some(accepted.clone()), Some(release.clone())).await;
+        let config = crate::models::Config {
+            subs: vec![subscription],
+            ..crate::models::Config::default()
+        };
+        let (state, root) = local_startup_test_state(config.clone(), "no-lock-fetch").await;
+
+        let finished = tokio::time::timeout(
+            std::time::Duration::from_millis(400),
+            initialize_runtime_locked(&config, &state),
+        )
+        .await
+        .expect("locked local startup must return without waiting on subscription HTTP");
+
+        assert!(!finished);
+        assert!(!state
+            .runtime_ready
+            .load(std::sync::atomic::Ordering::Relaxed));
+        // The hung subscription server was never contacted.
+        tokio::time::timeout(std::time::Duration::from_millis(50), accepted.notified())
+            .await
+            .expect_err("subscription fetch must not run under the config lock");
+
+        let _ = tokio::fs::remove_dir_all(root).await;
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
     async fn failed_initial_start_keeps_retrying_until_the_data_plane_recovers() {
         use std::sync::atomic::Ordering;
 
@@ -1318,6 +1281,102 @@ proxies:
                 .map(|status| status.node_count),
             Some(1)
         );
+
+        crate::services::singbox::stop_sing_internal(&state).await;
+        let _ = tokio::fs::remove_dir_all(root).await;
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn recovery_starts_compatible_cache_when_subscription_fetch_fails() {
+        use std::sync::atomic::Ordering;
+
+        let subscription = refusing_sub_url().await;
+        let config = crate::models::Config {
+            subs: vec![subscription.clone()],
+            ..crate::models::Config::default()
+        };
+        let (state, root) = local_startup_test_state(config.clone(), "recover-cache").await;
+        let snapshot = serde_json::json!({
+            "version": 1,
+            "subs": [subscription],
+            "node_names": ["cached-sub-node"],
+            "outbounds": [{
+                "type": "hysteria2",
+                "tag": "cached-sub-node",
+                "server": "127.0.0.1",
+                "server_port": 443,
+                "password": "secret"
+            }],
+            "source_ids": ["cached-source"]
+        });
+        tokio::fs::write(
+            &state.runtime_paths.sub_nodes_snapshot,
+            serde_json::to_vec(&snapshot).unwrap(),
+        )
+        .await
+        .unwrap();
+
+        assert!(initialize_runtime_locked(&config, &state).await);
+        assert!(state.runtime_ready.load(Ordering::Relaxed));
+        crate::services::singbox::stop_sing_internal(&state).await;
+        state.runtime_ready.store(false, Ordering::Relaxed);
+        state.set_runtime_phase(crate::models::RuntimePhase::Failed);
+        let _ = tokio::fs::remove_file(&state.runtime_paths.sub_nodes_snapshot).await;
+
+        let recovered = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            recover_data_plane_once(&state),
+        )
+        .await
+        .expect("cache recovery must finish");
+
+        assert!(recovered);
+        assert!(state.runtime_ready.load(Ordering::Relaxed));
+        let active = tokio::fs::read_to_string(&state.runtime_paths.active_config)
+            .await
+            .unwrap();
+        assert!(active.contains("cached-sub-node"));
+
+        crate::services::singbox::stop_sing_internal(&state).await;
+        let _ = tokio::fs::remove_dir_all(root).await;
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn recovery_activates_manuals_when_fetch_fails_and_nothing_is_running() {
+        use std::sync::atomic::Ordering;
+
+        let subscription = refusing_sub_url().await;
+        let config = crate::models::Config {
+            subs: vec![subscription],
+            nodes: vec![serde_json::json!({
+                "type": "hysteria2",
+                "tag": "manual-recover",
+                "server": "127.0.0.1",
+                "server_port": 443,
+                "password": "secret"
+            })
+            .to_string()],
+            ..crate::models::Config::default()
+        };
+        let (state, root) = local_startup_test_state(config, "recover-manuals").await;
+        state.initializing.store(false, Ordering::Relaxed);
+        state.set_runtime_phase(crate::models::RuntimePhase::Failed);
+
+        let recovered = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            recover_data_plane_once(&state),
+        )
+        .await
+        .expect("manual recovery must finish");
+
+        assert!(recovered);
+        assert!(state.runtime_ready.load(Ordering::Relaxed));
+        let active = tokio::fs::read_to_string(&state.runtime_paths.active_config)
+            .await
+            .unwrap();
+        assert!(active.contains("manual-recover"));
 
         crate::services::singbox::stop_sing_internal(&state).await;
         let _ = tokio::fs::remove_dir_all(root).await;

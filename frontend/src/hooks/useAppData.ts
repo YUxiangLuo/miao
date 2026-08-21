@@ -5,6 +5,7 @@ import { useProxies, useTraffic, useConnections, useDelays, isClashProxyGroup } 
 import { usePolling, type PollTask } from './usePolling'
 import { useDesktopLayout } from './useDesktopLayout'
 import {
+  CLASH_API_BASE,
   EMPTY_NODE_FORM,
   nodeTypeDefaults,
   STATUS_FAILURE_THRESHOLD,
@@ -32,7 +33,7 @@ export function useAppData() {
   const [switchingNode, setSwitchingNode] = useState('')
 
   const isDesktop = useDesktopLayout()
-  const clashApiBase = useMemo(() => '/api/clash', [])
+  const clashApiBase = CLASH_API_BASE
 
   const { toasts, showToast, dismissToast } = useToast()
   const { apiCall } = useApi({ setLoadingAction })
@@ -103,7 +104,7 @@ export function useAppData() {
     && statusLoaded
     && !backendUnreachable
     && !status.initializing
-    && !status.running
+    && !status.ready
     && subs.length === 0
     && nodes.length === 0
 

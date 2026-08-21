@@ -10,7 +10,6 @@ use crate::models::{
 };
 use crate::responses::{status_error, success, success_no_data, HandlerResult};
 use crate::services::{
-    config::apply_config_change,
     proxy::spawn_restore_last_proxy,
     singbox::{kernel_status, start_sing_internal, stop_sing_internal},
     status::{legacy_warning, runtime_warnings},
@@ -115,20 +114,9 @@ pub async fn set_route_mode(
         ));
     }
 
-    let _config_update = state.config_update.lock().await;
-    let old_config = state.config.read().await.clone();
-
-    if old_config.route_mode == req.route_mode {
-        return Ok(success_no_data("Route mode unchanged"));
-    }
-
-    let mut new_config = old_config.clone();
-    new_config.route_mode = req.route_mode;
-
-    // route_mode 是易变层字段：走普通配置事务（纯本地语义变更，快照零网络重建），
-    // 分层落盘只写 volatile.yaml
-    match apply_config_change(&state, &old_config, &new_config).await {
-        Ok(_) => Ok(success_no_data("Route mode updated")),
+    match crate::services::config::apply_route_mode(&state, req.route_mode).await {
+        Ok((_, update)) if update.updated() => Ok(success_no_data("Route mode updated")),
+        Ok(_) => Ok(success_no_data("Route mode unchanged")),
         Err(e) => Err(status_error(StatusCode::INTERNAL_SERVER_ERROR, e)),
     }
 }
@@ -151,22 +139,14 @@ pub async fn set_node_select(
         )
     })?;
 
-    let _config_update = state.config_update.lock().await;
-    let old_config = state.config.read().await.clone();
-    if old_config.node_select == node_select {
-        return Ok(success_no_data("Node select unchanged"));
-    }
-
-    let mut new_config = old_config.clone();
-    new_config.node_select = node_select;
-
-    match crate::services::config::apply_config_change(&state, &old_config, &new_config).await {
-        Ok(_) => {
-            let effective = state.config.read().await.node_select;
+    match crate::services::config::apply_node_select(&state, node_select).await {
+        Ok((_previous, effective, update)) => {
             if !node_select.is_manual() && effective.is_manual() {
-                Ok(success_no_data("该地区没有可用节点，已切回手动选择"))
-            } else {
+                Ok(success_no_data(crate::services::config::REGION_FALLBACK))
+            } else if update.updated() || effective != node_select {
                 Ok(success_no_data("Node select updated"))
+            } else {
+                Ok(success_no_data("Node select unchanged"))
             }
         }
         Err(e) => Err(status_error(StatusCode::INTERNAL_SERVER_ERROR, e)),

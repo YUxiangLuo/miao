@@ -8,7 +8,7 @@ use std::{
 use tracing::{error, info, warn};
 
 use crate::error::{AppError, AppResult};
-use crate::models::{Config, NodeSelect, RuntimePhase};
+use crate::models::{Config, NodeSelect, RouteMode, RuntimePhase};
 use crate::services::{
     proxy::spawn_restore_last_proxy,
     singbox::{
@@ -27,17 +27,21 @@ use super::persist::{
     restore_config_from_cache, restore_runtime_config_bytes, save_config_cache,
     save_config_layered, snapshot_runtime_config, write_file_atomic,
 };
+use super::warnings::{ALL_SUBS_FAILED, NO_USABLE_MANUAL, NO_USABLE_SUBS, REGION_FALLBACK};
 
-/// 订阅刷新策略：机制（拉取 → 生成 → 校验 → 重启）只有一条，差异显式表达
+/// 订阅刷新策略：机制（拉取 → 生成 → 校验 → 激活）只有一条，差异显式表达
 pub enum RefreshPolicy {
-    /// 手动刷新（面板「刷新订阅」等独立路径）：生成+校验成功后总是重启；
-    /// 全部订阅失败也用现有结果继续；重启后由本管线持久化生效的 node_select
+    /// 手动刷新（面板「刷新订阅」等独立路径）：生成+校验成功后，运行字节
+    /// 有变化才激活（Unix reload / 未在跑则 start）；全部订阅失败也用现有
+    /// 结果继续；激活后由本管线持久化生效的 node_select
     Manual,
     /// apply_config_change 事务内的刷新：机制同 Manual，但 node_select 由外层
     /// 事务随新配置一并提交，本管线不提前写盘——避免「旧配置 + 新选择」的中间快照
     ManualInApply,
-    /// 启动快速通道：与启动所用缓存比对无变化则不重启；
-    /// 全部订阅失败/校验失败时保留正在运行的缓存配置
+    /// 启动路径：与启动所用缓存比对无变化则不激活。
+    /// 内核已在跑时，全部订阅失败/校验失败保留当前运行配置。
+    /// 内核未在跑时（恢复路径）不把失败当成「保持运行」：有可用生成
+    /// 结果则激活，否则由调用方回退到兼容缓存启动。
     Startup,
 }
 
@@ -118,7 +122,7 @@ pub(super) fn sub_source_for(old_config: &Config, new_config: &Config) -> SubSou
     }
 }
 
-/// 刷新后是否需要重启内核：与启动缓存逐字节不同才需要；读不出内容时保守重启
+/// 刷新后是否需要激活新配置：与当前运行字节不同才需要；读不出内容时保守激活
 pub(super) fn config_changed_after_refresh(cache: Option<&[u8]>, current: Option<&[u8]>) -> bool {
     match (cache, current) {
         (Some(old), Some(new)) => old != new,
@@ -147,6 +151,42 @@ async fn validate_prepared_config(state: &Arc<AppState>, bytes: &[u8]) -> AppRes
     result
 }
 
+async fn restore_runtime_files(
+    state: &AppState,
+    old_runtime: Option<&[u8]>,
+    old_bindings: Option<&[u8]>,
+) -> AppResult<()> {
+    let runtime_rollback =
+        restore_file_snapshot(&state.runtime_paths.active_config, old_runtime).await;
+    let bindings_rollback =
+        restore_file_snapshot(&state.runtime_paths.node_bindings, old_bindings).await;
+    runtime_rollback.and(bindings_rollback)
+}
+
+async fn commit_runtime_files(
+    state: &AppState,
+    bytes: &[u8],
+    bindings: &super::bindings::NodeTagBindings,
+    old_runtime: Option<&[u8]>,
+    old_bindings: Option<&[u8]>,
+) -> AppResult<()> {
+    let commit = async {
+        write_file_atomic(&state.runtime_paths.active_config, bytes).await?;
+        save_node_bindings(state, bindings).await
+    }
+    .await;
+    if let Err(commit_err) = commit {
+        if let Err(rollback_err) = restore_runtime_files(state, old_runtime, old_bindings).await {
+            return Err(AppError::message(format!(
+                "{}. Runtime file rollback failed: {}",
+                commit_err, rollback_err
+            )));
+        }
+        return Err(commit_err);
+    }
+    Ok(())
+}
+
 /// Validate and install a generated config for startup before any process is
 /// launched. The caller publishes cache/snapshot state only after start.
 pub async fn install_prepared_runtime(
@@ -156,26 +196,14 @@ pub async fn install_prepared_runtime(
     validate_prepared_config(state, &outcome.bytes).await?;
     let old_runtime = read_file_snapshot(&state.runtime_paths.active_config).await?;
     let old_bindings = read_file_snapshot(&state.runtime_paths.node_bindings).await?;
-    let commit = async {
-        write_file_atomic(&state.runtime_paths.active_config, &outcome.bytes).await?;
-        save_node_bindings(state, &outcome.node_bindings).await
-    }
-    .await;
-    if let Err(commit_err) = commit {
-        let runtime_rollback =
-            restore_file_snapshot(&state.runtime_paths.active_config, old_runtime.as_deref()).await;
-        let bindings_rollback =
-            restore_file_snapshot(&state.runtime_paths.node_bindings, old_bindings.as_deref())
-                .await;
-        if let Err(rollback_err) = runtime_rollback.and(bindings_rollback) {
-            return Err(AppError::message(format!(
-                "{}. Prepared config rollback failed: {}",
-                commit_err, rollback_err
-            )));
-        }
-        return Err(commit_err);
-    }
-    Ok(())
+    commit_runtime_files(
+        state,
+        &outcome.bytes,
+        &outcome.node_bindings,
+        old_runtime.as_deref(),
+        old_bindings.as_deref(),
+    )
+    .await
 }
 
 async fn restore_file_snapshot(path: &Path, bytes: Option<&[u8]>) -> AppResult<()> {
@@ -235,26 +263,14 @@ async fn activate_running_config(
         // fails, the running process is still untouched and rollback is purely
         // local. Once SIGHUP is sent, any failure restores the old files and
         // reactivates them before returning.
-        let commit = async {
-            write_file_atomic(&state.runtime_paths.active_config, &outcome.bytes).await?;
-            save_node_bindings(state, &outcome.node_bindings).await
-        }
-        .await;
-        if let Err(commit_err) = commit {
-            let runtime_rollback =
-                restore_file_snapshot(&state.runtime_paths.active_config, old_runtime.as_deref())
-                    .await;
-            let bindings_rollback =
-                restore_file_snapshot(&state.runtime_paths.node_bindings, old_bindings.as_deref())
-                    .await;
-            if let Err(rollback_err) = runtime_rollback.and(bindings_rollback) {
-                return Err(AppError::message(format!(
-                    "{}. Runtime file rollback failed: {}",
-                    commit_err, rollback_err
-                )));
-            }
-            return Err(commit_err);
-        }
+        commit_runtime_files(
+            state,
+            &outcome.bytes,
+            &outcome.node_bindings,
+            old_runtime.as_deref(),
+            old_bindings.as_deref(),
+        )
+        .await?;
 
         let (activation, runtime_update) = if was_running {
             (reload_sing_internal(state).await, RuntimeUpdate::Reloaded)
@@ -262,14 +278,9 @@ async fn activate_running_config(
             (start_sing_internal(state).await, RuntimeUpdate::Started)
         };
         if let Err(reload_err) = activation {
-            let restore_files = async {
-                restore_file_snapshot(&state.runtime_paths.active_config, old_runtime.as_deref())
-                    .await?;
-                restore_file_snapshot(&state.runtime_paths.node_bindings, old_bindings.as_deref())
-                    .await
-            }
-            .await;
-            if let Err(restore_err) = restore_files {
+            if let Err(restore_err) =
+                restore_runtime_files(state, old_runtime.as_deref(), old_bindings.as_deref()).await
+            {
                 return Err(AppError::message(format!(
                     "{}. Runtime file rollback failed: {}",
                     reload_err, restore_err
@@ -330,8 +341,8 @@ async fn activate_running_config(
     }
 }
 
-/// 订阅刷新统一管线：获取节点集（source 决定真拉取还是快照重建）→ 生成配置 →（策略门控）→ 校验 → 重启内核。
-/// 不包含缓存保存/节点恢复/告警文案——由调用方按 outcome 决定。
+/// 订阅刷新统一管线：获取节点集（source 决定真拉取还是快照重建）→ 生成配置 →（策略门控）→ 校验 → 激活内核。
+/// 不负责缓存保存和告警文案（ManualInApply 也不提前写 node_select）。
 pub async fn refresh_subscriptions(
     config: &Config,
     state: &Arc<AppState>,
@@ -356,17 +367,22 @@ pub async fn refresh_subscriptions(
     .map_err(|e| AppError::context("Failed to regenerate config", e))?;
     info!("Config regenerated successfully");
 
-    if startup && !generated.has_sub_nodes && !config.subs.is_empty() {
-        return Ok(RefreshOutcome {
-            effect: RefreshEffect::KeptRunningOnTotalFailure,
-            runtime_update: RuntimeUpdate::None,
-            node_select: generated.node_select,
-            generated: None,
-        });
-    }
-
     let runtime_ready =
         state.runtime_ready.load(Ordering::Relaxed) && is_sing_box_running(state).await;
+    if startup && !generated.has_sub_nodes && !config.subs.is_empty() {
+        if runtime_ready {
+            return Ok(RefreshOutcome {
+                effect: RefreshEffect::KeptRunningOnTotalFailure,
+                runtime_update: RuntimeUpdate::None,
+                node_select: generated.node_select,
+                generated: None,
+            });
+        }
+        info!(
+            "Startup fetch produced no subscription nodes; activating generated config because the data plane is not running"
+        );
+    }
+
     if runtime_ready
         && !config_changed_after_refresh(active_bytes.as_deref(), Some(&generated.bytes))
     {
@@ -389,7 +405,7 @@ pub async fn refresh_subscriptions(
     }
 
     if let Err(e) = validate_prepared_config(state, &generated.bytes).await {
-        if startup {
+        if startup && runtime_ready {
             return Ok(RefreshOutcome {
                 effect: RefreshEffect::KeptRunningOnValidationFailure,
                 runtime_update: RuntimeUpdate::None,
@@ -545,11 +561,11 @@ async fn update_config_warning(config: &Config, state: &Arc<AppState>, has_sub_n
     let effective = state.config.read().await.node_select;
     *state.config_warning.lock().await = if !config.node_select.is_manual() && effective.is_manual()
     {
-        Some("该地区没有可用节点，已切回手动选择".to_string())
+        Some(REGION_FALLBACK.to_string())
     } else if has_sub_nodes {
         None
     } else if !config.subs.is_empty() {
-        Some("所有订阅获取失败，请检查当前订阅".to_string())
+        Some(ALL_SUBS_FAILED.to_string())
     } else {
         None
     };
@@ -641,9 +657,9 @@ async fn clear_runtime_config(state: &Arc<AppState>) {
 
 pub(super) fn no_usable_nodes_warning(config: &Config) -> String {
     if config.subs.is_empty() {
-        "没有可用的手动节点，请检查配置或添加节点".to_string()
+        NO_USABLE_MANUAL.to_string()
     } else {
-        "所有订阅获取失败且没有可用手动节点，请检查订阅或添加节点".to_string()
+        NO_USABLE_SUBS.to_string()
     }
 }
 
@@ -897,6 +913,50 @@ pub async fn apply_config_change(
             }
         }
     }
+}
+
+/// Caller must not already hold `config_update`.
+/// Returns `(previous, runtime_update)` observed under that lock.
+pub async fn apply_route_mode(
+    state: &Arc<AppState>,
+    route_mode: RouteMode,
+) -> AppResult<(RouteMode, RuntimeUpdate)> {
+    let _config_update = state.config_update.lock().await;
+    let old_config = state.config.read().await.clone();
+    let previous = old_config.route_mode;
+    if previous == route_mode {
+        return Ok((previous, RuntimeUpdate::None));
+    }
+    let mut new_config = old_config.clone();
+    new_config.route_mode = route_mode;
+    Ok((
+        previous,
+        apply_config_change(state, &old_config, &new_config)
+            .await?
+            .runtime_update(),
+    ))
+}
+
+/// Caller must not already hold `config_update`.
+/// Returns `(previous, effective, runtime_update)` observed under that lock.
+/// `effective` may fall back to manual when the region has no nodes.
+pub async fn apply_node_select(
+    state: &Arc<AppState>,
+    node_select: NodeSelect,
+) -> AppResult<(NodeSelect, NodeSelect, RuntimeUpdate)> {
+    let _config_update = state.config_update.lock().await;
+    let old_config = state.config.read().await.clone();
+    let previous = old_config.node_select;
+    if previous == node_select {
+        return Ok((previous, previous, RuntimeUpdate::None));
+    }
+    let mut new_config = old_config.clone();
+    new_config.node_select = node_select;
+    let update = apply_config_change(state, &old_config, &new_config)
+        .await?
+        .runtime_update();
+    let effective = state.config.read().await.node_select;
+    Ok((previous, effective, update))
 }
 
 /// 只用本地材料把磁盘 config.json 恢复到变更前状态：优先内存快照，其次缓存。
