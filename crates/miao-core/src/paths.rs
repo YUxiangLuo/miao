@@ -17,9 +17,9 @@ use crate::error::{AppError, AppResult};
 pub const CONFIG_FILENAME: &str = "config.yaml";
 pub const ETC_CONFIG_PATH: &str = "/etc/miao/config.yaml";
 
-/// All derived runtime artifacts used by configuration generation. Keeping
-/// these paths in state makes transaction tests hermetic and prevents tests
-/// from ever touching the production sing-box directory.
+/// Generated sing-box artifacts plus the last-proxy preference file.
+/// Tests keep everything under `runtime_dir`. Production overwrites
+/// `last_proxy` via [`Self::with_last_proxy`] (cwd / tmpfs / app data).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RuntimePaths {
     pub runtime_dir: PathBuf,
@@ -28,6 +28,7 @@ pub struct RuntimePaths {
     pub cache_manifest: PathBuf,
     pub sub_nodes_snapshot: PathBuf,
     pub node_bindings: PathBuf,
+    pub last_proxy: PathBuf,
 }
 
 impl RuntimePaths {
@@ -47,8 +48,14 @@ impl RuntimePaths {
             // from the config path prevents two explicit configs in the same
             // directory (and parallel tests) from sharing node identities.
             node_bindings,
+            last_proxy: runtime_dir.join(".last_proxy"),
             runtime_dir,
         }
+    }
+
+    pub fn with_last_proxy(mut self, last_proxy: PathBuf) -> Self {
+        self.last_proxy = last_proxy;
+        self
     }
 }
 
@@ -186,6 +193,16 @@ mod tests {
         assert_eq!(
             profile.node_bindings,
             PathBuf::from("/etc/miao/travel.node-bindings.json")
+        );
+        assert_eq!(
+            default.last_proxy,
+            PathBuf::from("/tmp/runtime/.last_proxy")
+        );
+        assert_eq!(
+            default
+                .with_last_proxy(PathBuf::from("/etc/miao/.last_proxy"))
+                .last_proxy,
+            PathBuf::from("/etc/miao/.last_proxy")
         );
     }
 

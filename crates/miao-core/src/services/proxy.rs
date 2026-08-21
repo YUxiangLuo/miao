@@ -74,7 +74,7 @@ fn pid1_comm() -> String {
         .unwrap_or_default()
 }
 
-fn get_last_proxy_path() -> PathBuf {
+pub fn platform_last_proxy_path() -> PathBuf {
     last_proxy_path_for(last_proxy_store(is_openwrt_like(), &pid1_comm()))
 }
 
@@ -95,13 +95,12 @@ async fn write_last_proxy_file(path: &Path, proxy: &LastProxy) -> AppResult<()> 
     Ok(())
 }
 
-pub async fn save_last_proxy(proxy: &LastProxy) -> AppResult<()> {
-    write_last_proxy_file(&get_last_proxy_path(), proxy).await
+pub async fn save_last_proxy(state: &AppState, proxy: &LastProxy) -> AppResult<()> {
+    write_last_proxy_file(&state.runtime_paths.last_proxy, proxy).await
 }
 
-async fn load_last_proxy() -> Option<LastProxy> {
-    let path = get_last_proxy_path();
-    if let Ok(content) = tokio::fs::read_to_string(&path).await {
+async fn load_last_proxy(path: &Path) -> Option<LastProxy> {
+    if let Ok(content) = tokio::fs::read_to_string(path).await {
         serde_json::from_str(&content).ok()
     } else {
         None
@@ -139,7 +138,7 @@ async fn restore_last_proxy(state: &Arc<AppState>, generation: u64) {
     }
 
     // 等待期间用户可能已切换节点：落地前才读取，避免把旧选择 PUT 回去
-    let proxy = match load_last_proxy().await {
+    let proxy = match load_last_proxy(&state.runtime_paths.last_proxy).await {
         Some(p) => p,
         None => return,
     };
@@ -321,6 +320,23 @@ mod tests {
         assert!(!os_release_looks_like_openwrt(
             "ID=ubuntu\nVERSION_ID=24.04\n"
         ));
+    }
+
+    #[tokio::test]
+    async fn restore_uses_runtime_paths_and_skips_missing_file_without_clash() {
+        let state = crate::test_support::app_state(crate::models::Config::default());
+        assert_eq!(
+            state.runtime_paths.last_proxy,
+            state.runtime_paths.runtime_dir.join(LAST_PROXY_FILENAME)
+        );
+        assert!(!state.runtime_paths.last_proxy.exists());
+
+        let start = std::time::Instant::now();
+        super::restore_last_proxy(&state, 0).await;
+        assert!(
+            start.elapsed() < std::time::Duration::from_millis(500),
+            "missing isolated last-proxy must not probe Clash"
+        );
     }
 
     #[tokio::test]

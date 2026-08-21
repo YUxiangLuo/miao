@@ -1,5 +1,5 @@
 use super::apply::{
-    config_apply_mode, config_changed_after_refresh, no_usable_nodes_warning,
+    apply_config_change, config_apply_mode, config_changed_after_refresh, no_usable_nodes_warning,
     persist_config_without_usable_nodes_at, sub_source_for, ConfigApplyMode, SubSource,
 };
 use super::builder::{build_sing_box_config, filter_rules_with_missing_outbound, tun_inbound};
@@ -358,6 +358,32 @@ fn config_change_clears_runtime_when_last_source_is_removed() {
     assert_eq!(config_apply_mode(&config, false), ConfigApplyMode::Clear);
 }
 
+#[tokio::test]
+async fn clearing_the_last_source_drops_node_bindings() {
+    let old = Config {
+        nodes: vec![
+            r#"{"type":"hysteria2","tag":"ghost","server":"127.0.0.1","server_port":443,"password":"x"}"#.to_string(),
+        ],
+        ..Config::default()
+    };
+    let state = app_state(old.clone());
+    if let Some(parent) = state.runtime_paths.node_bindings.parent() {
+        tokio::fs::create_dir_all(parent).await.unwrap();
+    }
+    tokio::fs::write(
+        &state.runtime_paths.node_bindings,
+        b"{\"version\":1,\"bindings\":[]}",
+    )
+    .await
+    .unwrap();
+
+    apply_config_change(&state, &old, &Config::default())
+        .await
+        .unwrap();
+
+    assert!(!state.runtime_paths.node_bindings.exists());
+}
+
 #[test]
 fn sub_source_is_snapshot_when_subs_unchanged() {
     let old = Config {
@@ -409,10 +435,14 @@ async fn unusable_config_is_persisted_and_stale_runtime_files_are_removed() {
     let runtime_path = temp_dir.join("config.json");
     let cache_path = temp_dir.join("config.json.cache");
     let sub_nodes_path = temp_dir.join("sub-nodes.json");
+    let bindings_path = temp_dir.join("node-bindings.json");
     tokio::fs::create_dir_all(&temp_dir).await.unwrap();
     tokio::fs::write(&runtime_path, "stale").await.unwrap();
     tokio::fs::write(&cache_path, "stale").await.unwrap();
     tokio::fs::write(&sub_nodes_path, "stale").await.unwrap();
+    tokio::fs::write(&bindings_path, b"{\"version\":1,\"bindings\":[]}")
+        .await
+        .unwrap();
 
     let subscription_url = "https://example.com/broken".to_string();
     state.sub_status.lock().await.insert(
@@ -443,6 +473,10 @@ async fn unusable_config_is_persisted_and_stale_runtime_files_are_removed() {
     assert!(!runtime_path.exists());
     assert!(!cache_path.exists());
     assert!(!sub_nodes_path.exists());
+    assert!(
+        bindings_path.exists(),
+        "subscription URLs remain; tag bindings must survive a tmpfs wipe"
+    );
     assert_eq!(
         state.config.read().await.subs,
         vec![subscription_url.clone()]

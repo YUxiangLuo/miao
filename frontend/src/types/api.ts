@@ -26,7 +26,7 @@ export type RuntimePhase =
   | 'stopped'
   | 'failed'
 
-/** handlers/nodes.rs VALID_NODE_TYPES */
+/** validation.rs VALID_NODE_TYPES */
 export type NodeType = 'hysteria2' | 'anytls' | 'ss' | 'vmess' | 'vless' | 'trojan' | 'tuic'
 
 /** models/api.rs ApiResponse<T>：所有 /api 端点的统一信封 */

@@ -285,7 +285,9 @@ async fn runtime_is_ready(state: &Arc<AppState>) -> bool {
 async fn tool_get_status(state: &Arc<AppState>) -> Result<JsonValue, String> {
     let kernel = kernel_status(state).await;
     let (running, uptime_secs) = (kernel.running, kernel.uptime_secs);
-    let ready = running && state.runtime_ready.load(Ordering::Relaxed);
+    // Same projection as GET /api/status: kernel_status reaps a dead child
+    // and clears the flag. Clash queries below still require a live process.
+    let ready = state.runtime_ready.load(Ordering::Relaxed);
 
     let config = state.config.read().await.clone();
     let route_mode = config.route_mode;
@@ -297,7 +299,7 @@ async fn tool_get_status(state: &Arc<AppState>) -> Result<JsonValue, String> {
     // 节点数按平铺节点池计（不随 fastest_* 地区过滤收缩）
     let mut current_node = JsonValue::Null;
     let mut node_count = config.nodes.len();
-    if ready {
+    if running && ready {
         if let Ok(proxies) = fetch_proxies(state).await {
             let pool = flat_node_pool(&proxies);
             if !pool.is_empty() {
@@ -430,10 +432,13 @@ async fn tool_switch_node(state: &Arc<AppState>, args: &JsonValue) -> Result<Jso
     }
 
     // 与面板切换同路径：持久化选择，重启后自动恢复
-    let persist = crate::services::proxy::save_last_proxy(&LastProxy {
-        group: SELECTOR_TAG.to_string(),
-        name: name.to_string(),
-    })
+    let persist = crate::services::proxy::save_last_proxy(
+        state,
+        &LastProxy {
+            group: SELECTOR_TAG.to_string(),
+            name: name.to_string(),
+        },
+    )
     .await;
 
     Ok(json!({
@@ -864,6 +869,7 @@ mod tests {
         let text = response["result"]["content"][0]["text"].as_str().unwrap();
         let payload: JsonValue = serde_json::from_str(text).unwrap();
         assert_eq!(payload["running"], false);
+        assert_eq!(payload["ready"], false);
         assert_eq!(payload["route_mode"], "rule");
         assert!(payload["current_node"].is_null());
     }

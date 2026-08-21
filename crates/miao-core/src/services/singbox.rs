@@ -290,7 +290,7 @@ async fn wait_for_sing_box_reload_ready(
 ) -> AppResult<()> {
     const PROBE_INTERVAL: Duration = Duration::from_millis(25);
     const RELOAD_SETTLE_TIME: Duration = Duration::from_millis(500);
-    const RELOAD_TIMEOUT: Duration = Duration::from_secs(5);
+    const RELOAD_TIMEOUT: Duration = Duration::from_secs(8);
     const CLASH_PROBE_TIMEOUT: Duration = Duration::from_millis(250);
 
     let started = Instant::now();
@@ -355,7 +355,7 @@ async fn wait_for_sing_box_reload_ready(
 
         if started.elapsed() >= RELOAD_TIMEOUT {
             return Err(AppError::message(
-                "sing-box data plane did not become ready within 5 seconds after reload",
+                "sing-box data plane did not become ready within 8 seconds after reload",
             ));
         }
     }
@@ -490,7 +490,9 @@ async fn spawn_and_probe_sing_box(
 async fn wait_for_sing_box_ready(state: &Arc<AppState>, expected_generation: u64) -> AppResult<()> {
     const PROBE_INTERVAL: Duration = Duration::from_millis(25);
     const MIN_STABLE_TIME: Duration = Duration::from_millis(100);
-    const STARTUP_TIMEOUT: Duration = Duration::from_secs(3);
+    // 3s was enough on desktops; OpenWrt auto_redirect + a slow Clash bind
+    // can miss that window and get the child killed while it is still coming up.
+    const STARTUP_TIMEOUT: Duration = Duration::from_secs(8);
     const CLASH_PROBE_TIMEOUT: Duration = Duration::from_millis(250);
 
     let started = Instant::now();
@@ -557,7 +559,7 @@ async fn wait_for_sing_box_ready(state: &Arc<AppState>, expected_generation: u64
         if started.elapsed() >= STARTUP_TIMEOUT {
             terminate_failed_start(state, expected_generation).await;
             return Err(AppError::message(
-                "sing-box process started but its data plane did not become ready within 3 seconds",
+                "sing-box process started but its data plane did not become ready within 8 seconds",
             ));
         }
     }

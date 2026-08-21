@@ -188,7 +188,14 @@ pub async fn spawn_server(options: RuntimeOptions) -> AppResult<ServerHandle> {
         "Configuration loaded"
     );
 
-    let runtime_paths = crate::paths::RuntimePaths::new(runtime_dir, &config_path);
+    let runtime_paths = {
+        let paths = crate::paths::RuntimePaths::new(runtime_dir, &config_path);
+        if options.runtime_dir.is_some() {
+            paths
+        } else {
+            paths.with_last_proxy(crate::services::proxy::platform_last_proxy_path())
+        }
+    };
     let app_state = Arc::new(
         AppState::with_config_layers(
             stable_config,
@@ -278,6 +285,9 @@ async fn initialize_runtime(config: Config, state: Arc<AppState>, extract_runtim
                 state
                     .initializing
                     .store(false, std::sync::atomic::Ordering::Relaxed);
+                // Panel is already bound. Waiting would keep a successful
+                // binary in `booting` and roll it back on the next start.
+                crate::services::version::mark_upgrade_healthy();
                 return;
             }
             Err(err) => {
@@ -291,10 +301,16 @@ async fn initialize_runtime(config: Config, state: Arc<AppState>, extract_runtim
                 state
                     .initializing
                     .store(false, std::sync::atomic::Ordering::Relaxed);
+                crate::services::version::mark_upgrade_healthy();
                 return;
             }
         }
     }
+
+    // Panel is already bound. Checkpoint before the first start attempt so a
+    // reboot during cache rebuild or the Startup fetch cannot roll back a live
+    // upgraded process. Background refresh/retry stay after this.
+    crate::services::version::mark_upgrade_healthy();
 
     state.set_runtime_phase(RuntimePhase::Initializing);
     // config_update 锁只覆盖「起内核」的本地操作；快速通道成功后的订阅后台刷新
@@ -307,14 +323,8 @@ async fn initialize_runtime(config: Config, state: Arc<AppState>, extract_runtim
     if started_from_local_state {
         refresh_subscriptions_in_background(&config, &state).await;
     } else if should_retry_failed_startup(&state).await {
-        // The panel itself is healthy and must stay available. Mark the app
-        // upgrade healthy, then keep retrying the data plane in this cancellable
-        // initialization task instead of relying on systemd to restart us.
-        crate::services::version::mark_upgrade_healthy();
         retry_failed_startup(&state).await;
-        return;
     }
-    crate::services::version::mark_upgrade_healthy();
 }
 
 async fn should_retry_failed_startup(state: &Arc<AppState>) -> bool {

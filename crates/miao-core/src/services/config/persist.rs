@@ -217,7 +217,7 @@ pub async fn save_stable_to(path: &Path, config: &StableConfig) -> AppResult<()>
 }
 
 /// 读取指定路径的易变层配置；文件缺失、读不出、内容损坏都返回 `None`
-/// （调用方保留 config.yaml 的解析结果，见 `Config::overlay`）。
+/// （调用方保留 config.yaml 的解析结果，见 `StableConfig::effective`）。
 pub async fn load_volatile_config_at(path: &Path) -> Option<VolatileConfig> {
     let content = tokio::fs::read_to_string(path).await.ok()?;
     yaml_serde::from_str(&content).ok()
