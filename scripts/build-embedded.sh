@@ -78,12 +78,25 @@ cd "$TMP_DIR/sing-box"
 build_tags="with_quic,with_clash_api,with_utls"
 build_flags=(-trimpath -ldflags "-s -w -buildid=" -tags "$build_tags")
 
+# Match the toolchain used by release CI. Newer Go versions can change x/net
+# implementation details before sing-box has adapted to them.
+go_command=(go)
+if [[ -z "${GOTOOLCHAIN:-}" || "${GOTOOLCHAIN}" == auto ]]; then
+  required_go=$(awk '$1 == "go" { print $2; exit }' go.mod)
+  if [[ -z "$required_go" ]]; then
+    echo "Unable to determine the required Go version from sing-box/go.mod" >&2
+    exit 1
+  fi
+  go_command=(env "GOTOOLCHAIN=go$required_go" go)
+  echo "==> Using sing-box Go toolchain go$required_go..."
+fi
+
 echo "==> Building host sing-box ($host_goarch) for rule compilation..."
-go build "${build_flags[@]}" -o "$EMBEDDED_DIR/sing-box-host" ./cmd/sing-box
+"${go_command[@]}" build "${build_flags[@]}" -o "$EMBEDDED_DIR/sing-box-host" ./cmd/sing-box
 
 echo "==> Building target sing-box ($target: $goos/$goarch)..."
 GOARCH="$goarch" GOOS="$goos" CGO_ENABLED=0 \
-  go build "${build_flags[@]}" -o "$EMBEDDED_DIR/$outfile" ./cmd/sing-box
+  "${go_command[@]}" build "${build_flags[@]}" -o "$EMBEDDED_DIR/$outfile" ./cmd/sing-box
 
 chmod 755 "$EMBEDDED_DIR/sing-box-host" "$EMBEDDED_DIR/$outfile"
 
