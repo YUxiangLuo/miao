@@ -7,7 +7,7 @@ updates:
 
   # Use the Bun ecosystem so dependency PRs update bun.lock as well as package.json.
   - package-ecosystem: bun
-    directory: /frontend
+    directory: /frontend-rsbuild
     schedule:
       interval: weekly
     open-pull-requests-limit: 3

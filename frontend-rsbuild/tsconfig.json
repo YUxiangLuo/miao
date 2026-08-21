@@ -1,11 +1,12 @@
 {
   "compilerOptions": {
-    "lib": ["DOM", "ES2020"],
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
     "jsx": "react-jsx",
-    "target": "ES2020",
+    "target": "ES2022",
     "noEmit": true,
     "skipLibCheck": true,
-    "types": ["@rsbuild/core/types", "node"],
+    "strict": true,
+    "types": ["@rsbuild/core/types", "node", "@testing-library/jest-dom"],
     "useDefineForClassFields": true,
 
     /* modules */
@@ -16,8 +17,9 @@
     "allowImportingTsExtensions": true,
 
     /* type checking */
+    "noFallthroughCasesInSwitch": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true
   },
-  "include": ["src"]
+  "include": ["src", "rsbuild.config.ts", "rstest.config.ts"]
 }

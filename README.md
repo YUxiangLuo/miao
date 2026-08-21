@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="frontend/public/icon.svg" width="72" alt="Miao logo" />
+  <img src="frontend-rsbuild/public/icon.svg" width="72" alt="Miao logo" />
   <h1>Miao</h1>
   <p><strong>开箱即用的透明代理</strong></p>
   <p>

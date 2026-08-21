@@ -1,0 +1,252 @@
+/* 移动端不要再对活跃链接区加 display:none：JS isDesktop 已经不渲染它 */
+.shell {
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    background: var(--bg);
+}
+.workspace {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    /* 上下留白 2×--space-4（48px）且数值一致，内容网格相应让高（见 --home-grid-height） */
+    padding: calc(var(--space-4) * 2) var(--space-4);
+    max-width: var(--workspace-max);
+    width: 100%;
+    margin: 0 auto;
+}
+.content-grid {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) var(--right-col-w);
+    gap: var(--space-3);
+}
+.left-column,
+.right-column {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    overflow-y: auto;
+    min-height: 0;
+}
+.left-column > *,
+.right-column > * {
+    flex-shrink: 0;
+}
+/* 列内最后一张卡片生长填满列高,保证左右列卡片底边对齐 */
+.left-column > *:last-child,
+.right-column > *:last-child {
+    flex-grow: 1;
+    min-height: 0;
+}
+/* 左列节点卡片:恒等于列高(可收缩),头部固定,仅节点网格内部滚动;
+   min-height 保底 = 头部+网格最小可用高度,列高不足时退回整列滚动兜底 */
+.left-column > *:last-child {
+    flex-shrink: 1;
+    min-height: var(--node-card-min-height);
+    display: flex;
+    flex-direction: column;
+}
+.left-column > *:last-child .section-header {
+    flex-shrink: 0;
+}
+.left-column > *:last-child .section-header {
+    flex-wrap: wrap;
+}
+.left-column > *:last-child .panel-card-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+}
+.home-connections {
+    /* 固定高度:不随有无活跃链接/卡片数量变化,布局恒定 */
+    flex: 0 0 auto;
+    height: var(--home-connections-height);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    margin-top: var(--space-3);
+}
+.home-connections-header {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    flex-shrink: 0;
+    padding: 0 2px;
+}
+.home-connections-title {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    color: var(--text);
+    font-size: var(--fs-md);
+    font-weight: var(--fw-semibold);
+}
+/* 条带单行 flex：正方形卡片定宽排开，JS 按实测宽度把溢出项折叠为 +N；
+   明细由 +N 进入；空态块 flex:1 占满整行 */
+.home-connections .home-connections-grid {
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+}
+/* 圆角正方形卡：favicon 主视觉 + 主域名 + 出口 chip。
+   入场：从负 margin 折叠态（不占位）展开 + 淡入上浮，按 --i 交错——
+   margin 动画让右侧卡片随展开平滑滑动，而不是卡片挂载瞬间整体右跳 */
+.home-site-card {
+    flex: 0 0 auto;
+    width: var(--home-site-card);
+    height: var(--home-site-card);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-1);
+    padding: var(--space-2);
+    border-radius: var(--r-lg);
+    border: var(--bw) solid var(--border);
+    background: var(--raised);
+    overflow: hidden;
+    animation: siteEnter var(--anim-fade) var(--ease) backwards;
+    animation-delay: calc(var(--stagger-step) * var(--i, 0));
+}
+@keyframes siteEnter {
+    from {
+        opacity: 0;
+        margin-right: calc(-1 * (var(--home-site-card) + var(--space-2)));
+        transform: translateY(3px);
+    }
+}
+@media (prefers-reduced-motion: reduce) {
+    .home-site-card {
+        animation: none;
+    }
+}
+.home-site-icon {
+    flex: 0 0 auto;
+    width: var(--size-site-icon-lg);
+    height: var(--size-site-icon-lg);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--r-md);
+    overflow: hidden;
+}
+.home-site-icon.letter {
+    background: var(--info-tint);
+    color: var(--info-strong);
+    /* 1.75rem 不入字号音阶：图标字母是图形元素，28/64≈44% 与 .site-icon 的 14/32 同比例 */
+    font-size: 1.75rem;
+    font-weight: var(--fw-heavy);
+}
+.home-site-domain {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--text);
+    font-size: var(--fs-sm);
+    font-weight: var(--fw-medium);
+}
+/* 出口 chip：节点名可能很长（旗 emoji+全名），允许截断 */
+.home-site-outbound {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.home-connections-more {
+    flex: 0 0 var(--home-connections-more);
+    width: var(--home-connections-more);
+    height: var(--home-connections-more);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border: var(--bw) solid var(--border);
+    border-radius: var(--r-md);
+    background: var(--raised);
+    color: var(--text-muted);
+    font-size: var(--fs-md);
+    font-weight: var(--fw-semibold);
+    font-variant-numeric: var(--font-numeric);
+    white-space: nowrap;
+}
+.home-connections-more:hover {
+    border-color: var(--border-strong);
+    color: var(--text);
+}
+.home-connections-empty {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    color: var(--text-subtle);
+    /* 卡片消失/出现时空态接手或让位，淡入柔化硬切换（无 margin 戏法：空态块占满整行） */
+    animation: emptyFade var(--anim-fade) var(--ease) backwards;
+}
+@keyframes emptyFade {
+    from {
+        opacity: 0;
+    }
+}
+@media (prefers-reduced-motion: reduce) {
+    .home-connections-empty {
+        animation: none;
+    }
+}
+
+/* ── 桌面双列（>1180px）几何：板块位置钉死，高度随视口伸缩 ─────────────
+   顶栏 76 / 网格 max(582, 100vh−388) / 条带 184；工作区上下留白均为 48px。
+   右列三卡按 156:196:246 比例分配列高——设计高度 630 时恰为 156/196/246（+2×16 gap），
+   高视口等比拉伸吃掉原底部留白；min-height 钉住设计值，网格低于 630 时整列
+   内部滚动兜底（与既有行为一致）。841–1180px 单列堆叠带不受此约束，保持弹性。 */
+@media (min-width: 1181px) {
+    .status-card {
+        height: var(--topbar-h);
+    }
+    .status-card .status-card-body {
+        height: 100%;
+    }
+    .content-grid {
+        flex: 0 1 auto;
+        height: var(--home-grid-height);
+    }
+    /* 左列节点卡恒等于列高（取代 flex-grow 填满），收缩/滚动兜底不变 */
+    .left-column > *:last-child {
+        flex-grow: 0;
+        height: 100%;
+    }
+    /* 右列三张卡按 156:196:246 等比分配；超出部分在卡片 body 内部滚动，header 固定 */
+    .right-column > *:nth-child(1) {
+        flex: 156 1 0;
+        min-height: var(--right-col-h1);
+    }
+    .right-column > *:nth-child(2) {
+        flex: 196 1 0;
+        min-height: var(--right-col-h2);
+    }
+    .right-column > *:nth-child(3) {
+        flex: 246 1 0;
+        min-height: var(--right-col-h3);
+    }
+    .right-column > * {
+        display: flex;
+        flex-direction: column;
+    }
+    .right-column .section-header {
+        flex-shrink: 0;
+    }
+    .right-column .panel-card-body {
+        flex: 1;
+        min-height: 0;
+        overflow-y: auto;
+    }
+}

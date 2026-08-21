@@ -1,0 +1,301 @@
+/* ==========================================================================
+   Miao 设计 token —— 全站样式的唯一来源
+   任何组件样式必须引用本文件的 token；新增硬编码需在 PR 中说明例外理由。
+   例外（不入 token）：@media 断点（1180/840/560，CSS 不支持 var，JS 镜像
+   见 ../tokens.ts）、siteIcons.ts 第三方品牌色、onboarding 门面散值（已注释）。
+   ========================================================================== */
+
+:root {
+    color-scheme: dark;
+
+    /* ── 1. 主题色（唯一按主题取值的段；新增主题 = 复制本段改值） ──────── */
+    --bg: #1a1d22;
+    --surface: #22262d; /* 卡片 */
+    --surface-soft: #1e2229; /* 凹槽：输入框/分段控件底（比卡片深一级） */
+    --raised: #252b35; /* 浮起：节点 tile、chip hover（比卡片浅一级） */
+    --modal-bg: #181c22; /* 浮层：弹窗/toast（比页面深，靠阴影+模糊浮起） */
+    --toast-bg: rgba(24, 28, 34, 0.96); /* 同 --modal-bg，带 4% 通透 */
+    --scrim: rgba(5, 8, 12, 0.68); /* 弹窗遮罩 */
+    --blur-scrim: 8px; /* 遮罩背景模糊 */
+    --hover: rgba(255, 255, 255, 0.06); /* 悬停底 */
+    --hover-subtle: rgba(255, 255, 255, 0.05); /* 弱悬停/弱填充（收编 .03/.04/.05） */
+    --hover-strong: rgba(255, 255, 255, 0.1); /* 强悬停（收编 .08/.1） */
+    --inset-fill: rgba(255, 255, 255, 0.02); /* 凹陷区的几乎不可见填充（收编 .015/.02） */
+
+    --border: #333a47;
+    --border-soft: #2b3040;
+    --border-strong: #485365; /* tile hover 描边 */
+
+    --text: #cdd3da;
+    --text-strong: #eef3f8;
+    --text-muted: #8b98a8;
+    --text-subtle: #4d5563;
+
+    /* 紫 = 交互与选中（品牌）；蓝（--info 族）专职代理路径语义 */
+    --accent: #7e74d1;
+    --accent-strong: #a49bef;
+    --accent-tint: #292847; /* 选中底：active 节点 tile、规则工作台选中项 */
+    --accent-tint-strong: #3b3866; /* 主按钮底 / 段控件与筛选 pill 的 active 底 */
+    --accent-tint-text: var(--accent-strong); /* accent-tint-strong 上的文字色 */
+    --accent-tint-deep: #201e3a; /* active 节点 tile 内嵌 chip 底 */
+    --secondary-hover: #333846; /* 次要按钮 hover 底 */
+    /* 次要按钮（暗色 = 中性灰阶） */
+    --btn-secondary-bg: var(--border-soft);
+    --btn-secondary-text: var(--text-muted);
+    --btn-secondary-hover-bg: var(--secondary-hover);
+    --btn-secondary-hover-text: var(--text);
+    --info: #5b8fd4; /* 代理路径：出口 chip、规则字段、下载速率 */
+    --info-strong: #8fb3e3; /* info 淡彩底上的文字 */
+    --info-tint: #1e2a3a;
+    --success: #4a9e75;
+    --success-strong: #4ade80; /* 活跃连接的亮绿描边/发光（与底色拉开明度差） */
+    --warning: #a07840;
+    --danger: #b05252;
+    --brand: #a78bfa; /* 紫猫 logo */
+    --logo-face: #ffffff; /* logo 五官（压在 brand 紫上，双主题不变） */
+    --toggle-thumb-on: #eef3f8; /* 开关开启时滑块色（亮色主题下为纯白） */
+
+    /* 语义表面色（直连/拦截徽章底；代理蓝面由 --info-tint 族承担） */
+    --surface-green-soft: #1c3028;
+    --surface-red: #2a1c1c;
+
+    --shadow: 0 16px 32px rgba(0, 0, 0, 0.25);
+    --shadow-modal: 0 24px 60px rgba(0, 0, 0, 0.45);
+    --shadow-lift: 0 6px 16px rgba(0, 0, 0, 0.3); /* 悬停浮起（tile 级小阴影） */
+
+    /* ── 2. 派生色（color-mix 从语义色现算；用法处直接书写，不集中定义） ──
+       统一写法，替代过去的逐处 rgba：
+         语义色 alpha 面  → color-mix(in srgb, var(--success) 10%, transparent)
+         语义描边         → color-mix(in srgb, var(--danger) 45%, transparent)
+         logo 光晕        → color-mix(in srgb, var(--brand) 50%, transparent)
+       srgb 空间下与原 rgba 逐值相等；换主题时随基色自动派生。 */
+
+    /* ── 3. 音阶：间距/圆角/字号只取下列档位 ──────────────────────────── */
+    --space-0: 4px; /* 微距：图标-文字间隙、段控内边距、badge 内部 */
+    --space-1: 6px;
+    --space-2: 10px;
+    --space-3: 16px;
+    --space-4: 24px;
+    /* 圆角角色档（同心规则：外层恒比内层大一级，容器 padding ≥ 差值时边角同心）：
+       控件 8 / 内容块 10（14−4、20−10）/ 容器 14 / 浮层 20 / 徽章 pill */
+    --r-sm: 8px; /* 控件：按钮/输入/下拉/小 chip */
+    --r-md: 10px; /* 内容块：tile、连接卡、统计卡、编辑器、提示条 */
+    --r-lg: 14px; /* 容器：panel-card、引导卡 */
+    --r-xl: 20px; /* 浮层：弹窗/toast */
+    --r-pill: 999px; /* 徽章/开关/图标按钮 */
+    --fs-xs: 0.75rem;
+    --fs-sm: 0.8125rem;
+    --fs-md: 0.875rem;
+    --fs-lg: 1rem;
+    --fs-xl: 1.25rem;
+    /* 字重/行高/字距档位 */
+    --fw-medium: 500;
+    --fw-semibold: 600;
+    --fw-bold: 650;
+    --fw-heavy: 700;
+    --lh-normal: 1.5; /* 正文/输入 */
+    --lh-relaxed: 1.6; /* 弹窗说明文 */
+    --ls-caps: 0.4px; /* 小号大写感标签（MCP） */
+
+    /* ── 4. 动效：过渡三档 + 具名动画时长 ─────────────────────────────── */
+    --dur-fast: 0.15s; /* 开关/勾选等即时反馈 */
+    --dur: 0.18s; /* 默认过渡 */
+    --dur-slow: 0.2s; /* 卡片/形变 */
+    --ease: ease;
+    --anim-spin: 1s;
+    --anim-live: 2s; /* 活跃点/徽标呼吸 */
+    --anim-logo: 3s; /* logo 光晕呼吸 */
+    --anim-fade: 0.35s; /* 数值刷新淡入（兼作站点卡入场时长） */
+    --anim-arrive: 0.9s; /* 节点切换到位脉冲（JS 镜像 ARRIVE_MS 在 tokens.ts） */
+    --anim-scan: 0.2s; /* 节点 tile 入场扫描：单张点亮时长，扫过感来自交错 */
+    --stagger-step: 0.024s; /* 站点卡入场交错步进：delay = step × --i（--i 封顶 STAGGER_CAP 在 tokens.ts） */
+    --stagger-step-scan: 0.012s; /* 节点 tile 扫描交错步进（--i 封顶 SCAN_STAGGER_CAP 在 tokens.ts） */
+
+    /* ── 5. 层级 ─────────────────────────────────────────────────────── */
+    --z-float: 40; /* MCP 浮动控件（低于弹窗） */
+    --z-modal: 50;
+    --z-toast: 60;
+
+    /* ── 6. 透明度 ───────────────────────────────────────────────────── */
+    --o-dim: 0.5; /* 失效行/禁用图标按钮 */
+    --o-disabled: 0.6; /* 禁用态（收编 .7/.72） */
+    --o-emphasis: 0.8; /* pill 内计数强调 */
+
+    /* ── 7. 描边宽度（颜色取 --border 族；focus 环统一 2px） ───────────── */
+    --bw: 1px;
+    --bw-strong: 2px; /* 连接卡描边、:focus-visible 环 */
+    --bw-bar: 3px; /* toast 左侧语义条、规则命中内发光条 */
+
+    /* ── 8. 控件几何：高度族 + 方形小件 ───────────────────────────────── */
+    --control-h-sm: 28px; /* btn-sm / 筛选 pill */
+    --control-h-header: 30px; /* 卡片头部内控件（同高对齐） */
+    --control-h-input: 34px; /* 输入框/下拉 */
+    --control-h-md: 36px; /* btn-md / 引导页输入 */
+    --control-h-lg: 38px; /* 规则工作台输入 */
+    --chip-h: 44px; /* 顶栏速率/当前节点 chip */
+    --size-dot: 6px; /* 状态点：版本点/活跃点/当前节点点 */
+    --size-toggle-w: 26px;
+    --size-toggle-h: 15px;
+    --size-toggle-thumb: 11px;
+    --toggle-inset: 2px; /* 滑块到轨道边的距离；位移 = 轨道宽 − 轨道高 */
+    --size-checkbox: 16px;
+    --size-step-no: 20px; /* 规则步骤序号 */
+    --size-toast-close: 20px;
+    --size-icon-btn-sm: 26px; /* icon-button.subtle */
+    --size-status-badge: 28px; /* 订阅状态圆形图标 */
+    --size-icon-btn: 32px;
+    --size-site-icon: 32px;
+    --size-site-icon-lg: 64px; /* 首页活跃链接正方形卡的站点图标（主视觉，占卡片近半高） */
+    --size-path-icon-lg: 48px; /* 通道卡 favicon 放大档：与两行主内容块（速率上下行）同高 */
+    --topbar-divider-h: 32px;
+    --badge-min-w: 20px; /* 计数徽标 */
+
+    /* ── 9. 组件几何 ─────────────────────────────────────────────────── */
+    --topbar-h: 76px; /* 64px logo + 上下各 6px */
+    --workspace-max: 1400px;
+    --right-col-w: 400px; /* 桌面双列右列宽 */
+    /* 右列三卡按 156:196:246 等比分配列高（设计高 630 时的像素值，兼作 min-height） */
+    --right-col-h1: 156px;
+    --right-col-h2: 196px;
+    --right-col-h3: 246px;
+    --modal-w: 480px;
+    --modal-w-confirm: 420px;
+    --modal-w-node: 640px;
+    --modal-h-node: min(92vh, 720px);
+    --modal-w-conn: 1560px;
+    --modal-conn-inset: 48px; /* 链接统计弹窗距视口四边 */
+    --onboarding-w: 460px;
+    --toast-min-w: 220px;
+    --float-offset: 20px; /* 浮层距视口边（toast 右上 / MCP 右下） */
+    --float-offset-mobile: 12px;
+    --num-w: 5.5rem; /* 速率数值定宽：实测最宽 "1023 MB/s" ≈ 79px，取 88px 留余量 */
+    --node-name-max: 11rem; /* 顶栏当前节点名截断 */
+    --node-select-max: 8.75rem; /* 节点选择下拉 */
+    --share-link-min-h: 110px;
+    --rule-node-open-min-h: 180px;
+    --rule-field-col-w: 96px;
+    --rule-target-col-w: 80px;
+    --rule-status-col-w: 16px;
+    --rule-list-min-h: 80px;
+    --rule-list-max-h: 280px;
+    --verge-list-max-h: 240px; /* Clash Verge 导入订阅列表：超高内滚，操作按钮始终可达 */
+    --conn-row-min-h: 56px; /* 链接统计行最小高度 */
+    --conn-num-w: 5rem; /* 链接统计行数字子列定宽（速率/累计的上下行共用，右对齐成列） */
+    --path-num-w: 5.5rem; /* 通道卡列宽（身份/速率/累计三列共用，跨两卡列位一致） */
+    --tile-min-h: 88px; /* 节点 tile 最小高度 */
+    --size-tile-test: 64px; /* 节点 tile 正方形测速按钮边长（四位数延迟 + ms 不换行） */
+
+    /* 活数字（速率/延迟/流量/PID）等宽，位数变化不再移位 */
+    --font-numeric: tabular-nums;
+    /* 字体族 */
+    --font-ui:
+        Inter,
+        system-ui,
+        -apple-system,
+        BlinkMacSystemFont,
+        "Segoe UI",
+        sans-serif;
+    --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+
+    /* 首页布局常量 */
+    --home-connections-height: 184px;
+    --home-site-card: 144px; /* 活跃链接正方形卡片边长 */
+    --home-connections-more: 48px; /* 条带溢出时的 +N 入口 */
+    /* 桌面双列（>1180px）内容网格高度：582px 保底（原 630 − 留白增量 48），高视口吃掉全部剩余垂直空间。
+       388 = 工作区上下 padding 96（各 48，上下留白一致）+ 顶栏 76 + 顶栏 margin-bottom 16
+             + 条带 margin-top 16 + 条带 184；
+       视口偏矮时网格 flex 收缩、列内滚动兜底（与既有行为一致） */
+    --home-grid-height: max(582px, calc(100vh - 388px));
+    /* 左列节点卡保底：头部 51 + 网格最小可用 187（两行 tile）；当前节点横幅迁往顶栏后不再计入 */
+    --node-card-min-height: 238px;
+}
+
+/* ── 1b. 亮色主题 ────────────────────────────────────────────────────
+   只覆盖段 1；段 2-9（音阶/动效/几何）与主题无关，不重复。
+   主题只有显式 dark/light 两态（hooks/useTheme.js + index.html 引导脚本），
+   默认 dark，不跟随系统。 */
+:root[data-theme="light"] {
+    color-scheme: light;
+    /* 亮色不用中性灰底：页面纯白，层级交给描边+阴影；紫色只留 hover/tint 等微彩色 */
+    --bg: #ffffff;
+    --surface: #ffffff;
+    --surface-soft: #f1f0f9; /* 白卡上的凹槽/chip 填充：微紫，与卡片可辨 */
+    --raised: #ffffff; /* tile 与卡片同色，层级交给描边+阴影 */
+    --modal-bg: #ffffff;
+    --toast-bg: rgba(255, 255, 255, 0.96);
+    --scrim: rgba(15, 18, 25, 0.3); /* 中性灰遮罩：不带紫偏色；浅度足以透光，模糊+阴影保住弹窗对比 */
+    /* hover/凹陷层取 accent 紫的 alpha，不再是黑灰 */
+    --hover: rgba(103, 88, 201, 0.06);
+    --hover-subtle: rgba(103, 88, 201, 0.04);
+    --hover-strong: rgba(103, 88, 201, 0.1);
+    --inset-fill: rgba(103, 88, 201, 0.025);
+    /* 描边带一丝紫灰，与 tint 底同族 */
+    --border: #cfd0de;
+    --border-soft: #e1e2ec;
+    --border-strong: #b7bacd;
+    /* 对比度基线：muted ≥6.8:1（正文级），subtle ≥3.6:1（装饰级） */
+    --text: #2f3641;
+    --text-strong: #161a21;
+    --text-muted: #525b69;
+    --text-subtle: #7c8697;
+    --accent: #6758c9;
+    --accent-strong: #5546b8;
+    --accent-tint: #e4e1fa;
+    /* 亮色下主按钮/段控 active 用实心色 + 白字（淡彩在白底上撑不起主操作） */
+    --accent-tint-strong: #6758c9;
+    --accent-tint-text: #ffffff;
+    --accent-tint-deep: #d5d0f6;
+    --secondary-hover: #e9e7f8;
+    /* 次要按钮（亮色 = 品牌紫淡彩；中性灰在白底上读作禁用） */
+    --btn-secondary-bg: var(--accent-tint);
+    --btn-secondary-text: var(--accent-strong);
+    --btn-secondary-hover-bg: var(--accent-tint-deep);
+    --btn-secondary-hover-text: var(--accent-strong);
+    --info: #3570b8;
+    --info-strong: #2f5f9e;
+    --info-tint: #e8eef7;
+    --success: #1c6f45; /* 在 surface-green-soft 上 5.2:1 */
+    --success-strong: #16a34a;
+    --warning: #9c6a1b;
+    --danger: #bf4040;
+    --brand: #7c5ce8; /* 亮底下 logo 紫加深一档保对比 */
+    --logo-face: #ffffff;
+    --toggle-thumb-on: #ffffff;
+    --surface-green-soft: #def0e6;
+    --surface-red: #fbe9e9;
+    --shadow: 0 16px 32px rgba(70, 60, 120, 0.1);
+    --shadow-modal: 0 24px 60px rgba(70, 60, 120, 0.16);
+    --shadow-lift: 0 6px 16px rgba(70, 60, 120, 0.14);
+}
+
+* {
+    box-sizing: border-box;
+}
+/* 全局字号基准：所有字体使用 rem，调整此值即可整体缩放字体 */
+html {
+    font-size: 16px;
+}
+html,
+body,
+#root {
+    margin: 0;
+    height: 100%;
+    overflow: hidden;
+}
+body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-ui);
+}
+button,
+input,
+select {
+    font: inherit;
+}
+button {
+    cursor: pointer;
+}
+/* 活数字（速率/延迟/流量/PID）等宽：配合 .num 类使用 */
+.num {
+    font-variant-numeric: var(--font-numeric);
+}

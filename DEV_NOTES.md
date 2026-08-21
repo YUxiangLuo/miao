@@ -24,8 +24,8 @@ Linux 版是：下载一个文件，`sudo` 跑，浏览器打开，TUN 接管流
 crates/miao-core      库：面板、配置事务、启停内核
 crates/miao-cli       Linux/OpenWrt 入口，二进制名 miao-rust
 desktop/src-tauri     Tauri 2 壳（workspace 成员但不是 default-member）
-frontend/             唯一一份面板（React 19 + TypeScript strict + Vite）
-public/               vite 构建产物（gitignore），被 include_str! 嵌进 core
+frontend-rsbuild/     唯一一份面板（React 19 + TypeScript strict + Rsbuild）
+public/               rsbuild 构建产物（gitignore），被 include_str! 嵌进 core
 embedded/             sing-box + srs，不入库
 ```
 
@@ -75,7 +75,7 @@ cargo run -p miao-cli
 
 **合法升级本机生产实例的唯一姿势**：`./scripts/build-frontend.sh && cargo build --locked --release && sudo bash install.sh ./target/release/miao-rust`。install.sh 会停服→换二进制→重启，断网窗口约 2 秒；升级前先 `sudo cp /usr/local/bin/miao /tmp/miao.$(date +%s).backup` 留回滚。注意只跑 `cargo build` 不重嵌前端，部署的还是旧页面。
 
-**PWA**：`frontend/public/` 的 manifest/sw.js/图标经 vite 拷进 `public/` 再嵌进二进制——新增静态资源必须同时在 `router.rs` 注册路由。SW 只是 Chrome 安装门槛的门票：只给导航请求做 network-first 兜底，**永远别缓存 `/api`**。
+**PWA**：`frontend-rsbuild/public/` 的 manifest/sw.js/图标经 rsbuild 拷进 `public/` 再嵌进二进制——新增静态资源必须同时在 `router.rs` 注册路由。SW 只是 Chrome 安装门槛的门票：只给导航请求做 network-first 兜底，**永远别缓存 `/api`**。
 
 **fresh clone**：`embedded/` 不入库，先 `./scripts/build-embedded.sh` 或 `./build.sh`。CI quality 用 stub 绕过，本地别学。Windows 交叉 check 还需要 `embedded/sing-box-windows-amd64.exe`（stub 够编译、不够当真内核）。
 

@@ -1,0 +1,166 @@
+.status-card {
+    flex-shrink: 0;
+    margin-bottom: var(--space-3);
+}
+.status-card-body {
+    display: flex;
+    align-items: center;
+    gap: var(--space-4);
+    padding: var(--space-3);
+}
+/* 状态簇：速率归为一组（亲密性），组内间距小于顶栏簇间间距 */
+.status-cluster {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    min-width: 0;
+}
+.status-card-spacer {
+    flex: 1;
+}
+/* 顶栏两个 chip 钉同高：padding 10×2 + 内容 24 = 44px。
+   仅钉 line-height 不够——CJK 节点名的字形框超出行高仍会撑大行盒。 */
+.traffic-chip,
+.current-node-chip {
+    height: var(--chip-h);
+}
+.traffic-chip {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    padding: var(--space-2) var(--space-3);
+    border-radius: var(--r-md);
+    border: var(--bw) solid transparent;
+    background: var(--surface-soft);
+    color: inherit;
+    cursor: pointer;
+    transition: var(--dur) var(--ease);
+}
+.traffic-chip:hover:not(:disabled) {
+    border-color: var(--border);
+    background: var(--raised);
+}
+.traffic-chip:disabled {
+    cursor: default;
+    opacity: var(--o-disabled);
+}
+.traffic-chip:focus-visible {
+    outline: var(--bw-strong) solid var(--accent);
+    outline-offset: 2px;
+}
+.traffic-item {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
+    color: var(--text);
+    font-size: var(--fs-lg);
+    font-weight: var(--fw-medium);
+}
+/* 速率数值定宽：数值位数/单位变化（37–79px 摆动）不再引起顶栏布局抖动。
+   实测最宽 "1023 MB/s" ≈ 79px，取 5.5rem(88px) 留字体度量余量；
+   左对齐让数字始终紧跟箭头（右对齐会在短数值时把二者远远分开）；
+   定宽盒内右侧留白不可见，位数增长向右吃掉余量，外部布局不受影响。 */
+.traffic-item .num {
+    display: inline-block;
+    width: var(--num-w);
+    text-align: left;
+}
+.traffic-icon.up {
+    color: var(--accent);
+}
+.traffic-icon.down {
+    color: var(--text-muted);
+}
+/* 当前节点 chip：顶栏内的紧凑节点指示（原节点列表横幅迁移而来），点击测当前节点延迟。
+   位于速率 chip 右侧、与速率以分隔线隔开；单行结构 + 相同 padding，与速率 chip 同高。 */
+.current-node-chip {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    min-width: 0;
+    padding: var(--space-2) var(--space-3);
+    border-radius: var(--r-md);
+    border: var(--bw) solid transparent;
+    background: var(--surface-soft);
+    color: inherit;
+    cursor: pointer;
+    transition: var(--dur) var(--ease);
+}
+.current-node-chip:hover:not(:disabled) {
+    border-color: var(--border);
+    background: var(--raised);
+}
+.current-node-chip:disabled {
+    cursor: default;
+    opacity: var(--o-disabled);
+}
+.current-node-chip:focus-visible {
+    outline: var(--bw-strong) solid var(--accent);
+    outline-offset: 2px;
+}
+.current-node-chip-name {
+    color: var(--text-strong);
+    font-size: var(--fs-lg);
+    font-weight: var(--fw-medium);
+    max-width: var(--node-name-max);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    text-align: left;
+}
+.current-node-chip-delay {
+    font-size: var(--fs-md);
+    font-weight: var(--fw-medium);
+    white-space: nowrap;
+}
+.current-node-chip-delay.fast {
+    color: var(--success);
+}
+.current-node-chip-delay.medium {
+    color: var(--warning);
+}
+.current-node-chip-delay.slow,
+.current-node-chip-delay.timeout {
+    color: var(--danger);
+}
+.route-mode-segment {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    padding: 3px;
+    border: 1px solid var(--border-soft);
+    border-radius: var(--r-md);
+    background: var(--surface-soft);
+    flex: 0 0 auto;
+}
+.route-mode-option {
+    min-height: var(--control-h-header);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-1);
+    padding: var(--space-1) var(--space-2);
+    border: none;
+    border-radius: var(--r-sm);
+    background: transparent;
+    color: var(--text-muted);
+    font-size: var(--fs-md);
+    font-weight: var(--fw-medium);
+    white-space: nowrap;
+    transition: var(--dur) var(--ease);
+}
+.route-mode-option:hover:not(:disabled):not(.active) {
+    color: var(--text);
+    background: var(--hover-subtle);
+}
+.route-mode-option.active {
+    background: var(--accent-tint-strong);
+    color: var(--accent-tint-text);
+}
+.route-mode-option:disabled {
+    cursor: not-allowed;
+    opacity: var(--o-disabled);
+}
+.route-mode-option svg {
+    flex: 0 0 auto;
+}

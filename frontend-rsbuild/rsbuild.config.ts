@@ -8,8 +8,22 @@ const miaoApiTarget = process.env.MIAO_API ?? 'http://localhost:6161';
 // Docs: https://rsbuild.rs/config/
 export default defineConfig({
   plugins: [pluginReact()],
+  source: {
+    entry: {
+      index: './src/main.tsx',
+    },
+  },
   html: {
-    title: 'miao',
+    template: './index.html',
+  },
+  output: {
+    cleanDistPath: true,
+    dataUriLimit: 100_000_000,
+    distPath: {
+      root: '../public',
+    },
+    inlineScripts: true,
+    inlineStyles: true,
   },
   server: {
     proxy: {

@@ -1,0 +1,183 @@
+/* Onboarding */
+.onboarding {
+    display: flex;
+    min-height: 100vh;
+    padding: var(--space-4);
+    /* 导入面板展开后卡片可能高过视口：容器自身滚动兜底（.shell 是 overflow:hidden） */
+    overflow-y: auto;
+}
+.onboarding-card {
+    /*  margin auto 取代容器 align/justify：矮卡片居中，高卡片两端都可滚动到达 */
+    margin: auto;
+    width: 100%;
+    max-width: var(--onboarding-w);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--r-lg);
+    /* 首屏门面刻意例外：比音阶大档（24px）更松的呼吸感，不做 token 归并 */
+    padding: 40px 32px;
+    box-shadow: var(--shadow);
+}
+.onboarding-header {
+    text-align: center;
+    margin-bottom: var(--space-4);
+}
+.onboarding-header .brand-icon {
+    margin-bottom: var(--space-2);
+}
+.onboarding-title {
+    font-size: 1.75rem;
+    font-weight: var(--fw-semibold);
+    color: var(--text-strong);
+    margin: var(--space-2) 0 0;
+}
+.onboarding-subtitle {
+    font-size: var(--fs-lg);
+    color: var(--text-muted);
+    margin: var(--space-2) 0 0;
+}
+.onboarding-section {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+}
+.onboarding-input-row {
+    display: flex;
+    gap: var(--space-2);
+}
+.onboarding-input-row input {
+    flex: 1;
+    min-height: var(--control-h-md);
+    padding: var(--space-1) var(--space-2);
+    border-radius: var(--r-sm);
+    border: 1px solid var(--border);
+    background: var(--surface-soft);
+    color: var(--text);
+    font-size: var(--fs-lg);
+    outline: none;
+}
+.onboarding-input-row input:focus {
+    border-color: var(--accent);
+}
+.onboarding-divider {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    margin: var(--space-3) 0;
+    color: var(--text-subtle);
+    font-size: var(--fs-md);
+}
+.onboarding-divider::before,
+.onboarding-divider::after {
+    content: "";
+    flex: 1;
+    height: var(--bw);
+    background: var(--border);
+}
+.onboarding-node-btn {
+    width: 100%;
+    justify-content: center;
+}
+/* Clash Verge 导入：低调入口链接 + 展开的勾选面板 */
+.onboarding-verge {
+    margin-top: var(--space-3);
+    align-items: center;
+}
+.onboarding-verge-link {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    border: none;
+    background: none;
+    padding: var(--space-1) var(--space-2);
+    border-radius: var(--r-sm);
+    color: var(--text-muted);
+    font-size: var(--fs-sm);
+    cursor: pointer;
+    transition: color var(--dur) var(--ease), background-color var(--dur) var(--ease);
+}
+.onboarding-verge-link:hover:not(:disabled) {
+    color: var(--text);
+    background: var(--hover);
+}
+.onboarding-verge-link:disabled {
+    opacity: var(--o-disabled);
+    cursor: not-allowed;
+}
+.onboarding-verge-panel {
+    width: 100%;
+    border: var(--bw) solid var(--border);
+    border-radius: var(--r-md);
+    padding: var(--space-2);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+}
+.onboarding-verge-title {
+    color: var(--text-muted);
+    font-size: var(--fs-sm);
+}
+.onboarding-verge-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-0);
+    /* 订阅很多时列表内滚，面板操作按钮始终可达 */
+    max-height: var(--verge-list-max-h);
+    overflow-y: auto;
+}
+.onboarding-verge-item {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-1) var(--space-2);
+    border-radius: var(--r-sm);
+    font-size: var(--fs-sm);
+    cursor: pointer;
+}
+.onboarding-verge-item:hover {
+    background: var(--hover-subtle);
+}
+.onboarding-verge-item.added {
+    opacity: var(--o-dim);
+    cursor: default;
+}
+.onboarding-verge-item input[type="checkbox"] {
+    width: var(--size-checkbox);
+    height: var(--size-checkbox);
+    flex: 0 0 auto;
+}
+.onboarding-verge-name {
+    color: var(--text);
+    font-weight: var(--fw-medium);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.onboarding-verge-url {
+    flex: 1;
+    min-width: 0;
+    color: var(--text-subtle);
+    font-size: var(--fs-xs);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    text-align: right;
+}
+.onboarding-verge-added {
+    flex: 0 0 auto;
+    color: var(--text-subtle);
+    font-size: var(--fs-xs);
+}
+.onboarding-verge-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: var(--space-2);
+}
+.onboarding-loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    color: var(--text-muted);
+    font-size: var(--fs-lg);
+}

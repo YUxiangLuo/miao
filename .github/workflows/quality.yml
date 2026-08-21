@@ -18,22 +18,22 @@ jobs:
         uses: oven-sh/setup-bun@v2
 
       - name: Install dependencies
-        run: bun install --cwd frontend --frozen-lockfile
+        run: bun install --cwd frontend-rsbuild --frozen-lockfile
 
       - name: Audit dependencies
-        run: bun audit --cwd frontend
+        run: bun audit --cwd frontend-rsbuild
 
       - name: Lint
-        run: bun run --cwd frontend lint
+        run: bun run --cwd frontend-rsbuild lint
 
       - name: Typecheck
-        run: bun run --cwd frontend typecheck
+        run: bun run --cwd frontend-rsbuild typecheck
 
       - name: Test
-        run: bun run --cwd frontend test
+        run: bun run --cwd frontend-rsbuild test
 
       - name: Build
-        run: bun run --cwd frontend build
+        run: bun run --cwd frontend-rsbuild build
 
       - name: Upload frontend artifact
         uses: actions/upload-artifact@v4

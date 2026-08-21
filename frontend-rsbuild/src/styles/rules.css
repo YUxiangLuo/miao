@@ -1,0 +1,557 @@
+/* 自定义规则卡片 */
+/* 徽标基元由 .badge 提供（统一 pill 体系），颜色由 .badge.{tone} 色调类提供 */
+.rule-field-chip {
+    flex: 0 0 auto;
+    min-width: 0;
+    max-width: 100%;
+    justify-self: start;
+}
+.rule-field-text,
+.rule-target-text {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.rule-value {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+/* 徽标基元由 .badge 提供，变体只保留颜色 */
+.rule-target-badge {
+    flex: 0 0 auto;
+    min-width: 0;
+    max-width: 100%;
+}
+.rule-target-badge.proxy {
+    background: var(--info-tint);
+    color: var(--info-strong);
+}
+.rule-target-badge.direct {
+    background: var(--surface-green-soft);
+    color: var(--success);
+}
+.rule-target-badge.reject {
+    background: var(--surface-red);
+    color: var(--danger);
+}
+.rule-target-badge.node {
+    background: var(--surface-soft);
+    color: var(--text-muted);
+}
+.rule-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) var(--rule-target-col-w) var(--rule-status-col-w) var(--size-icon-btn-sm);
+    align-items: center;
+}
+.rule-row .list-row-content {
+    grid-column: 1;
+}
+.rule-row:not(.has-target) .list-row-content {
+    grid-column: 1 / 3;
+}
+.rule-row .rule-target-badge {
+    grid-column: 2;
+    justify-self: end;
+}
+.rule-row .rule-status-slot {
+    grid-column: 3;
+    width: var(--rule-status-col-w);
+    height: var(--size-icon-btn-sm);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+.rule-row > .icon-button {
+    grid-column: 4;
+}
+.rule-row.skipped .list-row-content {
+    opacity: var(--o-dim);
+}
+.rule-skipped-icon {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    color: var(--warning);
+}
+/* 结构化规则行：chip（fs-xs 药丸）与数值（fs-md）字号不同，默认基线对齐会让
+   chip 视觉上浮。改为 flex 中线对齐，两种字号的字形中心重合。 */
+.list-row-title.structured {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
+}
+.rule-row .list-row-title.structured {
+    display: grid;
+    grid-template-columns: var(--rule-field-col-w) minmax(0, 1fr);
+}
+/* 规则命中：与活跃连接同一语言——行尾脉冲绿点，行本身无任何变色 */
+.list-row .rule-live-dot {
+    flex: 0 0 auto;
+    align-self: center;
+    width: var(--size-dot);
+    height: var(--size-dot);
+    border-radius: var(--r-pill);
+    background: var(--success);
+    box-shadow: 0 0 6px color-mix(in srgb, var(--success-strong) 80%, transparent);
+    animation: livePulse var(--anim-live) ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+    .list-row .rule-live-dot {
+        animation: none;
+    }
+}
+@keyframes livePulse {
+    0%, 100% {
+        opacity: 1;
+    }
+    50% {
+        opacity: 0.3;
+    }
+}
+
+@media (max-width: 520px) {
+    .rule-row {
+        --rule-field-col-w: 80px;
+        grid-template-columns: minmax(0, 1fr) var(--rule-status-col-w) var(--size-icon-btn-sm);
+        row-gap: var(--space-1);
+    }
+    .rule-row .list-row-content,
+    .rule-row:not(.has-target) .list-row-content {
+        grid-column: 1;
+        grid-row: 1;
+    }
+    .rule-row .rule-target-badge {
+        grid-column: 1;
+        grid-row: 2;
+        justify-self: end;
+        max-width: var(--rule-target-col-w);
+    }
+    .rule-row .rule-status-slot {
+        grid-column: 2;
+    }
+    .rule-row > .icon-button {
+        grid-column: 3;
+    }
+    .rule-row.has-target .rule-status-slot,
+    .rule-row.has-target > .icon-button {
+        grid-row: 1 / span 2;
+    }
+}
+
+
+/* ---- 全屏规则工作台（RuleModal v2） ---- */
+.rule-modal-subtitle {
+    color: var(--text-subtle);
+    font-size: var(--fs-sm);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.rule-workbench {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+}
+.rule-columns {
+    flex: 1;
+    min-height: 0;
+    display: grid;
+    grid-template-columns: 3fr 2fr;
+    overflow: hidden;
+}
+.rule-step {
+    overflow-y: auto;
+    padding: var(--space-3);
+}
+.rule-step + .rule-step {
+    border-left: var(--bw) solid var(--border-soft);
+}
+.rule-step-title {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    margin: 0 0 var(--space-1);
+    color: var(--text-strong);
+    font-size: var(--fs-lg);
+}
+/* 步骤序号用品牌紫（accent）而非语义蓝：引导流程是品牌时刻 */
+.rule-step-no {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: var(--size-step-no);
+    height: var(--size-step-no);
+    border-radius: 50%;
+    background: var(--accent-tint);
+    color: var(--accent-strong);
+    font-size: var(--fs-xs);
+    font-weight: var(--fw-heavy);
+    flex-shrink: 0;
+}
+.rule-group-label {
+    color: var(--text-subtle);
+    font-size: var(--fs-xs);
+    margin: var(--space-2) 0;
+}
+.rule-type-strip {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-1);
+}
+.rule-type-chip {
+    padding: var(--space-1) var(--space-2);
+    border-radius: var(--r-pill);
+    border: var(--bw) solid var(--border);
+    background: var(--surface-soft);
+    color: var(--text-muted);
+    font-size: var(--fs-sm);
+    cursor: pointer;
+    font-family: inherit;
+}
+.rule-type-chip:hover {
+    color: var(--text-strong);
+    border-color: var(--accent);
+}
+.rule-type-chip.active {
+    background: var(--accent-tint);
+    border-color: var(--accent);
+    color: var(--accent-strong);
+    font-weight: var(--fw-bold);
+}
+.rule-editor {
+    margin-top: var(--space-3);
+    padding: var(--space-2) var(--space-3) var(--space-3);
+    border: var(--bw) solid var(--border);
+    border-radius: var(--r-md);
+    background: var(--inset-fill);
+}
+.rule-editor-head {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-2);
+    margin-bottom: var(--space-2);
+}
+.rule-editor-title {
+    color: var(--text-strong);
+    font-size: var(--fs-lg);
+    font-weight: var(--fw-bold);
+}
+.rule-editor-desc {
+    color: var(--text-subtle);
+    font-size: var(--fs-sm);
+}
+.rule-value-block input,
+.rule-value-block select {
+    width: 100%;
+    min-height: var(--control-h-lg);
+    padding: var(--space-2);
+    border-radius: var(--r-sm);
+    border: var(--bw) solid var(--border);
+    background: var(--surface-soft);
+    color: var(--text);
+    outline: none;
+    font-family: inherit;
+    font-size: var(--fs-lg);
+}
+.rule-value-block input:focus,
+.rule-value-block select:focus {
+    border-color: var(--accent);
+}
+.rule-chips-block {
+    margin-top: var(--space-0);
+}
+.rule-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-1);
+}
+.rule-chip {
+    padding: var(--space-0) var(--space-2);
+    border-radius: var(--r-pill);
+    border: var(--bw) solid var(--border);
+    background: var(--surface-soft);
+    color: var(--text-muted);
+    font-size: var(--fs-sm);
+    cursor: pointer;
+    font-family: inherit;
+}
+.rule-chip:hover {
+    color: var(--text-strong);
+    border-color: var(--accent);
+}
+.rule-chip.active {
+    background: var(--accent-tint);
+    border-color: var(--accent);
+    color: var(--accent-strong);
+}
+.rule-target-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: var(--space-2);
+}
+.rule-target-card {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--space-0);
+    padding: var(--space-2);
+    border-radius: var(--r-md);
+    border: var(--bw) solid var(--border);
+    background: var(--surface-soft);
+    color: var(--text);
+    cursor: pointer;
+    text-align: left;
+    font-family: inherit;
+}
+.rule-target-card:hover {
+    border-color: var(--accent);
+}
+.rule-target-card.active.proxy {
+    border-color: var(--info-strong);
+    background: var(--info-tint);
+    color: var(--info-strong);
+}
+.rule-target-card.active.direct {
+    border-color: var(--success);
+    background: var(--surface-green-soft);
+    color: var(--success);
+}
+.rule-target-card.active.reject {
+    border-color: var(--danger);
+    background: var(--surface-red);
+    color: var(--danger);
+}
+.rule-target-label {
+    font-weight: var(--fw-bold);
+    font-size: var(--fs-lg);
+    color: var(--text-strong);
+}
+.rule-target-card.active .rule-target-label {
+    color: inherit;
+}
+.rule-target-desc {
+    font-size: var(--fs-xs);
+    color: var(--text-subtle);
+}
+.rule-node-block {
+    margin-top: var(--space-3);
+    border: var(--bw) solid var(--border);
+    border-radius: var(--r-md);
+    background: var(--inset-fill);
+}
+.rule-node-summary {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2);
+    padding: var(--space-2);
+    color: var(--text-muted);
+    font-size: var(--fs-sm);
+    font-weight: var(--fw-bold);
+    font-family: inherit;
+    text-align: left;
+    cursor: pointer;
+    border: 0;
+    background: transparent;
+}
+.rule-node-summary:hover {
+    color: var(--text-strong);
+}
+.rule-node-summary svg {
+    flex: 0 0 auto;
+    transition: transform var(--dur-fast) var(--ease);
+}
+.rule-node-block.open .rule-node-summary svg {
+    transform: rotate(180deg);
+}
+.rule-node-content {
+    padding: 0 var(--space-2) var(--space-2);
+}
+.rule-node-search {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
+    padding: var(--space-1) var(--space-2);
+    border: var(--bw) solid var(--border);
+    border-radius: var(--r-sm);
+    background: var(--surface-soft);
+    color: var(--text-subtle);
+    margin-bottom: var(--space-2);
+}
+.rule-node-search input {
+    flex: 1;
+    border: none;
+    background: none;
+    color: var(--text);
+    outline: none;
+    font-size: var(--fs-md);
+    font-family: inherit;
+}
+.rule-node-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-0);
+    max-height: var(--rule-list-max-h);
+    overflow-y: auto;
+}
+.rule-node-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2);
+    padding: var(--space-2);
+    border-radius: var(--r-md);
+    border: var(--bw) solid var(--border);
+    background: var(--surface-soft);
+    color: var(--text);
+    cursor: pointer;
+    text-align: left;
+    font-family: inherit;
+}
+.rule-node-row:hover {
+    border-color: var(--accent);
+}
+.rule-node-row.active {
+    border-color: var(--accent-strong);
+    background: var(--accent-tint);
+}
+.rule-node-name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: var(--fs-md);
+}
+/* 纯文字状态色、无底，不并入 .badge，只收敛字号 */
+.node-delay {
+    flex: 0 0 auto;
+    font-size: var(--fs-xs);
+    font-weight: var(--fw-bold);
+}
+.node-delay.ok {
+    color: var(--success);
+}
+.node-delay.timeout {
+    color: var(--text-subtle);
+}
+.node-delay.testing {
+    color: var(--text-muted);
+}
+.rule-node-empty {
+    color: var(--text-subtle);
+    font-size: var(--fs-md);
+    padding: var(--space-2) 2px;
+}
+.rule-node-warning {
+    display: flex;
+    gap: var(--space-1);
+    align-items: flex-start;
+    margin-top: var(--space-2);
+    padding: var(--space-2);
+    border-radius: var(--r-md);
+    background: color-mix(in srgb, var(--warning) 12%, transparent);
+    color: var(--warning);
+    font-size: var(--fs-sm);
+    line-height: var(--lh-normal);
+}
+.rule-footer {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-3);
+    padding: var(--space-2) var(--space-3);
+    border-top: var(--bw) solid var(--border-soft);
+    background: var(--inset-fill);
+}
+.rule-preview {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+.rule-preview-plain {
+    color: var(--text-strong);
+    font-size: var(--fs-lg);
+    overflow-wrap: anywhere;
+}
+.rule-preview-json {
+    color: var(--text-muted);
+    font-size: var(--fs-xs);
+    background: none;
+    border: none;
+    padding: 0;
+    overflow-wrap: anywhere;
+}
+.rule-preview-empty {
+    color: var(--text-subtle);
+    font-size: var(--fs-md);
+}
+.rule-actions {
+    display: flex;
+    gap: var(--space-2);
+    flex: 0 0 auto;
+}
+@media (min-width: 961px) {
+    .rule-target-step {
+        display: flex;
+        flex-direction: column;
+        overflow-y: auto;
+    }
+    .rule-target-step > .rule-step-title,
+    .rule-target-step > .rule-target-grid {
+        flex: 0 0 auto;
+    }
+    .rule-target-step > .rule-node-block.open {
+        flex: 1 1 0;
+        min-height: var(--rule-node-open-min-h);
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+    }
+    .rule-target-step .rule-node-summary,
+    .rule-target-step .rule-node-search,
+    .rule-target-step .rule-node-warning {
+        flex: 0 0 auto;
+    }
+    .rule-target-step .rule-node-content {
+        flex: 1 1 0;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+    }
+    .rule-target-step .rule-node-list {
+        flex: 1 1 0;
+        min-height: var(--rule-list-min-h);
+        max-height: none;
+    }
+}
+@media (max-width: 960px) {
+    .rule-modal-subtitle {
+        display: none;
+    }
+    .rule-columns {
+        grid-template-columns: 1fr;
+        overflow-y: auto;
+    }
+    .rule-step {
+        overflow: visible;
+    }
+    .rule-step + .rule-step {
+        border-left: none;
+        border-top: 1px solid var(--border-soft);
+    }
+    .rule-footer {
+        flex-direction: column;
+        align-items: stretch;
+        gap: var(--space-2);
+    }
+    .rule-actions {
+        justify-content: flex-end;
+    }
+}
