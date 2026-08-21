@@ -15,6 +15,9 @@ export default defineConfig({
   },
   html: {
     template: './index.html',
+    // inlineScripts 内联后 defer 无效，脚本必须注入 body 末尾，
+    // 否则在 <head> 解析阶段就执行，#root 尚不存在。
+    inject: 'body',
   },
   output: {
     cleanDistPath: true,
