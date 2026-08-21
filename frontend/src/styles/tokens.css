@@ -1,8 +1,8 @@
 /* ==========================================================================
    Miao 设计 token —— 全站样式的唯一来源
    任何组件样式必须引用本文件的 token；新增硬编码需在 PR 中说明例外理由。
-   例外（不入 token）：@media 断点（1180/960/840/560，CSS 不支持 var，JS 镜像
-   见 ../tokens.js）、siteIcons.js 第三方品牌色、onboarding 门面散值（已注释）。
+   例外（不入 token）：@media 断点（1180/840/560，CSS 不支持 var，JS 镜像
+   见 ../tokens.ts）、siteIcons.ts 第三方品牌色、onboarding 门面散值（已注释）。
    ========================================================================== */
 
 :root {
@@ -88,18 +88,14 @@
     --fs-md: 0.875rem;
     --fs-lg: 1rem;
     --fs-xl: 1.25rem;
-    --fs-2xl: 1.375rem; /* 链接统计大数字 */
     /* 字重/行高/字距档位 */
     --fw-medium: 500;
     --fw-semibold: 600;
     --fw-bold: 650;
     --fw-heavy: 700;
-    --lh-tight: 1.2; /* 统计大数字 */
-    --lh-snug: 1.3; /* 标题行（收编 1.35） */
     --lh-normal: 1.5; /* 正文/输入 */
     --lh-relaxed: 1.6; /* 弹窗说明文 */
     --ls-caps: 0.4px; /* 小号大写感标签（MCP） */
-    --ls-wide: 0.02em; /* 计数等宽感标签 */
 
     /* ── 4. 动效：过渡三档 + 具名动画时长 ─────────────────────────────── */
     --dur-fast: 0.15s; /* 开关/勾选等即时反馈 */
@@ -124,7 +120,6 @@
     /* ── 6. 透明度 ───────────────────────────────────────────────────── */
     --o-dim: 0.5; /* 失效行/禁用图标按钮 */
     --o-disabled: 0.6; /* 禁用态（收编 .7/.72） */
-    --o-icon: 0.75; /* 辅助图标弱化 */
     --o-emphasis: 0.8; /* pill 内计数强调 */
 
     /* ── 7. 描边宽度（颜色取 --border 族；focus 环统一 2px） ───────────── */
@@ -147,7 +142,6 @@
     --size-checkbox: 16px;
     --size-step-no: 20px; /* 规则步骤序号 */
     --size-toast-close: 20px;
-    --size-search-clear: 22px;
     --size-icon-btn-sm: 26px; /* icon-button.subtle */
     --size-status-badge: 28px; /* 订阅状态圆形图标 */
     --size-icon-btn: 32px;
@@ -178,11 +172,8 @@
     --num-w: 5.5rem; /* 速率数值定宽：实测最宽 "1023 MB/s" ≈ 79px，取 88px 留余量 */
     --node-name-max: 11rem; /* 顶栏当前节点名截断 */
     --node-select-max: 8.75rem; /* 节点选择下拉 */
-    --search-basis: 16rem; /* 链接搜索框弹性基准 */
-    --search-min-w: 12rem;
     --share-link-min-h: 110px;
     --rule-list-max-h: 280px;
-    --conn-card-min: 280px; /* 连接卡网格最小列宽 */
     --conn-row-min-h: 56px; /* 链接统计行最小高度 */
     --conn-num-w: 5rem; /* 链接统计行数字子列定宽（速率/累计的上下行共用，右对齐成列） */
     --path-num-w: 5.5rem; /* 通道卡列宽（身份/速率/累计三列共用，跨两卡列位一致） */

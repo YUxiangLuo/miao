@@ -98,7 +98,7 @@ export function signatureFromClashRule(text: string | null | undefined): RuleSig
   }
 }
 
-export function signaturesMatch(expected: RuleSignature | null, actual: RuleSignature | null): boolean {
+function signaturesMatch(expected: RuleSignature | null, actual: RuleSignature | null): boolean {
   if (!expected || !actual) return false
   if (expected.field !== actual.field || expected.value !== actual.value) return false
   if (expected.target && actual.target && expected.target !== actual.target) return false

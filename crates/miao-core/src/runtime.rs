@@ -63,7 +63,6 @@ pub struct RuntimeOptions {
 pub struct ServerHandle {
     port: u16,
     url: String,
-    log_path: Option<PathBuf>,
     init_cancel: Option<oneshot::Sender<()>>,
     init_task: Option<JoinHandle<()>>,
     shutdown_tx: Option<oneshot::Sender<()>>,
@@ -77,10 +76,6 @@ impl ServerHandle {
 
     pub fn url(&self) -> &str {
         &self.url
-    }
-
-    pub fn log_path(&self) -> Option<&std::path::Path> {
-        self.log_path.as_deref()
     }
 
     pub async fn shutdown(mut self) {
@@ -261,7 +256,6 @@ pub async fn spawn_server(options: RuntimeOptions) -> AppResult<ServerHandle> {
     Ok(ServerHandle {
         port,
         url,
-        log_path,
         init_cancel: Some(init_cancel),
         init_task: Some(init_task),
         shutdown_tx: Some(shutdown_tx),
@@ -960,10 +954,10 @@ async fn open_onboarding_browser(url: String) {
 mod tests {
     use std::path::PathBuf;
 
-    use super::{
-        initialize_runtime_locked, panel_bind_addr, prepare_compatible_startup_cache,
-        recover_data_plane_once, spawn_server, RuntimeOptions,
-    };
+    use super::{panel_bind_addr, prepare_compatible_startup_cache, spawn_server, RuntimeOptions};
+    // 仅被 #[cfg(unix)] 测试使用（Windows 测试构建下 import 会报未使用）。
+    #[cfg(unix)]
+    use super::{initialize_runtime_locked, recover_data_plane_once};
 
     #[tokio::test]
     async fn incompatible_cache_is_rejected_before_it_replaces_active_config() {
@@ -1045,6 +1039,7 @@ mod tests {
         (state, root)
     }
 
+    #[cfg(unix)]
     async fn subscription_server(
         accepted: Option<std::sync::Arc<tokio::sync::Notify>>,
         release: Option<std::sync::Arc<tokio::sync::Notify>>,
@@ -1083,6 +1078,7 @@ proxies:
         format!("http://{addr}/sub")
     }
 
+    #[cfg(unix)]
     async fn refusing_sub_url() -> String {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();

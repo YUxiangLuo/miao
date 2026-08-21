@@ -607,6 +607,9 @@ async fn wait_for_sing_box_ready(state: &Arc<AppState>, expected_generation: u64
     Ok(())
 }
 
+/// 非测试构建的超时清理（wait_for_sing_box_ready），外加 unix 测试直接调用。
+/// Windows 的 test 构建两端都被裁掉，故用 any(not(test), unix) 而非无条件编译。
+#[cfg(any(not(test), unix))]
 async fn terminate_failed_start(state: &Arc<AppState>, expected_generation: u64) {
     let mut lock = state.sing_process.lock().await;
     if state.sing_generation.load(Ordering::Relaxed) != expected_generation {
