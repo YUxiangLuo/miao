@@ -28,6 +28,11 @@ async function openRuleModal(user: ReturnType<typeof userEvent.setup>) {
   return screen.getByRole('dialog')
 }
 
+async function openNodeTargets(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(screen.getByRole('button', { name: '或指定节点出口' }))
+  return screen.getByRole('radiogroup', { name: '指定节点' })
+}
+
 describe('RulesCard', () => {
   it('renders structured rules with labels and target badges', () => {
     renderCard()
@@ -218,6 +223,7 @@ describe('RulesCard', () => {
     renderCard({ onAddRule, nodeNames: ['香港节点'] })
 
     await openRuleModal(user)
+    await openNodeTargets(user)
     await user.click(screen.getByRole('radio', { name: /香港节点/ }))
     // 选中节点目标后提示节点失效风险
     expect(screen.getByText(/节点日后消失/)).toBeInTheDocument()
@@ -232,7 +238,7 @@ describe('RulesCard', () => {
     renderCard({ nodeNames: ['香港节点', '新加坡节点', '美国节点'] })
 
     await openRuleModal(user)
-    const nodeList = within(screen.getByRole('radiogroup', { name: '指定节点' }))
+    const nodeList = within(await openNodeTargets(user))
     expect(nodeList.getAllByRole('radio')).toHaveLength(3)
 
     await user.type(screen.getByLabelText('搜索节点'), '香港')
@@ -240,21 +246,45 @@ describe('RulesCard', () => {
     expect(screen.queryByRole('radio', { name: /新加坡节点/ })).not.toBeInTheDocument()
   })
 
-  it('tests all candidate nodes on modal open and shows delays in the list', async () => {
+  it('keeps node targets collapsed and tests candidates only when expanded', async () => {
     const user = userEvent.setup()
     const onTestNodes = vi.fn()
     renderCard({
       nodeNames: ['香港节点', '新加坡节点', '美国节点'],
       onTestNodes,
       delays: { '香港节点': 132, '新加坡节点': -1 },
-      testingNodes: { '美国节点': true },
     })
 
     await openRuleModal(user)
+    expect(screen.getByRole('button', { name: '或指定节点出口' })).toHaveAttribute('aria-expanded', 'false')
+    expect(onTestNodes).not.toHaveBeenCalled()
+
+    await openNodeTargets(user)
+    expect(onTestNodes).toHaveBeenCalledTimes(1)
+
+    // 同一次弹窗会话里重新折叠并展开，不重复启动一整批测速
+    const nodeTargetsToggle = screen.getByRole('button', { name: '或指定节点出口' })
+    await user.click(nodeTargetsToggle)
+    await user.click(nodeTargetsToggle)
     expect(onTestNodes).toHaveBeenCalledTimes(1)
 
     expect(screen.getByRole('radio', { name: /香港节点/ }).textContent).toContain('132 ms')
     expect(screen.getByRole('radio', { name: /新加坡节点/ }).textContent).toContain('超时')
+  })
+
+  it('does not start another node test batch while a candidate is already testing', async () => {
+    const user = userEvent.setup()
+    const onTestNodes = vi.fn()
+    renderCard({
+      nodeNames: ['香港节点', '美国节点'],
+      onTestNodes,
+      testingNodes: { '美国节点': true },
+    })
+
+    await openRuleModal(user)
+    await openNodeTargets(user)
+
+    expect(onTestNodes).not.toHaveBeenCalled()
     expect(screen.getByRole('radio', { name: /美国节点/ }).textContent).toContain('测速中')
   })
 

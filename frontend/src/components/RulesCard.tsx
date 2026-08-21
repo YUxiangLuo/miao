@@ -115,11 +115,7 @@ export function RulesCard({
               size="sm"
               icon={<Plus size={ICON.xs} />}
               disabled={isInitializing}
-              onClick={() => {
-                setShowRuleModal(true)
-                // 打开弹窗即测全部候选节点，延迟结果显示在下拉选项里
-                onTestNodes?.()
-              }}
+              onClick={() => setShowRuleModal(true)}
             >
               添加
             </Button>
@@ -149,6 +145,7 @@ export function RulesCard({
         platform={platform}
         delays={delays}
         testingNodes={testingNodes}
+        onTestNodes={onTestNodes}
       />
     </>
   )

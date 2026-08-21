@@ -1,5 +1,5 @@
 import { useEffect, useId, useState } from 'react'
-import { Ban, Globe, ListFilter, Plus, Search, TriangleAlert, X, Zap } from 'lucide-react'
+import { Ban, ChevronDown, Globe, ListFilter, Plus, Search, TriangleAlert, X, Zap } from 'lucide-react'
 import { ICON } from '../tokens'
 import { useDialog } from '../hooks/useDialog'
 import { Button } from './ui'
@@ -47,10 +47,12 @@ export interface RuleModalProps {
   platform?: string
   delays?: Record<string, number>
   testingNodes?: Record<string, boolean>
+  onTestNodes?: () => void
 }
 
-export function RuleModal({ open, loading, onClose, onSubmit, nodeNames = [], platform = 'linux', delays = {}, testingNodes = {} }: RuleModalProps) {
+export function RuleModal({ open, loading, onClose, onSubmit, nodeNames = [], platform = 'linux', delays = {}, testingNodes = {}, onTestNodes }: RuleModalProps) {
   const titleId = useId()
+  const nodeTargetsId = useId()
   const dialogRef = useDialog(open, onClose)
   const [field, setField] = useState('domain_suffix')
   const [target, setTarget] = useState('proxy')
@@ -59,6 +61,8 @@ export function RuleModal({ open, loading, onClose, onSubmit, nodeNames = [], pl
   // 切回时值还在（protocol 未编辑过则回落默认 quic）
   const [drafts, setDrafts] = useState<Record<string, string>>({})
   const [nodeQuery, setNodeQuery] = useState('')
+  const [nodeTargetsOpen, setNodeTargetsOpen] = useState(false)
+  const [nodeTestStarted, setNodeTestStarted] = useState(false)
 
   // 关闭后重新打开时重置为默认表单
   useEffect(() => {
@@ -68,6 +72,8 @@ export function RuleModal({ open, loading, onClose, onSubmit, nodeNames = [], pl
       setValue('')
       setDrafts({})
       setNodeQuery('')
+      setNodeTargetsOpen(false)
+      setNodeTestStarted(false)
     }
   }, [open])
 
@@ -89,6 +95,7 @@ export function RuleModal({ open, loading, onClose, onSubmit, nodeNames = [], pl
   const filteredNodes = query
     ? nodeNames.filter((name) => name.toLowerCase().includes(query))
     : nodeNames
+  const hasTestingNode = nodeNames.some((name) => testingNodes[name])
 
   // 类型切换：存下当前字段的草稿,恢复目标字段的草稿;
   // protocol 未编辑过时给默认值 quic
@@ -241,7 +248,7 @@ export function RuleModal({ open, loading, onClose, onSubmit, nodeNames = [], pl
               </div>
             </section>
 
-            <section className="rule-step" aria-label="出口目标">
+            <section className="rule-step rule-target-step" aria-label="出口目标">
               <h4 className="rule-step-title"><span className="rule-step-no">2</span>怎么走</h4>
               <div className="rule-target-grid" role="radiogroup" aria-label="规则目标">
                 {TARGET_CARDS.map((card) => {
@@ -263,49 +270,67 @@ export function RuleModal({ open, loading, onClose, onSubmit, nodeNames = [], pl
                 })}
               </div>
 
-              <div className="rule-node-block">
-                <div className="rule-group-label">或指定节点出口</div>
-                {nodeNames.length === 0 ? (
-                  <div className="rule-node-empty">暂无可用节点</div>
-                ) : (
-                  <>
-                    <div className="rule-node-search">
-                      <Search size={ICON.xs} />
-                      <input
-                        value={nodeQuery}
-                        onChange={(event) => setNodeQuery(event.target.value)}
-                        placeholder="搜索节点"
-                        aria-label="搜索节点"
-                      />
-                    </div>
-                    <div className="rule-node-list" role="radiogroup" aria-label="指定节点">
-                      {filteredNodes.map((name) => (
-                        <button
-                          key={name}
-                          type="button"
-                          role="radio"
-                          aria-checked={target === name}
-                          className={classNames('rule-node-row', target === name && 'active')}
-                          onClick={() => setTarget(name)}
-                        >
-                          <span className="rule-node-name" title={name}>{name}</span>
-                          {delayBadge(name)}
-                        </button>
-                      ))}
-                      {filteredNodes.length === 0 && (
-                        <div className="rule-node-empty">无匹配节点</div>
-                      )}
-                    </div>
-                  </>
-                )}
-              </div>
+              <div className={classNames('rule-node-block', nodeTargetsOpen && 'open')}>
+                <button
+                  type="button"
+                  className="rule-node-summary"
+                  aria-expanded={nodeTargetsOpen}
+                  aria-controls={nodeTargetsId}
+                  onClick={() => {
+                    const nextOpen = !nodeTargetsOpen
+                    setNodeTargetsOpen(nextOpen)
+                    if (nextOpen && !nodeTestStarted && !hasTestingNode) {
+                      setNodeTestStarted(true)
+                      onTestNodes?.()
+                    }
+                  }}
+                >
+                  <span>或指定节点出口</span>
+                  <ChevronDown size={ICON.xs} aria-hidden="true" />
+                </button>
+                {nodeTargetsOpen && <div id={nodeTargetsId} className="rule-node-content">
+                  {nodeNames.length === 0 ? (
+                    <div className="rule-node-empty">暂无可用节点</div>
+                  ) : (
+                    <>
+                      <div className="rule-node-search">
+                        <Search size={ICON.xs} />
+                        <input
+                          value={nodeQuery}
+                          onChange={(event) => setNodeQuery(event.target.value)}
+                          placeholder="搜索节点"
+                          aria-label="搜索节点"
+                        />
+                      </div>
+                      <div className="rule-node-list" role="radiogroup" aria-label="指定节点">
+                        {filteredNodes.map((name) => (
+                          <button
+                            key={name}
+                            type="button"
+                            role="radio"
+                            aria-checked={target === name}
+                            className={classNames('rule-node-row', target === name && 'active')}
+                            onClick={() => setTarget(name)}
+                          >
+                            <span className="rule-node-name" title={name}>{name}</span>
+                            {delayBadge(name)}
+                          </button>
+                        ))}
+                        {filteredNodes.length === 0 && (
+                          <div className="rule-node-empty">无匹配节点</div>
+                        )}
+                      </div>
+                    </>
+                  )}
 
-              {isNodeTarget && (
-                <div className="rule-node-warning">
-                  <TriangleAlert size={ICON.xs} />
-                  <span>若该节点日后消失（改名或订阅变更），此规则将暂停生效并在列表中标记，节点恢复后自动生效</span>
-                </div>
-              )}
+                  {isNodeTarget && (
+                    <div className="rule-node-warning">
+                      <TriangleAlert size={ICON.xs} />
+                      <span>若该节点日后消失（改名或订阅变更），此规则将暂停生效并在列表中标记，节点恢复后自动生效</span>
+                    </div>
+                  )}
+                </div>}
+              </div>
             </section>
           </div>
 
