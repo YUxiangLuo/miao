@@ -828,7 +828,7 @@ fn build_sing_box_config_splits_direct_route_rules() {
         .iter()
         .find(|server| server["tag"] == "local")
         .unwrap();
-    assert_eq!(local["type"], "https");
+    assert_eq!(local["type"], "udp");
     assert_eq!(local["server"], "223.5.5.5");
     assert!(local.get("detour").is_none());
 
