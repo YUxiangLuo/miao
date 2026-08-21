@@ -122,6 +122,34 @@ pub struct SubRequest {
     pub url: String,
 }
 
+/// clash-verge-rev 导入：单条订阅 + 是否已在 miao 配置中。
+#[derive(Serialize)]
+pub struct VergeImportItem {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    pub url: String,
+    pub already_added: bool,
+}
+
+/// clash-verge-rev 导入扫描结果；found=false 时 items 为空。
+#[derive(Serialize)]
+pub struct VergeImportResult {
+    pub found: bool,
+    pub items: Vec<VergeImportItem>,
+}
+
+/// 批量添加订阅：一次配置事务提交全部，跳过已存在的。
+#[derive(Deserialize)]
+pub struct SubBatchRequest {
+    pub urls: Vec<String>,
+}
+
+#[derive(Serialize)]
+pub struct SubBatchResult {
+    pub added: usize,
+    pub skipped: usize,
+}
+
 #[derive(Deserialize)]
 pub struct RuleRequest {
     pub field: String,

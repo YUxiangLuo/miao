@@ -7,6 +7,7 @@ pub mod proxy;
 pub mod singbox;
 pub mod status;
 pub mod subscription;
+pub mod verge;
 pub mod version;
 #[cfg(not(windows))]
 pub mod vps;
