@@ -24,11 +24,11 @@ export function LogoIcon({ size = 20 }: { size?: number }) {
   )
 }
 
-export type ButtonTone = 'default' | 'primary' | 'secondary' | 'danger' | 'ghost'
+export type ButtonTone = 'primary' | 'secondary' | 'danger' | 'ghost'
 export type ButtonSize = 'md' | 'sm'
 
 export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
-  tone?: ButtonTone
+  tone: ButtonTone
   size?: ButtonSize
   icon?: ReactNode
   loading?: boolean
@@ -36,7 +36,7 @@ export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 
 export function Button({
   children,
-  tone = 'default',
+  tone,
   size = 'md',
   icon,
   loading,
