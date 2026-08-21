@@ -20,14 +20,16 @@ const RuleRow = memo(function RuleRow({ rule, onDelete, disabled, active }: Rule
   const display = describeRule(rule)
   return (
     <div
-      className={classNames('list-row', rule.skipped && 'skipped', active && 'rule-active')}
+      className={classNames('list-row', 'rule-row', display.structured && display.target && 'has-target', rule.skipped && 'skipped', active && 'rule-active')}
       title={active ? '该规则正在匹配连接' : undefined}
     >
       <div className="list-row-content">
         {display.structured ? (
           <>
             <div className="list-row-title structured">
-              <span className={classNames('badge', 'rule-field-chip', ruleFieldTone(display.field))}>{display.fieldLabel}</span>
+              <span className={classNames('badge', 'rule-field-chip', ruleFieldTone(display.field))} title={display.fieldLabel}>
+                <span className="rule-field-text">{display.fieldLabel}</span>
+              </span>
               <span className="rule-value" title={display.value}>{display.value}</span>
             </div>
           </>
@@ -38,21 +40,27 @@ const RuleRow = memo(function RuleRow({ rule, onDelete, disabled, active }: Rule
           </>
         )}
       </div>
-      {rule.skipped && (
-        <span
-          className="rule-skipped-icon"
-          title="出口节点不存在,该规则未生效;请删除后重新添加"
-          aria-label="规则未生效"
-        >
-          <TriangleAlert size={ICON.xs} />
-        </span>
-      )}
       {display.structured && display.target && (
-        <span className={classNames('badge', 'rule-target-badge', ['proxy', 'direct', 'reject'].includes(display.target) ? display.target : 'node')}>
-          {ruleTargetLabel(display.target)}
+        <span
+          className={classNames('badge', 'rule-target-badge', ['proxy', 'direct', 'reject'].includes(display.target) ? display.target : 'node')}
+          title={ruleTargetLabel(display.target)}
+        >
+          <span className="rule-target-text">{ruleTargetLabel(display.target)}</span>
         </span>
       )}
-      {active && <span className="rule-live-dot" title="正在匹配" aria-hidden="true" />}
+      <span className="rule-status-slot">
+        {rule.skipped ? (
+          <span
+            className="rule-skipped-icon"
+            title="出口节点不存在,该规则未生效;请删除后重新添加"
+            aria-label="规则未生效"
+          >
+            <TriangleAlert size={ICON.xs} />
+          </span>
+        ) : active ? (
+          <span className="rule-live-dot" title="正在匹配" aria-hidden="true" />
+        ) : null}
+      </span>
       <button
         className="icon-button subtle"
         onClick={() => onDelete(rule)}

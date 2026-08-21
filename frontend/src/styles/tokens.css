@@ -173,6 +173,9 @@
     --node-select-max: 8.75rem; /* 节点选择下拉 */
     --share-link-min-h: 110px;
     --rule-node-open-min-h: 180px;
+    --rule-field-col-w: 96px;
+    --rule-target-col-w: 80px;
+    --rule-status-col-w: 16px;
     --rule-list-min-h: 80px;
     --rule-list-max-h: 280px;
     --verge-list-max-h: 240px; /* Clash Verge 导入订阅列表：超高内滚，操作按钮始终可达 */

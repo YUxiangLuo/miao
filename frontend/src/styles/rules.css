@@ -2,6 +2,16 @@
 /* 徽标基元由 .badge 提供（统一 pill 体系），颜色由 .badge.{tone} 色调类提供 */
 .rule-field-chip {
     flex: 0 0 auto;
+    min-width: 0;
+    max-width: 100%;
+    justify-self: start;
+}
+.rule-field-text,
+.rule-target-text {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 .rule-value {
     min-width: 0;
@@ -12,6 +22,8 @@
 /* 徽标基元由 .badge 提供，变体只保留颜色 */
 .rule-target-badge {
     flex: 0 0 auto;
+    min-width: 0;
+    max-width: 100%;
 }
 .rule-target-badge.proxy {
     background: var(--info-tint);
@@ -29,7 +41,33 @@
     background: var(--surface-soft);
     color: var(--text-muted);
 }
-.list-row.skipped .list-row-content {
+.rule-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) var(--rule-target-col-w) var(--rule-status-col-w) var(--size-icon-btn-sm);
+    align-items: center;
+}
+.rule-row .list-row-content {
+    grid-column: 1;
+}
+.rule-row:not(.has-target) .list-row-content {
+    grid-column: 1 / 3;
+}
+.rule-row .rule-target-badge {
+    grid-column: 2;
+    justify-self: end;
+}
+.rule-row .rule-status-slot {
+    grid-column: 3;
+    width: var(--rule-status-col-w);
+    height: var(--size-icon-btn-sm);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+.rule-row > .icon-button {
+    grid-column: 4;
+}
+.rule-row.skipped .list-row-content {
     opacity: var(--o-dim);
 }
 .rule-skipped-icon {
@@ -44,6 +82,10 @@
     display: flex;
     align-items: center;
     gap: var(--space-1);
+}
+.rule-row .list-row-title.structured {
+    display: grid;
+    grid-template-columns: var(--rule-field-col-w) minmax(0, 1fr);
 }
 /* 规则命中：与活跃连接同一语言——行尾脉冲绿点，行本身无任何变色 */
 .list-row .rule-live-dot {
@@ -67,6 +109,35 @@
     }
     50% {
         opacity: 0.3;
+    }
+}
+
+@media (max-width: 520px) {
+    .rule-row {
+        --rule-field-col-w: 80px;
+        grid-template-columns: minmax(0, 1fr) var(--rule-status-col-w) var(--size-icon-btn-sm);
+        row-gap: var(--space-1);
+    }
+    .rule-row .list-row-content,
+    .rule-row:not(.has-target) .list-row-content {
+        grid-column: 1;
+        grid-row: 1;
+    }
+    .rule-row .rule-target-badge {
+        grid-column: 1;
+        grid-row: 2;
+        justify-self: end;
+        max-width: var(--rule-target-col-w);
+    }
+    .rule-row .rule-status-slot {
+        grid-column: 2;
+    }
+    .rule-row > .icon-button {
+        grid-column: 3;
+    }
+    .rule-row.has-target .rule-status-slot,
+    .rule-row.has-target > .icon-button {
+        grid-row: 1 / span 2;
     }
 }
 

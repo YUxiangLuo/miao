@@ -295,7 +295,8 @@ describe('RulesCard', () => {
       ],
     })
 
-    const badge = screen.getByText('香港节点')
+    const badge = screen.getByText('香港节点').closest('.rule-target-badge')
+    expect(badge).not.toBeNull()
     expect(badge).toHaveClass('rule-target-badge', 'node')
   })
 
@@ -307,9 +308,13 @@ describe('RulesCard', () => {
       ],
     })
 
-    expect(screen.getByText('curl').closest('.list-row')).toHaveClass('rule-active')
-    expect(screen.getByText('curl').closest('.list-row')).toHaveAttribute('title', '该规则正在匹配连接')
-    expect(screen.getByText('25').closest('.list-row')).not.toHaveClass('rule-active')
+    const activeRow = screen.getByText('curl').closest('.list-row')!
+    const inactiveRow = screen.getByText('25').closest('.list-row')!
+    expect(activeRow).toHaveClass('rule-active')
+    expect(activeRow).toHaveAttribute('title', '该规则正在匹配连接')
+    expect(activeRow.querySelector('.rule-status-slot .rule-live-dot')).toBeInTheDocument()
+    expect(inactiveRow).not.toHaveClass('rule-active')
+    expect(inactiveRow.querySelector('.rule-status-slot')).toBeEmptyDOMElement()
   })
 
   it('marks skipped rules with a warning icon and dims the row', () => {
@@ -323,6 +328,7 @@ describe('RulesCard', () => {
     const icon = screen.getByLabelText('规则未生效')
     expect(icon).toHaveAttribute('title', expect.stringContaining('未生效'))
     expect(icon.closest('.list-row')).toHaveClass('skipped')
+    expect(icon.parentElement).toHaveClass('rule-status-slot')
     // 正常规则不带失效标记
     expect(screen.getByText('t.co').closest('.list-row')).not.toHaveClass('skipped')
   })
