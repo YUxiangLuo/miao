@@ -27,6 +27,9 @@ export const STAGGER_CAP = 12
 // 末位 tile 96ms 内起步，大订阅下整列 ~0.3s 扫完，不会等数秒才出现。
 export const SCAN_STAGGER_CAP = 8
 
+// 连接行 FLIP 归位时长（WAAPI 只进 JS；与 tokens.css 的 --dur-slow 同步，改任何一边必须同步）
+export const FLIP_MS = 200
+
 // 通道卡 favicon 单格宽（tokens.css 的 --size-path-icon-lg 48px + .path-icons 的
 // gap --space-2 10px）：JS 侧用它算「单行放得下几个」，改任何一边必须同步。
 export const PATH_ICON_CELL = 58

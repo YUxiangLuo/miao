@@ -2,6 +2,7 @@ import { useId, useMemo, useState } from 'react'
 import { Activity, X } from 'lucide-react'
 import { ICON } from '../tokens'
 import { useDialog } from '../hooks/useDialog'
+import { useFlipContainer } from '../hooks/useFlip'
 import { ConnectionsToolbar } from './ConnectionsToolbar'
 import { ConnectionRow } from './ConnectionRow'
 import { ConnectionStats } from './ConnectionStats'
@@ -45,6 +46,8 @@ export function ConnectionsModal({
     [connections, path],
   )
   const pathCounts = useMemo(() => pathCountsForConnections(connections), [connections])
+  // 行级 FLIP：速率排序变化时从旧位置滑入新位置；弹窗关闭时清空位置记录
+  const rowsRef = useFlipContainer<HTMLDivElement>(open)
 
   if (!open) return null
 
@@ -87,7 +90,7 @@ export function ConnectionsModal({
               />
 
               {visibleConnections.length > 0 ? (
-                <div className="conn-rows">
+                <div className="conn-rows" ref={rowsRef}>
                   {visibleConnections.map((connection) => (
                     <ConnectionRow
                       key={connection.id}

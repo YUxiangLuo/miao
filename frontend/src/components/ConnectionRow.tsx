@@ -22,6 +22,7 @@ export interface ConnectionRowProps {
 /**
  * 链接统计的单条链接行：域名为主标识，副行是人话规则 · 进程 · 网络/端口 · 时长；
  * 活跃链接全亮并带速率比例条，空闲链接降为 dim。
+ * data-flip-key 供容器 FLIP 动画按连接 id 追踪跨帧位置（见 hooks/useFlip.ts）。
  */
 export function ConnectionRow({ connection }: ConnectionRowProps) {
   const domain = connectionDomain(connection)
@@ -45,6 +46,7 @@ export function ConnectionRow({ connection }: ConnectionRowProps) {
     <article
       className={classNames('conn-row', active ? 'active' : 'idle')}
       aria-label={`${domain} 链接`}
+      data-flip-key={connection.id}
     >
       <div className="conn-row-main">
         <SiteMark domain={domain} />

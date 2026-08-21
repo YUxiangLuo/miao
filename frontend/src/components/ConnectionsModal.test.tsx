@@ -153,4 +153,15 @@ describe('ConnectionsModal connection list', () => {
     expect(screen.getByLabelText('idle.dev 链接').className).toContain('idle')
   })
 
+  it('tags rows with connection ids as flip keys for reorder animation', () => {
+    renderModal([
+      connection({ id: 'slow-one', downloadSpeed: 10, metadata: { host: 'slow.dev' } }),
+      connection({ id: 'fast-one', downloadSpeed: 500, metadata: { host: 'fast.dev' } }),
+    ])
+
+    const rows = screen.getAllByLabelText(/\.dev 链接$/)
+    // 速率降序：fast-one 在前；flip key 与连接 id 一致，跨轮询稳定
+    expect(rows.map((row) => (row as HTMLElement).dataset.flipKey)).toEqual(['fast-one', 'slow-one'])
+  })
+
 })
