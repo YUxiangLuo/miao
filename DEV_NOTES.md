@@ -33,14 +33,14 @@ embedded/             sing-box + srs，不入库
 
 ## 前端栈与跨层约定
 
-- **TypeScript 钉 6.0.3**：typescript-eslint 8.x 尚未支持 TS 7（7.0 无进程内编程 API，7.1 才会有新 API，跟踪 typescript-eslint#10940）。`bun add -d typescript@latest` 会直接炸 lint，别升。
-- **前后端类型对齐**：`frontend/src/types/api.ts` 与 `crates/miao-core/src/models/*.rs` 的 serde 结构体一一对应——`skip_serializing_if` → `?:`，裸 `Option<T>` → `| null`。**改 Rust models 必须同步 api.ts**；`types/clash.ts` 无后端 schema（Clash API 反代），按前端实际消费面维护。
+- **TypeScript 钉 7.0.2**：迁移 Rsbuild 后 lint 由 rslint 承担，不再受 typescript-eslint 不支持 TS 7 的限制（旧 Vite 版钉 6.0.3 的原因已消除）。升级前仍先跑 `lint + typecheck + test` 三件套验证。
+- **前后端类型对齐**：`frontend-rsbuild/src/types/api.ts` 与 `crates/miao-core/src/models/*.rs` 的 serde 结构体一一对应——`skip_serializing_if` → `?:`，裸 `Option<T>` → `| null`。**改 Rust models 必须同步 api.ts**；`types/clash.ts` 无后端 schema（Clash API 反代），按前端实际消费面维护。
 
 ## 日常命令
 
 ```bash
 # 前端
-bun run --cwd frontend dev / test / lint / typecheck
+bun run --cwd frontend-rsbuild dev / test / lint / typecheck
 
 # 默认成员门禁（与 CI 一致）
 cargo test --locked --all-targets
@@ -101,7 +101,7 @@ Windows 构建里故意拿掉的能力（管理员进程里不该有；Linux CLI
 工具链：Rust（msvc）+ VS 2022 C++、Go（`%LOCALAPPDATA%\Programs\go`）、Bun、Node（npm 全局 `@tauri-apps/cli`）。PowerShell 拦 `.ps1`，一律用 `.cmd` 形态。
 
 ```powershell
-bun run --cwd frontend build          # 改了前端才跑
+bun run --cwd frontend-rsbuild build  # 改了前端才跑
 # Git Bash（PATH 先带上 Go）：
 MIAO_TARGET=windows-amd64 ./scripts/build-embedded.sh
 cargo build -p miao-desktop --locked --release
@@ -150,7 +150,7 @@ TUN JSON：`auto_route` + `strict_route`，`interface_name` 仍是 `sing-tun`。
 
 ## 设计 token 约定
 
-样式唯一来源是 `frontend/src/styles/tokens.css`（九段：主题色/派生色/音阶/动效/层级/透明度/描边/控件几何/组件几何）。写样式先找 token，没有再新增；**禁止组件里出现硬编码颜色/尺寸/时长**。例外（需在注释说明）：`@media` 断点（CSS 不支持 var，JS 镜像在 `src/tokens.ts`）、≤3px 光学补偿 padding、onboarding 门面散值、`siteIcons.ts` 第三方品牌色。
+样式唯一来源是 `frontend-rsbuild/src/styles/tokens.css`（九段：主题色/派生色/音阶/动效/层级/透明度/描边/控件几何/组件几何）。写样式先找 token，没有再新增；**禁止组件里出现硬编码颜色/尺寸/时长**。例外（需在注释说明）：`@media` 断点（CSS 不支持 var，JS 镜像在 `src/tokens.ts`）、≤3px 光学补偿 padding、onboarding 门面散值、`siteIcons.ts` 第三方品牌色。
 
 - **双主题**：仅段 1 分主题——`:root` 深色（默认）+ `:root[data-theme="light"]` 亮色。其余段主题无关。语义色的 alpha 面/描边一律 `color-mix(in srgb, var(--x) N%, transparent)` 现算，随主题自动派生，不要写死 rgba。
 - **色彩语义**：紫（`--accent` 族）= 交互与选中（品牌色，与 logo 同族）+ 上传速率；蓝（`--info` 族）= 代理路径（出口 chip、规则字段）+ 下载速率；绿专属直连/红拦截/琥珀警告——彩色不再跨维度复用（曾因上传绿与直连绿冲突导致链接统计页读混乱）。选中态用 `--accent-tint`，不要用 info 蓝。
