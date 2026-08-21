@@ -20,9 +20,12 @@ export const THEME_META = { dark: '#1a1d22', light: '#ffffff' }
 // 动画结束 ≈ React 移除 .arrive class，交棒给 .active 的 tileGlow 呼吸。
 export const ARRIVE_MS = 900
 
-// 入场交错序号 --i 的上限（与 tokens.css 的 --stagger-step 配合）：
-// 大订阅下末位 tile 的入场延迟封顶在 ~0.3s，不会等数秒才出现。
+// 站点卡入场交错序号 --i 的上限（与 tokens.css 的 --stagger-step 配合）。
 export const STAGGER_CAP = 12
+
+// 节点 tile 扫描入场交错序号 --i 的上限（与 tokens.css 的 --stagger-step-scan 配合）：
+// 末位 tile 96ms 内起步，大订阅下整列 ~0.3s 扫完，不会等数秒才出现。
+export const SCAN_STAGGER_CAP = 8
 
 // 通道卡 favicon 单格宽（tokens.css 的 --size-path-icon-lg 48px + .path-icons 的
 // gap --space-2 10px）：JS 侧用它算「单行放得下几个」，改任何一边必须同步。

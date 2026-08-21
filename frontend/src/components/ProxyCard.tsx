@@ -1,7 +1,7 @@
 import { memo, useEffect, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { Waypoints, Zap, LoaderCircle, Plus } from 'lucide-react'
-import { ARRIVE_MS, ICON, STAGGER_CAP } from '../tokens'
+import { ARRIVE_MS, ICON, SCAN_STAGGER_CAP } from '../tokens'
 import { Button, SectionCard } from './ui'
 import { 
   classNames, 
@@ -40,7 +40,7 @@ const ProxyTile = memo(function ProxyTile({ nodeName, protocol, delay, isActive,
   return (
     <div
       className={classNames('proxy-tile', isActive && 'active', isArriving && 'arrive')}
-      style={{ '--i': Math.min(index, STAGGER_CAP) } as CSSProperties}
+      style={{ '--i': Math.min(index, SCAN_STAGGER_CAP) } as CSSProperties}
     >
       <button
         type="button"
@@ -203,7 +203,7 @@ export function ProxyCard({
             ))}
             <button
               className="proxy-tile add-tile"
-              style={{ '--i': Math.min(primaryGroup.all!.length, STAGGER_CAP) } as CSSProperties}
+              style={{ '--i': Math.min(primaryGroup.all!.length, SCAN_STAGGER_CAP) } as CSSProperties}
               onClick={onOpenAddNode}
               disabled={status.initializing}
             >

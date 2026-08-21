@@ -104,15 +104,14 @@
     --ease: ease;
     --anim-spin: 1s;
     --anim-live: 2s; /* 活跃点/徽标呼吸 */
-    --anim-rule: 1.6s; /* 规则命中脉冲 */
     --anim-logo: 3s; /* logo 光晕呼吸 */
-    --anim-fade: 0.35s; /* 数值刷新淡入（兼作卡片入场时长） */
+    --anim-fade: 0.35s; /* 数值刷新淡入（兼作站点卡入场时长） */
     --anim-arrive: 0.9s; /* 节点切换到位脉冲（JS 镜像 ARRIVE_MS 在 tokens.ts） */
-    --stagger-step: 0.024s; /* 卡片入场交错步进：delay = step × --i（--i 封顶 STAGGER_CAP 在 tokens.ts） */
+    --anim-scan: 0.2s; /* 节点 tile 入场扫描：单张点亮时长，扫过感来自交错 */
+    --stagger-step: 0.024s; /* 站点卡入场交错步进：delay = step × --i（--i 封顶 STAGGER_CAP 在 tokens.ts） */
+    --stagger-step-scan: 0.012s; /* 节点 tile 扫描交错步进（--i 封顶 SCAN_STAGGER_CAP 在 tokens.ts） */
 
     /* ── 5. 层级 ─────────────────────────────────────────────────────── */
-    --z-base: 0; /* 卡片内绝对定位层 */
-    --z-raised: 1; /* 层叠其上的同级元素 */
     --z-float: 40; /* MCP 浮动控件（低于弹窗） */
     --z-modal: 50;
     --z-toast: 60;
