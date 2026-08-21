@@ -27,6 +27,8 @@ export default function App() {
           loadingAction={app.loadingAction}
           onOpenAddNode={app.openNodeModal}
           showToast={app.showToast}
+          onScanVerge={app.scanClashVerge}
+          onImportVerge={app.importClashVergeSubs}
         />
         <ToastStack toasts={app.toasts} onDismiss={app.dismissToast} />
         <NodeModal

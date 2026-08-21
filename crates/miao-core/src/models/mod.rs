@@ -6,8 +6,9 @@ pub mod version;
 
 pub use api::{
     ApiResponse, ConnectivityResult, DeleteRuleRequest, McpRequest, NodeSelectRequest,
-    RouteModeRequest, RuleInfo, RuleRequest, RuntimePhase, RuntimeWarning, StatusData, SubRequest,
-    SubStatus, SubscriptionState,
+    RouteModeRequest, RuleInfo, RuleRequest, RuntimePhase, RuntimeWarning, StatusData,
+    SubBatchRequest, SubBatchResult, SubRequest, SubStatus, SubscriptionState, VergeImportItem,
+    VergeImportResult,
 };
 #[cfg(not(windows))]
 pub use api::{VpsDeployRequest, VpsDeployResponse};

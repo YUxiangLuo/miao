@@ -10,6 +10,8 @@ import type {
   RouteMode,
   RuleInfo,
   RuleRequest,
+  SubBatchResult,
+  VergeImportResult,
   VpsDeployRequest,
   VpsDeployResponse,
 } from '../types/api'
@@ -191,6 +193,33 @@ export function useAppActions(data: AppData) {
       clearDelays()
       await fetchSubs()
       showToast('订阅已添加', 'success')
+      return true
+    } catch (error) {
+      showToast(errorMessage(error), 'error')
+      return false
+    }
+  }, [apiCall, clearDelays, fetchSubs, showToast])
+
+  // 扫描本机 clash-verge-rev 的订阅（只读）；失败/未安装都返回 null，由调用方提示
+  const scanClashVerge = useCallback(async (): Promise<VergeImportResult | null> => {
+    try {
+      const response = await apiCall<VergeImportResult>('import/clash-verge', {}, 'scanVerge')
+      return response.data ?? null
+    } catch {
+      return null
+    }
+  }, [apiCall])
+
+  const importClashVergeSubs = useCallback(async (urls: string[]): Promise<boolean> => {
+    try {
+      const response = await apiCall<SubBatchResult>(
+        'subs/batch',
+        { method: 'POST', body: JSON.stringify({ urls }) },
+        'importVerge'
+      )
+      clearDelays()
+      await fetchSubs()
+      showToast(`已导入 ${response.data?.added ?? urls.length} 条订阅`, 'success')
       return true
     } catch (error) {
       showToast(errorMessage(error), 'error')
@@ -419,6 +448,8 @@ export function useAppActions(data: AppData) {
     handleSwitchProxy,
     handleAddSubscription,
     handleOnboardingAddSub,
+    scanClashVerge,
+    importClashVergeSubs,
     handleRefreshSubscriptions,
     handleAddNode,
     handleImportNodes,

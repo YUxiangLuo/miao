@@ -22,7 +22,7 @@ use crate::handlers::{
         serve_favicon, serve_icon_192, serve_icon_512, serve_icon_maskable_512, serve_index,
         serve_manifest, serve_service_worker,
     },
-    subs::{add_sub, delete_sub, get_subs, refresh_subs},
+    subs::{add_sub, add_subs_batch, delete_sub, get_subs, get_verge_import, refresh_subs},
     version::get_version,
 };
 use crate::state::AppState;
@@ -49,6 +49,8 @@ pub fn build_router(app_state: Arc<AppState>) -> Router {
         .route("/api/subs", post(add_sub))
         .route("/api/subs", delete(delete_sub))
         .route("/api/subs/refresh", post(refresh_subs))
+        .route("/api/subs/batch", post(add_subs_batch))
+        .route("/api/import/clash-verge", get(get_verge_import))
         .route("/api/nodes", get(get_nodes))
         .route("/api/nodes", post(add_node))
         .route("/api/nodes/import", post(import_nodes))

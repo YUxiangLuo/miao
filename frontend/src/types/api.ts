@@ -114,6 +114,25 @@ export interface SubRequest {
   url: string
 }
 
+/** models/api.rs VergeImportItem（GET /api/import/clash-verge 的 items 元素） */
+export interface VergeImportItem {
+  name?: string
+  url: string
+  already_added: boolean
+}
+
+/** models/api.rs VergeImportResult（GET /api/import/clash-verge 的 data） */
+export interface VergeImportResult {
+  found: boolean
+  items: VergeImportItem[]
+}
+
+/** models/api.rs SubBatchResult（POST /api/subs/batch 的 data） */
+export interface SubBatchResult {
+  added: number
+  skipped: number
+}
+
 /** models/api.rs RuleRequest（POST /api/rules） */
 export interface RuleRequest {
   field: string
