@@ -199,7 +199,8 @@
 
     /* 首页布局常量 */
     --home-connections-height: 184px;
-    --home-site-card: 144px; /* 活跃链接正方形卡片边长（条带单行排开，多余裁切） */
+    --home-site-card: 144px; /* 活跃链接正方形卡片边长 */
+    --home-connections-more: 48px; /* 条带溢出时的 +N 入口 */
     /* 桌面双列（>1180px）内容网格高度：582px 保底（原 630 − 留白增量 48），高视口吃掉全部剩余垂直空间。
        388 = 工作区上下 padding 96（各 48，上下留白一致）+ 顶栏 76 + 顶栏 margin-bottom 16
              + 条带 margin-top 16 + 条带 184；

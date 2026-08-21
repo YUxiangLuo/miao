@@ -2,15 +2,17 @@ import { useMemo, useRef } from 'react'
 import type { CSSProperties } from 'react'
 import { Activity } from 'lucide-react'
 import { ICON, STAGGER_CAP } from '../tokens'
+import { useElementWidth } from '../hooks/useElementWidth'
 import { classNames } from '../utils'
 import { iconForDomain, mainDomain } from './siteIcons'
 import { groupConnections, groupSpeed, sortConnectionGroups, isDirectOutbound } from './connectionFilters'
 import type { StatusData } from '../types/api'
 import type { ConnectionGroup, ConnectionsInfo } from '../types/clash'
+import { foldHomeConnections } from './homeConnectionsFold'
 
 // 首页条带专用卡：圆角正方形，favicon 为主视觉 + 主域名 + 出口 chip。
 // 首页条带是独立的轻量呈现（图标+主域名+出口），与链接统计面板的行式列表各自演进
-// 首页只需要「谁在用网、走的哪条出口」的一眼概览；明细由「查看全部」承载。
+// 首页只需要「谁在用网、走的哪条出口」的一眼概览；溢出时由 +N 进入明细。
 function HomeSiteCard({ group, index = 0 }: { group: ConnectionGroup; index?: number }) {
   const main = mainDomain(group.domain)
   const brandIcon = iconForDomain(group.domain)
@@ -78,10 +80,13 @@ export function HomeConnections({ status, data, onOpenAll }: HomeConnectionsProp
   }, [activeGroups])
 
   const hasActive = Boolean(status.ready) && activeGroups.length > 0
+  const { ref: gridRef, width: gridWidth } = useElementWidth<HTMLDivElement>()
+  const foldPlan = foldHomeConnections(orderedGroups.length, gridWidth)
+  const shownGroups = orderedGroups.slice(0, foldPlan.shown)
 
   // 始终渲染占位:不出现时不渲染会让 .content-grid 变成 last-child 而撑高,
   // 导致活跃链接出现时主内容区高度突变、右列突然出现滚动条。
-  // 条带恒高、正方形卡片单行排开,放不下的直接裁掉,明细走「查看全部」。
+  // 条带恒高、正方形卡片单行排开，放不下的折叠为 +N，由 +N 进入明细。
   return (
     <section className="home-connections" aria-label="活跃链接">
       <div className="home-connections-header">
@@ -89,15 +94,24 @@ export function HomeConnections({ status, data, onOpenAll }: HomeConnectionsProp
           <Activity size={ICON.sm} className="section-icon" />
           <span>活跃链接</span>
         </div>
-        <button type="button" className="home-connections-all" onClick={onOpenAll}>
-          查看全部
-        </button>
       </div>
-      <div className="home-connections-grid">
+      <div ref={gridRef} className="home-connections-grid">
         {hasActive ? (
-          orderedGroups.map((group, index) => (
-            <HomeSiteCard key={group.id} group={group} index={index} />
-          ))
+          <>
+            {shownGroups.map((group, index) => (
+              <HomeSiteCard key={group.id} group={group} index={index} />
+            ))}
+            {foldPlan.more > 0 && (
+              <button
+                type="button"
+                className="home-connections-more"
+                aria-label={`打开其余 ${foldPlan.more} 个活跃链接`}
+                onClick={onOpenAll}
+              >
+                +{foldPlan.more}
+              </button>
+            )}
+          </>
         ) : (
           <div className="empty-block home-connections-empty">暂无活跃链接</div>
         )}

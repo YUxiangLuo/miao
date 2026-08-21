@@ -33,3 +33,9 @@ export const FLIP_MS = 200
 // 通道卡 favicon 单格宽（tokens.css 的 --size-path-icon-lg 48px + .path-icons 的
 // gap --space-2 10px）：JS 侧用它算「单行放得下几个」，改任何一边必须同步。
 export const PATH_ICON_CELL = 58
+
+// 首页活跃链接条带：站点卡 144px、卡间距 10px、溢出入口 48px。
+// 与 styles/tokens.css、styles/layout.css 对应几何保持同步。
+export const HOME_SITE_CARD_WIDTH = 144
+export const HOME_SITE_CARD_GAP = 10
+export const HOME_CONNECTIONS_MORE_WIDTH = 48

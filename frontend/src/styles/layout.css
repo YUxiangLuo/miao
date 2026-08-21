@@ -74,7 +74,6 @@
 .home-connections-header {
     display: flex;
     align-items: center;
-    justify-content: space-between;
     gap: var(--space-2);
     flex-shrink: 0;
     padding: 0 2px;
@@ -87,24 +86,15 @@
     font-size: var(--fs-md);
     font-weight: var(--fw-semibold);
 }
-.home-connections-all {
-    border: none;
-    background: none;
-    color: var(--text-muted);
-    font-size: var(--fs-sm);
-    padding: var(--space-0) 2px;
-}
-.home-connections-all:hover {
-    color: var(--text);
-}
-/* 条带单行 flex：正方形卡片定宽排开，放不下的直接裁切（overflow:hidden），
-   明细走「查看全部」；空态块 flex:1 占满整行 */
+/* 条带单行 flex：正方形卡片定宽排开，JS 按实测宽度把溢出项折叠为 +N；
+   明细由 +N 进入；空态块 flex:1 占满整行 */
 .home-connections .home-connections-grid {
     flex: 1;
     min-height: 0;
     overflow: hidden;
     padding: 0;
     display: flex;
+    align-items: center;
     gap: var(--space-2);
 }
 /* 圆角正方形卡：favicon 主视觉 + 主域名 + 出口 chip。
@@ -170,6 +160,27 @@
     max-width: 100%;
     overflow: hidden;
     text-overflow: ellipsis;
+}
+.home-connections-more {
+    flex: 0 0 var(--home-connections-more);
+    width: var(--home-connections-more);
+    height: var(--home-connections-more);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border: var(--bw) solid var(--border);
+    border-radius: var(--r-md);
+    background: var(--raised);
+    color: var(--text-muted);
+    font-size: var(--fs-md);
+    font-weight: var(--fw-semibold);
+    font-variant-numeric: var(--font-numeric);
+    white-space: nowrap;
+}
+.home-connections-more:hover {
+    border-color: var(--border-strong);
+    color: var(--text);
 }
 .home-connections-empty {
     flex: 1;
