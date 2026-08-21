@@ -429,7 +429,7 @@ fn get_config_template() -> serde_json::Value {
             "optimistic": {"enabled": true, "timeout": "8h"},
             "servers": [
                 {"type": "https", "tag": "cfdns", "server": "1.1.1.1", "detour": "proxy"},
-                {"tag": "local", "type": "udp", "server": "223.5.5.5"}
+                {"tag": "local", "type": "https", "server": "223.5.5.5"}
             ],
             "rules": [
                 {"rule_set": ["chinasite"], "action": "route", "server": "local"}

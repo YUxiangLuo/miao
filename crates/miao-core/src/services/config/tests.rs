@@ -824,6 +824,14 @@ fn build_sing_box_config_splits_direct_route_rules() {
     assert_eq!(cfdns["server"], "1.1.1.1");
     assert_eq!(cfdns["detour"], "proxy");
 
+    let local = dns_servers
+        .iter()
+        .find(|server| server["tag"] == "local")
+        .unwrap();
+    assert_eq!(local["type"], "https");
+    assert_eq!(local["server"], "223.5.5.5");
+    assert!(local.get("detour").is_none());
+
     assert!(dns_servers
         .iter()
         .all(|server| server["type"] != "fakeip" && server["tag"] != "fakeip"));
