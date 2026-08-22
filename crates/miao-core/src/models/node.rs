@@ -36,13 +36,16 @@ pub struct Tls {
 }
 
 #[derive(Clone, Debug, Deserialize, Default)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(optional_fields))]
 pub struct NodeRequest {
+    #[cfg_attr(test, ts(type = "NodeType", optional))]
     pub node_type: Option<String>,
     pub tag: String,
     pub server: String,
     pub server_port: u16,
     #[serde(default)]
-    pub password: String,
+    pub password: Option<String>,
     #[serde(default)]
     pub uuid: Option<String>,
     #[serde(default, alias = "alterId")]
@@ -52,7 +55,7 @@ pub struct NodeRequest {
     #[serde(default)]
     pub cipher: Option<String>,
     #[serde(default)]
-    pub skip_cert_verify: bool,
+    pub skip_cert_verify: Option<bool>,
     #[serde(default)]
     pub tls_enabled: Option<bool>,
     #[serde(default)]
@@ -80,7 +83,7 @@ pub struct NodeRequest {
     #[serde(default)]
     pub tuic_udp_relay_mode: Option<String>,
     #[serde(default)]
-    pub tuic_zero_rtt: bool,
+    pub tuic_zero_rtt: Option<bool>,
     #[serde(default)]
     pub obfs_type: Option<String>,
     #[serde(default)]
@@ -88,17 +91,20 @@ pub struct NodeRequest {
 }
 
 #[derive(Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub struct BatchNodeRequest {
     pub nodes: Vec<NodeRequest>,
 }
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub struct BatchNodeAdded {
     pub index: usize,
     pub tag: String,
 }
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub struct BatchNodeFailure {
     pub index: usize,
     pub tag: String,
@@ -106,23 +112,27 @@ pub struct BatchNodeFailure {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub struct BatchNodeResult {
     pub added: Vec<BatchNodeAdded>,
     pub failed: Vec<BatchNodeFailure>,
 }
 
 #[derive(Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub struct DeleteNodeRequest {
     pub tag: String,
 }
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub struct NodeInfo {
     pub tag: String,
     pub server: String,
     pub server_port: u16,
     pub node_type: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
     pub sni: Option<String>,
 }
 

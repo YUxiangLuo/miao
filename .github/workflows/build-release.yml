@@ -145,12 +145,9 @@ jobs:
       - name: Build desktop shell
         run: cargo build -p miao-desktop --locked --release
 
-      - name: Install Tauri CLI
-        run: npm install -g @tauri-apps/cli@2.11.4
-
       - name: Bundle NSIS installer
         working-directory: desktop/src-tauri
-        run: npx --yes @tauri-apps/cli@2.11.4 build --bundles nsis --ci
+        run: bunx @tauri-apps/cli@2.11.4 build --bundles nsis --ci
 
       - name: Collect NSIS installer
         shell: bash

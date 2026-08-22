@@ -28,6 +28,10 @@ fn base_outbound(typ: &str, req: &NodeRequest) -> Map<String, JsonValue> {
     obj
 }
 
+fn request_password(req: &NodeRequest) -> &str {
+    req.password.as_deref().unwrap_or_default().trim()
+}
+
 fn build_tls(req: &NodeRequest, default_enabled: bool, force_enabled: bool) -> Option<JsonValue> {
     let enabled = force_enabled
         || req.tls_enabled.unwrap_or(default_enabled)
@@ -38,7 +42,10 @@ fn build_tls(req: &NodeRequest, default_enabled: bool, force_enabled: bool) -> O
 
     let mut tls = Map::new();
     tls.insert("enabled".to_string(), json!(true));
-    tls.insert("insecure".to_string(), json!(req.skip_cert_verify));
+    tls.insert(
+        "insecure".to_string(),
+        json!(req.skip_cert_verify.unwrap_or(false)),
+    );
     insert_optional_string(&mut tls, "server_name", non_empty(&req.sni));
 
     if let Some(alpn) = req.alpn.as_ref().map(|values| {
@@ -117,7 +124,7 @@ fn build_node_value(req: &NodeRequest, node_type: &str) -> JsonValue {
     match node_type {
         "anytls" => {
             let mut obj = base_outbound("anytls", req);
-            obj.insert("password".to_string(), json!(req.password.trim()));
+            obj.insert("password".to_string(), json!(request_password(req)));
             obj.insert(
                 "tls".to_string(),
                 build_tls(req, true, true).expect("AnyTLS TLS is always enabled"),
@@ -130,7 +137,7 @@ fn build_node_value(req: &NodeRequest, node_type: &str) -> JsonValue {
                 "method".to_string(),
                 json!(non_empty(&req.cipher).unwrap_or("2022-blake3-aes-128-gcm")),
             );
-            obj.insert("password".to_string(), json!(req.password.trim()));
+            obj.insert("password".to_string(), json!(request_password(req)));
             JsonValue::Object(obj)
         }
         "vmess" => {
@@ -171,7 +178,7 @@ fn build_node_value(req: &NodeRequest, node_type: &str) -> JsonValue {
         }
         "trojan" => {
             let mut obj = base_outbound("trojan", req);
-            obj.insert("password".to_string(), json!(req.password.trim()));
+            obj.insert("password".to_string(), json!(request_password(req)));
             if let Some(tls) = build_tls(req, true, true) {
                 obj.insert("tls".to_string(), tls);
             }
@@ -186,7 +193,7 @@ fn build_node_value(req: &NodeRequest, node_type: &str) -> JsonValue {
                 "uuid".to_string(),
                 json!(non_empty(&req.uuid).unwrap_or_default()),
             );
-            obj.insert("password".to_string(), json!(req.password.trim()));
+            obj.insert("password".to_string(), json!(request_password(req)));
             obj.insert(
                 "congestion_control".to_string(),
                 json!(non_empty(&req.tuic_congestion_control).unwrap_or("cubic")),
@@ -195,7 +202,7 @@ fn build_node_value(req: &NodeRequest, node_type: &str) -> JsonValue {
                 "udp_relay_mode".to_string(),
                 json!(non_empty(&req.tuic_udp_relay_mode).unwrap_or("native")),
             );
-            if req.tuic_zero_rtt {
+            if req.tuic_zero_rtt.unwrap_or(false) {
                 obj.insert("zero_rtt_handshake".to_string(), json!(true));
             }
             obj.insert(
@@ -206,7 +213,7 @@ fn build_node_value(req: &NodeRequest, node_type: &str) -> JsonValue {
         }
         _ => {
             let mut obj = base_outbound("hysteria2", req);
-            obj.insert("password".to_string(), json!(req.password.trim()));
+            obj.insert("password".to_string(), json!(request_password(req)));
             obj.insert(
                 "tls".to_string(),
                 build_tls(req, true, true).expect("Hysteria2 TLS is always enabled"),
@@ -477,7 +484,7 @@ mod tests {
             server: "tuic.example.com".to_string(),
             server_port: 443,
             uuid: Some("123e4567-e89b-12d3-a456-426614174000".to_string()),
-            password: "password123".to_string(),
+            password: Some("password123".to_string()),
             ..NodeRequest::default()
         };
 

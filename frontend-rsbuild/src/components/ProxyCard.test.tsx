@@ -16,6 +16,7 @@ function statusMock(node_select: StatusData['node_select']): StatusData {
     route_mode: 'rule',
     vps_supported: true,
     platform: 'linux',
+    warnings: [],
     mcp: false,
   }
 }

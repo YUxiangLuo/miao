@@ -33,14 +33,15 @@ embedded/             sing-box + srs，不入库
 
 ## 前端栈与跨层约定
 
-- **TypeScript 钉 7.0.2**：迁移 Rsbuild 后 lint 由 rslint 承担，不再受 typescript-eslint 不支持 TS 7 的限制（旧 Vite 版钉 6.0.3 的原因已消除）。升级前仍先跑 `lint + typecheck + test` 三件套验证。
-- **前后端类型对齐**：`frontend-rsbuild/src/types/api.ts` 与 `crates/miao-core/src/models/*.rs` 的 serde 结构体一一对应——`skip_serializing_if` → `?:`，裸 `Option<T>` → `| null`。**改 Rust models 必须同步 api.ts**；`types/clash.ts` 无后端 schema（Clash API 反代），按前端实际消费面维护。
+- **TypeScript 钉 7.0.2**：lint 由 rslint 承担。升级前先跑 `lint + typecheck + test` 三件套验证。
+- **前后端类型单一来源**：`crates/miao-core/src/models/*.rs` 的 serde 结构体是 canonical schema，`frontend-rsbuild/src/types/api.ts` 由 ts-rs 生成，**禁止手改**。改 API models 后运行 `./scripts/generate-api-types.sh`；普通 Rust 测试会对比生成结果，文件过期直接失败。`types/clash.ts` 无 Miao 后端 schema（Clash API 反代），按前端实际消费面维护。
 
 ## 日常命令
 
 ```bash
 # 前端
 bun run --cwd frontend-rsbuild dev / test / lint / typecheck
+./scripts/generate-api-types.sh  # 修改 Rust API models 后更新 TS binding
 
 # 默认成员门禁（与 CI 一致）
 cargo test --locked --all-targets
@@ -98,7 +99,7 @@ Windows 构建里故意拿掉的能力（管理员进程里不该有；Linux CLI
 
 ## 在 Windows 真机上构建
 
-工具链：Rust（msvc）+ VS 2022 C++、Go（`%LOCALAPPDATA%\Programs\go`）、Bun、Node（npm 全局 `@tauri-apps/cli`）。PowerShell 拦 `.ps1`，一律用 `.cmd` 形态。
+工具链：Rust（msvc）+ VS 2022 C++、Go（`%LOCALAPPDATA%\Programs\go`）、Bun。Tauri CLI 用固定版本 `bunx` 临时执行，不做 npm 全局安装。
 
 ```powershell
 bun run --cwd frontend-rsbuild build  # 改了前端才跑
@@ -106,7 +107,7 @@ bun run --cwd frontend-rsbuild build  # 改了前端才跑
 MIAO_TARGET=windows-amd64 ./scripts/build-embedded.sh
 cargo build -p miao-desktop --locked --release
 # desktop/src-tauri 下：
-tauri.cmd build --bundles nsis --ci
+bunx @tauri-apps/cli@2.11.4 build --bundles nsis --ci
 ```
 
 - **重编前先从托盘退出 miao**：运行中的 exe 被锁定，链接报 `os error 5`

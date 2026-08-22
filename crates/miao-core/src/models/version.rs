@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub struct VersionInfo {
     pub current: String,
     pub latest: Option<String>,

@@ -1,4 +1,4 @@
-use crate::models::RuntimeWarning;
+use crate::models::{RuntimeWarning, RuntimeWarningSeverity};
 use crate::state::AppState;
 
 /// Build one diagnostic snapshot for REST and MCP. Keeping the compatibility
@@ -10,7 +10,7 @@ pub async fn runtime_warnings(state: &AppState) -> Vec<RuntimeWarning> {
         warnings.push(RuntimeWarning {
             code: "runtime_config",
             message,
-            severity: "warning",
+            severity: RuntimeWarningSeverity::Warning,
         });
     }
 
@@ -27,7 +27,7 @@ pub async fn runtime_warnings(state: &AppState) -> Vec<RuntimeWarning> {
                     .collect::<Vec<_>>()
                     .join(";")
             ),
-            severity: "warning",
+            severity: RuntimeWarningSeverity::Warning,
         });
     }
     warnings

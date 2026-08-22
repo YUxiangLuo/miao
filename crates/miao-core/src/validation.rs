@@ -8,7 +8,7 @@ pub(crate) static UUID_REGEX: LazyLock<Regex> = LazyLock::new(|| {
         .unwrap()
 });
 
-static VALID_NODE_TYPES: &[&str] = &[
+pub(crate) static VALID_NODE_TYPES: &[&str] = &[
     "hysteria2",
     "anytls",
     "ss",
@@ -84,7 +84,7 @@ impl Validator {
         Self::node_type(node_type)?;
 
         if matches!(node_type, "hysteria2" | "anytls" | "ss" | "trojan" | "tuic") {
-            Self::password(&req.password)?;
+            Self::password(req.password.as_deref().unwrap_or_default())?;
         }
         if matches!(node_type, "vmess" | "vless" | "tuic") {
             let uuid = non_empty(&req.uuid).ok_or("UUID 不能为空")?;
@@ -740,7 +740,7 @@ mod tests {
             tag: "hy2".to_string(),
             server: "example.com".to_string(),
             server_port: 443,
-            password: "password123".to_string(),
+            password: Some("password123".to_string()),
             obfs_type: Some("salamander".to_string()),
             obfs_password: Some("obfs-secret".to_string()),
             ..NodeRequest::default()
@@ -759,7 +759,7 @@ mod tests {
             tag: "anytls".to_string(),
             server: "example.com".to_string(),
             server_port: 443,
-            password: "password123".to_string(),
+            password: Some("password123".to_string()),
             obfs_type: Some("salamander".to_string()),
             obfs_password: Some("obfs-secret".to_string()),
             ..NodeRequest::default()
@@ -826,7 +826,7 @@ mod tests {
             tag: "tuic".to_string(),
             server: "example.com".to_string(),
             server_port: 443,
-            password: "password123".to_string(),
+            password: Some("password123".to_string()),
             uuid: Some("123e4567-e89b-12d3-a456-426614174000".to_string()),
             tuic_congestion_control: Some("bbr".to_string()),
             tuic_udp_relay_mode: Some("quic".to_string()),

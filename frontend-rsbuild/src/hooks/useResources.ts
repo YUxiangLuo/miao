@@ -12,6 +12,7 @@ const INITIAL_STATUS: StatusData = {
   node_select: 'manual',
   vps_supported: true,
   platform: 'linux',
+  warnings: [],
   mcp: false,
 }
 

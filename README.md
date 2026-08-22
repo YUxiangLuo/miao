@@ -22,7 +22,7 @@ wget https://github.com/YUxiangLuo/miao/releases/latest/download/miao-rust-linux
 chmod +x miao && sudo ./miao
 ```
 
-面板在 <http://localhost:6161>，需要 root（TUN 所需）。常驻为 systemd：`sudo bash install.sh ./miao`；干净卸载：`sudo bash remove.sh`。
+面板在 <http://localhost:6161>，需要 root（TUN 所需）。常驻为 systemd：`sudo bash install.sh ./miao`；在线重复执行安装脚本会先校验 SHA256，再短暂停服原子升级，启动失败自动回滚。干净卸载：`sudo bash remove.sh`。
 
 GitHub 不可达？用镜像站：<https://miao.vesein.dev/dl/>
 

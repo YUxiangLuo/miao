@@ -106,7 +106,7 @@ mod tests {
     async fn serve_index_links_the_web_app_manifest() {
         let (_, axum::response::Html(html)) = serve_index().await;
 
-        // vite 构建会把 href 改写为 ./manifest.webmanifest，只断言关键片段
+        // 构建工具可能规范化 manifest URL，只断言关键片段
         assert!(html.contains(r#"rel="manifest""#));
         assert!(html.contains("manifest.webmanifest"));
         assert!(html.contains(r#"name="theme-color""#));

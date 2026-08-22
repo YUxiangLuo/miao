@@ -1,6 +1,7 @@
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "lowercase")]
 pub enum RouteMode {
     #[default]
@@ -29,6 +30,13 @@ impl<'de> Deserialize<'de> for RouteMode {
 /// `config.yaml` 里的同名字段只是 volatile 缺失时的启动默认值。
 /// `manual`：selector 全量节点；`fastest_*`：按地区筛进 urltest。
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(
+    test,
+    ts(
+        type = "\"manual\" | \"fastest_hk\" | \"fastest_jp\" | \"fastest_tw\" | \"fastest_sg\" | \"fastest_us\""
+    )
+)]
 pub enum NodeSelect {
     #[default]
     Manual,
@@ -36,6 +44,7 @@ pub enum NodeSelect {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub enum Region {
     Hk,
     Jp,

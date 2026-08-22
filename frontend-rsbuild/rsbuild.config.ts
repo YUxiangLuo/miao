@@ -1,7 +1,7 @@
 import { defineConfig } from '@rsbuild/core';
 import { pluginReact } from '@rsbuild/plugin-react';
 
-// 与现有 frontend/vite.config.ts 保持相同的本地后端入口。
+// 本地开发时将控制面 API 代理到正在运行的 miao 后端。
 // 后端端口有调整时：MIAO_API=http://localhost:7000 bun run dev
 const miaoApiTarget = process.env.MIAO_API ?? 'http://localhost:6161';
 

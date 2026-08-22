@@ -18,6 +18,7 @@ export function statusMock(overrides: Partial<StatusData> = {}): StatusData {
     platform: 'linux',
     mcp: false,
     ...overrides,
+    warnings: overrides.warnings ?? [],
   }
 }
 

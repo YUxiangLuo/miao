@@ -5,7 +5,7 @@ import { SubsCard } from './SubsCard'
 import type { SubStatus } from '../types/api'
 
 const subs: SubStatus[] = [
-  { url: 'https://example.com/subscription-token-abcdef', success: true, node_count: 42 },
+  { url: 'https://example.com/subscription-token-abcdef', success: true, node_count: 42, state: 'ready' },
 ]
 
 function renderCard(overrides = {}) {

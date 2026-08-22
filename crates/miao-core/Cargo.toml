@@ -43,3 +43,4 @@ windows-sys = { version = "0.59", features = [
 
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }
+ts-rs = { version = "12.0.1", features = ["no-serde-warnings"] }

@@ -1,16 +1,12 @@
-# miao Rsbuild frontend
+# Miao Web 控制面板
 
-这是与现有 `frontend/` 并行的新前端工程，用于逐步迁移到 Rsbuild 和 TypeScript 7。
-
-当前阶段不会替换正式构建入口：根目录的 `build.sh` 与
-`scripts/build-frontend.sh` 仍然构建旧前端。完成页面迁移、单文件产物适配和回归测试后，
-再统一切换生产构建。
+这是 Miao 唯一的正式前端工程。生产构建由 Rsbuild 输出到仓库根目录 `public/`，随后通过 Rust 的 `include_str!` / `include_bytes!` 嵌入 `miao-core`，因此最终仍保持单二进制分发。
 
 ## 技术栈
 
 - Rsbuild 2
 - React 19
-- TypeScript 7
+- TypeScript 7（strict）
 - Rstest
 - Rslint
 
@@ -21,14 +17,23 @@ bun install
 bun run dev
 ```
 
-开发服务器默认把 `/api`（包括 WebSocket）代理到 `http://localhost:6161`。
-后端使用其他端口时：
+开发服务器默认把 `/api`（包括 WebSocket）代理到 `http://localhost:6161`。后端使用其他端口时：
 
 ```bash
 MIAO_API=http://localhost:7000 bun run dev
 ```
 
-## 校验
+## API 类型
+
+`src/types/api.ts` 由 Rust serde 模型生成，禁止手工编辑。修改 `crates/miao-core/src/models/*.rs` 后在仓库根目录运行：
+
+```bash
+./scripts/generate-api-types.sh
+```
+
+Rust 测试会校验生成文件是否最新。`src/types/clash.ts` 描述的是被反代的 Clash API，不属于 Miao Rust schema，仍按前端实际消费面维护。
+
+## 校验与生产构建
 
 ```bash
 bun run typecheck
@@ -36,3 +41,5 @@ bun run lint
 bun run test
 bun run build
 ```
+
+也可以从仓库根目录运行 `./scripts/build-frontend.sh`，它会以冻结的 Bun lockfile 安装依赖并将生产产物写入 `public/`。

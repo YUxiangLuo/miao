@@ -6,6 +6,7 @@ use crate::models::config::{NodeSelect, RouteMode};
 /// compatibility field; this phase and `ready` describe whether the data plane
 /// can actually be used and what work is currently happening.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "snake_case")]
 #[repr(u8)]
 pub enum RuntimePhase {
@@ -44,10 +45,12 @@ impl RuntimePhase {
 }
 
 #[derive(Serialize)]
-pub struct ApiResponse<T: Serialize> {
+#[cfg_attr(test, derive(ts_rs::TS))]
+pub struct ApiResponse<T> {
     pub success: bool,
     pub message: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
     pub data: Option<T>,
 }
 
@@ -78,6 +81,7 @@ impl<T: Serialize> ApiResponse<T> {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub struct StatusData {
     pub running: bool,
     /// True only after the managed sing-box instance passed its startup
@@ -88,10 +92,13 @@ pub struct StatusData {
     pub route_mode: RouteMode,
     pub node_select: NodeSelect,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
     pub pid: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
     pub uptime_secs: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
     pub warning: Option<String>,
     /// Structured diagnostics for new clients. `warning` remains above as a
     /// compatibility projection for existing panel/API consumers.
@@ -102,14 +109,26 @@ pub struct StatusData {
     pub mcp: bool,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[serde(rename_all = "lowercase")]
+#[allow(dead_code)] // Error/Info are part of the stable API contract for future diagnostics.
+pub enum RuntimeWarningSeverity {
+    Warning,
+    Error,
+    Info,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub struct RuntimeWarning {
     pub code: &'static str,
     pub message: String,
-    pub severity: &'static str,
+    pub severity: RuntimeWarningSeverity,
 }
 
 #[derive(Serialize, Clone)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub struct ConnectivityResult {
     pub name: String,
     pub url: String,
@@ -118,14 +137,17 @@ pub struct ConnectivityResult {
 }
 
 #[derive(Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub struct SubRequest {
     pub url: String,
 }
 
 /// clash-verge-rev 导入：单条订阅 + 是否已在 miao 配置中。
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub struct VergeImportItem {
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
     pub name: Option<String>,
     pub url: String,
     pub already_added: bool,
@@ -133,6 +155,7 @@ pub struct VergeImportItem {
 
 /// clash-verge-rev 导入扫描结果；found=false 时 items 为空。
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub struct VergeImportResult {
     pub found: bool,
     pub items: Vec<VergeImportItem>,
@@ -140,17 +163,20 @@ pub struct VergeImportResult {
 
 /// 批量添加订阅：一次配置事务提交全部，跳过已存在的。
 #[derive(Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub struct SubBatchRequest {
     pub urls: Vec<String>,
 }
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub struct SubBatchResult {
     pub added: usize,
     pub skipped: usize,
 }
 
 #[derive(Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub struct RuleRequest {
     pub field: String,
     pub value: String,
@@ -158,18 +184,21 @@ pub struct RuleRequest {
 }
 
 #[derive(Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub struct DeleteRuleRequest {
     pub index: usize,
     pub raw: String,
 }
 
 #[derive(Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub struct McpRequest {
     pub enabled: bool,
 }
 
 #[cfg(not(windows))]
 #[derive(Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub struct VpsDeployRequest {
     pub ip: String,
     pub password: String,
@@ -177,19 +206,24 @@ pub struct VpsDeployRequest {
 
 #[cfg(not(windows))]
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub struct VpsDeployResponse {
     pub tag: String,
 }
 
 /// 自定义规则展示项;手写的任意 JSON 规则可能不是结构化单条件,以 raw 兜底
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub struct RuleInfo {
     pub index: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
     pub field: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
     pub value: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
     pub target: Option<String>,
     /// 出口节点不存在,生成配置时被跳过(未生效)
     pub skipped: bool,
@@ -197,26 +231,32 @@ pub struct RuleInfo {
 }
 
 #[derive(Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub struct RouteModeRequest {
     pub route_mode: RouteMode,
 }
 
 #[derive(Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub struct NodeSelectRequest {
+    #[cfg_attr(test, ts(type = "NodeSelect"))]
     pub node_select: String,
 }
 
 #[derive(Clone, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub struct SubStatus {
     pub url: String,
     pub success: bool,
     pub node_count: usize,
     pub state: SubscriptionState,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
     pub error: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "snake_case")]
 pub enum SubscriptionState {
     #[default]
