@@ -4,7 +4,7 @@
   "description": "开箱即用的透明代理",
   "start_url": "/",
   "scope": "/",
-  "display": "standalone",
+  "display": "fullscreen",
   "background_color": "#1a1d22",
   "theme_color": "#1a1d22",
   "icons": [

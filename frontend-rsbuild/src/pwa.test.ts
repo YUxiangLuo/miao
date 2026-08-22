@@ -20,7 +20,8 @@ describe('PWA 资源', () => {
     const manifest = JSON.parse(readFileSync(join(publicDir, 'manifest.webmanifest'), 'utf8'))
 
     expect(manifest.name).toBeTruthy()
-    expect(manifest.display).toBe('standalone')
+    // 安装后默认进入沉浸式全屏；不支持 fullscreen 的平台按规范回退。
+    expect(manifest.display).toBe('fullscreen')
     expect(manifest.start_url).toBe('/')
 
     const icons = (manifest.icons as Array<{ src: string }>).map((icon) => icon.src)

@@ -128,7 +128,7 @@ mod tests {
         assert_eq!(headers[1].0, axum::http::header::CACHE_CONTROL);
 
         let manifest: serde_json::Value = serde_json::from_str(body).unwrap();
-        assert_eq!(manifest["display"], "standalone");
+        assert_eq!(manifest["display"], "fullscreen");
         assert_eq!(manifest["start_url"], "/");
         // Chrome 可安装门槛：192 与 512 PNG 图标
         let sizes: Vec<&str> = manifest["icons"]
