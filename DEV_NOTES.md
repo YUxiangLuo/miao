@@ -178,7 +178,7 @@ TUN JSON：`auto_route` + `strict_route`，`interface_name` 仍是 `sing-tun`。
 
 ## MCP 端点
 
-`POST /mcp`：MCP 无状态 JSON-RPC，配置 `mcp: true` 开启（默认关，关闭时 404）。工具面与面板同构的平铺节点模型，selector 永不暴露；`switch_node` 走 Clash PUT + `save_last_proxy`（与面板同路径）。测试只覆盖纯分发、参数校验、无网络读路径。
+`POST /mcp`：MCP 无状态 JSON-RPC，配置 `mcp: true` 开启（默认关，关闭时 404）。工具覆盖面板的状态、版本、订阅、手动节点、规则、连接、模式、MCP 开关、VPS 与升级能力；浏览器本地主题/PWA 不属于服务端工具。写操作必须复用现有 handler/service，禁止复制配置事务。节点模型保持平铺，selector 永不暴露；`switch_node` 走 Clash PUT + `save_last_proxy`（与面板同路径）。破坏性工具必须带 `destructiveHint`、明确后果，并在执行前校验 `confirm: true`。测试优先覆盖目录/文案契约、纯分发、参数校验、确认闸和无网络读路径；不要在单测中实际升级、SSH、拉订阅或启动 TUN。
 
 ## CI
 

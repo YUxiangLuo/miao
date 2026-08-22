@@ -36,8 +36,17 @@ OpenWrt 的易变层写 tmpfs：切节点/切模式这类高频操作零闪存�
 
 配置里加一行 `mcp: true`（默认关闭），端点是 `POST http://<面板地址>/mcp`（MCP 2026-07-28，无状态 JSON-RPC，无握手无会话）。面板右下角的浮动控件可以一键开关并复制地址。
 
-内置工具：`get_status`（服务状态）、`list_nodes`（平铺节点池）、`switch_node`（切节点，持久化）、`set_node_select`（手动⇄地区最快）、`test_delay`（测速）、`set_route_mode`（分流⇄全局）、`refresh_subscriptions`（刷新订阅）、`list_rules`、`list_connections`。
+MCP 尽量与面板能力同构，工具按用途分为：
 
-连接时服务端通过 `instructions` 告知调用者：「你的流量很可能正经过本代理，破坏性操作会自断其网」——agent 在执行热重启类操作前会先找你确认。
+- 状态与诊断：`get_status`、`get_version_info`、`test_connectivity`、`get_traffic`（实时速率快照）、`list_connections`（支持分页）
+- 服务与路由：`start_service`、`stop_service`、`set_route_mode`、`set_node_select`、`switch_node`、`test_delay`
+- 订阅：`list_subscriptions`、`add_subscriptions`、`delete_subscription`、`refresh_subscriptions`、`scan_clash_verge`
+- 节点：`list_nodes`（订阅 + 手动平铺池）、`list_manual_nodes`、`add_node`、`import_nodes`、`delete_node`
+- 规则：`list_rules`、`add_rule`、`delete_rule`
+- 管理：`set_mcp_enabled`、`deploy_vps`、`upgrade_miao`（平台不支持时返回明确错误）
+
+主题切换、弹窗和 PWA 安装属于浏览器本地 UI 状态，没有服务端语义，因此不暴露为 MCP 工具。分享链接解析也保留在浏览器端；MCP 调用者可自行解析后交给结构化的 `add_node` / `import_nodes`。节点/订阅/规则写操作复用面板 HTTP handler，不另造一套配置逻辑。
+
+连接时服务端通过 `instructions` 告知调用者：流量很可能正经过本代理，配置热应用可能影响连接；订阅 URL、连接记录和 VPS 密码属于敏感信息。停止服务、删除配置、部署 VPS、关闭 MCP、升级 Miao 等破坏性工具既在描述和 `annotations` 中标记，也要求 `confirm: true`；agent 必须先取得用户明确确认，不能自行确认。
 
 > **安全提示**：Linux 下面板绑 `0.0.0.0` 且无鉴权，开启 MCP 后局域网内任何设备都能调用这些工具（包括切节点/切模式），请自行评估网络环境。Windows 版只听 `127.0.0.1`，无此问题。

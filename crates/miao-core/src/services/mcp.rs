@@ -3,6 +3,10 @@
 //! 节点模型与面板一致：全部订阅 + 手动节点构成一个平铺节点池，没有分组概念；
 //! 运行时的 sing-box selector（tag "proxy"）只是实现细节，不向 MCP 暴露。
 
+mod catalog;
+mod panel;
+
+use catalog::tools_catalog;
 use std::collections::HashSet;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -15,7 +19,7 @@ use crate::error::AppResult;
 use crate::models::{LastProxy, NodeSelect, RouteMode};
 use crate::services::{
     config::{RuntimeUpdate, REGION_FALLBACK},
-    singbox::{is_sing_box_running, kernel_status, CLASH_API_BASE},
+    singbox::{is_sing_box_running, kernel_status, CLASH_API_BASE, CLASH_TRAFFIC_WS},
     status::{legacy_warning, runtime_warnings},
 };
 use crate::state::AppState;
@@ -81,7 +85,7 @@ fn discover_result() -> JsonValue {
         "serverInfo": { "name": "miao", "version": VERSION },
         // 给调用者的使用说明：客户端连接时读取。核心目的——防「自伤」：
         // agent 的出网流量很可能正经过本代理，破坏性操作会断它自己的网
-        "instructions": "miao 是本机/路由器的透明代理控制面。你（调用者）的出网流量很可能正经过它：停止内核或更新运行配置可能造成短暂网络中断、重置连接——包括你自己的连接。执行此类操作前请先向用户说明并确认。切换节点是毫秒级操作，但已建立的连接也会重置。",
+        "instructions": "Miao 是本机/路由器的透明代理控制面，你的出网流量很可能正经过它。读取状态、列表和版本没有配置副作用；切换当前节点不重启内核，通常只影响新连接。修改订阅/节点/规则/模式会校验并热应用配置，可能短暂影响连接。停止服务、删除配置、部署 VPS、关闭 MCP 或升级 Miao 属于破坏性操作：执行前必须向用户说明具体影响并取得明确确认，绝不能自行把 confirm 设为 true。订阅 URL、连接记录和 VPS 密码属于敏感信息，不要在回答中无必要地复述。",
     })
 }
 
@@ -115,82 +119,6 @@ fn tool_error_result(message: &str) -> JsonValue {
     })
 }
 
-fn tools_catalog() -> JsonValue {
-    json!([
-        {
-            "name": "get_status",
-            "description": "服务状态：内核进程、数据面是否就绪、启动/重载阶段、路由模式、当前节点、运行时长与告警",
-            "inputSchema": { "type": "object", "properties": {} },
-        },
-        {
-            "name": "list_nodes",
-            "description": "平铺节点池：全部订阅节点与手动节点（name/type/source/is_current）。无分组概念",
-            "inputSchema": { "type": "object", "properties": {} },
-        },
-        {
-            "name": "switch_node",
-            "description": "切换当前节点；选择会持久化并自动恢复（OpenWrt 系统重启后回到默认选择）。毫秒级完成，但已建立的连接会重置",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "name": { "type": "string", "description": "节点名（来自 list_nodes）" },
-                },
-                "required": ["name"],
-            },
-        },
-        {
-            "name": "set_node_select",
-            "description": "节点选择策略：manual=手动选择（配合 switch_node 指定具体节点），fastest_hk/jp/tw/sg/us=内核自动选该地区延迟最低节点。纯本地语义变更（快照重建，不拉订阅）；Unix 原进程热重载，Windows 重启内核，已有连接可能重置",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "select": {
-                        "type": "string",
-                        "enum": ["manual", "fastest_hk", "fastest_jp", "fastest_tw", "fastest_sg", "fastest_us"],
-                    },
-                },
-                "required": ["select"],
-            },
-        },
-        {
-            "name": "test_delay",
-            "description": "测节点延迟（毫秒）。不传 name 则测全部节点",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "name": { "type": "string", "description": "节点名；缺省测全部" },
-                },
-            },
-        },
-        {
-            "name": "set_route_mode",
-            "description": "切换路由模式：rule=规则分流（国内直连/国外代理），global=全局代理。写入易变层配置，OpenWrt/Linux 系统重启后回到 config.yaml 的启动默认值。Unix 原进程热重载，Windows 重启内核；已有连接（可能包括你自己的）可能重置，操作前请先向用户确认",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "mode": { "type": "string", "enum": ["rule", "global"] },
-                },
-                "required": ["mode"],
-            },
-        },
-        {
-            "name": "refresh_subscriptions",
-            "description": "真拉取全部订阅刷新节点池。生成结果有变化才更新运行配置（Unix 原进程热重载，Windows 重启内核，已有连接可能重置）；全部订阅失败时保留当前运行配置并告警",
-            "inputSchema": { "type": "object", "properties": {} },
-        },
-        {
-            "name": "list_rules",
-            "description": "自定义规则列表：域名/IP/端口/进程等条件到直连/代理/拦截/指定节点的映射",
-            "inputSchema": { "type": "object", "properties": {} },
-        },
-        {
-            "name": "list_connections",
-            "description": "当前活动连接：按站点投影出 host、出口、命中规则与流量",
-            "inputSchema": { "type": "object", "properties": {} },
-        },
-    ])
-}
-
 async fn handle_tool_call(
     state: &Arc<AppState>,
     params: Option<&JsonValue>,
@@ -207,14 +135,32 @@ async fn handle_tool_call(
 
     match name {
         "get_status" => tool_get_status(state).await,
+        "get_version_info" => panel::get_version_info(state).await,
+        "start_service" => panel::start_service(state, &args).await,
+        "stop_service" => panel::stop_service(state, &args).await,
+        "list_subscriptions" => panel::list_subscriptions(state).await,
+        "add_subscriptions" => panel::add_subscriptions(state, &args).await,
+        "delete_subscription" => panel::delete_subscription(state, &args).await,
+        "refresh_subscriptions" => tool_refresh_subscriptions(state).await,
+        "scan_clash_verge" => panel::scan_clash_verge(state).await,
         "list_nodes" => tool_list_nodes(state).await,
+        "list_manual_nodes" => panel::list_manual_nodes(state).await,
+        "add_node" => panel::add_node(state, &args).await,
+        "import_nodes" => panel::import_nodes(state, &args).await,
+        "delete_node" => panel::delete_node(state, &args).await,
         "switch_node" => tool_switch_node(state, &args).await,
         "set_node_select" => tool_set_node_select(state, &args).await,
         "test_delay" => tool_test_delay(state, &args).await,
         "set_route_mode" => tool_set_route_mode(state, &args).await,
-        "refresh_subscriptions" => tool_refresh_subscriptions(state).await,
         "list_rules" => tool_list_rules(state).await,
-        "list_connections" => tool_list_connections(state).await,
+        "add_rule" => panel::add_rule(state, &args).await,
+        "delete_rule" => panel::delete_rule(state, &args).await,
+        "get_traffic" => tool_get_traffic(state).await,
+        "list_connections" => tool_list_connections(state, &args).await,
+        "test_connectivity" => panel::test_connectivity(state, &args).await,
+        "set_mcp_enabled" => panel::set_mcp_enabled(state, &args).await,
+        "deploy_vps" => panel::deploy_vps(state, &args).await,
+        "upgrade_miao" => panel::upgrade_miao(state, &args).await,
         other => Err(format!("Unknown tool: {other}")),
     }
 }
@@ -316,6 +262,10 @@ async fn tool_get_status(state: &Arc<AppState>) -> Result<JsonValue, String> {
         "initializing": state.initializing.load(Ordering::Relaxed),
         "route_mode": route_mode,
         "node_select": config.node_select,
+        "platform": if cfg!(windows) { "windows" } else { "linux" },
+        "vps_supported": crate::platform::vps_supported(),
+        "upgrade_supported": crate::platform::upgrade_supported(),
+        "mcp": config.mcp,
         "current_node": current_node,
         "node_count": node_count,
         "uptime_secs": uptime_secs,
@@ -640,7 +590,76 @@ async fn tool_list_rules(state: &Arc<AppState>) -> Result<JsonValue, String> {
     Ok(json!({ "rules": serde_json::to_value(rules).unwrap_or_default() }))
 }
 
-async fn tool_list_connections(state: &Arc<AppState>) -> Result<JsonValue, String> {
+fn pagination_value(
+    args: &JsonValue,
+    key: &str,
+    default: usize,
+    min: usize,
+    max: Option<usize>,
+) -> Result<usize, String> {
+    let Some(value) = args.get(key) else {
+        return Ok(default);
+    };
+    let raw = value
+        .as_u64()
+        .ok_or_else(|| format!("Invalid params: `{key}` 必须是非负整数"))?;
+    let value =
+        usize::try_from(raw).map_err(|_| format!("Invalid params: `{key}` 超出支持范围"))?;
+    if value < min || max.is_some_and(|max| value > max) {
+        return Err(match max {
+            Some(max) => format!("Invalid params: `{key}` 必须在 {min}..={max} 范围内"),
+            None => format!("Invalid params: `{key}` 不能小于 {min}"),
+        });
+    }
+    Ok(value)
+}
+
+async fn tool_get_traffic(state: &Arc<AppState>) -> Result<JsonValue, String> {
+    if !runtime_is_ready(state).await {
+        return Err("代理数据面尚未就绪，无法读取实时流量".to_string());
+    }
+
+    let message = tokio::time::timeout(Duration::from_secs(3), async {
+        let (mut socket, _) = tokio_tungstenite::connect_async(CLASH_TRAFFIC_WS)
+            .await
+            .map_err(|err| format!("连接 Clash 流量接口失败: {err}"))?;
+        socket
+            .next()
+            .await
+            .ok_or_else(|| "Clash 流量接口未返回数据".to_string())?
+            .map_err(|err| format!("读取 Clash 流量失败: {err}"))
+    })
+    .await
+    .map_err(|_| "读取实时流量超时".to_string())??;
+
+    let payload: JsonValue = match message {
+        tokio_tungstenite::tungstenite::Message::Text(text) => {
+            serde_json::from_str(&text).map_err(|err| format!("流量数据格式无效: {err}"))?
+        }
+        tokio_tungstenite::tungstenite::Message::Binary(bytes) => {
+            serde_json::from_slice(&bytes).map_err(|err| format!("流量数据格式无效: {err}"))?
+        }
+        _ => return Err("Clash 流量接口返回了非数据帧".to_string()),
+    };
+    let up = payload
+        .get("up")
+        .and_then(JsonValue::as_u64)
+        .ok_or_else(|| "流量数据缺少 `up`".to_string())?;
+    let down = payload
+        .get("down")
+        .and_then(JsonValue::as_u64)
+        .ok_or_else(|| "流量数据缺少 `down`".to_string())?;
+    Ok(json!({
+        "up": up,
+        "down": down,
+        "unit": "bytes_per_second",
+    }))
+}
+
+async fn tool_list_connections(
+    state: &Arc<AppState>,
+    args: &JsonValue,
+) -> Result<JsonValue, String> {
     if !runtime_is_ready(state).await {
         return Err("代理数据面尚未就绪，无可用活动连接".to_string());
     }
@@ -655,9 +674,13 @@ async fn tool_list_connections(state: &Arc<AppState>) -> Result<JsonValue, Strin
         .cloned()
         .unwrap_or_default();
 
+    let offset = pagination_value(args, "offset", 0, 0, None)?;
+    let limit = pagination_value(args, "limit", 100, 1, Some(500))?;
+    let total_count = connections.len();
     let projected: Vec<JsonValue> = connections
         .iter()
-        .take(100)
+        .skip(offset)
+        .take(limit)
         .map(|connection| {
             let metadata = connection.get("metadata").cloned().unwrap_or(json!({}));
             let host = metadata
@@ -700,9 +723,16 @@ async fn tool_list_connections(state: &Arc<AppState>) -> Result<JsonValue, Strin
     Ok(json!({
         "download_total": payload.get("downloadTotal").cloned().unwrap_or(json!(0)),
         "upload_total": payload.get("uploadTotal").cloned().unwrap_or(json!(0)),
+        "total_count": total_count,
+        "offset": offset,
+        "limit": limit,
         "count": projected.len(),
         "connections": projected,
-        "note": if connections.len() > 100 { "仅返回前 100 条" } else { "" },
+        "next_offset": if offset.saturating_add(limit) < total_count {
+            json!(offset.saturating_add(limit))
+        } else {
+            JsonValue::Null
+        },
     }))
 }
 
@@ -785,16 +815,16 @@ mod tests {
             assert_eq!(result["protocolVersion"], MCP_PROTOCOL_VERSION);
             assert_eq!(result["serverInfo"]["name"], "miao");
             assert!(result["capabilities"]["tools"].is_object());
-            // 调用者须知：流量可能经过本代理，破坏性操作会自断其网
-            assert!(result["instructions"]
-                .as_str()
-                .unwrap()
-                .contains("网络中断"));
+            // 调用者须知：流量可能经过本代理，破坏性操作不能自行确认
+            let instructions = result["instructions"].as_str().unwrap();
+            assert!(instructions.contains("流量很可能正经过它"));
+            assert!(instructions.contains("绝不能自行把 confirm 设为 true"));
+            assert!(instructions.contains("敏感信息"));
         }
     }
 
     #[tokio::test]
-    async fn tools_list_covers_the_flat_node_model() {
+    async fn tools_list_covers_panel_capabilities() {
         let response = call(
             &state(Config::default()),
             json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/list" }),
@@ -805,18 +835,60 @@ mod tests {
             .iter()
             .map(|tool| tool["name"].as_str().unwrap())
             .collect();
-        for expected in [
+        let expected = [
             "get_status",
+            "get_version_info",
+            "start_service",
+            "stop_service",
+            "list_subscriptions",
+            "add_subscriptions",
+            "delete_subscription",
+            "refresh_subscriptions",
+            "scan_clash_verge",
             "list_nodes",
+            "list_manual_nodes",
+            "add_node",
+            "import_nodes",
+            "delete_node",
             "switch_node",
             "set_node_select",
             "test_delay",
             "set_route_mode",
-            "refresh_subscriptions",
             "list_rules",
+            "add_rule",
+            "delete_rule",
+            "get_traffic",
             "list_connections",
+            "test_connectivity",
+            "set_mcp_enabled",
+            "deploy_vps",
+            "upgrade_miao",
+        ];
+        assert_eq!(names, expected);
+
+        for tool in tools {
+            let description = tool["description"].as_str().unwrap();
+            assert!(
+                description.chars().count() >= 25,
+                "description too short: {description}"
+            );
+            assert!(tool["inputSchema"].is_object());
+            assert!(tool["annotations"]["readOnlyHint"].is_boolean());
+            assert!(tool["annotations"]["destructiveHint"].is_boolean());
+        }
+        for name in [
+            "stop_service",
+            "delete_subscription",
+            "delete_node",
+            "delete_rule",
+            "set_mcp_enabled",
+            "deploy_vps",
+            "upgrade_miao",
         ] {
-            assert!(names.contains(&expected), "missing tool {expected}");
+            let tool = tools.iter().find(|tool| tool["name"] == name).unwrap();
+            assert!(tool["description"].as_str().unwrap().contains("确认"));
+            assert_eq!(tool["inputSchema"]["properties"]["confirm"]["const"], true);
+            assert_eq!(tool["annotations"]["destructiveHint"], true);
         }
         assert!(response["result"]["ttlMs"].is_number());
     }
@@ -854,6 +926,12 @@ mod tests {
         assert_eq!(payload["running"], false);
         assert_eq!(payload["ready"], false);
         assert_eq!(payload["route_mode"], "rule");
+        assert_eq!(payload["mcp"], false);
+        assert_eq!(
+            payload["upgrade_supported"],
+            crate::platform::upgrade_supported()
+        );
+        assert_eq!(payload["vps_supported"], crate::platform::vps_supported());
         assert!(payload["current_node"].is_null());
     }
 
@@ -1049,5 +1127,143 @@ mod tests {
         assert_eq!(rules[0]["value"], "curl");
         assert_eq!(rules[0]["target"], "direct");
         assert_eq!(rules[0]["skipped"], false);
+    }
+
+    #[tokio::test]
+    async fn list_subscriptions_matches_panel_data() {
+        let config = Config {
+            subs: vec!["https://example.com/sub?token=secret".to_string()],
+            ..Default::default()
+        };
+        let response = call(
+            &state(config),
+            json!({
+                "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                "params": { "name": "list_subscriptions", "arguments": {} },
+            }),
+        )
+        .await;
+        let payload: JsonValue =
+            serde_json::from_str(response["result"]["content"][0]["text"].as_str().unwrap())
+                .unwrap();
+        assert_eq!(
+            payload["subscriptions"][0]["url"],
+            "https://example.com/sub?token=secret"
+        );
+        assert_eq!(payload["subscriptions"][0]["state"], "pending");
+    }
+
+    #[tokio::test]
+    async fn list_manual_nodes_matches_panel_data_without_secrets() {
+        let config = Config {
+            nodes: vec![
+                r#"{"type":"hysteria2","tag":"手动A","server":"a.example.com","server_port":443,"password":"secret","tls":{"enabled":true,"server_name":"sni.example.com"}}"#.to_string(),
+            ],
+            ..Default::default()
+        };
+        let response = call(
+            &state(config),
+            json!({
+                "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                "params": { "name": "list_manual_nodes", "arguments": {} },
+            }),
+        )
+        .await;
+        let text = response["result"]["content"][0]["text"].as_str().unwrap();
+        let payload: JsonValue = serde_json::from_str(text).unwrap();
+        assert_eq!(payload["nodes"][0]["tag"], "手动A");
+        assert_eq!(payload["nodes"][0]["server"], "a.example.com");
+        assert_eq!(payload["nodes"][0]["sni"], "sni.example.com");
+        assert!(!text.contains("secret"));
+    }
+
+    #[tokio::test]
+    async fn destructive_tools_require_explicit_confirmation_before_side_effects() {
+        let state = state(Config::default());
+        assert!(state
+            .service_should_run
+            .load(std::sync::atomic::Ordering::Relaxed));
+        for name in ["stop_service", "set_mcp_enabled", "upgrade_miao"] {
+            let response = call(
+                &state,
+                json!({
+                    "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                    "params": { "name": name, "arguments": {} },
+                }),
+            )
+            .await;
+            assert_eq!(response["result"]["isError"], true, "tool {name}");
+            assert!(response["result"]["content"][0]["text"]
+                .as_str()
+                .unwrap()
+                .contains("明确确认"));
+        }
+        assert!(state
+            .service_should_run
+            .load(std::sync::atomic::Ordering::Relaxed));
+        assert!(!state.config.read().await.mcp);
+    }
+
+    #[tokio::test]
+    async fn add_subscriptions_reuses_panel_validation_without_network() {
+        let state = state(Config::default());
+        let response = call(
+            &state,
+            json!({
+                "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                "params": {
+                    "name": "add_subscriptions",
+                    "arguments": { "urls": ["ftp://example.com/not-supported"] }
+                },
+            }),
+        )
+        .await;
+        assert_eq!(response["result"]["isError"], true);
+        assert!(state.config.read().await.subs.is_empty());
+    }
+
+    #[tokio::test]
+    async fn add_node_reuses_panel_protocol_validation() {
+        let state = state(Config::default());
+        let response = call(
+            &state,
+            json!({
+                "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                "params": {
+                    "name": "add_node",
+                    "arguments": {
+                        "node_type": "hysteria2",
+                        "tag": "missing-password",
+                        "server": "example.com",
+                        "server_port": 443
+                    }
+                },
+            }),
+        )
+        .await;
+        assert_eq!(response["result"]["isError"], true);
+        assert!(response["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("密码"));
+        assert!(state.config.read().await.nodes.is_empty());
+    }
+
+    #[test]
+    fn connection_pagination_validates_bounds() {
+        assert_eq!(
+            super::pagination_value(&json!({}), "limit", 100, 1, Some(500)).unwrap(),
+            100
+        );
+        assert_eq!(
+            super::pagination_value(&json!({ "limit": 500 }), "limit", 100, 1, Some(500)).unwrap(),
+            500
+        );
+        assert!(
+            super::pagination_value(&json!({ "limit": 0 }), "limit", 100, 1, Some(500)).is_err()
+        );
+        assert!(
+            super::pagination_value(&json!({ "limit": 501 }), "limit", 100, 1, Some(500)).is_err()
+        );
     }
 }
