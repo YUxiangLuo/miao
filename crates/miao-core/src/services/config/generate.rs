@@ -398,10 +398,12 @@ async fn build_prepared(
     state: &Arc<AppState>,
     nodes: Vec<FetchedNode>,
 ) -> AppResult<GenConfigOutcome> {
+    // has_sub_nodes 是「订阅是否产出节点」的健康度语义（过滤前）：
+    // 下游用它区分「订阅获取失败」与「有节点」，过滤后为空是用户意图（全禁用），
+    // 不能误报成订阅失败（ALL_SUBS_FAILED / KeptRunningOnTotalFailure）
+    let has_sub_nodes = !nodes.is_empty();
     let nodes = filter_disabled_nodes(nodes, &config.disabled_nodes);
     let (my_outbounds, my_names) = collect_manual_outbounds(config);
-    // has_sub_nodes 是过滤后的「可用」语义：全被禁用时应当触发无节点告警
-    let has_sub_nodes = !nodes.is_empty();
     let reserved_rule_tags = custom_rule_outbound_tags(&config.custom_rules);
     let (final_node_names, final_outbounds, node_bindings) =
         assign_subscription_tags(state, &my_names, &reserved_rule_tags, nodes).await;
@@ -612,6 +614,34 @@ mod tests {
         let nodes = vec![fetched_node("https://a", "node-1")];
         let kept = filter_disabled_nodes(nodes, &[disabled_node("https://a", "node-1")]);
         assert!(kept.is_empty());
+    }
+
+    #[tokio::test]
+    async fn has_sub_nodes_reflects_fetch_health_not_the_disable_filter() {
+        // 回归：全禁用是用户意图，has_sub_nodes 必须保持过滤前的「订阅产出过节点」
+        // 语义——否则会被误报成「所有订阅获取失败」（ALL_SUBS_FAILED）并被
+        // Startup 刷新路径误判为 KeptRunningOnTotalFailure
+        // 手动节点兑底保证空池保护（NoUsableNodes）不拦截，专注验证 has_sub_nodes 语义
+        let config = Config {
+            subs: vec!["https://a".to_string()],
+            nodes: vec![
+                r#"{"type":"trojan","tag":"manual-1","server":"m.example.com","server_port":443,"password":"x"}"#
+                    .to_string(),
+            ],
+            disabled_nodes: vec![disabled_node("https://a", "node-1")],
+            ..Config::default()
+        };
+        let state = crate::test_support::app_state(config.clone());
+
+        let outcome =
+            super::build_prepared(&config, &state, vec![fetched_node("https://a", "node-1")])
+                .await
+                .unwrap();
+
+        assert!(outcome.has_sub_nodes);
+        // 且被禁节点确实不在生成结果里
+        let text = String::from_utf8(outcome.bytes).unwrap();
+        assert!(!text.contains("node-1"));
     }
 
     #[tokio::test]

@@ -29,11 +29,12 @@ fn snapshot_entry_set(snapshot: &SubNodesSnapshot) -> HashSet<(&str, &str)> {
 }
 
 pub async fn get_subs(State(state): State<Arc<AppState>>) -> Json<ApiResponse<Vec<SubStatus>>> {
+    // 快照磁盘读先于一切锁：本 handler 是面板轮询热点，不把 IO 关进临界区
+    let snapshot = read_sub_nodes_snapshot(&state).await;
     let config = state.config.read().await;
     let status_map = state.sub_status.lock().await;
     // disabled_count 用生效口径：只统计匹配当前快照节点的条目；
     // 失配条目（如机场的「剩余流量」信息节点改名后）不产生效果，不应计入
-    let snapshot = read_sub_nodes_snapshot(&state).await;
     let live_entries = snapshot.as_ref().map(snapshot_entry_set);
 
     let subs_with_status: Vec<SubStatus> = config

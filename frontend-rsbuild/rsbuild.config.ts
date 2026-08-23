@@ -6,7 +6,7 @@ import { pluginReact } from '@rsbuild/plugin-react';
 const miaoApiTarget = process.env.MIAO_API ?? 'http://localhost:6161';
 
 // Docs: https://rsbuild.rs/config/
-export default defineConfig({
+export default defineConfig(({ command }) => ({
   plugins: [pluginReact()],
   source: {
     entry: {
@@ -20,7 +20,9 @@ export default defineConfig({
     inject: 'body',
   },
   output: {
-    cleanDistPath: true,
+    // dev 服务从内存出页面，清 dist 只会把嵌进二进制的构建产物抹掉（cargo 编译依赖它）；
+    // 仅 build 时清理
+    cleanDistPath: command === 'build',
     dataUriLimit: 100_000_000,
     distPath: {
       root: '../public',
@@ -37,4 +39,4 @@ export default defineConfig({
       },
     },
   },
-});
+}));
