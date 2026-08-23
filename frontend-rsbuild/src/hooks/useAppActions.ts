@@ -249,6 +249,23 @@ export function useAppActions(data: AppData) {
     }
   }, [apiCall, clearDelays, fetchSubs, showToast])
 
+  // 禁用/启用订阅节点（易变层变更，后端热应用）；成功后刷新订阅列表更新禁用计数
+  const handleSetNodeDisabled = useCallback(async (sub: string, name: string, disabled: boolean): Promise<boolean> => {
+    try {
+      await apiCall(
+        'subs/nodes/disabled',
+        { method: 'POST', body: JSON.stringify({ sub, name, disabled }) },
+        'toggleSubNode'
+      )
+      await fetchSubs()
+      showToast(disabled ? `已禁用节点 ${name}` : `已启用节点 ${name}`, 'success')
+      return true
+    } catch (error) {
+      showToast(errorMessage(error), 'error')
+      return false
+    }
+  }, [apiCall, fetchSubs, showToast])
+
   const handleAddNode = useCallback(async () => {
     let payload: NodeRequest
     try {
@@ -460,6 +477,7 @@ export function useAppActions(data: AppData) {
     handleUpgradeClick,
     handleOpenDeleteNodeConfirm,
     handleOpenDeleteSubConfirm,
+    handleSetNodeDisabled,
     handleAddRule,
     handleOpenDeleteRuleConfirm,
     handleToggleMcp,

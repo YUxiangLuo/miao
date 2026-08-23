@@ -1,8 +1,8 @@
 import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it, rs } from '@rstest/core'
+import { afterEach, describe, expect, it, rs } from '@rstest/core'
 import { SubsCard } from './SubsCard'
-import { subMock } from '../testFixtures'
+import { subMock, subNodeMock } from '../testFixtures'
 
 const subs = [
   subMock({ url: 'https://example.com/subscription-token-abcdef', node_count: 42 }),
@@ -15,11 +15,51 @@ function renderCard(overrides = {}) {
     onAddSub: rs.fn().mockResolvedValue(true),
     onDeleteSub: rs.fn(),
     onRefreshSubs: rs.fn(),
+    onToggleNodeDisabled: rs.fn().mockResolvedValue(true),
     isInitializing: false,
     ...overrides,
   }
   return { ...render(<SubsCard {...props} />), props }
 }
+
+describe('SubsCard subscription detail entry', () => {
+  afterEach(() => {
+    rs.unstubAllGlobals()
+  })
+
+  it('opens the detail modal from the clickable node count', async () => {
+    const user = userEvent.setup()
+    rs.stubGlobal('fetch', rs.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        success: true,
+        message: 'ok',
+        data: [{ url: subs[0].url, nodes: [subNodeMock({ name: '香港 01' })] }],
+      }),
+    })))
+    renderCard()
+
+    await user.click(screen.getByRole('button', { name: /42 个节点/ }))
+
+    expect(await screen.findByRole('dialog')).toBeInTheDocument()
+    expect(await screen.findByText('香港 01')).toBeInTheDocument()
+  })
+
+  it('shows the disabled count next to the node count', () => {
+    renderCard({ subs: [subMock({ ...subs[0], disabled_count: 2 })] })
+
+    expect(screen.getByRole('button', { name: /42 个节点 · 禁用 2/ })).toBeInTheDocument()
+  })
+
+  it('keeps the node count non-clickable for failed subscriptions', () => {
+    renderCard({
+      subs: [subMock({ success: false, node_count: 0, state: 'failed', error: 'boom' })],
+    })
+
+    expect(screen.queryByRole('button', { name: /个节点/ })).not.toBeInTheDocument()
+    expect(screen.getByText('boom')).toBeInTheDocument()
+  })
+})
 
 describe('SubsCard header actions', () => {
   it('places the refresh button next to the title and add at the far right', async () => {

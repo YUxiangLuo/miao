@@ -4,17 +4,21 @@ import { ICON } from '../tokens'
 import { Button, SectionCard } from './ui'
 import { useDialog } from '../hooks/useDialog'
 import { classNames, maskSubscription } from '../utils'
+import { SubDetailModal } from './SubDetailModal'
 import type { SubStatus } from '../types/api'
 
 interface SubRowProps {
   sub: SubStatus
   onDelete: (url: string) => void
+  onShowNodes: (sub: SubStatus) => void
   disabled: boolean
 }
 
-const SubRow = memo(function SubRow({ sub, onDelete, disabled }: SubRowProps) {
+const SubRow = memo(function SubRow({ sub, onDelete, onShowNodes, disabled }: SubRowProps) {
   const state = sub.state || (sub.success ? 'ready' : 'failed')
   const pending = state === 'pending' || state === 'refreshing'
+  // 获取成功的订阅节点数可点击：打开订阅详情弹窗（节点列表 + 禁用开关）
+  const clickable = sub.success && !pending && sub.node_count > 0
   return (
     <div className="list-row">
       <div className={classNames('status-icon-badge', pending ? 'info' : sub.success ? 'success' : 'error')}>
@@ -26,18 +30,31 @@ const SubRow = memo(function SubRow({ sub, onDelete, disabled }: SubRowProps) {
       </div>
       <div className="list-row-content">
         <div className="list-row-title">{maskSubscription(sub.url)}</div>
-        <div
-          className={classNames('list-row-meta', state === 'failed' && 'error')}
-          title={state === 'failed' ? sub.error : undefined}
-        >
-          {state === 'pending'
-            ? '等待首次获取'
-            : state === 'refreshing'
-              ? sub.success ? `正在刷新，上次获取 ${sub.node_count} 个节点` : '正在获取订阅'
-              : sub.success
-                ? `${sub.node_count} 个节点`
-                : sub.error || '获取失败'}
-        </div>
+        {clickable
+          ? (
+            <button
+              type="button"
+              className="list-row-meta meta-link"
+              title="查看订阅节点"
+              onClick={() => onShowNodes(sub)}
+            >
+              {sub.node_count} 个节点{sub.disabled_count > 0 ? ` · 禁用 ${sub.disabled_count}` : ''}
+            </button>
+          )
+          : (
+            <div
+              className={classNames('list-row-meta', state === 'failed' && 'error')}
+              title={state === 'failed' ? sub.error : undefined}
+            >
+              {state === 'pending'
+                ? '等待首次获取'
+                : state === 'refreshing'
+                  ? sub.success ? `正在刷新，上次获取 ${sub.node_count} 个节点` : '正在获取订阅'
+                  : sub.success
+                    ? `${sub.node_count} 个节点`
+                    : sub.error || '获取失败'}
+            </div>
+          )}
       </div>
       <button
         className="icon-button subtle"
@@ -131,11 +148,13 @@ export interface SubsCardProps {
   onAddSub: (url: string) => Promise<boolean>
   onDeleteSub: (url: string) => void
   onRefreshSubs: () => void
+  onToggleNodeDisabled: (sub: string, name: string, disabled: boolean) => Promise<boolean>
   isInitializing: boolean
 }
 
-export function SubsCard({ subs, loadingAction, onAddSub, onDeleteSub, onRefreshSubs, isInitializing }: SubsCardProps) {
+export function SubsCard({ subs, loadingAction, onAddSub, onDeleteSub, onRefreshSubs, onToggleNodeDisabled, isInitializing }: SubsCardProps) {
   const [showAdd, setShowAdd] = useState(false)
+  const [detailSub, setDetailSub] = useState<SubStatus | null>(null)
   const refreshing = loadingAction === 'refreshSubs'
 
   return (
@@ -176,10 +195,16 @@ export function SubsCard({ subs, loadingAction, onAddSub, onDeleteSub, onRefresh
               key={sub.url}
               sub={sub}
               onDelete={onDeleteSub}
+              onShowNodes={setDetailSub}
               disabled={isInitializing}
             />
           ))}
       </div>
+      <SubDetailModal
+        sub={detailSub}
+        onClose={() => setDetailSub(null)}
+        onToggleNode={onToggleNodeDisabled}
+      />
       <AddSubModal
         open={showAdd}
         loading={loadingAction === 'addSub'}
