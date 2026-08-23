@@ -170,6 +170,7 @@ mod tests {
             route_mode: Default::default(),
             mcp: false,
             node_select: Default::default(),
+            disabled_nodes: Default::default(),
         };
 
         let state = AppState::new(config.clone()).unwrap();
@@ -201,6 +202,7 @@ mod tests {
             route_mode: Default::default(),
             mcp: false,
             node_select: Default::default(),
+            disabled_nodes: Default::default(),
         };
 
         let state = AppState::new(config).unwrap();

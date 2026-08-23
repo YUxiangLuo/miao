@@ -510,6 +510,7 @@ mod tests {
         let volatile = VolatileConfig {
             node_select: NodeSelect::Fastest(Region::Sg),
             route_mode: RouteMode::Global,
+            ..VolatileConfig::default()
         };
         save_volatile_to(&path, &volatile).await.unwrap();
         assert!(!temp_dir.join("volatile.tmp").exists());

@@ -94,6 +94,7 @@ mod tests {
             route_mode: Default::default(),
             mcp: false,
             node_select: Default::default(),
+            disabled_nodes: Default::default(),
         })
         .await;
 
@@ -114,6 +115,7 @@ mod tests {
             route_mode: Default::default(),
             mcp: false,
             node_select: Default::default(),
+            disabled_nodes: Default::default(),
         })
         .await;
 
@@ -141,6 +143,7 @@ mod tests {
             route_mode: Default::default(),
             mcp: false,
             node_select: Default::default(),
+            disabled_nodes: Default::default(),
         })
         .await;
 
@@ -175,6 +178,7 @@ mod tests {
             route_mode: Default::default(),
             mcp: false,
             node_select: Default::default(),
+            disabled_nodes: Default::default(),
         })
         .await;
 
@@ -205,6 +209,7 @@ mod tests {
             route_mode: Default::default(),
             mcp: false,
             node_select: Default::default(),
+            disabled_nodes: Default::default(),
         })
         .await;
 
@@ -232,6 +237,7 @@ mod tests {
             route_mode: Default::default(),
             mcp: false,
             node_select: Default::default(),
+            disabled_nodes: Default::default(),
         })
         .await;
 
@@ -278,6 +284,7 @@ mod tests {
             route_mode: Default::default(),
             mcp: false,
             node_select: Default::default(),
+            disabled_nodes: Default::default(),
         })
         .await;
 
@@ -306,6 +313,7 @@ mod tests {
             route_mode: Default::default(),
             mcp: false,
             node_select: Default::default(),
+            disabled_nodes: Default::default(),
         })
         .await;
 
@@ -336,6 +344,7 @@ mod tests {
             route_mode: Default::default(),
             mcp: false,
             node_select: Default::default(),
+            disabled_nodes: Default::default(),
         })
         .await;
 
@@ -408,6 +417,7 @@ mod tests {
             route_mode: Default::default(),
             mcp: false,
             node_select: Default::default(),
+            disabled_nodes: Default::default(),
         })
         .await;
 
@@ -436,6 +446,7 @@ mod tests {
             route_mode: Default::default(),
             mcp: false,
             node_select: Default::default(),
+            disabled_nodes: Default::default(),
         })
         .await;
 
@@ -467,6 +478,7 @@ mod tests {
             route_mode: Default::default(),
             mcp: false,
             node_select: Default::default(),
+            disabled_nodes: Default::default(),
         })
         .await;
 
@@ -497,6 +509,7 @@ mod tests {
             route_mode: Default::default(),
             mcp: false,
             node_select: Default::default(),
+            disabled_nodes: Default::default(),
         })
         .await;
 
@@ -528,6 +541,7 @@ mod tests {
             route_mode: Default::default(),
             mcp: false,
             node_select: Default::default(),
+            disabled_nodes: Default::default(),
         })
         .await;
 
@@ -561,6 +575,7 @@ mod tests {
             route_mode: Default::default(),
             mcp: false,
             node_select: Default::default(),
+            disabled_nodes: Default::default(),
         })
         .await;
 
@@ -593,6 +608,7 @@ mod tests {
             route_mode: Default::default(),
             mcp: false,
             node_select: Default::default(),
+            disabled_nodes: Default::default(),
         })
         .await;
 
@@ -621,6 +637,7 @@ mod tests {
             route_mode: Default::default(),
             mcp: false,
             node_select: Default::default(),
+            disabled_nodes: Default::default(),
         })
         .await;
 
@@ -652,6 +669,7 @@ mod tests {
             route_mode: Default::default(),
             mcp: false,
             node_select: Default::default(),
+            disabled_nodes: Default::default(),
         })
         .await;
 
@@ -755,6 +773,7 @@ mod tests {
         let app = test_app(Config {
             mcp: true,
             node_select: Default::default(),
+            disabled_nodes: Default::default(),
             ..Default::default()
         })
         .await;

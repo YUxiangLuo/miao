@@ -232,6 +232,7 @@ mod tests {
             route_mode: Default::default(),
             mcp: false,
             node_select: Default::default(),
+            disabled_nodes: Default::default(),
         });
 
         let axum::response::Json(response) = get_status(State(state)).await;
@@ -259,6 +260,7 @@ mod tests {
             route_mode: RouteMode::Global,
             mcp: false,
             node_select: Default::default(),
+            disabled_nodes: Default::default(),
         });
 
         let axum::response::Json(response) = get_status(State(state)).await;

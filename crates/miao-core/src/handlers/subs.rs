@@ -214,6 +214,7 @@ mod tests {
             route_mode: Default::default(),
             mcp: false,
             node_select: Default::default(),
+            disabled_nodes: Default::default(),
         }
     }
 

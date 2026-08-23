@@ -5,7 +5,7 @@ use tokio::time::{Duration, Instant};
 use tracing::{error, info, warn};
 
 use crate::error::AppResult;
-use crate::models::{Config, NodeSelect, SubStatus, SubscriptionState};
+use crate::models::{Config, DisabledNode, NodeSelect, SubStatus, SubscriptionState};
 use crate::services::subscription::fetch_sub;
 use crate::state::{AppState, SkippedRule};
 
@@ -395,7 +395,9 @@ async fn build_prepared(
     state: &Arc<AppState>,
     nodes: Vec<FetchedNode>,
 ) -> AppResult<GenConfigOutcome> {
+    let nodes = filter_disabled_nodes(nodes, &config.disabled_nodes);
     let (my_outbounds, my_names) = collect_manual_outbounds(config);
+    // has_sub_nodes 是过滤后的「可用」语义：全被禁用时应当触发无节点告警
     let has_sub_nodes = !nodes.is_empty();
     let reserved_rule_tags = custom_rule_outbound_tags(&config.custom_rules);
     let (final_node_names, final_outbounds, node_bindings) =
@@ -417,6 +419,33 @@ async fn build_prepared(
         fresh_sub_nodes: None,
         node_bindings,
     })
+}
+
+/// 按易变层禁用集过滤订阅节点：按「订阅 + 节点名」匹配，订阅内同名节点连坐禁用。
+/// 只在构建入口调用——快照保存的是完整拉取结果，禁用不影响快照内容。
+pub(super) fn filter_disabled_nodes(
+    nodes: Vec<FetchedNode>,
+    disabled: &[DisabledNode],
+) -> Vec<FetchedNode> {
+    if disabled.is_empty() {
+        return nodes;
+    }
+    let mut disabled_by_source: std::collections::HashMap<String, std::collections::HashSet<&str>> =
+        std::collections::HashMap::new();
+    for entry in disabled {
+        disabled_by_source
+            .entry(subscription_source_id(&entry.sub))
+            .or_default()
+            .insert(entry.name.as_str());
+    }
+    nodes
+        .into_iter()
+        .filter(|node| {
+            disabled_by_source
+                .get(&node.source_id)
+                .is_none_or(|names| !names.contains(node.name.as_str()))
+        })
+        .collect()
 }
 
 fn custom_rule_outbound_tags(custom_rules: &[String]) -> Vec<String> {
@@ -517,11 +546,70 @@ pub async fn known_rule_targets(config: &Config, state: &AppState) -> Vec<String
 
 #[cfg(test)]
 mod tests {
-    use super::{known_rule_targets, SubFetchRetry, STARTUP_FETCH_BUDGET, STARTUP_RETRY_SCHEDULE};
-    use crate::models::Config;
+    use super::{
+        filter_disabled_nodes, known_rule_targets, subscription_source_id, FetchedNode,
+        SubFetchRetry, STARTUP_FETCH_BUDGET, STARTUP_RETRY_SCHEDULE,
+    };
+    use crate::models::{Config, DisabledNode};
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
     use tokio::time::Duration;
+
+    fn fetched_node(sub_url: &str, name: &str) -> FetchedNode {
+        FetchedNode {
+            source_id: subscription_source_id(sub_url),
+            name: name.to_string(),
+            outbound: serde_json::json!({"type": "trojan", "server": "example.com"}),
+        }
+    }
+
+    fn disabled_node(sub: &str, name: &str) -> DisabledNode {
+        DisabledNode {
+            sub: sub.to_string(),
+            name: name.to_string(),
+        }
+    }
+
+    #[test]
+    fn filter_disabled_nodes_keeps_everything_when_nothing_disabled() {
+        let nodes = vec![fetched_node("https://a", "node-1")];
+        let kept = filter_disabled_nodes(nodes.clone(), &[]);
+        assert_eq!(kept, nodes);
+    }
+
+    #[test]
+    fn filter_disabled_nodes_matches_by_subscription_and_name() {
+        let nodes = vec![
+            fetched_node("https://a", "node-1"),
+            fetched_node("https://a", "node-2"),
+            fetched_node("https://b", "node-1"),
+        ];
+        let kept = filter_disabled_nodes(nodes, &[disabled_node("https://a", "node-1")]);
+        let names: Vec<_> = kept.iter().map(|n| n.name.as_str()).collect();
+        // 只禁用 a 订阅的 node-1；b 订阅的同名节点保留
+        assert_eq!(names, ["node-2", "node-1"]);
+        assert_eq!(kept[1].source_id, subscription_source_id("https://b"));
+    }
+
+    #[test]
+    fn filter_disabled_nodes_disables_same_name_duplicates_together() {
+        // 订阅内同名重复节点连坐禁用
+        let nodes = vec![
+            fetched_node("https://a", "dup"),
+            fetched_node("https://a", "dup"),
+            fetched_node("https://a", "solo"),
+        ];
+        let kept = filter_disabled_nodes(nodes, &[disabled_node("https://a", "dup")]);
+        assert_eq!(kept.len(), 1);
+        assert_eq!(kept[0].name, "solo");
+    }
+
+    #[test]
+    fn filter_disabled_nodes_can_empty_the_pool() {
+        let nodes = vec![fetched_node("https://a", "node-1")];
+        let kept = filter_disabled_nodes(nodes, &[disabled_node("https://a", "node-1")]);
+        assert!(kept.is_empty());
+    }
 
     #[tokio::test]
     async fn dormant_custom_rule_target_remains_reserved_without_bindings() {

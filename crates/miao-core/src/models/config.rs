@@ -134,6 +134,20 @@ pub struct Config {
     /// 运行值落 volatile.yaml，稳定层保存不再携带。
     #[serde(default, skip_serializing)]
     pub route_mode: RouteMode,
+    /// 禁用的订阅节点：易变层字段——只从 volatile.yaml 读出，稳定层保存不携带。
+    #[serde(default, skip_serializing)]
+    pub disabled_nodes: Vec<DisabledNode>,
+}
+
+/// 一个被禁用的订阅节点。按「订阅 URL + 节点名」标识：同名节点在订阅内连坐禁用；
+/// 订阅刷新后节点改名则旧条目失配自然失效（节点重新出现），不主动清理。
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+pub struct DisabledNode {
+    /// 订阅 URL（与 config.subs 里的条目一致）
+    pub sub: String,
+    /// 节点名（订阅里的原始名称）
+    pub name: String,
 }
 
 /// The exact semantic model persisted in `config.yaml`.
@@ -165,12 +179,14 @@ pub const DEFAULT_PORT: u16 = 6161;
 /// 与稳定层 config.yaml 分文件落盘：OpenWrt/Linux 写 tmpfs（系统重启即回默认），
 /// Windows 写应用数据目录（持久）。文件缺失/读不出/损坏等价于「无覆盖」，
 /// 此时 config.yaml 里的同名字段（旧版遗留或手写的启动默认值）生效。
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct VolatileConfig {
     #[serde(default, skip_serializing_if = "NodeSelect::serde_is_manual")]
     pub node_select: NodeSelect,
     #[serde(default, skip_serializing_if = "RouteMode::serde_is_rule")]
     pub route_mode: RouteMode,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub disabled_nodes: Vec<DisabledNode>,
 }
 
 impl From<&Config> for VolatileConfig {
@@ -178,6 +194,7 @@ impl From<&Config> for VolatileConfig {
         Self {
             node_select: config.node_select,
             route_mode: config.route_mode,
+            disabled_nodes: config.disabled_nodes.clone(),
         }
     }
 }
@@ -207,10 +224,12 @@ impl StableConfig {
             mcp: self.mcp,
             node_select: self.node_select,
             route_mode: self.route_mode,
+            disabled_nodes: Vec::new(),
         };
         if let Some(volatile) = volatile {
             config.node_select = volatile.node_select;
             config.route_mode = volatile.route_mode;
+            config.disabled_nodes = volatile.disabled_nodes;
         }
         config
     }
@@ -238,6 +257,7 @@ impl Config {
         if let Some(volatile) = volatile {
             self.node_select = volatile.node_select;
             self.route_mode = volatile.route_mode;
+            self.disabled_nodes = volatile.disabled_nodes;
         }
         self
     }
@@ -271,6 +291,7 @@ nodes: []
             route_mode: super::RouteMode::Global,
             mcp: false,
             node_select: Default::default(),
+            disabled_nodes: Default::default(),
         };
 
         let yaml = yaml_serde::to_string(&config).unwrap();
@@ -288,6 +309,7 @@ nodes: []
             route_mode: Default::default(),
             mcp: false,
             node_select: Default::default(),
+            disabled_nodes: Default::default(),
         };
 
         let yaml = yaml_serde::to_string(&config).unwrap();
@@ -353,12 +375,71 @@ nodes: []
     }
 
     #[test]
+    fn volatile_config_carries_disabled_nodes() {
+        use super::{DisabledNode, VolatileConfig};
+
+        let volatile = VolatileConfig {
+            disabled_nodes: vec![DisabledNode {
+                sub: "https://example.com/sub".to_string(),
+                name: "香港 01".to_string(),
+            }],
+            ..VolatileConfig::default()
+        };
+        let yaml = yaml_serde::to_string(&volatile).unwrap();
+        assert!(yaml.contains("disabled_nodes"));
+        let parsed: VolatileConfig = yaml_serde::from_str(&yaml).unwrap();
+        assert_eq!(parsed, volatile);
+
+        // 空列表不落盘，保持 volatile.yaml 干净
+        let empty = VolatileConfig::default();
+        let yaml = yaml_serde::to_string(&empty).unwrap();
+        assert!(!yaml.contains("disabled_nodes"));
+        // 旧版 volatile.yaml 没有该字段也能解析
+        let legacy: VolatileConfig = yaml_serde::from_str("route_mode: global").unwrap();
+        assert!(legacy.disabled_nodes.is_empty());
+    }
+
+    #[test]
+    fn effective_merges_disabled_nodes_from_volatile() {
+        use super::{DisabledNode, StableConfig, VolatileConfig};
+
+        let stable: StableConfig = yaml_serde::from_str("subs: []\nnodes: []\n").unwrap();
+        let disabled = vec![DisabledNode {
+            sub: "https://example.com/sub".to_string(),
+            name: "node-1".to_string(),
+        }];
+        let merged = stable.effective(Some(VolatileConfig {
+            disabled_nodes: disabled.clone(),
+            ..VolatileConfig::default()
+        }));
+        assert_eq!(merged.disabled_nodes, disabled);
+
+        // volatile 缺失时没有禁用（稳定层不携带该字段）
+        let merged = stable.effective(None);
+        assert!(merged.disabled_nodes.is_empty());
+    }
+
+    #[test]
+    fn config_does_not_persist_disabled_nodes_to_stable_layer() {
+        let config = Config {
+            disabled_nodes: vec![super::DisabledNode {
+                sub: "https://example.com/sub".to_string(),
+                name: "node-1".to_string(),
+            }],
+            ..Config::default()
+        };
+        let yaml = yaml_serde::to_string(&config).unwrap();
+        assert!(!yaml.contains("disabled_nodes"));
+    }
+
+    #[test]
     fn volatile_config_roundtrip() {
         use super::{NodeSelect, Region, RouteMode, VolatileConfig};
 
         let volatile = VolatileConfig {
             node_select: NodeSelect::Fastest(Region::Jp),
             route_mode: RouteMode::Global,
+            ..VolatileConfig::default()
         };
         let yaml = yaml_serde::to_string(&volatile).unwrap();
         assert!(yaml.contains("node_select: fastest_jp"));
@@ -395,6 +476,7 @@ nodes: []
         let merged = yaml_config.clone().overlay(Some(VolatileConfig {
             node_select: NodeSelect::Manual,
             route_mode: RouteMode::Rule,
+            ..VolatileConfig::default()
         }));
         assert_eq!(merged.node_select, NodeSelect::Manual);
         assert_eq!(merged.route_mode, RouteMode::Rule);
@@ -421,6 +503,7 @@ nodes: []
         let effective = stable.effective(Some(VolatileConfig {
             node_select: NodeSelect::Manual,
             route_mode: RouteMode::Rule,
+            ..VolatileConfig::default()
         }));
         let mut changed = effective;
         changed.mcp = true;

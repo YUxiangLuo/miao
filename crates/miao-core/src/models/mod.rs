@@ -13,7 +13,7 @@ pub use api::{
 #[cfg(not(windows))]
 pub use api::{VpsDeployRequest, VpsDeployResponse};
 pub use config::{
-    Config, NodeSelect, Region, RouteMode, StableConfig, VolatileConfig, DEFAULT_PORT,
+    Config, DisabledNode, NodeSelect, Region, RouteMode, StableConfig, VolatileConfig, DEFAULT_PORT,
 };
 pub use node::{
     BatchNodeAdded, BatchNodeFailure, BatchNodeRequest, BatchNodeResult, DeleteNodeRequest,
