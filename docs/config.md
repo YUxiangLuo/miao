@@ -27,10 +27,23 @@ route_mode: global         # 可选：启动默认路由模式（rule 规则分�
 | 层 | 文件 | 内容 | 位置 |
 | --- | --- | --- | --- |
 | 稳定层 | `config.yaml` | 订阅/节点/规则等低频配置 | Linux/OpenWrt：`/etc/miao`；Windows：应用数据目录 |
-| 易变层 | `volatile.yaml` | 节点选择策略、路由模式 | Unix：`/tmp/miao-sing-box`（tmpfs，系统重启后回到 config.yaml 的启动默认值）；Windows：应用数据目录（持久） |
+| 易变层 | `volatile.yaml` | 节点选择策略、路由模式、禁用的订阅节点 | Unix：`/tmp/miao-sing-box`（tmpfs，系统重启后回到 config.yaml 的启动默认值）；Windows：应用数据目录（持久） |
 | 状态层 | `config.json` / `.cache` / 快照 | 运行时配置与缓存 | sing-box 运行目录，可删 |
 
 OpenWrt 的易变层写 tmpfs：切节点/切模式这类高频操作零闪存磨损。面板/进程重启（如自升级）两层都保留，选择与模式不丢失。
+
+### 禁用订阅节点
+
+面板「订阅管理」里获取成功的订阅，其「N 个节点」可点开订阅详情弹窗，逐节点禁用/启用。禁用的节点不会出现在生成的 sing-box 配置中（selector/urltest 成员、地区分组同步缩小），自定义规则若引用被禁节点会被跳过并在面板标记。禁用集是易变层配置 `disabled_nodes`：
+
+```yaml
+# volatile.yaml（由面板维护，不建议手编）
+disabled_nodes:
+  - sub: "https://your-subscription-url"   # 订阅 URL，与 config.yaml 的 subs 条目一致
+    name: "香港 01"                          # 节点名；订阅内同名节点会一起禁用
+```
+
+语义说明：按「订阅 + 节点名」标识，订阅刷新后节点改名则旧条目失配自然失效（节点重新出现）；Unix 上易变层在 tmpfs，系统重启后禁用集清空；不允许禁用后节点池为空（含手动节点），会被 400 拒绝。
 
 ## MCP：让 AI agent 操作代理
 
@@ -40,7 +53,7 @@ MCP 尽量与面板能力同构，工具按用途分为：
 
 - 状态与诊断：`get_status`、`get_version_info`、`test_connectivity`、`get_traffic`（实时速率快照）、`list_connections`（支持分页）
 - 服务与路由：`start_service`、`stop_service`、`set_route_mode`、`set_node_select`、`switch_node`、`test_delay`
-- 订阅：`list_subscriptions`、`add_subscriptions`、`delete_subscription`、`refresh_subscriptions`、`scan_clash_verge`
+- 订阅：`list_subscriptions`、`add_subscriptions`、`delete_subscription`、`refresh_subscriptions`、`scan_clash_verge`、`list_subscription_nodes`（按订阅列出节点及禁用状态）、`set_subscription_node_disabled`（禁用/启用订阅节点）
 - 节点：`list_nodes`（订阅 + 手动平铺池）、`list_manual_nodes`、`add_node`、`import_nodes`、`delete_node`
 - 规则：`list_rules`、`add_rule`、`delete_rule`
 - 管理：`set_mcp_enabled`、`deploy_vps`、`upgrade_miao`（平台不支持时返回明确错误）
