@@ -1,12 +1,17 @@
 use axum::{extract::State, http::StatusCode, response::Json};
+use std::collections::HashSet;
 use std::sync::{atomic::Ordering, Arc};
 
 use crate::models::{
-    ApiResponse, SubBatchRequest, SubBatchResult, SubRequest, SubStatus, SubscriptionState,
-    VergeImportItem, VergeImportResult,
+    ApiResponse, DisabledNode, SetNodeDisabledRequest, SubBatchRequest, SubBatchResult,
+    SubNodeInfo, SubNodesInfo, SubRequest, SubStatus, SubscriptionState, VergeImportItem,
+    VergeImportResult,
 };
 use crate::responses::{status_error, success, success_no_data, HandlerResult};
-use crate::services::config::{apply_config_change, regenerate_preserving_service_state};
+use crate::services::config::{
+    apply_config_change, apply_disabled_nodes, collect_manual_outbounds, read_sub_nodes_snapshot,
+    regenerate_preserving_service_state, subscription_source_id,
+};
 use crate::services::verge;
 use crate::state::AppState;
 use crate::validation::Validator;
@@ -19,17 +24,160 @@ pub async fn get_subs(State(state): State<Arc<AppState>>) -> Json<ApiResponse<Ve
         .subs
         .iter()
         .map(|url| {
-            status_map.get(url).cloned().unwrap_or(SubStatus {
+            let mut status = status_map.get(url).cloned().unwrap_or(SubStatus {
                 url: url.clone(),
                 success: false,
                 node_count: 0,
+                disabled_count: 0,
                 state: SubscriptionState::Pending,
                 error: None,
-            })
+            });
+            status.disabled_count = config
+                .disabled_nodes
+                .iter()
+                .filter(|entry| &entry.sub == url)
+                .count();
+            status
         })
         .collect();
 
     success("Subscriptions loaded", subs_with_status)
+}
+
+/// 订阅详情弹窗的数据源：按订阅分组列出节点（含禁用标记）。
+/// 纯读路径：数据来自 sub-nodes.json 快照，零网络；快照缺失的订阅返回空列表。
+pub async fn get_sub_nodes(
+    State(state): State<Arc<AppState>>,
+) -> Json<ApiResponse<Vec<SubNodesInfo>>> {
+    let config = state.config.read().await;
+    let snapshot = read_sub_nodes_snapshot(&state).await;
+
+    let disabled_keys: HashSet<(String, &str)> = config
+        .disabled_nodes
+        .iter()
+        .map(|entry| (subscription_source_id(&entry.sub), entry.name.as_str()))
+        .collect();
+
+    let groups = config
+        .subs
+        .iter()
+        .map(|url| {
+            let source_id = subscription_source_id(url);
+            let mut nodes = Vec::new();
+            if let Some(snapshot) = &snapshot {
+                for (index, entry_source) in snapshot.source_ids.iter().enumerate() {
+                    if *entry_source != source_id {
+                        continue;
+                    }
+                    let (Some(name), Some(outbound)) = (
+                        snapshot.node_names.get(index),
+                        snapshot.outbounds.get(index),
+                    ) else {
+                        continue;
+                    };
+                    let str_field = |key: &str| {
+                        outbound
+                            .get(key)
+                            .and_then(|value| value.as_str())
+                            .unwrap_or_default()
+                    };
+                    nodes.push(SubNodeInfo {
+                        name: name.clone(),
+                        server: str_field("server").to_string(),
+                        server_port: outbound
+                            .get("server_port")
+                            .and_then(|value| value.as_u64())
+                            .unwrap_or_default() as u16,
+                        node_type: str_field("type").to_string(),
+                        disabled: disabled_keys.contains(&(source_id.clone(), name.as_str())),
+                    });
+                }
+            }
+            SubNodesInfo {
+                url: url.clone(),
+                nodes,
+            }
+        })
+        .collect();
+
+    success("Subscription nodes loaded", groups)
+}
+
+/// 禁用/启用订阅节点（易变层）。本地语义变更：快照零网络重建 + 热应用。
+/// 成功路径会热重启内核；校验失败（订阅/节点不存在、禁用后空池）在事务前拦截。
+pub async fn set_node_disabled(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<SetNodeDisabledRequest>,
+) -> HandlerResult {
+    if state.initializing.load(Ordering::Relaxed) {
+        return Err(status_error(
+            StatusCode::CONFLICT,
+            "Initialization is still in progress",
+        ));
+    }
+
+    let old_config = state.config.read().await.clone();
+    if !old_config.subs.contains(&req.sub) {
+        return Err(status_error(StatusCode::BAD_REQUEST, "订阅不存在"));
+    }
+    let Some(snapshot) = read_sub_nodes_snapshot(&state).await else {
+        return Err(status_error(
+            StatusCode::BAD_REQUEST,
+            "订阅节点尚未获取，无法设置禁用",
+        ));
+    };
+    let entries: Vec<(&str, &str)> = snapshot
+        .source_ids
+        .iter()
+        .zip(snapshot.node_names.iter())
+        .map(|(source, name)| (source.as_str(), name.as_str()))
+        .collect();
+    let source_id = subscription_source_id(&req.sub);
+    if !entries.contains(&(source_id.as_str(), req.name.as_str())) {
+        return Err(status_error(StatusCode::BAD_REQUEST, "订阅中不存在该节点"));
+    }
+
+    let mut disabled_nodes = old_config.disabled_nodes.clone();
+    if req.disabled {
+        if !disabled_nodes
+            .iter()
+            .any(|entry| entry.sub == req.sub && entry.name == req.name)
+        {
+            disabled_nodes.push(DisabledNode {
+                sub: req.sub.clone(),
+                name: req.name.clone(),
+            });
+        }
+        // selector/urltest 不允许空 outbounds；禁用后可用池（订阅剩余 + 有效手动节点）为空
+        // 会生成非法配置，sing-box check 失败前先用明确的 400 拦住
+        let disabled_keys: HashSet<(String, &str)> = disabled_nodes
+            .iter()
+            .map(|entry| (subscription_source_id(&entry.sub), entry.name.as_str()))
+            .collect();
+        let remaining = entries
+            .iter()
+            .filter(|(source, name)| !disabled_keys.contains(&(source.to_string(), name)))
+            .count();
+        let manual = collect_manual_outbounds(&old_config).0.len();
+        if remaining + manual == 0 {
+            return Err(status_error(StatusCode::BAD_REQUEST, "不能禁用全部节点"));
+        }
+    } else {
+        disabled_nodes.retain(|entry| !(entry.sub == req.sub && entry.name == req.name));
+    }
+
+    match apply_disabled_nodes(&state, disabled_nodes).await {
+        Ok(update) => Ok(success_no_data(if update.updated() {
+            if req.disabled {
+                "节点已禁用"
+            } else {
+                "节点已启用"
+            }
+        } else {
+            "节点状态未变化"
+        })),
+        Err(e) => Err(status_error(StatusCode::INTERNAL_SERVER_ERROR, e)),
+    }
 }
 
 pub async fn add_sub(
@@ -198,10 +346,13 @@ pub async fn refresh_subs(State(state): State<Arc<AppState>>) -> HandlerResult {
 mod tests {
     use axum::{extract::State, http::StatusCode, response::Json};
 
-    use super::{add_subs_batch, get_subs, get_verge_import};
+    use super::{add_subs_batch, get_sub_nodes, get_subs, get_verge_import, set_node_disabled};
     use crate::{
         error::AppError,
-        models::{Config, SubBatchRequest, SubscriptionState},
+        models::{
+            Config, DisabledNode, SetNodeDisabledRequest, SubBatchRequest, SubscriptionState,
+        },
+        services::config::{save_sub_nodes_snapshot, subscription_source_id, SubNodesSnapshot},
         test_support::app_state,
     };
 
@@ -216,6 +367,44 @@ mod tests {
             node_select: Default::default(),
             disabled_nodes: Default::default(),
         }
+    }
+
+    /// 构造 sub-nodes.json 快照：nodes 为 (订阅 URL, 节点名) 列表
+    fn snapshot_for(subs: &[&str], nodes: &[(&str, &str)]) -> SubNodesSnapshot {
+        SubNodesSnapshot {
+            version: 1,
+            subs: subs.iter().map(|s| s.to_string()).collect(),
+            node_names: nodes.iter().map(|(_, name)| name.to_string()).collect(),
+            outbounds: nodes
+                .iter()
+                .map(|_| {
+                    serde_json::json!({
+                        "type": "trojan",
+                        "server": "example.com",
+                        "server_port": 443,
+                    })
+                })
+                .collect(),
+            source_ids: nodes
+                .iter()
+                .map(|(sub, _)| subscription_source_id(sub))
+                .collect(),
+        }
+    }
+
+    fn disabled_entry(sub: &str, name: &str) -> DisabledNode {
+        DisabledNode {
+            sub: sub.to_string(),
+            name: name.to_string(),
+        }
+    }
+
+    fn disable_request(sub: &str, name: &str, disabled: bool) -> Json<SetNodeDisabledRequest> {
+        Json(SetNodeDisabledRequest {
+            sub: sub.to_string(),
+            name: name.to_string(),
+            disabled,
+        })
     }
 
     // app_state 默认 initializing=true（写路径的 409 闸），handler 直测需手动关闸
@@ -255,6 +444,164 @@ mod tests {
         assert_eq!(subs[0].state, SubscriptionState::Pending);
         assert_eq!(subs[0].node_count, 0);
         assert!(subs[0].error.is_none());
+    }
+
+    #[tokio::test]
+    async fn get_subs_reports_disabled_count() {
+        let mut config = config_with_subs(&["https://example.com/a", "https://example.com/b"]);
+        config.disabled_nodes = vec![
+            disabled_entry("https://example.com/a", "node-1"),
+            disabled_entry("https://example.com/a", "node-2"),
+        ];
+        let state = app_state(config);
+
+        let Json(response) = get_subs(State(state)).await;
+
+        let subs = response.data.unwrap();
+        assert_eq!(subs[0].disabled_count, 2);
+        assert_eq!(subs[1].disabled_count, 0);
+    }
+
+    #[tokio::test]
+    async fn get_sub_nodes_groups_nodes_with_disabled_flags() {
+        let subs = ["https://example.com/a", "https://example.com/b"];
+        let mut config = config_with_subs(&subs);
+        config.disabled_nodes = vec![disabled_entry("https://example.com/a", "node-1")];
+        let state = app_state(config);
+        let snapshot = snapshot_for(
+            &subs,
+            &[
+                ("https://example.com/a", "node-1"),
+                ("https://example.com/a", "node-2"),
+                ("https://example.com/b", "node-1"),
+            ],
+        );
+        save_sub_nodes_snapshot(&state, &snapshot).await.unwrap();
+
+        let Json(response) = get_sub_nodes(State(state)).await;
+
+        assert!(response.success);
+        let groups = response.data.unwrap();
+        assert_eq!(groups.len(), 2);
+        assert_eq!(groups[0].url, "https://example.com/a");
+        assert_eq!(groups[0].nodes.len(), 2);
+        // a 订阅的 node-1 被禁用；同名禁用不波及 b 订阅的同名节点
+        assert!(groups[0].nodes[0].disabled);
+        assert!(!groups[0].nodes[1].disabled);
+        assert!(!groups[1].nodes[0].disabled);
+        assert_eq!(groups[0].nodes[0].server, "example.com");
+        assert_eq!(groups[0].nodes[0].server_port, 443);
+        assert_eq!(groups[0].nodes[0].node_type, "trojan");
+    }
+
+    #[tokio::test]
+    async fn get_sub_nodes_returns_empty_nodes_without_snapshot() {
+        let state = app_state(config_with_subs(&["https://example.com/a"]));
+
+        let Json(response) = get_sub_nodes(State(state)).await;
+
+        let groups = response.data.unwrap();
+        assert_eq!(groups.len(), 1);
+        assert!(groups[0].nodes.is_empty());
+    }
+
+    #[tokio::test]
+    async fn set_node_disabled_rejects_unknown_subscription() {
+        let state = ready_state(config_with_subs(&["https://example.com/a"]));
+
+        let result = set_node_disabled(
+            State(state),
+            disable_request("https://example.com/nope", "node-1", true),
+        )
+        .await;
+
+        let Err((status, _)) = result else {
+            panic!("unknown subscription must be rejected")
+        };
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn set_node_disabled_requires_fetched_snapshot() {
+        let state = ready_state(config_with_subs(&["https://example.com/a"]));
+
+        let result = set_node_disabled(
+            State(state),
+            disable_request("https://example.com/a", "node-1", true),
+        )
+        .await;
+
+        let Err((status, Json(body))) = result else {
+            panic!("missing snapshot must be rejected")
+        };
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert!(body.message.contains("尚未获取"));
+    }
+
+    #[tokio::test]
+    async fn set_node_disabled_rejects_unknown_node() {
+        let subs = ["https://example.com/a"];
+        let state = ready_state(config_with_subs(&subs));
+        let snapshot = snapshot_for(&subs, &[("https://example.com/a", "node-1")]);
+        save_sub_nodes_snapshot(&state, &snapshot).await.unwrap();
+
+        let result = set_node_disabled(
+            State(state),
+            disable_request("https://example.com/a", "nope", true),
+        )
+        .await;
+
+        let Err((status, _)) = result else {
+            panic!("unknown node must be rejected")
+        };
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn set_node_disabled_rejects_emptying_the_pool() {
+        // 唯一的订阅节点被禁用后节点池为空 → 生成非法 selector，必须在事务前拦住
+        let subs = ["https://example.com/a"];
+        let state = ready_state(config_with_subs(&subs));
+        let snapshot = snapshot_for(&subs, &[("https://example.com/a", "node-1")]);
+        save_sub_nodes_snapshot(&state, &snapshot).await.unwrap();
+
+        let result = set_node_disabled(
+            State(state),
+            disable_request("https://example.com/a", "node-1", true),
+        )
+        .await;
+
+        let Err((status, Json(body))) = result else {
+            panic!("disabling the last node must be rejected")
+        };
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert!(body.message.contains("不能禁用全部节点"));
+    }
+
+    #[tokio::test]
+    async fn set_node_disabled_allows_disabling_when_manual_nodes_remain() {
+        // 有手动节点时禁用唯一订阅节点不会空池——但成功路径会热应用起内核，
+        // 单测只验证它不被空池校验误拦（到 apply 前的错误一律是校验错误）
+        let subs = ["https://example.com/a"];
+        let mut config = config_with_subs(&subs);
+        config.nodes = vec![
+            r#"{"type":"trojan","tag":"manual","server":"m.example.com","server_port":443,"password":"x"}"#
+                .to_string(),
+        ];
+        let state = ready_state(config);
+        let snapshot = snapshot_for(&subs, &[("https://example.com/a", "node-1")]);
+        save_sub_nodes_snapshot(&state, &snapshot).await.unwrap();
+
+        let result = set_node_disabled(
+            State(state),
+            disable_request("https://example.com/a", "node-1", true),
+        )
+        .await;
+
+        // 不被 400 拦截即通过校验；apply 在测试环境失败（无内核）是可接受的
+        if let Err((status, _)) = result {
+            assert_ne!(status, StatusCode::BAD_REQUEST);
+        }
     }
 
     // 扫描依赖真实路径解析；开发与 CI 机器上都没有 clash-verge-rev → found=false。

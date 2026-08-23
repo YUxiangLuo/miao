@@ -2,10 +2,10 @@ import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, rs } from '@rstest/core'
 import { SubsCard } from './SubsCard'
-import type { SubStatus } from '../types/api'
+import { subMock } from '../testFixtures'
 
-const subs: SubStatus[] = [
-  { url: 'https://example.com/subscription-token-abcdef', success: true, node_count: 42, state: 'ready' },
+const subs = [
+  subMock({ url: 'https://example.com/subscription-token-abcdef', node_count: 42 }),
 ]
 
 function renderCard(overrides = {}) {

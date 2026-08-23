@@ -456,6 +456,7 @@ async fn unusable_config_is_persisted_and_stale_runtime_files_are_removed() {
             url: subscription_url.clone(),
             success: false,
             node_count: 0,
+            disabled_count: 0,
             state: crate::models::SubscriptionState::Failed,
             error: Some("fetch failed".to_string()),
         },

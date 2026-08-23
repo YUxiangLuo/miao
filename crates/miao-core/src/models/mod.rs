@@ -7,8 +7,8 @@ pub mod version;
 pub use api::{
     ApiResponse, ConnectivityResult, DeleteRuleRequest, McpRequest, NodeSelectRequest,
     RouteModeRequest, RuleInfo, RuleRequest, RuntimePhase, RuntimeWarning, RuntimeWarningSeverity,
-    StatusData, SubBatchRequest, SubBatchResult, SubRequest, SubStatus, SubscriptionState,
-    VergeImportItem, VergeImportResult,
+    SetNodeDisabledRequest, StatusData, SubBatchRequest, SubBatchResult, SubNodeInfo, SubNodesInfo,
+    SubRequest, SubStatus, SubscriptionState, VergeImportItem, VergeImportResult,
 };
 #[cfg(not(windows))]
 pub use api::{VpsDeployRequest, VpsDeployResponse};
@@ -73,6 +73,9 @@ mod typescript_contract {
         push_decl::<RuleInfo>(&mut output, &config);
         push_decl::<SubscriptionState>(&mut output, &config);
         push_decl::<SubStatus>(&mut output, &config);
+        push_decl::<SubNodeInfo>(&mut output, &config);
+        push_decl::<SubNodesInfo>(&mut output, &config);
+        push_decl::<SetNodeDisabledRequest>(&mut output, &config);
         push_decl::<VersionInfo>(&mut output, &config);
         push_decl::<SubRequest>(&mut output, &config);
         push_decl::<VergeImportItem>(&mut output, &config);

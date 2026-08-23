@@ -142,6 +142,34 @@ pub struct SubRequest {
     pub url: String,
 }
 
+/// 订阅详情弹窗用的单条订阅节点：展示字段 + 禁用标记。
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+pub struct SubNodeInfo {
+    pub name: String,
+    pub server: String,
+    pub server_port: u16,
+    pub node_type: String,
+    pub disabled: bool,
+}
+
+/// 一个订阅及其节点列表（快照里没有节点时 nodes 为空）。
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+pub struct SubNodesInfo {
+    pub url: String,
+    pub nodes: Vec<SubNodeInfo>,
+}
+
+/// 禁用/启用订阅节点：按订阅 URL + 节点名标识（同名节点连坐）。
+#[derive(Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+pub struct SetNodeDisabledRequest {
+    pub sub: String,
+    pub name: String,
+    pub disabled: bool,
+}
+
 /// clash-verge-rev 导入：单条订阅 + 是否已在 miao 配置中。
 #[derive(Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
@@ -249,6 +277,9 @@ pub struct SubStatus {
     pub url: String,
     pub success: bool,
     pub node_count: usize,
+    /// 该订阅被禁用的节点数（易变层 disabled_nodes 中匹配此订阅的条目数）
+    #[serde(default)]
+    pub disabled_count: usize,
     pub state: SubscriptionState,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[cfg_attr(test, ts(optional))]

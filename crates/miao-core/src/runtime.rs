@@ -1411,6 +1411,7 @@ proxies:
                 url: subscription,
                 success: true,
                 node_count: 99,
+                disabled_count: 0,
                 state: crate::models::SubscriptionState::Ready,
                 error: None,
             },

@@ -32,7 +32,7 @@ pub struct FetchedNode {
     pub outbound: serde_json::Value,
 }
 
-fn subscription_source_id(url: &str) -> String {
+pub fn subscription_source_id(url: &str) -> String {
     hex::encode(Sha256::digest(url.as_bytes()))
 }
 
@@ -245,6 +245,7 @@ async fn fetch_all_subs(
                 url: url.clone(),
                 success: false,
                 node_count: 0,
+                disabled_count: 0,
                 state: SubscriptionState::Pending,
                 error: None,
             });
@@ -360,6 +361,7 @@ async fn fetch_all_subs(
                     url: url.clone(),
                     success: count > 0,
                     node_count: count,
+                    disabled_count: 0,
                     state: if count > 0 {
                         SubscriptionState::Ready
                     } else {
@@ -372,6 +374,7 @@ async fn fetch_all_subs(
                 url: url.clone(),
                 success: false,
                 node_count: 0,
+                disabled_count: 0,
                 state: SubscriptionState::Failed,
                 error: Some(e),
             },
@@ -464,7 +467,7 @@ fn custom_rule_outbound_tags(custom_rules: &[String]) -> Vec<String> {
     tags
 }
 
-pub(super) fn collect_manual_outbounds(config: &Config) -> (Vec<serde_json::Value>, Vec<String>) {
+pub fn collect_manual_outbounds(config: &Config) -> (Vec<serde_json::Value>, Vec<String>) {
     use crate::services::node_parser::parse_node_json;
 
     let mut my_outbounds = vec![];

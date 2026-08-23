@@ -43,7 +43,17 @@ skipped: boolean, raw: string, };
 
 export type SubscriptionState = "pending" | "refreshing" | "ready" | "failed";
 
-export type SubStatus = { url: string, success: boolean, node_count: number, state: SubscriptionState, error?: string, };
+export type SubStatus = { url: string, success: boolean, node_count: number,
+/**
+ * 该订阅被禁用的节点数（易变层 disabled_nodes 中匹配此订阅的条目数）
+ */
+disabled_count: number, state: SubscriptionState, error?: string, };
+
+export type SubNodeInfo = { name: string, server: string, server_port: number, node_type: string, disabled: boolean, };
+
+export type SubNodesInfo = { url: string, nodes: Array<SubNodeInfo>, };
+
+export type SetNodeDisabledRequest = { sub: string, name: string, disabled: boolean, };
 
 export type VersionInfo = { current: string, latest: string | null, has_update: boolean, download_url: string | null, upgrade_supported: boolean, };
 

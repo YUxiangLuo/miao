@@ -8,7 +8,7 @@ use std::{
 use tracing::{error, info, warn};
 
 use crate::error::{AppError, AppResult};
-use crate::models::{Config, NodeSelect, RouteMode, RuntimePhase};
+use crate::models::{Config, DisabledNode, NodeSelect, RouteMode, RuntimePhase};
 use crate::services::{
     proxy::spawn_restore_last_proxy,
     singbox::{
@@ -935,6 +935,24 @@ pub async fn apply_route_mode(
             .await?
             .runtime_update(),
     ))
+}
+
+/// Caller must not already hold `config_update`.
+/// 禁用集整体替换走配置事务：本地语义变更，快照零网络重建。
+pub async fn apply_disabled_nodes(
+    state: &Arc<AppState>,
+    disabled_nodes: Vec<DisabledNode>,
+) -> AppResult<RuntimeUpdate> {
+    let _config_update = state.config_update.lock().await;
+    let old_config = state.config.read().await.clone();
+    if old_config.disabled_nodes == disabled_nodes {
+        return Ok(RuntimeUpdate::None);
+    }
+    let mut new_config = old_config.clone();
+    new_config.disabled_nodes = disabled_nodes;
+    Ok(apply_config_change(state, &old_config, &new_config)
+        .await?
+        .runtime_update())
 }
 
 /// Caller must not already hold `config_update`.
