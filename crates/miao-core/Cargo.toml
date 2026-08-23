@@ -28,7 +28,7 @@ tokio-tungstenite = "0.29"
 nix = { version = "0.29", features = ["signal", "user"] }
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.59", features = [
+windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
     # TODO: Win32_Security 疑似可删——全仓库无 Win32::Security 引用（CreateMutexW 等均传空安全属性）。
     # 删除前须在 Windows 真机 cargo build -p miao-desktop 验证，交叉 check 覆盖不到桌面壳。
