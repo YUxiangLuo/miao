@@ -10,7 +10,7 @@ use tokio::time::Duration;
 use crate::models::VpsDeployRequest;
 use crate::models::{
     BatchNodeRequest, DeleteNodeRequest, DeleteRuleRequest, McpRequest, NodeRequest, RuleRequest,
-    SubBatchRequest, SubRequest,
+    SetNodeDisabledRequest, SubBatchRequest, SubRequest,
 };
 use crate::responses::HandlerResult;
 use crate::state::AppState;
@@ -103,6 +103,23 @@ pub(super) async fn delete_subscription(
             }),
         )
         .await,
+    )
+}
+
+pub(super) async fn list_subscription_nodes(state: &Arc<AppState>) -> Result<JsonValue, String> {
+    let Json(response) = crate::handlers::subs::get_sub_nodes(State(state.clone())).await;
+    let groups = response_data(response)?;
+    Ok(json!({ "subscriptions": groups }))
+}
+
+pub(super) async fn set_subscription_node_disabled(
+    state: &Arc<AppState>,
+    args: &JsonValue,
+) -> Result<JsonValue, String> {
+    let request: SetNodeDisabledRequest =
+        serde_json::from_value(args.clone()).map_err(|err| format!("Invalid params: {err}"))?;
+    handler_payload(
+        crate::handlers::subs::set_node_disabled(State(state.clone()), Json(request)).await,
     )
 }
 

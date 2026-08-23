@@ -155,6 +155,27 @@ pub(super) fn tools_catalog() -> JsonValue {
             "annotations": read_only(),
         },
         {
+            "name": "list_subscription_nodes",
+            "description": "按订阅分组列出已获取的节点：名称、协议、服务器和禁用状态。数据来自最近一次成功拉取的快照，零网络；尚未获取成功的订阅节点列表为空。无副作用。",
+            "inputSchema": empty_schema(),
+            "annotations": read_only(),
+        },
+        {
+            "name": "set_subscription_node_disabled",
+            "description": "禁用或启用某个订阅节点（按订阅 URL + 节点名，同名节点连坐）。禁用后该节点从生成的 sing-box 配置中移除；服务运行时会热重载生效并短暂影响连接。不允许禁用后节点池为空（可先添加其他节点）。先用 list_subscription_nodes 取得精确的 sub 与 name。",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "sub": { "type": "string", "format": "uri", "description": "订阅 URL（与 list_subscriptions 返回一致）" },
+                    "name": { "type": "string", "description": "节点名" },
+                    "disabled": { "type": "boolean", "description": "true 禁用 / false 启用" }
+                },
+                "required": ["sub", "name", "disabled"],
+                "additionalProperties": false
+            },
+            "annotations": mutating(),
+        },
+        {
             "name": "list_nodes",
             "description": "列出运行时平铺节点池（订阅节点 + 手动节点）的名称、协议、来源和当前选择；不暴露 selector 分组。数据面未就绪时只能返回手动节点。无副作用。",
             "inputSchema": empty_schema(),

@@ -143,6 +143,10 @@ async fn handle_tool_call(
         "delete_subscription" => panel::delete_subscription(state, &args).await,
         "refresh_subscriptions" => tool_refresh_subscriptions(state).await,
         "scan_clash_verge" => panel::scan_clash_verge(state).await,
+        "list_subscription_nodes" => panel::list_subscription_nodes(state).await,
+        "set_subscription_node_disabled" => {
+            panel::set_subscription_node_disabled(state, &args).await
+        }
         "list_nodes" => tool_list_nodes(state).await,
         "list_manual_nodes" => panel::list_manual_nodes(state).await,
         "add_node" => panel::add_node(state, &args).await,
@@ -845,6 +849,8 @@ mod tests {
             "delete_subscription",
             "refresh_subscriptions",
             "scan_clash_verge",
+            "list_subscription_nodes",
+            "set_subscription_node_disabled",
             "list_nodes",
             "list_manual_nodes",
             "add_node",
@@ -1151,6 +1157,92 @@ mod tests {
             "https://example.com/sub?token=secret"
         );
         assert_eq!(payload["subscriptions"][0]["state"], "pending");
+    }
+
+    #[tokio::test]
+    async fn list_subscription_nodes_matches_panel_data() {
+        let mut config = Config {
+            subs: vec!["https://example.com/sub".to_string()],
+            ..Default::default()
+        };
+        config.disabled_nodes = vec![crate::models::DisabledNode {
+            sub: "https://example.com/sub".to_string(),
+            name: "node-1".to_string(),
+        }];
+        let state = state(config);
+        let snapshot = crate::services::config::SubNodesSnapshot {
+            version: 1,
+            subs: vec!["https://example.com/sub".to_string()],
+            node_names: vec!["node-1".to_string(), "node-2".to_string()],
+            outbounds: vec![
+                serde_json::json!({"type":"trojan","server":"a.example.com","server_port":443}),
+                serde_json::json!({"type":"vless","server":"b.example.com","server_port":8443}),
+            ],
+            source_ids: vec![
+                crate::services::config::subscription_source_id("https://example.com/sub"),
+                crate::services::config::subscription_source_id("https://example.com/sub"),
+            ],
+        };
+        crate::services::config::save_sub_nodes_snapshot(&state, &snapshot)
+            .await
+            .unwrap();
+
+        let response = call(
+            &state,
+            json!({
+                "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                "params": { "name": "list_subscription_nodes", "arguments": {} },
+            }),
+        )
+        .await;
+        let payload: JsonValue =
+            serde_json::from_str(response["result"]["content"][0]["text"].as_str().unwrap())
+                .unwrap();
+        let nodes = &payload["subscriptions"][0]["nodes"];
+        assert_eq!(nodes[0]["name"], "node-1");
+        assert_eq!(nodes[0]["disabled"], true);
+        assert_eq!(nodes[1]["disabled"], false);
+        assert_eq!(nodes[1]["server"], "b.example.com");
+    }
+
+    #[tokio::test]
+    async fn set_subscription_node_disabled_validates_params() {
+        let state = state(Config::default());
+        // 缺 disabled 字段 → 参数错误
+        let response = call(
+            &state,
+            json!({
+                "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                "params": { "name": "set_subscription_node_disabled", "arguments": { "sub": "https://example.com/sub", "name": "n" } },
+            }),
+        )
+        .await;
+        let text = response["error"]["message"]
+            .as_str()
+            .unwrap_or("")
+            .to_string()
+            + response["result"]["content"][0]["text"]
+                .as_str()
+                .unwrap_or("");
+        assert!(text.contains("Invalid params"), "unexpected: {text}");
+
+        // 订阅不存在 → handler 校验错误
+        let response = call(
+            &state,
+            json!({
+                "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                "params": { "name": "set_subscription_node_disabled", "arguments": { "sub": "https://example.com/nope", "name": "n", "disabled": true } },
+            }),
+        )
+        .await;
+        let text = response["error"]["message"]
+            .as_str()
+            .unwrap_or("")
+            .to_string()
+            + response["result"]["content"][0]["text"]
+                .as_str()
+                .unwrap_or("");
+        assert!(text.contains("订阅不存在"), "unexpected: {text}");
     }
 
     #[tokio::test]
