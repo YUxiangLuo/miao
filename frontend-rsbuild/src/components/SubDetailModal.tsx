@@ -66,6 +66,8 @@ export function SubDetailModal({ sub, onClose, onToggleNode }: SubDetailModalPro
   }
 
   const disabledCount = nodes?.filter((node) => node.disabled).length ?? 0
+  // 禁用节点排在最前面；组内保持订阅原始顺序（Array.sort 稳定）
+  const sortedNodes = nodes === null ? null : [...nodes].sort((a, b) => Number(b.disabled) - Number(a.disabled))
 
   // 移除失配的禁用条目（走「启用」路径按名字删除，不要求节点仍存在）
   const clearStale = async (name: string) => {
@@ -108,11 +110,11 @@ export function SubDetailModal({ sub, onClose, onToggleNode }: SubDetailModalPro
         <div className="sub-detail-list list-stack">
           {loadError
             ? <div className="empty-block">{loadError}</div>
-            : nodes === null
+            : sortedNodes === null
               ? null
-              : nodes.length === 0
+              : sortedNodes.length === 0
                 ? <div className="empty-block">暂无节点{sub.state === 'pending' ? '，等待首次获取' : ''}</div>
-                : nodes.map((node, index) => (
+                : sortedNodes.map((node, index) => (
                   <div key={`${node.name}-${index}`} className={classNames('list-row', 'sub-node-row', node.disabled && 'disabled')}>
                     <div className="list-row-content">
                       <div className="list-row-title" title={node.name}>{node.name}</div>

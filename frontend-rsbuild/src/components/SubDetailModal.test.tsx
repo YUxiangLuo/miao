@@ -59,6 +59,9 @@ describe('SubDetailModal', () => {
     expect(screen.getByText('hk.example.com:8443')).toBeInTheDocument()
     // 头部统计：共 2 个 · 禁用 1
     expect(screen.getByText('共 2 个节点 · 禁用 1')).toBeInTheDocument()
+    // 禁用节点排在最前面（日本 01 被禁用，尽管原始顺序在香港 01 之后）
+    const titles = [...document.querySelectorAll('.sub-node-row .list-row-title')].map((el) => el.textContent)
+    expect(titles).toEqual(['日本 01', '香港 01'])
   })
 
   it('toggles a node via onToggleNode and reloads the list', async () => {
