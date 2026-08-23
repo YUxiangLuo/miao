@@ -10,7 +10,7 @@ use crate::models::{
 use crate::responses::{status_error, success, success_no_data, HandlerResult};
 use crate::services::config::{
     apply_config_change, apply_disabled_nodes, collect_manual_outbounds, read_sub_nodes_snapshot,
-    regenerate_preserving_service_state, subscription_source_id,
+    regenerate_preserving_service_state, subscription_source_id, ConfigMutationError,
 };
 use crate::services::verge;
 use crate::state::AppState;
@@ -117,6 +117,8 @@ pub async fn set_node_disabled(
     }
 
     let old_config = state.config.read().await.clone();
+    // 锁外咨询性校验（快速 400 + 精确报错）；订阅存在性与空池校验在锁内闭包里
+    // 还会基于最新配置权威重查——上锁间隙的并发变更不会逃过校验
     if !old_config.subs.contains(&req.sub) {
         return Err(status_error(StatusCode::BAD_REQUEST, "订阅不存在"));
     }
@@ -126,47 +128,60 @@ pub async fn set_node_disabled(
             "订阅节点尚未获取，无法设置禁用",
         ));
     };
-    let entries: Vec<(&str, &str)> = snapshot
+    let entries: Vec<(String, String)> = snapshot
         .source_ids
         .iter()
         .zip(snapshot.node_names.iter())
-        .map(|(source, name)| (source.as_str(), name.as_str()))
+        .map(|(source, name)| (source.clone(), name.clone()))
         .collect();
     let source_id = subscription_source_id(&req.sub);
-    if !entries.contains(&(source_id.as_str(), req.name.as_str())) {
+    if !entries.contains(&(source_id, req.name.clone())) {
         return Err(status_error(StatusCode::BAD_REQUEST, "订阅中不存在该节点"));
     }
 
-    let mut disabled_nodes = old_config.disabled_nodes.clone();
-    if req.disabled {
-        if !disabled_nodes
-            .iter()
-            .any(|entry| entry.sub == req.sub && entry.name == req.name)
-        {
-            disabled_nodes.push(DisabledNode {
-                sub: req.sub.clone(),
-                name: req.name.clone(),
-            });
+    let sub = req.sub.clone();
+    let name = req.name.clone();
+    let disabled = req.disabled;
+    let result = apply_disabled_nodes(&state, move |config| {
+        if !config.subs.contains(&sub) {
+            return Err("订阅不存在".to_string());
         }
-        // selector/urltest 不允许空 outbounds；禁用后可用池（订阅剩余 + 有效手动节点）为空
-        // 会生成非法配置，sing-box check 失败前先用明确的 400 拦住
-        let disabled_keys: HashSet<(String, &str)> = disabled_nodes
-            .iter()
-            .map(|entry| (subscription_source_id(&entry.sub), entry.name.as_str()))
-            .collect();
-        let remaining = entries
-            .iter()
-            .filter(|(source, name)| !disabled_keys.contains(&(source.to_string(), name)))
-            .count();
-        let manual = collect_manual_outbounds(&old_config).0.len();
-        if remaining + manual == 0 {
-            return Err(status_error(StatusCode::BAD_REQUEST, "不能禁用全部节点"));
+        let mut next = config.disabled_nodes.clone();
+        if disabled {
+            if !next
+                .iter()
+                .any(|entry| entry.sub == sub && entry.name == name)
+            {
+                next.push(DisabledNode {
+                    sub: sub.clone(),
+                    name: name.clone(),
+                });
+            }
+            // selector/urltest 不允许空 outbounds；禁用后可用池（订阅剩余 + 有效手动节点）
+            // 为空会生成非法配置。锁内基于最新禁用集计算：并发禁用请求不会叠加出空池
+            let disabled_keys: HashSet<(String, &str)> = next
+                .iter()
+                .map(|entry| (subscription_source_id(&entry.sub), entry.name.as_str()))
+                .collect();
+            let remaining = entries
+                .iter()
+                .filter(|(source, node_name)| {
+                    !disabled_keys.contains(&(source.clone(), node_name.as_str()))
+                })
+                .count();
+            let manual = collect_manual_outbounds(config).0.len();
+            if remaining + manual == 0 {
+                return Err("不能禁用全部节点".to_string());
+            }
+        } else {
+            next.retain(|entry| !(entry.sub == sub && entry.name == name));
         }
-    } else {
-        disabled_nodes.retain(|entry| !(entry.sub == req.sub && entry.name == req.name));
-    }
+        config.disabled_nodes = next;
+        Ok(())
+    })
+    .await;
 
-    match apply_disabled_nodes(&state, disabled_nodes).await {
+    match result {
         Ok(update) => Ok(success_no_data(if update.updated() {
             if req.disabled {
                 "节点已禁用"
@@ -176,7 +191,12 @@ pub async fn set_node_disabled(
         } else {
             "节点状态未变化"
         })),
-        Err(e) => Err(status_error(StatusCode::INTERNAL_SERVER_ERROR, e)),
+        Err(ConfigMutationError::Rejected(message)) => {
+            Err(status_error(StatusCode::BAD_REQUEST, message))
+        }
+        Err(ConfigMutationError::Apply(e)) => {
+            Err(status_error(StatusCode::INTERNAL_SERVER_ERROR, e))
+        }
     }
 }
 

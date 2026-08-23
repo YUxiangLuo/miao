@@ -12,7 +12,7 @@ mod tests;
 pub use apply::{
     apply_config_change, apply_disabled_nodes, apply_node_select, apply_route_mode,
     install_prepared_runtime, refresh_subscriptions, regenerate_preserving_service_state,
-    RefreshEffect, RefreshPolicy, RuntimeUpdate, SubSource,
+    ConfigMutationError, RefreshEffect, RefreshPolicy, RuntimeUpdate, SubSource,
 };
 pub use generate::{
     collect_manual_outbounds, fetch_sub_nodes_if_current, gen_config_from_nodes,

@@ -8,7 +8,7 @@ use std::{
 use tracing::{error, info, warn};
 
 use crate::error::{AppError, AppResult};
-use crate::models::{Config, DisabledNode, NodeSelect, RouteMode, RuntimePhase};
+use crate::models::{Config, NodeSelect, RouteMode, RuntimePhase};
 use crate::services::{
     proxy::spawn_restore_last_proxy,
     singbox::{
@@ -917,42 +917,64 @@ pub async fn apply_config_change(
 
 /// Caller must not already hold `config_update`.
 /// Returns `(previous, runtime_update)` observed under that lock.
+/// 配置变更的错误两分：闭包拒绝（请求校验失败，调用方映射 400）与事务失败（500）。
+#[derive(Debug)]
+pub enum ConfigMutationError {
+    Rejected(String),
+    Apply(AppError),
+}
+
+impl std::fmt::Display for ConfigMutationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Rejected(message) => write!(f, "{message}"),
+            Self::Apply(err) => write!(f, "{err}"),
+        }
+    }
+}
+
+/// 「改配置 → 落盘 → 热应用」事务的统一入口：read-modify-write 整体在
+/// `config_update` 锁内完成——变更闭包基于锁内最新配置克隆计算，并发请求
+/// 不再可能基于锁外快照互相覆盖（丢失更新）。闭包返回 Err 则事务不开始；
+/// 变更后配置无变化则跳过事务（幂等免费）。
+async fn apply_config_mutation(
+    state: &Arc<AppState>,
+    mutate: impl FnOnce(&mut Config) -> Result<(), String>,
+) -> Result<RuntimeUpdate, ConfigMutationError> {
+    let _config_update = state.config_update.lock().await;
+    let old_config = state.config.read().await.clone();
+    let mut new_config = old_config.clone();
+    mutate(&mut new_config).map_err(ConfigMutationError::Rejected)?;
+    if new_config == old_config {
+        return Ok(RuntimeUpdate::None);
+    }
+    apply_config_change(state, &old_config, &new_config)
+        .await
+        .map(|effect| effect.runtime_update())
+        .map_err(ConfigMutationError::Apply)
+}
+
 pub async fn apply_route_mode(
     state: &Arc<AppState>,
     route_mode: RouteMode,
-) -> AppResult<(RouteMode, RuntimeUpdate)> {
-    let _config_update = state.config_update.lock().await;
-    let old_config = state.config.read().await.clone();
-    let previous = old_config.route_mode;
-    if previous == route_mode {
-        return Ok((previous, RuntimeUpdate::None));
-    }
-    let mut new_config = old_config.clone();
-    new_config.route_mode = route_mode;
-    Ok((
-        previous,
-        apply_config_change(state, &old_config, &new_config)
-            .await?
-            .runtime_update(),
-    ))
+) -> Result<(RouteMode, RuntimeUpdate), ConfigMutationError> {
+    let mut previous = RouteMode::default();
+    let update = apply_config_mutation(state, |config| {
+        previous = config.route_mode;
+        config.route_mode = route_mode;
+        Ok(())
+    })
+    .await?;
+    Ok((previous, update))
 }
 
 /// Caller must not already hold `config_update`.
-/// 禁用集整体替换走配置事务：本地语义变更，快照零网络重建。
+/// 禁用集变更闭包在锁内基于最新配置执行：增删条目与空池校验都是原子的。
 pub async fn apply_disabled_nodes(
     state: &Arc<AppState>,
-    disabled_nodes: Vec<DisabledNode>,
-) -> AppResult<RuntimeUpdate> {
-    let _config_update = state.config_update.lock().await;
-    let old_config = state.config.read().await.clone();
-    if old_config.disabled_nodes == disabled_nodes {
-        return Ok(RuntimeUpdate::None);
-    }
-    let mut new_config = old_config.clone();
-    new_config.disabled_nodes = disabled_nodes;
-    Ok(apply_config_change(state, &old_config, &new_config)
-        .await?
-        .runtime_update())
+    mutate: impl FnOnce(&mut Config) -> Result<(), String>,
+) -> Result<RuntimeUpdate, ConfigMutationError> {
+    apply_config_mutation(state, mutate).await
 }
 
 /// Caller must not already hold `config_update`.
@@ -961,18 +983,14 @@ pub async fn apply_disabled_nodes(
 pub async fn apply_node_select(
     state: &Arc<AppState>,
     node_select: NodeSelect,
-) -> AppResult<(NodeSelect, NodeSelect, RuntimeUpdate)> {
-    let _config_update = state.config_update.lock().await;
-    let old_config = state.config.read().await.clone();
-    let previous = old_config.node_select;
-    if previous == node_select {
-        return Ok((previous, previous, RuntimeUpdate::None));
-    }
-    let mut new_config = old_config.clone();
-    new_config.node_select = node_select;
-    let update = apply_config_change(state, &old_config, &new_config)
-        .await?
-        .runtime_update();
+) -> Result<(NodeSelect, NodeSelect, RuntimeUpdate), ConfigMutationError> {
+    let mut previous = NodeSelect::default();
+    let update = apply_config_mutation(state, |config| {
+        previous = config.node_select;
+        config.node_select = node_select;
+        Ok(())
+    })
+    .await?;
     let effective = state.config.read().await.node_select;
     Ok((previous, effective, update))
 }

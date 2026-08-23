@@ -1,12 +1,13 @@
 use super::apply::{
-    apply_config_change, config_apply_mode, config_changed_after_refresh, no_usable_nodes_warning,
-    persist_config_without_usable_nodes_at, sub_source_for, ConfigApplyMode, SubSource,
+    apply_config_change, apply_disabled_nodes, config_apply_mode, config_changed_after_refresh,
+    no_usable_nodes_warning, persist_config_without_usable_nodes_at, sub_source_for,
+    ConfigApplyMode, ConfigMutationError, RuntimeUpdate, SubSource,
 };
 use super::builder::{build_sing_box_config, filter_rules_with_missing_outbound, tun_inbound};
 use super::generate::{collect_manual_outbounds, runtime_config_node_tags};
 use super::persist::save_config_to;
 use crate::{
-    models::{Config, NodeSelect, Region, RouteMode, SubStatus},
+    models::{Config, DisabledNode, NodeSelect, Region, RouteMode, SubStatus},
     test_support::app_state,
 };
 use serde_json::json;
@@ -1130,4 +1131,49 @@ fn build_sing_box_config_falls_back_to_selector_when_region_empty() {
         built["outbounds"][0]["outbounds"].as_array().unwrap().len(),
         3
     );
+}
+
+#[tokio::test]
+async fn disabled_nodes_mutation_observes_latest_config_under_lock() {
+    // RMW 闭包必须基于锁内最新配置计算（并发安全的关键）：预置条目 x，
+    // 闭包观察到的禁用集必须包含 x，而不是锁外快照
+    let config = Config {
+        disabled_nodes: vec![DisabledNode {
+            sub: "https://example.com/a".to_string(),
+            name: "x".to_string(),
+        }],
+        ..Config::default()
+    };
+    let state = app_state(config);
+
+    let observed = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let observed_in_closure = observed.clone();
+    let result = apply_disabled_nodes(&state, move |config| {
+        observed_in_closure
+            .lock()
+            .unwrap()
+            .push(config.disabled_nodes.clone());
+        // 拒绝提交：不进入配置事务
+        Err("rejected by test".to_string())
+    })
+    .await;
+
+    assert!(matches!(result, Err(ConfigMutationError::Rejected(_))));
+    let seen = observed.lock().unwrap().clone();
+    drop(observed);
+    assert_eq!(seen.len(), 1);
+    assert_eq!(seen[0].len(), 1);
+    assert_eq!(seen[0][0].name, "x");
+    // 拒绝后运行配置未被污染
+    assert_eq!(state.config.read().await.disabled_nodes.len(), 1);
+}
+
+#[tokio::test]
+async fn disabled_nodes_noop_mutation_skips_transaction() {
+    // 变更后配置无变化 → 幂等早退，不落盘不触内核
+    let state = app_state(Config::default());
+
+    let update = apply_disabled_nodes(&state, |_| Ok(())).await.unwrap();
+
+    assert_eq!(update, RuntimeUpdate::None);
 }
