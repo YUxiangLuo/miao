@@ -293,9 +293,17 @@
 .list-row:last-child {
     border-bottom: none;
 }
-/* 手动节点行无前导元素，文本顶边略显局促：补一档微距做光学调整（+4px） */
+/* 手动节点行无前导元素，文本顶边略显局促：补一档微距做光学调整（+4px）。
+   布局与 .rule-row 同款网格：内容列自适应截断，协议徽章右对齐紧靠删除按钮，
+   各行徽章右缘形成一条垂直线。 */
 .list-row.node-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto var(--size-icon-btn-sm);
+    align-items: center;
     padding-left: calc(var(--space-3) + var(--space-0));
+}
+.list-row.node-row > .badge {
+    justify-self: end;
 }
 .list-row-content {
     min-width: 0;
