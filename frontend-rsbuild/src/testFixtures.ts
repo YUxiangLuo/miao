@@ -1,6 +1,6 @@
 // 测试夹具工厂：构造满足 API/Clash 类型的 mock，默认值与运行时零值一致。
 // 只被 *.test.* 引用；新增必填字段时在这里补默认值，测试只覆盖差异字段。
-import type { NodeInfo, RuleInfo, StatusData, SubNodeInfo, SubStatus } from './types/api'
+import type { NodeInfo, RuleInfo, StatusData, SubNodeInfo, SubNodesInfo, SubStatus } from './types/api'
 import type { ConnectionGroup, EnrichedConnection } from './types/clash'
 
 export function statusMock(overrides: Partial<StatusData> = {}): StatusData {
@@ -84,4 +84,8 @@ export function subNodeMock(overrides: Partial<SubNodeInfo> = {}): SubNodeInfo {
     disabled: false,
     ...overrides,
   }
+}
+
+export function subNodesInfoMock(overrides: Partial<SubNodesInfo> = {}): SubNodesInfo {
+  return { url: 'https://example.com/sub', nodes: [], stale_disabled: [], ...overrides }
 }

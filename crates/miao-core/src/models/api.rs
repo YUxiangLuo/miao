@@ -159,6 +159,8 @@ pub struct SubNodeInfo {
 pub struct SubNodesInfo {
     pub url: String,
     pub nodes: Vec<SubNodeInfo>,
+    /// 失配的禁用条目名（订阅刷新后节点改名/消失，条目不再生效），供面板展示与清理
+    pub stale_disabled: Vec<String>,
 }
 
 /// 禁用/启用订阅节点：按订阅 URL + 节点名标识（同名节点连坐）。

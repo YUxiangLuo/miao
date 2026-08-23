@@ -11,14 +11,30 @@ use crate::responses::{status_error, success, success_no_data, HandlerResult};
 use crate::services::config::{
     apply_config_change, apply_disabled_nodes, collect_manual_outbounds, read_sub_nodes_snapshot,
     regenerate_preserving_service_state, subscription_source_id, ConfigMutationError,
+    SubNodesSnapshot,
 };
 use crate::services::verge;
 use crate::state::AppState;
 use crate::validation::Validator;
 
+/// 快照中的 (source_id, 节点名) 集合：禁用条目「生效」的判据
+/// （订阅刷新后改名/消失的节点不再匹配任何条目，条目随之失效）
+fn snapshot_entry_set(snapshot: &SubNodesSnapshot) -> HashSet<(&str, &str)> {
+    snapshot
+        .source_ids
+        .iter()
+        .zip(snapshot.node_names.iter())
+        .map(|(source, name)| (source.as_str(), name.as_str()))
+        .collect()
+}
+
 pub async fn get_subs(State(state): State<Arc<AppState>>) -> Json<ApiResponse<Vec<SubStatus>>> {
     let config = state.config.read().await;
     let status_map = state.sub_status.lock().await;
+    // disabled_count 用生效口径：只统计匹配当前快照节点的条目；
+    // 失配条目（如机场的「剩余流量」信息节点改名后）不产生效果，不应计入
+    let snapshot = read_sub_nodes_snapshot(&state).await;
+    let live_entries = snapshot.as_ref().map(snapshot_entry_set);
 
     let subs_with_status: Vec<SubStatus> = config
         .subs
@@ -36,6 +52,15 @@ pub async fn get_subs(State(state): State<Arc<AppState>>) -> Json<ApiResponse<Ve
                 .disabled_nodes
                 .iter()
                 .filter(|entry| &entry.sub == url)
+                .filter(|entry| {
+                    let Some(live) = &live_entries else {
+                        return false;
+                    };
+                    live.contains(&(
+                        subscription_source_id(&entry.sub).as_str(),
+                        entry.name.as_str(),
+                    ))
+                })
                 .count();
             status
         })
@@ -93,9 +118,18 @@ pub async fn get_sub_nodes(
                     });
                 }
             }
+            // 失配的禁用条目：存在禁用记录但当前快照里已没有同名节点
+            let stale_disabled = config
+                .disabled_nodes
+                .iter()
+                .filter(|entry| subscription_source_id(&entry.sub) == source_id)
+                .filter(|entry| !nodes.iter().any(|node| node.name == entry.name))
+                .map(|entry| entry.name.clone())
+                .collect();
             SubNodesInfo {
                 url: url.clone(),
                 nodes,
+                stale_disabled,
             }
         })
         .collect();
@@ -122,21 +156,26 @@ pub async fn set_node_disabled(
     if !old_config.subs.contains(&req.sub) {
         return Err(status_error(StatusCode::BAD_REQUEST, "订阅不存在"));
     }
-    let Some(snapshot) = read_sub_nodes_snapshot(&state).await else {
-        return Err(status_error(
-            StatusCode::BAD_REQUEST,
-            "订阅节点尚未获取，无法设置禁用",
-        ));
-    };
-    let entries: Vec<(String, String)> = snapshot
-        .source_ids
-        .iter()
-        .zip(snapshot.node_names.iter())
-        .map(|(source, name)| (source.clone(), name.clone()))
-        .collect();
-    let source_id = subscription_source_id(&req.sub);
-    if !entries.contains(&(source_id, req.name.clone())) {
-        return Err(status_error(StatusCode::BAD_REQUEST, "订阅中不存在该节点"));
+    // 存在性校验只约束「禁用」；「启用/清理」按名字移除条目即可，
+    // 必须能清理已失配的条目（节点改名后快照里已不存在）
+    let mut entries: Vec<(String, String)> = Vec::new();
+    if req.disabled {
+        let Some(snapshot) = read_sub_nodes_snapshot(&state).await else {
+            return Err(status_error(
+                StatusCode::BAD_REQUEST,
+                "订阅节点尚未获取，无法设置禁用",
+            ));
+        };
+        entries = snapshot
+            .source_ids
+            .iter()
+            .zip(snapshot.node_names.iter())
+            .map(|(source, name)| (source.clone(), name.clone()))
+            .collect();
+        let source_id = subscription_source_id(&req.sub);
+        if !entries.contains(&(source_id, req.name.clone())) {
+            return Err(status_error(StatusCode::BAD_REQUEST, "订阅中不存在该节点"));
+        }
     }
 
     let sub = req.sub.clone();
@@ -467,19 +506,42 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn get_subs_reports_disabled_count() {
-        let mut config = config_with_subs(&["https://example.com/a", "https://example.com/b"]);
+    async fn get_subs_reports_effective_disabled_count() {
+        // 生效口径：只有匹配当前快照节点的条目才计数，失配条目不产生效果不计入
+        let subs = ["https://example.com/a", "https://example.com/b"];
+        let mut config = config_with_subs(&subs);
         config.disabled_nodes = vec![
             disabled_entry("https://example.com/a", "node-1"),
             disabled_entry("https://example.com/a", "node-2"),
+            disabled_entry("https://example.com/a", "剩余流量：45 GB"), // 快照里没有 → 失配
         ];
+        let state = app_state(config);
+        let snapshot = snapshot_for(
+            &subs,
+            &[
+                ("https://example.com/a", "node-1"),
+                ("https://example.com/a", "node-2"),
+                ("https://example.com/a", "剩余流量：44 GB"), // 订阅刷新后名字漂移
+            ],
+        );
+        save_sub_nodes_snapshot(&state, &snapshot).await.unwrap();
+
+        let Json(response) = get_subs(State(state)).await;
+
+        let subs_status = response.data.unwrap();
+        assert_eq!(subs_status[0].disabled_count, 2);
+        assert_eq!(subs_status[1].disabled_count, 0);
+    }
+
+    #[tokio::test]
+    async fn get_subs_counts_zero_disabled_without_snapshot() {
+        let mut config = config_with_subs(&["https://example.com/a"]);
+        config.disabled_nodes = vec![disabled_entry("https://example.com/a", "node-1")];
         let state = app_state(config);
 
         let Json(response) = get_subs(State(state)).await;
 
-        let subs = response.data.unwrap();
-        assert_eq!(subs[0].disabled_count, 2);
-        assert_eq!(subs[1].disabled_count, 0);
+        assert_eq!(response.data.unwrap()[0].disabled_count, 0);
     }
 
     #[tokio::test]
@@ -512,6 +574,26 @@ mod tests {
         assert_eq!(groups[0].nodes[0].server, "example.com");
         assert_eq!(groups[0].nodes[0].server_port, 443);
         assert_eq!(groups[0].nodes[0].node_type, "trojan");
+        assert!(groups[0].stale_disabled.is_empty());
+    }
+
+    #[tokio::test]
+    async fn get_sub_nodes_reports_stale_disabled_entries() {
+        let subs = ["https://example.com/a"];
+        let mut config = config_with_subs(&subs);
+        config.disabled_nodes = vec![
+            disabled_entry("https://example.com/a", "node-1"), // 生效中
+            disabled_entry("https://example.com/a", "已改名的节点"), // 失配
+        ];
+        let state = app_state(config);
+        let snapshot = snapshot_for(&subs, &[("https://example.com/a", "node-1")]);
+        save_sub_nodes_snapshot(&state, &snapshot).await.unwrap();
+
+        let Json(response) = get_sub_nodes(State(state)).await;
+
+        let groups = response.data.unwrap();
+        assert!(groups[0].nodes[0].disabled);
+        assert_eq!(groups[0].stale_disabled, vec!["已改名的节点".to_string()]);
     }
 
     #[tokio::test]
@@ -596,6 +678,42 @@ mod tests {
         };
         assert_eq!(status, StatusCode::BAD_REQUEST);
         assert!(body.message.contains("不能禁用全部节点"));
+    }
+
+    #[tokio::test]
+    async fn set_node_disabled_allows_clearing_stale_entry() {
+        // 启用/清理不校验节点存在：失配条目（节点改名后）必须能清掉。
+        // 条目不存在时 retain 无效果 → 幂等返回「未变化」，不触碰内核
+        let subs = ["https://example.com/a"];
+        let state = ready_state(config_with_subs(&subs));
+
+        let result = set_node_disabled(
+            State(state),
+            disable_request("https://example.com/a", "已改名的节点", false),
+        )
+        .await;
+
+        let Ok(Json(response)) = result else {
+            panic!("clearing a stale entry must not be rejected")
+        };
+        assert!(response.success);
+        assert_eq!(response.message, "节点状态未变化");
+    }
+
+    #[tokio::test]
+    async fn set_node_disabled_disallow_missing_sub_even_when_enabling() {
+        let state = ready_state(config_with_subs(&["https://example.com/a"]));
+
+        let result = set_node_disabled(
+            State(state),
+            disable_request("https://example.com/nope", "node-1", false),
+        )
+        .await;
+
+        let Err((status, _)) = result else {
+            panic!("unknown subscription must be rejected even when enabling")
+        };
+        assert_eq!(status, StatusCode::BAD_REQUEST);
     }
 
     #[tokio::test]

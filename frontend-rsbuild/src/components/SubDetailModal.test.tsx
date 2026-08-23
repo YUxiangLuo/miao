@@ -2,7 +2,7 @@ import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, rs } from '@rstest/core'
 import { SubDetailModal } from './SubDetailModal'
-import { subMock, subNodeMock } from '../testFixtures'
+import { subMock, subNodeMock, subNodesInfoMock } from '../testFixtures'
 import type { ApiResponse, SubNodesInfo } from '../types/api'
 
 const SUB_URL = 'https://example.com/subscription-token-abcdef'
@@ -42,14 +42,14 @@ describe('SubDetailModal', () => {
 
   it('loads and lists the nodes of the given subscription', async () => {
     stubSubNodesFetch([
-      { url: 'https://example.com/other', nodes: [subNodeMock({ name: '别家节点' })] },
-      {
+      subNodesInfoMock({ url: 'https://example.com/other', nodes: [subNodeMock({ name: '别家节点' })] }),
+      subNodesInfoMock({
         url: SUB_URL,
         nodes: [
           subNodeMock({ name: '香港 01', server: 'hk.example.com', server_port: 8443 }),
           subNodeMock({ name: '日本 01', node_type: 'hysteria2', disabled: true }),
         ],
-      },
+      }),
     ])
     renderModal()
 
@@ -67,7 +67,7 @@ describe('SubDetailModal', () => {
     rs.stubGlobal('fetch', rs.fn(async () => ({
       ok: true,
       json: async () => subNodesPayload([
-        { url: SUB_URL, nodes: [subNodeMock({ name: '香港 01', disabled })] },
+        subNodesInfoMock({ url: SUB_URL, nodes: [subNodeMock({ name: '香港 01', disabled })] }),
       ]),
     })))
     const onToggleNode = rs.fn(async (_sub: string, _name: string, next: boolean) => {
@@ -95,9 +95,41 @@ describe('SubDetailModal', () => {
   })
 
   it('shows an empty block when the subscription has no fetched nodes', async () => {
-    stubSubNodesFetch([{ url: SUB_URL, nodes: [] }])
+    stubSubNodesFetch([subNodesInfoMock({ url: SUB_URL })])
     renderModal()
 
     expect(await screen.findByText(/暂无节点/)).toBeInTheDocument()
+  })
+
+  it('lists stale disabled entries and clears them via the enable path', async () => {
+    const user = userEvent.setup()
+    let stale = ['剩余流量：45.17 GB']
+    rs.stubGlobal('fetch', rs.fn(async () => ({
+      ok: true,
+      json: async () => subNodesPayload([
+        subNodesInfoMock({
+          url: SUB_URL,
+          nodes: [subNodeMock({ name: '香港 01', disabled: true })],
+          stale_disabled: stale,
+        }),
+      ]),
+    })))
+    const onToggleNode = rs.fn(async () => {
+      stale = []
+      return true
+    })
+    renderModal({ onToggleNode })
+
+    // 失配条目单独成块展示，不计入生效禁用数
+    expect(await screen.findByText('剩余流量：45.17 GB')).toBeInTheDocument()
+    expect(screen.getByText('共 1 个节点 · 禁用 1')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: '移除失效禁用 剩余流量：45.17 GB' }))
+
+    // 走 disabled=false 的清理路径
+    expect(onToggleNode).toHaveBeenCalledWith(SUB_URL, '剩余流量：45.17 GB', false)
+    await waitFor(() => {
+      expect(screen.queryByText('剩余流量：45.17 GB')).not.toBeInTheDocument()
+    })
   })
 })

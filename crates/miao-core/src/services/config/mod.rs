@@ -18,13 +18,14 @@ pub use generate::{
     collect_manual_outbounds, fetch_sub_nodes_if_current, gen_config_from_nodes,
     known_rule_targets, subscription_source_id, GenConfigOutcome, SubFetchRetry,
 };
+#[cfg(test)]
+pub use persist::save_sub_nodes_snapshot;
 pub use persist::{
     cache_compatibility, has_config_cache, load_volatile_config_at, mark_legacy_cache_used,
     persist_effective_node_select, read_sub_nodes_snapshot, restore_config_from_cache,
     save_config_cache, save_stable_fields, volatile_config_path, CacheCompatibility,
+    SubNodesSnapshot,
 };
-#[cfg(test)]
-pub use persist::{save_sub_nodes_snapshot, SubNodesSnapshot};
 pub use region::runtime_config_matches_node_select;
 pub use warnings::{
     ALL_SUBS_FAILED_KEEP_CACHE, ALL_SUBS_FAILED_RETRY, DATA_PLANE_RETRYING,

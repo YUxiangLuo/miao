@@ -51,7 +51,11 @@ disabled_count: number, state: SubscriptionState, error?: string, };
 
 export type SubNodeInfo = { name: string, server: string, server_port: number, node_type: string, disabled: boolean, };
 
-export type SubNodesInfo = { url: string, nodes: Array<SubNodeInfo>, };
+export type SubNodesInfo = { url: string, nodes: Array<SubNodeInfo>,
+/**
+ * 失配的禁用条目名（订阅刷新后节点改名/消失，条目不再生效），供面板展示与清理
+ */
+stale_disabled: Array<string>, };
 
 export type SetNodeDisabledRequest = { sub: string, name: string, disabled: boolean, };
 

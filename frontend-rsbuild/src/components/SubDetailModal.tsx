@@ -18,6 +18,7 @@ export function SubDetailModal({ sub, onClose, onToggleNode }: SubDetailModalPro
   const titleId = useId()
   const dialogRef = useDialog(sub !== null, onClose)
   const [nodes, setNodes] = useState<SubNodeInfo[] | null>(null)
+  const [staleDisabled, setStaleDisabled] = useState<string[]>([])
   const [loadError, setLoadError] = useState('')
   // 正在切换的节点名：行级 busy，防止重复点击
   const [pendingNames, setPendingNames] = useState<ReadonlySet<string>>(new Set())
@@ -27,7 +28,9 @@ export function SubDetailModal({ sub, onClose, onToggleNode }: SubDetailModalPro
       const response = await fetch('/api/subs/nodes')
       const payload: ApiResponse<SubNodesInfo[]> = await response.json()
       if (payload.success && payload.data) {
-        setNodes(payload.data.find((group) => group.url === url)?.nodes ?? [])
+        const group = payload.data.find((item) => item.url === url)
+        setNodes(group?.nodes ?? [])
+        setStaleDisabled(group?.stale_disabled ?? [])
         setLoadError('')
       } else {
         setLoadError(payload.message || '加载节点列表失败')
@@ -41,6 +44,7 @@ export function SubDetailModal({ sub, onClose, onToggleNode }: SubDetailModalPro
   useEffect(() => {
     if (!sub) {
       setNodes(null)
+      setStaleDisabled([])
       setLoadError('')
       setPendingNames(new Set())
       return
@@ -62,6 +66,18 @@ export function SubDetailModal({ sub, onClose, onToggleNode }: SubDetailModalPro
   }
 
   const disabledCount = nodes?.filter((node) => node.disabled).length ?? 0
+
+  // 移除失配的禁用条目（走「启用」路径按名字删除，不要求节点仍存在）
+  const clearStale = async (name: string) => {
+    setPendingNames((prev) => new Set(prev).add(name))
+    const ok = await onToggleNode(sub.url, name, false)
+    if (ok) await load(sub.url)
+    setPendingNames((prev) => {
+      const next = new Set(prev)
+      next.delete(name)
+      return next
+    })
+  }
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -121,6 +137,28 @@ export function SubDetailModal({ sub, onClose, onToggleNode }: SubDetailModalPro
                   </div>
                 ))}
         </div>
+        {staleDisabled.length > 0 && (
+          <div className="sub-stale-block">
+            <div className="sub-detail-meta">已失效的禁用（订阅刷新后节点已改名/消失）：</div>
+            {staleDisabled.map((name) => (
+              <div key={name} className="list-row sub-stale-row">
+                <div className="list-row-content">
+                  <div className="list-row-meta" title={name}>{name}</div>
+                </div>
+                <button
+                  type="button"
+                  className="icon-button subtle"
+                  aria-label={`移除失效禁用 ${name}`}
+                  title="移除该失效禁用条目"
+                  disabled={pendingNames.has(name)}
+                  onClick={() => clearStale(name)}
+                >
+                  <X size={ICON.xs} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
         <div className="sub-detail-foot">
           禁用的节点不会出现在生成的配置中；同名节点会一起禁用。自定义规则若引用了被禁节点将被跳过。
         </div>
