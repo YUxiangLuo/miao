@@ -1104,6 +1104,11 @@ fn build_sing_box_config_uses_urltest_for_region_fastest() {
     assert_eq!(built["outbounds"][0]["outbounds"], json!(["日本-订阅"]));
     assert_eq!(built["outbounds"][0]["interval"], "2m");
     assert_eq!(built["outbounds"][0]["tolerance"], 30);
+    // 与 Clash API 测速端点同口径（sing-box API 层拒绝 http:// 测速 URL）
+    assert_eq!(
+        built["outbounds"][0]["url"],
+        "https://www.gstatic.com/generate_204"
+    );
     assert_eq!(built["outbounds"][0]["interrupt_exist_connections"], false);
     let tags: Vec<&str> = built["outbounds"]
         .as_array()

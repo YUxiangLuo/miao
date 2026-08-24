@@ -29,7 +29,9 @@ pub const MCP_PROTOCOL_VERSION: &str = "2026-07-28";
 /// 配置模板里唯一的 selector；全部节点的容器，对外不暴露
 const SELECTOR_TAG: &str = "proxy";
 const DELAY_TIMEOUT_MS: u64 = 3000;
-const DELAY_TEST_URL: &str = "http://www.gstatic.com/generate_204";
+/// 与 builder.rs 生成的 urltest 组测速目标一致；sing-box Clash API 会拒绝
+/// http:// 测速 URL 并回退到此 https 默认值，显式传它保证口径统一。
+const DELAY_TEST_URL: &str = "https://www.gstatic.com/generate_204";
 const DELAY_CONCURRENCY: usize = 6;
 /// 测速请求的 HTTP 层超时：探测本身 3s，留 2s 余量兜底 sing-box 卡顿
 const DELAY_HTTP_TIMEOUT: Duration = Duration::from_millis(DELAY_TIMEOUT_MS + 2000);

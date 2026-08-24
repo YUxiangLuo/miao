@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { CLASH_API_BASE } from '../utils'
+import { CLASH_API_BASE, DELAY_TEST_URL } from '../utils'
 import { useWebSocket } from './useWebSocket'
 import type { StatusData } from '../types/api'
 import type {
@@ -154,7 +154,7 @@ export function useDelays() {
   const testDelay = useCallback(async (clashApiBase: string, nodeName: string) => {
     setTestingNodes((prev) => ({ ...prev, [nodeName]: true }))
     try {
-      const response = await fetch(`${clashApiBase}/proxies/${encodeURIComponent(nodeName)}/delay?timeout=3000&url=http://www.gstatic.com/generate_204`)
+      const response = await fetch(`${clashApiBase}/proxies/${encodeURIComponent(nodeName)}/delay?timeout=3000&url=${DELAY_TEST_URL}`)
       if (!response.ok) {
         setDelays((prev) => ({ ...prev, [nodeName]: -1 }))
         return

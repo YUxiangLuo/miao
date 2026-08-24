@@ -5,6 +5,10 @@ import type { NodeType } from './types/api'
 export const API_HEADERS = { 'Content-Type': 'application/json' } as const
 export const CLASH_API_BASE = '/api/clash'
 export const POLL_INTERVAL = 3000
+// 延迟测试目标：必须用 https——sing-box 自 9d32fc9b（Use HTTPS URLTest source）起
+// 在 Clash API 测速端点拒绝 http:// URL（静默回退到此 https 默认值）；
+// 与 miao-core 生成的 urltest 组配置保持一致，保证手动测速与组内周期测速同口径。
+export const DELAY_TEST_URL = 'https://www.gstatic.com/generate_204'
 // /api/status 连续失败多少次判定为后端不可达：触发断线提示，并阻止把宕机误判成引导页
 export const STATUS_FAILURE_THRESHOLD = 3
 

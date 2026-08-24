@@ -141,6 +141,60 @@ describe('App onboarding integration', () => {
     expect(delayCalls[0]).not.toContain('node-b')
   })
 
+  it('does not auto-test delay in fastest mode and shows urltest history instead', async () => {
+    const delayCalls: string[] = []
+    const fetchMock = rs.fn(async (input) => {
+      const url = String(input)
+      if (url === '/api/status') {
+        return jsonResponse({
+          success: true,
+          data: { running: true, initializing: false, route_mode: 'rule', node_select: 'fastest_jp', pid: 1, uptime_secs: 10 },
+        })
+      }
+      if (url === '/api/nodes' || url === '/api/subs' || url === '/api/rules') {
+        return jsonResponse({ success: true, data: [] })
+      }
+      if (url === '/api/version') {
+        return jsonResponse({
+          success: true,
+          data: { current: 'v0.29.0', latest: null, has_update: false },
+        })
+      }
+      if (url === '/api/clash/connections') {
+        return jsonResponse({ connections: [], uploadTotal: 0, downloadTotal: 0 })
+      }
+      if (url === '/api/clash/proxies') {
+        return jsonResponse({
+          proxies: {
+            proxy: { type: 'URLTest', name: 'proxy', now: 'node-a', all: ['node-a', 'node-b'] },
+            'node-a': { type: 'Hysteria2', name: 'node-a', history: [{ time: '2026-01-01T00:00:00Z', delay: 96 }] },
+            'node-b': { type: 'Hysteria2', name: 'node-b', history: [{ time: '2026-01-01T00:00:00Z', delay: 120 }] },
+          },
+        })
+      }
+      if (url.startsWith('/api/clash/proxies/') && url.includes('/delay')) {
+        delayCalls.push(url)
+        return jsonResponse({ delay: 123 })
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    })
+
+    rs.stubGlobal('fetch', fetchMock)
+    stubMatchMedia()
+
+    render(<App />)
+
+    // urltest 模式下不主动测速（测速会触发 sing-box 对 urltest 组即时重选，
+    // 表现为面板打开几秒内连换节点），顶栏与节点瓷贴的延迟直接来自
+    // /proxies 里 urltest 周期测速沉淀的 history
+    expect(await screen.findByText('节点列表')).toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.getAllByText('96 ms').length).toBeGreaterThan(0)
+      expect(screen.getAllByText('120 ms').length).toBeGreaterThan(0)
+    })
+    expect(delayCalls).toHaveLength(0)
+  })
+
   it('asks for confirmation before switching route mode', async () => {
     let routeMode = 'rule'
     const fetchMock = rs.fn(async (input, options = {}) => {

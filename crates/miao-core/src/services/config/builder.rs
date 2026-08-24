@@ -239,7 +239,10 @@ fn apply_proxy_group(
             "type": "urltest",
             "tag": "proxy",
             "outbounds": member_values,
-            "url": "http://www.gstatic.com/generate_204",
+            // 测速目标与 Clash API 测速端点同口径：sing-box 自 9d32fc9b
+            // （Use HTTPS URLTest source）起在 API 层拒绝 http:// URL 并回退到
+            // 此 https 默认值，组配置若仍用 http 会造成两套测量口径。
+            "url": "https://www.gstatic.com/generate_204",
             "interval": "2m",
             "tolerance": 30,
             // 自动切换不打断已有连接：旧连接留在原节点自然结束，新连接走当前最快

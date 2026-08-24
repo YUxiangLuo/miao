@@ -74,15 +74,38 @@ export function useAppData() {
   const { delays, testingNodes, testingGroup, testDelay, testGroupDelays, clearDelays } = useDelays()
 
   // 进入首页且当前节点就绪后,自动测一次延迟;切换节点后也会测新节点。
-  // 每个节点每次会话只自动测一次,手动点测不受影响
+  // 每个节点每次会话只自动测一次,手动点测不受影响。
+  // fastest 模式(primaryGroup 为 URLTest)例外:Clash API 的单节点测延迟会让
+  // sing-box 对所在 urltest 组立即 PerformUpdateCheck——新鲜测量值与组内
+  // 陈旧历史一比较就会换节点,面板打开几秒内连换数次。该模式延迟改读 history。
   const autoTestedNodeRef = useRef('')
   const currentNodeName = primaryGroup?.now || ''
+  const isUrlTestGroup = primaryGroup?.type === 'URLTest'
   useEffect(() => {
-    if (!status.ready || status.initializing || !currentNodeName) return
+    if (!status.ready || status.initializing || !currentNodeName || isUrlTestGroup) return
     if (currentNodeName === autoTestedNodeRef.current) return
     autoTestedNodeRef.current = currentNodeName
     testDelay(clashApiBase, currentNodeName)
-  }, [status.ready, status.initializing, currentNodeName, clashApiBase, testDelay])
+  }, [status.ready, status.initializing, currentNodeName, isUrlTestGroup, clashApiBase, testDelay])
+
+  // fastest(urltest) 模式的延迟展示回落到 /proxies 自带的 urltest 周期测速
+  // history(每轮 fetchProxies 自动刷新);手动点测结果优先显示——它与 history
+  // 同源(sing-box 测完即写回),下一轮轮询即收敛。
+  const historyDelays = useMemo(() => {
+    if (!isUrlTestGroup) return {}
+    const map: Record<string, number> = {}
+    Object.entries(proxies || {}).forEach(([name, proxy]) => {
+      if (isClashProxyGroup(proxy?.type)) return
+      const delay = proxy?.history?.[0]?.delay
+      if (delay) map[name] = delay
+    })
+    return map
+  }, [proxies, isUrlTestGroup])
+
+  const displayDelays = useMemo(
+    () => ({ ...historyDelays, ...delays }),
+    [historyDelays, delays],
+  )
 
   const resetNodeForm = useCallback(() => {
     setNodeType('hysteria2')
@@ -199,7 +222,7 @@ export function useAppData() {
     fetchConnections,
     versionInfo,
     fetchVersion,
-    delays,
+    delays: displayDelays,
     testingNodes,
     testingGroup,
     testDelay,
