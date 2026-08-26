@@ -17,10 +17,10 @@ bun install
 bun run dev
 ```
 
-开发服务器默认把 `/api`（包括 WebSocket）代理到 `http://localhost:6161`。后端使用其他端口时：
+开发服务器默认监听 `127.0.0.1`，并把 `/api`（包括 WebSocket）代理到 `http://127.0.0.1:6161`。后端使用其他端口时：
 
 ```bash
-MIAO_API=http://localhost:7000 bun run dev
+MIAO_API=http://127.0.0.1:7000 bun run dev
 ```
 
 ## API 类型

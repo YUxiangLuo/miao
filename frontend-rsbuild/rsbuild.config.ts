@@ -2,8 +2,10 @@ import { defineConfig } from '@rsbuild/core';
 import { pluginReact } from '@rsbuild/plugin-react';
 
 // 本地开发时将控制面 API 代理到正在运行的 miao 后端。
-// 后端端口有调整时：MIAO_API=http://localhost:7000 bun run dev
-const miaoApiTarget = process.env.MIAO_API ?? 'http://localhost:6161';
+// 固定默认 loopback 为 IPv4：部分环境会把 localhost 优先解析到 ::1，
+// 而本机 miao 后端只监听 IPv4。后端端口有调整时：
+// MIAO_API=http://127.0.0.1:7000 bun run dev
+const miaoApiTarget = process.env.MIAO_API ?? 'http://127.0.0.1:6161';
 
 // Docs: https://rsbuild.rs/config/
 export default defineConfig(({ command }) => ({
@@ -31,6 +33,8 @@ export default defineConfig(({ command }) => ({
     inlineStyles: true,
   },
   server: {
+    // 避免 localhost 优先解析到 ::1 后，浏览器无法连接开发服务器。
+    host: '127.0.0.1',
     proxy: {
       '/api': {
         target: miaoApiTarget,
