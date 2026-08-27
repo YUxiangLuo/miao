@@ -21,7 +21,7 @@ pub async fn regenerate_preserving_service_state(
 ) -> AppResult<RuntimeUpdate> {
     // This is an explicit foreground refresh. Any startup fetch that began
     // earlier with the same subscription URLs must not publish after it.
-    state.sub_refresh_generation.fetch_add(1, Ordering::Relaxed);
+    let refresh_generation = state.sub_refresh_generation.fetch_add(1, Ordering::Relaxed) + 1;
     let should_run = state.service_should_run.load(Ordering::Relaxed);
     state.set_runtime_phase(RuntimePhase::ApplyingConfig);
 
@@ -35,7 +35,7 @@ pub async fn regenerate_preserving_service_state(
     let snapshot = snapshot_runtime_config(state).await;
     let bindings_snapshot = read_file_snapshot(&state.runtime_paths.node_bindings).await?;
 
-    let runtime_update = if should_run {
+    let (runtime_update, has_sub_nodes) = if should_run {
         match regenerate_and_restart_runtime(config, state, RefreshPolicy::Manual, SubSource::Fetch)
             .await
         {
@@ -57,7 +57,7 @@ pub async fn regenerate_preserving_service_state(
                     )
                     .await);
                 }
-                if refresh.effect == RefreshEffect::Activated {
+                let runtime_update = if refresh.effect == RefreshEffect::Activated {
                     finalize_started_config(config, state, outcome.has_sub_nodes).await;
                     refresh.runtime_update
                 } else {
@@ -65,7 +65,8 @@ pub async fn regenerate_preserving_service_state(
                     state.runtime_ready.store(true, Ordering::Relaxed);
                     state.set_runtime_phase(RuntimePhase::Ready);
                     RuntimeUpdate::None
-                }
+                };
+                (runtime_update, outcome.has_sub_nodes)
             }
             Err(err) => {
                 // Candidate validation never replaces config.json. Activation
@@ -90,7 +91,13 @@ pub async fn regenerate_preserving_service_state(
             }
         }
     } else {
-        match regenerate_without_restart_runtime(config, state, SubSource::Fetch).await {
+        let has_sub_nodes = match regenerate_without_restart_runtime(
+            config,
+            state,
+            SubSource::Fetch,
+        )
+        .await
+        {
             Ok(outcome) => {
                 if let Err(commit_err) = commit_foreground_refresh(config, state, &outcome).await {
                     error!(error = %commit_err, "Stopped runtime refresh could not commit effective preferences; restoring previous runtime files");
@@ -107,6 +114,7 @@ pub async fn regenerate_preserving_service_state(
                 }
                 update_config_warning(config, state, outcome.has_sub_nodes).await;
                 state.set_runtime_phase(RuntimePhase::Stopped);
+                outcome.has_sub_nodes
             }
             Err(err) => {
                 error!(error = %err, "Failed to regenerate config, restoring previous runtime config");
@@ -121,10 +129,15 @@ pub async fn regenerate_preserving_service_state(
                 .await;
                 return Err(err);
             }
-        }
-        RuntimeUpdate::None
+        };
+        (RuntimeUpdate::None, has_sub_nodes)
     };
 
+    if has_sub_nodes {
+        state
+            .sub_refresh_success_generation
+            .store(refresh_generation, Ordering::Relaxed);
+    }
     Ok(runtime_update)
 }
 

@@ -272,43 +272,135 @@ pub(super) async fn initialize_runtime_locked(config: &Config, state: &Arc<AppSt
     false
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum BackgroundRefreshStep {
+    Finished,
+    Retry,
+    Superseded,
+}
+
 /// 后台订阅刷新（快速通道启动后调用）。
-/// 阶段 1 不持锁拉取订阅节点集：绝对预算 20s，不阻塞面板写操作；
+/// 阶段 1 不持锁拉取订阅节点集：首次有绝对预算 20s，不阻塞面板写操作；
 /// 阶段 2 持锁落地：拉取期间订阅列表被改过（面板编辑已按新配置自行应用）
 /// 或服务被显式停止，则放弃本次刷新。
-/// 机制全部收敛在 services::config::refresh_subscriptions；这里只按 outcome 决定告警与收尾。
+///
+/// 缓存、快照或手动节点已让数据面就绪时，启动刷新失败不能就此停止：开机
+/// 早期 DNS、DHCP 或默认路由可能在 20s 预算后才可用。失败后在保持当前
+/// 配置运行的同时按 5–60s 退避继续单次拉取，直到成功。前台刷新会淘汰
+/// 正在进行的旧请求；若前台仍未取到订阅节点，后台采用新 generation 继续恢复。
 pub(super) async fn refresh_subscriptions_in_background(config: &Config, state: &Arc<AppState>) {
-    let refresh_generation = state.sub_refresh_generation.load(Ordering::Relaxed);
-    let background_phase = if config.subs.is_empty() {
+    let mut refresh_generation = state.sub_refresh_generation.load(Ordering::Relaxed);
+    let mut retry = SubFetchRetry::Startup;
+    let mut delay = STARTUP_RECOVERY_INITIAL_DELAY;
+
+    loop {
+        match background_subscription_refresh_once(config, state, refresh_generation, retry).await {
+            BackgroundRefreshStep::Finished => return,
+            BackgroundRefreshStep::Retry => {}
+            BackgroundRefreshStep::Superseded => {
+                let Some(generation) =
+                    resume_after_foreground_refresh(config, state, refresh_generation).await
+                else {
+                    return;
+                };
+                refresh_generation = generation;
+            }
+        }
+
+        info!(
+            delay_secs = delay.as_secs(),
+            "Startup subscription refresh will retry in the background"
+        );
+        tokio::time::sleep(delay).await;
+        if state.sub_refresh_generation.load(Ordering::Relaxed) != refresh_generation {
+            let Some(generation) =
+                resume_after_foreground_refresh(config, state, refresh_generation).await
+            else {
+                return;
+            };
+            refresh_generation = generation;
+        }
+        delay = next_startup_recovery_delay(delay);
+        // 后续已有外层持续退避；每轮只请求一次，避免永久坏订阅每分钟触发
+        // 一整组启动预算内重试。
+        retry = SubFetchRetry::None;
+    }
+}
+
+/// 等待取代后台请求的前台事务结束。前台拿到并提交了订阅节点则后台完成；
+/// 前台请求本身结束但仍无订阅节点时，只淘汰旧请求并采用新 generation 续跑。
+async fn resume_after_foreground_refresh(
+    startup_config: &Config,
+    state: &Arc<AppState>,
+    previous_generation: u64,
+) -> Option<u64> {
+    let _config_update = state.config_update.lock().await;
+    let current_generation = state.sub_refresh_generation.load(Ordering::Relaxed);
+    if current_generation == previous_generation {
+        return Some(current_generation);
+    }
+    if !state.service_should_run.load(Ordering::Relaxed) {
+        info!("Service stopped while foreground subscription refresh was running");
+        return None;
+    }
+    let current = state.config.read().await;
+    if current.subs != startup_config.subs || current.subs.is_empty() {
+        info!("Subscriptions changed while foreground refresh superseded startup recovery");
+        return None;
+    }
+    if state.sub_refresh_success_generation.load(Ordering::Relaxed) == current_generation {
+        info!("Foreground subscription refresh succeeded; startup recovery is complete");
+        return None;
+    }
+
+    info!("Foreground subscription refresh got no usable subscription nodes; resuming startup recovery");
+    Some(current_generation)
+}
+
+async fn background_subscription_refresh_once(
+    startup_config: &Config,
+    state: &Arc<AppState>,
+    refresh_generation: u64,
+    retry: SubFetchRetry,
+) -> BackgroundRefreshStep {
+    if state.sub_refresh_generation.load(Ordering::Relaxed) != refresh_generation {
+        return BackgroundRefreshStep::Superseded;
+    }
+    if !state.service_should_run.load(Ordering::Relaxed) {
+        info!("Service stopped before background refresh; skipping");
+        return BackgroundRefreshStep::Finished;
+    }
+    let before_fetch = state.config.read().await.clone();
+    if before_fetch.subs != startup_config.subs {
+        info!("Subscriptions changed before background refresh; skipping");
+        return BackgroundRefreshStep::Finished;
+    }
+
+    let background_phase = if before_fetch.subs.is_empty() {
         RuntimePhase::Validating
     } else {
         RuntimePhase::RefreshingSubscriptions
     };
     state.set_runtime_phase(background_phase);
-    let nodes =
-        fetch_sub_nodes_if_current(config, state, SubFetchRetry::Startup, refresh_generation).await;
+    let nodes = fetch_sub_nodes_if_current(&before_fetch, state, retry, refresh_generation).await;
 
     let _config_update = state.config_update.lock().await;
     if state.sub_refresh_generation.load(Ordering::Relaxed) != refresh_generation {
-        info!("Startup subscription refresh was superseded by a foreground refresh; skipping");
-        return;
+        return BackgroundRefreshStep::Superseded;
     }
     let current = state.config.read().await.clone();
-    if current.subs != config.subs {
+    if current.subs != startup_config.subs {
         info!(
             "Subscriptions changed during background refresh; skipping (panel edit already applied)"
         );
-        return;
+        return BackgroundRefreshStep::Finished;
     }
-    if !state
-        .service_should_run
-        .load(std::sync::atomic::Ordering::Relaxed)
-    {
+    if !state.service_should_run.load(Ordering::Relaxed) {
         info!("Service stopped during background refresh; skipping");
-        return;
+        return BackgroundRefreshStep::Finished;
     }
 
-    match refresh_subscriptions(
+    let step = match refresh_subscriptions(
         &current,
         state,
         RefreshPolicy::Startup,
@@ -321,12 +413,13 @@ pub(super) async fn refresh_subscriptions_in_background(config: &Config, state: 
                 info!("sing-box activated refreshed subscriptions");
                 save_config_cache(state).await;
                 *state.config_warning.lock().await =
-                    if !config.node_select.is_manual() && outcome.node_select.is_manual() {
+                    if !current.node_select.is_manual() && outcome.node_select.is_manual() {
                         Some(REGION_FALLBACK.to_string())
                     } else {
                         None
                     };
                 spawn_restore_last_proxy(state);
+                BackgroundRefreshStep::Finished
             }
             RefreshEffect::SkippedUnchanged => {
                 // This also upgrades a one-time legacy cache marker to a
@@ -334,29 +427,46 @@ pub(super) async fn refresh_subscriptions_in_background(config: &Config, state: 
                 // the validated running cache.
                 save_config_cache(state).await;
                 *state.config_warning.lock().await =
-                    if !config.node_select.is_manual() && outcome.node_select.is_manual() {
+                    if !current.node_select.is_manual() && outcome.node_select.is_manual() {
                         Some(REGION_FALLBACK.to_string())
                     } else {
                         None
                     };
+                BackgroundRefreshStep::Finished
             }
             RefreshEffect::KeptRunningOnTotalFailure => {
                 warn!("{ALL_SUBS_FAILED_KEEP_CACHE}");
                 *state.config_warning.lock().await = Some(ALL_SUBS_FAILED_KEEP_CACHE.to_string());
+                if current.subs.is_empty() {
+                    BackgroundRefreshStep::Finished
+                } else {
+                    BackgroundRefreshStep::Retry
+                }
             }
             RefreshEffect::KeptRunningOnValidationFailure => {
-                error!("Refreshed config failed validation; keeping cached config");
+                error!("Refreshed config failed validation; keeping current config");
                 *state.config_warning.lock().await = Some(REFRESH_VALIDATION_FAILED.to_string());
+                if current.subs.is_empty() {
+                    BackgroundRefreshStep::Finished
+                } else {
+                    BackgroundRefreshStep::Retry
+                }
             }
         },
         Err(err) => {
             warn!(error = %err, "Background subscription refresh failed");
             *state.config_warning.lock().await = Some(REFRESH_FAILED_KEEP_CACHE.to_string());
+            if current.subs.is_empty() {
+                BackgroundRefreshStep::Finished
+            } else {
+                BackgroundRefreshStep::Retry
+            }
         }
-    }
+    };
     if state.runtime_phase() == background_phase {
         state.set_runtime_phase(RuntimePhase::Ready);
     }
+    step
 }
 
 #[cfg(not(test))]

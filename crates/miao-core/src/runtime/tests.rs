@@ -125,6 +125,92 @@ proxies:
 }
 
 #[cfg(unix)]
+async fn eventually_available_subscription_server(
+    failures: usize,
+) -> (String, std::sync::Arc<std::sync::atomic::AtomicUsize>) {
+    use axum::{http::StatusCode, routing::get, Router};
+    use std::sync::atomic::Ordering;
+
+    const BODY: &str = r#"
+proxies:
+  - name: refreshed-sub-node
+    type: hysteria2
+    server: 127.0.0.1
+    port: 443
+    password: secret
+"#;
+    let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let calls_for_handler = calls.clone();
+    let app = Router::new().route(
+        "/sub",
+        get(move || {
+            let calls = calls_for_handler.clone();
+            async move {
+                let attempt = calls.fetch_add(1, Ordering::Relaxed) + 1;
+                let status = if attempt <= failures {
+                    StatusCode::SERVICE_UNAVAILABLE
+                } else {
+                    StatusCode::OK
+                };
+                (status, BODY)
+            }
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    (format!("http://{addr}/sub"), calls)
+}
+
+#[cfg(unix)]
+async fn superseding_subscription_server(
+    first_accepted: std::sync::Arc<tokio::sync::Notify>,
+    release_first: std::sync::Arc<tokio::sync::Notify>,
+) -> (String, std::sync::Arc<std::sync::atomic::AtomicUsize>) {
+    use axum::{http::StatusCode, routing::get, Router};
+    use std::sync::atomic::Ordering;
+
+    const BODY: &str = r#"
+proxies:
+  - name: recovered-after-foreground-failure
+    type: hysteria2
+    server: 127.0.0.1
+    port: 443
+    password: secret
+"#;
+    let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let calls_for_handler = calls.clone();
+    let app = Router::new().route(
+        "/sub",
+        get(move || {
+            let calls = calls_for_handler.clone();
+            let first_accepted = first_accepted.clone();
+            let release_first = release_first.clone();
+            async move {
+                let attempt = calls.fetch_add(1, Ordering::Relaxed) + 1;
+                match attempt {
+                    1 => {
+                        first_accepted.notify_one();
+                        release_first.notified().await;
+                        (StatusCode::SERVICE_UNAVAILABLE, BODY)
+                    }
+                    2 => (StatusCode::SERVICE_UNAVAILABLE, BODY),
+                    _ => (StatusCode::OK, BODY),
+                }
+            }
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    (format!("http://{addr}/sub"), calls)
+}
+
+#[cfg(unix)]
 async fn refusing_sub_url() -> String {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -253,6 +339,133 @@ async fn matching_node_snapshot_starts_before_any_subscription_request() {
         .await
         .unwrap();
     assert!(active.contains("snapshot-local"));
+
+    crate::services::singbox::stop_sing_internal(&state).await;
+    let _ = tokio::fs::remove_dir_all(root).await;
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn manual_node_startup_keeps_retrying_subscriptions_after_the_initial_budget() {
+    use std::sync::atomic::Ordering;
+
+    // 测试启动预算共请求三次（首次 + 两次短退避）；第四次只有外层持续
+    // 重试存在时才会发生。模拟 /tmp 已随重启清空，但 config.yaml 仍有手动节点。
+    let (subscription, calls) = eventually_available_subscription_server(3).await;
+    let config = crate::models::Config {
+        subs: vec![subscription.clone()],
+        nodes: vec![serde_json::json!({
+            "type": "hysteria2",
+            "tag": "manual-startup-node",
+            "server": "192.0.2.1",
+            "server_port": 8443,
+            "password": "secret"
+        })
+        .to_string()],
+        ..crate::models::Config::default()
+    };
+    let (state, root) = local_startup_test_state(config.clone(), "manual-refresh-retry").await;
+
+    assert!(!state.runtime_paths.config_cache.exists());
+    assert!(!state.runtime_paths.sub_nodes_snapshot.exists());
+    assert!(initialize_runtime_locked(&config, &state).await);
+    assert!(state.runtime_ready.load(Ordering::Relaxed));
+
+    tokio::time::timeout(
+        std::time::Duration::from_secs(3),
+        super::refresh_subscriptions_in_background(&config, &state),
+    )
+    .await
+    .expect("manual-node startup refresh must recover after its initial retry budget");
+
+    assert!(calls.load(Ordering::Relaxed) >= 4);
+    assert!(state.runtime_ready.load(Ordering::Relaxed));
+    assert_eq!(state.runtime_phase(), crate::models::RuntimePhase::Ready);
+    assert!(state.config_warning.lock().await.is_none());
+    assert_eq!(
+        state
+            .sub_status
+            .lock()
+            .await
+            .get(&subscription)
+            .map(|status| (status.success, status.node_count)),
+        Some((true, 1))
+    );
+    let refreshed_snapshot = tokio::fs::read_to_string(&state.runtime_paths.sub_nodes_snapshot)
+        .await
+        .unwrap();
+    assert!(refreshed_snapshot.contains("refreshed-sub-node"));
+
+    crate::services::singbox::stop_sing_internal(&state).await;
+    let _ = tokio::fs::remove_dir_all(root).await;
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn failed_foreground_refresh_does_not_cancel_startup_subscription_recovery() {
+    use std::sync::atomic::Ordering;
+
+    let first_accepted = std::sync::Arc::new(tokio::sync::Notify::new());
+    let release_first = std::sync::Arc::new(tokio::sync::Notify::new());
+    let (subscription, calls) =
+        superseding_subscription_server(first_accepted.clone(), release_first.clone()).await;
+    let config = crate::models::Config {
+        subs: vec![subscription.clone()],
+        nodes: vec![serde_json::json!({
+            "type": "hysteria2",
+            "tag": "manual-during-foreground-refresh",
+            "server": "192.0.2.2",
+            "server_port": 8443,
+            "password": "secret"
+        })
+        .to_string()],
+        ..crate::models::Config::default()
+    };
+    let (state, root) =
+        local_startup_test_state(config.clone(), "foreground-refresh-failure").await;
+    assert!(initialize_runtime_locked(&config, &state).await);
+
+    let background_state = state.clone();
+    let background_config = config.clone();
+    let background = tokio::spawn(async move {
+        super::refresh_subscriptions_in_background(&background_config, &background_state).await;
+    });
+    first_accepted.notified().await;
+
+    // 模拟用户在第一次启动刷新尚未返回时点击手动刷新。第二个请求失败；因为
+    // 手动节点仍可生成配置，HTTP handler 会完成，但没有获取到任何订阅节点。
+    let config_update = state.config_update.lock().await;
+    crate::services::config::regenerate_preserving_service_state(&config, &state)
+        .await
+        .unwrap();
+    drop(config_update);
+    assert_eq!(calls.load(Ordering::Relaxed), 2);
+    assert_eq!(
+        state
+            .sub_status
+            .lock()
+            .await
+            .get(&subscription)
+            .map(|status| status.success),
+        Some(false)
+    );
+
+    release_first.notify_one();
+    tokio::time::timeout(std::time::Duration::from_secs(3), background)
+        .await
+        .expect("startup recovery must continue after a failed foreground fetch")
+        .unwrap();
+
+    assert!(calls.load(Ordering::Relaxed) >= 3);
+    assert_eq!(
+        state
+            .sub_status
+            .lock()
+            .await
+            .get(&subscription)
+            .map(|status| (status.success, status.node_count)),
+        Some((true, 1))
+    );
 
     crate::services::singbox::stop_sing_internal(&state).await;
     let _ = tokio::fs::remove_dir_all(root).await;
@@ -450,7 +663,10 @@ async fn foreground_refresh_supersedes_an_older_startup_fetch() {
     });
     accepted.notified().await;
 
-    state.sub_refresh_generation.fetch_add(1, Ordering::Relaxed);
+    let foreground_generation = state.sub_refresh_generation.fetch_add(1, Ordering::Relaxed) + 1;
+    state
+        .sub_refresh_success_generation
+        .store(foreground_generation, Ordering::Relaxed);
     state.sub_status.lock().await.insert(
         subscription.clone(),
         crate::models::SubStatus {

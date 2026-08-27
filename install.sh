@@ -110,12 +110,15 @@ candidate_unit="$work_dir/miao.service"
 cat > "$candidate_unit" <<'EOF'
 [Unit]
 Description=Miao transparent proxy (embedded sing-box)
-After=network.target
+# 冷启动时优先等待网络管理器完成链路/DHCP，减少第一次订阅刷新与默认路由竞速。
+# Wants 而非 Requires：wait-online 超时/失败后仍启动，运行时后台重试继续兜底。
+Wants=network-online.target
+After=network-online.target
 
 [Service]
 Type=simple
-# 面板必须先可访问；网络/DHCP 尚未就绪时由 miao 的后台订阅重试负责，
-# 不在 ExecStartPre 中阻塞整个进程和控制面板。
+# systemctl restart 时 network-online.target 已是 active，不能代表当前网络可用；
+# 因此这里只优化冷启动，断网恢复仍由 miao 的后台订阅重试负责。
 ExecStart=/usr/local/bin/miao
 WorkingDirectory=/etc/miao
 Restart=on-failure
