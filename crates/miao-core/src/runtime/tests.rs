@@ -133,7 +133,7 @@ async fn eventually_available_subscription_server(
 
     const BODY: &str = r#"
 proxies:
-  - name: refreshed-sub-node
+  - name: 日本-refreshed-sub-node
     type: hysteria2
     server: 127.0.0.1
     port: 443
@@ -362,6 +362,7 @@ async fn manual_node_startup_keeps_retrying_subscriptions_after_the_initial_budg
             "password": "secret"
         })
         .to_string()],
+        node_select: crate::models::NodeSelect::Fastest(crate::models::Region::Jp),
         ..crate::models::Config::default()
     };
     let (state, root) = local_startup_test_state(config.clone(), "manual-refresh-retry").await;
@@ -370,6 +371,16 @@ async fn manual_node_startup_keeps_retrying_subscriptions_after_the_initial_budg
     assert!(!state.runtime_paths.sub_nodes_snapshot.exists());
     assert!(initialize_runtime_locked(&config, &state).await);
     assert!(state.runtime_ready.load(Ordering::Relaxed));
+    assert_eq!(
+        state.config.read().await.node_select,
+        crate::models::NodeSelect::Manual,
+        "manual-only local material should temporarily fall back"
+    );
+    assert_eq!(
+        *state.node_select_preference.read().await,
+        crate::models::NodeSelect::Fastest(crate::models::Region::Jp),
+        "the requested strategy must survive the effective fallback"
+    );
 
     tokio::time::timeout(
         std::time::Duration::from_secs(3),
@@ -381,6 +392,11 @@ async fn manual_node_startup_keeps_retrying_subscriptions_after_the_initial_budg
     assert!(calls.load(Ordering::Relaxed) >= 4);
     assert!(state.runtime_ready.load(Ordering::Relaxed));
     assert_eq!(state.runtime_phase(), crate::models::RuntimePhase::Ready);
+    assert_eq!(
+        state.config.read().await.node_select,
+        crate::models::NodeSelect::Fastest(crate::models::Region::Jp),
+        "background refresh should reapply the requested regional strategy"
+    );
     assert!(state.config_warning.lock().await.is_none());
     assert_eq!(
         state
@@ -754,6 +770,122 @@ fn resolve_log_path_honors_explicit_override() {
         ..RuntimeOptions::default()
     };
     assert_eq!(super::resolve_log_path(&options), Some(path));
+}
+
+#[tokio::test]
+async fn spawn_server_restores_persisted_node_selection_strategy() {
+    let config_path = unique_test_config_path();
+    let volatile_path = unique_test_volatile_path();
+    let runtime_dir = unique_test_runtime_dir();
+    tokio::fs::create_dir_all(&runtime_dir).await.unwrap();
+    tokio::fs::write(runtime_dir.join(".node_select"), "fastest_jp\n")
+        .await
+        .unwrap();
+    tokio::fs::write(&volatile_path, "{}\n").await.unwrap();
+
+    let handle = spawn_server(RuntimeOptions {
+        open_browser: false,
+        install_tracing: false,
+        bind_port: Some(0),
+        port_fallback: false,
+        config_path: Some(config_path.clone()),
+        volatile_path: Some(volatile_path.clone()),
+        skip_extract: true,
+        runtime_dir: Some(runtime_dir.clone()),
+        log_path: None,
+    })
+    .await
+    .expect("spawn panel");
+
+    let response = reqwest::get(format!("{}/api/status", handle.url()))
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(response.contains("\"node_select\":\"fastest_jp\""));
+
+    handle.shutdown().await;
+    let _ = tokio::fs::remove_file(config_path).await;
+    let _ = tokio::fs::remove_file(volatile_path).await;
+    let _ = tokio::fs::remove_dir_all(runtime_dir).await;
+}
+
+#[tokio::test]
+async fn spawn_server_migrates_existing_volatile_node_selection() {
+    let config_path = unique_test_config_path();
+    let volatile_path = unique_test_volatile_path();
+    let runtime_dir = unique_test_runtime_dir();
+    tokio::fs::write(&volatile_path, "node_select: fastest_sg\n")
+        .await
+        .unwrap();
+
+    let handle = spawn_server(RuntimeOptions {
+        open_browser: false,
+        install_tracing: false,
+        bind_port: Some(0),
+        port_fallback: false,
+        config_path: Some(config_path.clone()),
+        volatile_path: Some(volatile_path.clone()),
+        skip_extract: true,
+        runtime_dir: Some(runtime_dir.clone()),
+        log_path: None,
+    })
+    .await
+    .expect("spawn panel");
+
+    assert_eq!(
+        tokio::fs::read_to_string(runtime_dir.join(".node_select"))
+            .await
+            .unwrap(),
+        "fastest_sg\n"
+    );
+
+    handle.shutdown().await;
+    let _ = tokio::fs::remove_file(config_path).await;
+    let _ = tokio::fs::remove_file(volatile_path).await;
+    let _ = tokio::fs::remove_dir_all(runtime_dir).await;
+}
+
+#[tokio::test]
+async fn spawn_server_does_not_promote_volatile_manual_fallback() {
+    let config_path = unique_test_config_path();
+    let volatile_path = unique_test_volatile_path();
+    let runtime_dir = unique_test_runtime_dir();
+    tokio::fs::write(&config_path, "node_select: fastest_jp\n")
+        .await
+        .unwrap();
+    // Manual is omitted by VolatileConfig serialization, so an empty mapping
+    // is exactly what a temporary effective fallback can leave behind.
+    tokio::fs::write(&volatile_path, "{}\n").await.unwrap();
+
+    let handle = spawn_server(RuntimeOptions {
+        open_browser: false,
+        install_tracing: false,
+        bind_port: Some(0),
+        port_fallback: false,
+        config_path: Some(config_path.clone()),
+        volatile_path: Some(volatile_path.clone()),
+        skip_extract: true,
+        runtime_dir: Some(runtime_dir.clone()),
+        log_path: None,
+    })
+    .await
+    .expect("spawn panel");
+
+    let response = reqwest::get(format!("{}/api/status", handle.url()))
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(response.contains("\"node_select\":\"fastest_jp\""));
+    assert!(!runtime_dir.join(".node_select").exists());
+
+    handle.shutdown().await;
+    let _ = tokio::fs::remove_file(config_path).await;
+    let _ = tokio::fs::remove_file(volatile_path).await;
+    let _ = tokio::fs::remove_dir_all(runtime_dir).await;
 }
 
 #[tokio::test]

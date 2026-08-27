@@ -12,13 +12,14 @@ use crate::models::{Config, RuntimePhase, DEFAULT_PORT};
 use crate::services::{
     config::{
         cache_compatibility, fetch_sub_nodes_if_current, gen_config_from_nodes, has_config_cache,
-        install_prepared_runtime, load_volatile_config_at, mark_legacy_cache_used,
-        persist_effective_node_select, read_sub_nodes_snapshot, refresh_subscriptions,
-        restore_config_from_cache, runtime_config_matches_node_select, save_config_cache,
-        CacheCompatibility, GenConfigOutcome, RefreshEffect, RefreshPolicy, SubFetchRetry,
-        SubSource, ALL_SUBS_FAILED_KEEP_CACHE, ALL_SUBS_FAILED_RETRY, DATA_PLANE_RETRYING,
-        REFRESH_FAILED_KEEP_CACHE, REFRESH_VALIDATION_FAILED, REGION_FALLBACK,
-        STARTUP_VALIDATION_RETRY, SUBS_REFRESHING_MANUAL,
+        install_prepared_runtime, load_node_select_preference, load_volatile_config_at,
+        mark_legacy_cache_used, persist_effective_node_select, read_sub_nodes_snapshot,
+        refresh_subscriptions, restore_config_from_cache, runtime_config_matches_node_select,
+        save_config_cache, save_node_select_preference, CacheCompatibility, GenConfigOutcome,
+        RefreshEffect, RefreshPolicy, SubFetchRetry, SubSource, ALL_SUBS_FAILED_KEEP_CACHE,
+        ALL_SUBS_FAILED_RETRY, DATA_PLANE_RETRYING, REFRESH_FAILED_KEEP_CACHE,
+        REFRESH_VALIDATION_FAILED, REGION_FALLBACK, STARTUP_VALIDATION_RETRY,
+        SUBS_REFRESHING_MANUAL,
     },
     proxy::spawn_restore_last_proxy,
     singbox::{
@@ -171,9 +172,44 @@ pub async fn spawn_server(options: RuntimeOptions) -> AppResult<ServerHandle> {
             runtime_dir.join("volatile.yaml")
         }
     });
-    // 易变层 overlay：node_select/route_mode 的运行值覆盖 config.yaml 解析结果；
-    // volatile 文件缺失/损坏时保留 config.yaml 里的同名字段（旧版配置兼容）
-    let config = stable_config.effective(load_volatile_config_at(&volatile_path).await);
+    let preference_paths = if options.runtime_dir.is_some() {
+        (
+            runtime_dir.join(".last_proxy"),
+            runtime_dir.join(".node_select"),
+        )
+    } else {
+        (
+            crate::services::proxy::platform_last_proxy_path(),
+            crate::services::proxy::platform_node_select_path(),
+        )
+    };
+    // route_mode/disabled_nodes 仍由易变层覆盖。node_select 则拆分为 requested
+    // preference 与 effective volatile 状态：前者优先，启动期地区筛空回退
+    // manual 只改后者，不会擦除跨重启偏好。
+    let volatile_config = load_volatile_config_at(&volatile_path).await;
+    let stored_node_select = load_node_select_preference(&preference_paths.1).await;
+    // Old releases only had volatile.yaml. Only a non-manual value is safe to
+    // migrate: serialized manual is indistinguishable from a temporary region
+    // fallback, so promoting it could permanently mask config.yaml's default.
+    let migrated_node_select = if stored_node_select.is_none() {
+        volatile_config
+            .as_ref()
+            .map(|volatile| volatile.node_select)
+            .filter(|node_select| !node_select.is_manual())
+    } else {
+        None
+    };
+    let requested_node_select = stored_node_select
+        .or(migrated_node_select)
+        .unwrap_or(stable_config.node_select);
+    let mut config = stable_config.effective(volatile_config);
+    config.node_select = requested_node_select;
+    if stored_node_select.is_some() {
+        info!(
+            node_select = requested_node_select.as_str(),
+            "Restored node-selection preference"
+        );
+    }
     let requested_port = options.bind_port.or(config.port).unwrap_or(DEFAULT_PORT);
     let subs_count = config.subs.len();
     let nodes_count = config.nodes.len();
@@ -185,14 +221,8 @@ pub async fn spawn_server(options: RuntimeOptions) -> AppResult<ServerHandle> {
         "Configuration loaded"
     );
 
-    let runtime_paths = {
-        let paths = crate::paths::RuntimePaths::new(runtime_dir, &config_path);
-        if options.runtime_dir.is_some() {
-            paths
-        } else {
-            paths.with_last_proxy(crate::services::proxy::platform_last_proxy_path())
-        }
-    };
+    let runtime_paths = crate::paths::RuntimePaths::new(runtime_dir, &config_path)
+        .with_preferences(preference_paths.0, preference_paths.1);
     let app_state = Arc::new(
         AppState::with_config_layers(
             stable_config,
@@ -203,6 +233,11 @@ pub async fn spawn_server(options: RuntimeOptions) -> AppResult<ServerHandle> {
         )
         .map_err(|e| AppError::context("Failed to create HTTP client", e))?,
     );
+    if let Some(node_select) = migrated_node_select {
+        if let Err(err) = save_node_select_preference(&app_state, node_select).await {
+            warn!(error = %err, "Failed to migrate volatile node-selection preference");
+        }
+    }
     let state_for_init = app_state.clone();
     let extract_runtime = !options.skip_extract;
 

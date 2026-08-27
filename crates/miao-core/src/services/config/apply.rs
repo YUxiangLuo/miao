@@ -25,7 +25,7 @@ use super::generate::{
 use super::persist::{
     has_config_cache, has_sub_nodes_snapshot, persist_effective_node_select, read_config_cache,
     restore_config_from_cache, restore_runtime_config_bytes, save_config_cache,
-    save_config_layered, snapshot_runtime_config, write_file_atomic,
+    save_config_layered, save_node_select_preference, snapshot_runtime_config, write_file_atomic,
 };
 use super::warnings::{ALL_SUBS_FAILED, NO_USABLE_MANUAL, NO_USABLE_SUBS, REGION_FALLBACK};
 

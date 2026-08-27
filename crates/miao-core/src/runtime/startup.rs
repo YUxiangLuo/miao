@@ -370,7 +370,7 @@ async fn background_subscription_refresh_once(
         info!("Service stopped before background refresh; skipping");
         return BackgroundRefreshStep::Finished;
     }
-    let before_fetch = state.config.read().await.clone();
+    let before_fetch = state.config_with_node_select_preference().await;
     if before_fetch.subs != startup_config.subs {
         info!("Subscriptions changed before background refresh; skipping");
         return BackgroundRefreshStep::Finished;
@@ -388,7 +388,7 @@ async fn background_subscription_refresh_once(
     if state.sub_refresh_generation.load(Ordering::Relaxed) != refresh_generation {
         return BackgroundRefreshStep::Superseded;
     }
-    let current = state.config.read().await.clone();
+    let current = state.config_with_node_select_preference().await;
     if current.subs != startup_config.subs {
         info!(
             "Subscriptions changed during background refresh; skipping (panel edit already applied)"
@@ -496,7 +496,7 @@ pub(super) async fn recover_data_plane_once(state: &Arc<AppState>) -> bool {
         return true;
     }
 
-    let config = state.config.read().await.clone();
+    let config = state.config_with_node_select_preference().await;
     let refresh_generation = state.sub_refresh_generation.load(Ordering::Relaxed);
     if state.runtime_phase() == RuntimePhase::Failed {
         state.set_runtime_phase(if config.subs.is_empty() {
@@ -518,7 +518,7 @@ pub(super) async fn recover_data_plane_once(state: &Arc<AppState>) -> bool {
         return state.runtime_ready.load(Ordering::Relaxed) && is_sing_box_running(state).await;
     }
 
-    let current = state.config.read().await.clone();
+    let current = state.config_with_node_select_preference().await;
     if current.subs != config.subs {
         info!("Subscriptions changed during startup recovery; discarding stale fetch");
         return state.runtime_ready.load(Ordering::Relaxed) && is_sing_box_running(state).await;

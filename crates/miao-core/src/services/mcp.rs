@@ -533,7 +533,7 @@ async fn tool_set_node_select(
     } else if previous == node_select {
         "未变化"
     } else {
-        "已写入易变层配置"
+        "已保存节点选择偏好"
     };
     Ok(json!({
         "node_select": effective.as_str(),

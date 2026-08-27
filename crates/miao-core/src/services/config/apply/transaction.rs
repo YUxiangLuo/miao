@@ -19,6 +19,13 @@ pub async fn regenerate_preserving_service_state(
     config: &Config,
     state: &Arc<AppState>,
 ) -> AppResult<RuntimeUpdate> {
+    // Effective state may be manual after a regional fallback. Every explicit
+    // refresh retries the requested strategy rather than making that fallback
+    // sticky until the next process restart. Keep the effective snapshot for
+    // rollback if the preferred regeneration cannot commit.
+    let previous_config = config;
+    let preferred_config = state.overlay_node_select_preference(config).await;
+    let config = &preferred_config;
     // This is an explicit foreground refresh. Any startup fetch that began
     // earlier with the same subscription URLs must not publish after it.
     let refresh_generation = state.sub_refresh_generation.fetch_add(1, Ordering::Relaxed) + 1;
@@ -47,7 +54,7 @@ pub async fn regenerate_preserving_service_state(
                 if let Err(commit_err) = commit_foreground_refresh(config, state, outcome).await {
                     error!(error = %commit_err, "Foreground runtime refresh could not commit effective preferences; restoring previous runtime state");
                     return Err(rollback_failed_foreground_commit(
-                        config,
+                        previous_config,
                         state,
                         true,
                         snapshot.as_deref(),
@@ -73,7 +80,7 @@ pub async fn regenerate_preserving_service_state(
                 // may have, so rewind runtime + bindings before surfacing err.
                 error!(error = %err, "Failed to refresh subscriptions, restoring previous runtime state");
                 let restore = restore_after_apply_failure(
-                    config,
+                    previous_config,
                     state,
                     true,
                     snapshot.as_deref(),
@@ -102,7 +109,7 @@ pub async fn regenerate_preserving_service_state(
                 if let Err(commit_err) = commit_foreground_refresh(config, state, &outcome).await {
                     error!(error = %commit_err, "Stopped runtime refresh could not commit effective preferences; restoring previous runtime files");
                     return Err(rollback_failed_foreground_commit(
-                        config,
+                        previous_config,
                         state,
                         false,
                         snapshot.as_deref(),
@@ -119,7 +126,7 @@ pub async fn regenerate_preserving_service_state(
             Err(err) => {
                 error!(error = %err, "Failed to regenerate config, restoring previous runtime config");
                 let _ = restore_after_apply_failure(
-                    config,
+                    previous_config,
                     state,
                     false,
                     snapshot.as_deref(),
@@ -393,6 +400,11 @@ pub async fn apply_config_change(
     old_config: &Config,
     new_config: &Config,
 ) -> AppResult<ConfigApplyEffect> {
+    // Handlers clone the effective config, whose strategy may be a temporary
+    // manual fallback. Configuration changes must regenerate with the user's
+    // requested strategy instead of accidentally extending that fallback.
+    let preferred_new_config = state.overlay_node_select_preference(new_config).await;
+    let new_config = &preferred_new_config;
     let should_run = state.service_should_run.load(Ordering::Relaxed);
     let apply_mode = config_apply_mode(new_config, should_run);
     let previous_phase = state.runtime_phase();
@@ -587,6 +599,7 @@ async fn apply_config_mutation(
     let _config_update = state.config_update.lock().await;
     let old_config = state.config.read().await.clone();
     let mut new_config = old_config.clone();
+    new_config.node_select = *state.node_select_preference.read().await;
     mutate(&mut new_config).map_err(ConfigMutationError::Rejected)?;
     if new_config == old_config {
         return Ok(RuntimeUpdate::None);
@@ -627,13 +640,51 @@ pub async fn apply_node_select(
     state: &Arc<AppState>,
     node_select: NodeSelect,
 ) -> Result<(NodeSelect, NodeSelect, RuntimeUpdate), ConfigMutationError> {
-    let mut previous = NodeSelect::default();
-    let update = apply_config_mutation(state, |config| {
-        previous = config.node_select;
-        config.node_select = node_select;
-        Ok(())
-    })
-    .await?;
+    // Keep runtime activation and preference persistence under the same lock:
+    // concurrent strategy changes must not let an older request write its
+    // preference after a newer request has already become effective.
+    let _config_update = state.config_update.lock().await;
+    let old_config = state.config.read().await.clone();
+    let previous = *state.node_select_preference.read().await;
+    let preference_path = &state.runtime_paths.node_select_preference;
+    let preference_snapshot = read_file_snapshot(preference_path)
+        .await
+        .map_err(ConfigMutationError::Apply)?;
+
+    // Persistence is part of accepting the request. Do it before changing the
+    // runtime, then restore it if runtime activation fails.
+    if let Err(save_err) = save_node_select_preference(state, node_select).await {
+        return match restore_file_snapshot(preference_path, preference_snapshot.as_deref()).await {
+            Ok(()) => Err(ConfigMutationError::Apply(save_err)),
+            Err(rollback_err) => Err(ConfigMutationError::Apply(AppError::message(format!(
+                "Failed to persist node-selection strategy: {save_err}. Preference rollback failed: {rollback_err}"
+            )))),
+        };
+    }
+    *state.node_select_preference.write().await = node_select;
+
+    let mut new_config = old_config.clone();
+    new_config.node_select = node_select;
+    let apply_result = if new_config == old_config {
+        Ok(RuntimeUpdate::None)
+    } else {
+        apply_config_change(state, &old_config, &new_config)
+            .await
+            .map(|effect| effect.runtime_update())
+    };
+    let update = match apply_result {
+        Ok(update) => update,
+        Err(apply_err) => {
+            *state.node_select_preference.write().await = previous;
+            return match restore_file_snapshot(preference_path, preference_snapshot.as_deref()).await
+            {
+                Ok(()) => Err(ConfigMutationError::Apply(apply_err)),
+                Err(rollback_err) => Err(ConfigMutationError::Apply(AppError::message(format!(
+                    "Failed to apply node-selection strategy: {apply_err}. Preference rollback failed: {rollback_err}"
+                )))),
+            };
+        }
+    };
     let effective = state.config.read().await.node_select;
     Ok((previous, effective, update))
 }

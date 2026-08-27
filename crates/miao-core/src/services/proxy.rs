@@ -11,6 +11,7 @@ use crate::services::singbox::get_sing_box_home;
 use crate::state::AppState;
 
 const LAST_PROXY_FILENAME: &str = ".last_proxy";
+const NODE_SELECT_FILENAME: &str = ".node_select";
 
 /// Where `.last_proxy` is stored.
 ///
@@ -76,6 +77,15 @@ fn pid1_comm() -> String {
 
 pub fn platform_last_proxy_path() -> PathBuf {
     last_proxy_path_for(last_proxy_store(is_openwrt_like(), &pid1_comm()))
+}
+
+/// Node-selection strategy follows the same persistence policy as the concrete
+/// selector choice: regular systemd Linux and Windows retain it, while OpenWrt
+/// keeps it in tmpfs to avoid flash writes.
+pub fn platform_node_select_path() -> PathBuf {
+    let mut path = platform_last_proxy_path();
+    path.set_file_name(NODE_SELECT_FILENAME);
+    path
 }
 
 async fn write_last_proxy_file(path: &Path, proxy: &LastProxy) -> AppResult<()> {
@@ -222,9 +232,19 @@ async fn restore_last_proxy(state: &Arc<AppState>, generation: u64) {
 mod tests {
     use super::{
         get_sing_box_home, last_proxy_path_for, last_proxy_store, openwrt_like_from_paths,
-        os_release_looks_like_openwrt, write_last_proxy_file, LastProxyStore, LAST_PROXY_FILENAME,
+        os_release_looks_like_openwrt, platform_node_select_path, write_last_proxy_file,
+        LastProxyStore, LAST_PROXY_FILENAME, NODE_SELECT_FILENAME,
     };
     use crate::models::LastProxy;
+
+    #[test]
+    fn node_select_preference_uses_the_platform_state_store() {
+        let path = platform_node_select_path();
+        assert_eq!(
+            path.file_name().and_then(|name| name.to_str()),
+            Some(NODE_SELECT_FILENAME)
+        );
+    }
 
     #[test]
     fn last_proxy_path_uses_tmp_on_openwrt() {

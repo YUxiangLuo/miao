@@ -6,13 +6,19 @@ use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::{Mutex, RwLock};
 
-use crate::models::{Config, GitHubRelease, RuntimePhase, StableConfig, SubStatus};
+use crate::models::{Config, GitHubRelease, NodeSelect, RuntimePhase, StableConfig, SubStatus};
 use crate::paths::RuntimePaths;
 
 /// 应用状态容器 - 包含所有运行时状态
 /// 通过依赖注入传递，避免全局静态变量
 pub struct AppState {
-    pub config: RwLock<Config>, // 使用 RwLock 支持并发读
+    /// Effective runtime configuration. `node_select` may be `manual` after a
+    /// region temporarily has no usable nodes.
+    pub config: RwLock<Config>,
+    /// Strategy explicitly requested by the user or configured as the boot
+    /// default. Generation paths overlay this onto the effective config so a
+    /// temporary regional fallback can recover without restarting Miao.
+    pub node_select_preference: RwLock<NodeSelect>,
     /// Stable YAML model kept separately so volatile preferences never erase
     /// boot defaults during an unrelated configuration save.
     pub stable_config: RwLock<StableConfig>,
@@ -96,6 +102,7 @@ impl AppState {
         volatile_path: PathBuf,
         runtime_paths: RuntimePaths,
     ) -> Result<Self, reqwest::Error> {
+        let node_select_preference = config.node_select;
         // reqwest 默认会读 HTTP_PROXY/HTTPS_PROXY 等环境变量代理。本进程自己
         // 就是代理：订阅拉取、Clash API（127.0.0.1）都不该被 root 环境里的
         // 代理变量劫持，显式禁用。
@@ -106,6 +113,7 @@ impl AppState {
 
         Ok(Self {
             config: RwLock::new(config),
+            node_select_preference: RwLock::new(node_select_preference),
             stable_config: RwLock::new(stable_config),
             config_path,
             volatile_path,
@@ -130,6 +138,19 @@ impl AppState {
             #[cfg(not(windows))]
             upgrading: AtomicBool::new(false),
         })
+    }
+
+    pub async fn config_with_node_select_preference(&self) -> Config {
+        let node_select = *self.node_select_preference.read().await;
+        let mut config = self.config.read().await.clone();
+        config.node_select = node_select;
+        config
+    }
+
+    pub async fn overlay_node_select_preference(&self, config: &Config) -> Config {
+        let mut config = config.clone();
+        config.node_select = *self.node_select_preference.read().await;
+        config
     }
 
     pub fn set_runtime_phase(&self, phase: RuntimePhase) {

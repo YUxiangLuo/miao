@@ -10,6 +10,7 @@
 | 配置 | `/etc/miao/config.yaml` | `%LOCALAPPDATA%\io.github.yuxiangluo.miao\config.yaml` |
 | 内核运行时 | `/tmp/miao-sing-box` | `%TEMP%\miao-sing-box` |
 | 易变配置 | `/tmp/miao-sing-box/volatile.yaml`（tmpfs） | 应用数据目录（持久） |
+| 节点选择偏好 | Linux：`/etc/miao/.node_select` + `.last_proxy`（持久）；OpenWrt：运行时 tmpfs | 应用数据目录（持久） |
 | 一键升级 / VPS 部署 | 有 | 不编进桌面进程 |
 | 开机自启 | `install.sh` → systemd | 托盘勾选（任务计划，登录免 UAC 直进托盘） |
 
@@ -25,7 +26,7 @@ Win10/11 x64，从 [Releases](https://github.com/YUxiangLuo/miao/releases/latest
 
 ## OpenWrt
 
-启动时自动检测并安装内核依赖（支持 x86_64 与 aarch64）。运行时文件全部在 `/tmp/miao-sing-box`（tmpfs），不写路由器 flash；系统重启后，路由模式与地区自动选择回到 `config.yaml` 的启动默认值（fail-safe），手动选定的具体节点依然恢复。
+启动时自动检测并安装内核依赖（支持 x86_64 与 aarch64）。运行时文件和选择偏好全部在 `/tmp/miao-sing-box`（tmpfs），不写路由器 flash；面板/进程重启会保留，系统重启后路由模式、节点策略与具体手动节点回到 `config.yaml` / 生成配置的默认值（fail-safe）。
 
 ## 干净卸载
 

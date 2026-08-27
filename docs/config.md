@@ -19,6 +19,7 @@ custom_rules:              # 可选：优先于内置分流，全局模式下仍
 
 mcp: true                  # 可选：MCP 端点（POST /mcp），默认关闭
 
+node_select: fastest_jp    # 可选：启动默认节点策略（manual / fastest_hk/jp/tw/sg/us）
 route_mode: global         # 可选：启动默认路由模式（rule 规则分流 / global 全局代理）
 ```
 
@@ -29,8 +30,11 @@ route_mode: global         # 可选：启动默认路由模式（rule 规则分�
 | 稳定层 | `config.yaml` | 订阅/节点/规则等低频配置 | Linux/OpenWrt：`/etc/miao`；Windows：应用数据目录 |
 | 易变层 | `volatile.yaml` | 节点选择策略、路由模式、禁用的订阅节点 | Unix：`/tmp/miao-sing-box`（tmpfs，系统重启后回到 config.yaml 的启动默认值）；Windows：应用数据目录（持久） |
 | 状态层 | `config.json` / `.cache` / 快照 | 运行时配置与缓存 | sing-box 运行目录，可删 |
+| 选择偏好 | `.node_select` / `.last_proxy` | 用户显式选择的策略 / 手动节点 | 普通 Linux：`/etc/miao`；OpenWrt：运行时 tmpfs；Windows：应用数据目录 |
 
-OpenWrt 的易变层写 tmpfs：切节点/切模式这类高频操作零闪存磨损。面板/进程重启（如自升级）两层都保留，选择与模式不丢失。
+面板或 MCP 显式选择 `manual` / `fastest_*` 后会更新 `.node_select`。普通 Linux 和 Windows 重启后优先恢复该策略；启动期间因地区节点暂缺而临时回退到 `manual` 不会覆盖用户偏好，后续订阅刷新会继续尝试原策略。首次升级只自动迁移旧 `volatile.yaml` 中明确记录的 `fastest_*`；无法与临时回退区分的 `manual` 不会被提升为持久偏好。具体手动节点仍由 `.last_proxy` 独立恢复。
+
+OpenWrt 的易变层和选择偏好写 tmpfs：切节点/切模式这类高频操作零闪存磨损。面板/进程重启（如自升级）期间文件仍保留，系统重启后则回到 `config.yaml` 的启动默认值。
 
 ### 禁用订阅节点
 

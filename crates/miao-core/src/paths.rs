@@ -17,9 +17,9 @@ use crate::error::{AppError, AppResult};
 pub const CONFIG_FILENAME: &str = "config.yaml";
 pub const ETC_CONFIG_PATH: &str = "/etc/miao/config.yaml";
 
-/// Generated sing-box artifacts plus the last-proxy preference file.
-/// Tests keep everything under `runtime_dir`. Production overwrites
-/// `last_proxy` via [`Self::with_last_proxy`] (cwd / tmpfs / app data).
+/// Generated sing-box artifacts plus user preference files.
+/// Tests keep everything under `runtime_dir`. Production overwrites the
+/// preference paths via [`Self::with_preferences`] (cwd / tmpfs / app data).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RuntimePaths {
     pub runtime_dir: PathBuf,
@@ -29,6 +29,7 @@ pub struct RuntimePaths {
     pub sub_nodes_snapshot: PathBuf,
     pub node_bindings: PathBuf,
     pub last_proxy: PathBuf,
+    pub node_select_preference: PathBuf,
 }
 
 impl RuntimePaths {
@@ -49,12 +50,14 @@ impl RuntimePaths {
             // directory (and parallel tests) from sharing node identities.
             node_bindings,
             last_proxy: runtime_dir.join(".last_proxy"),
+            node_select_preference: runtime_dir.join(".node_select"),
             runtime_dir,
         }
     }
 
-    pub fn with_last_proxy(mut self, last_proxy: PathBuf) -> Self {
+    pub fn with_preferences(mut self, last_proxy: PathBuf, node_select: PathBuf) -> Self {
         self.last_proxy = last_proxy;
+        self.node_select_preference = node_select;
         self
     }
 }
@@ -199,10 +202,20 @@ mod tests {
             PathBuf::from("/tmp/runtime/.last_proxy")
         );
         assert_eq!(
-            default
-                .with_last_proxy(PathBuf::from("/etc/miao/.last_proxy"))
-                .last_proxy,
+            default.node_select_preference,
+            PathBuf::from("/tmp/runtime/.node_select")
+        );
+        let persistent = default.with_preferences(
+            PathBuf::from("/etc/miao/.last_proxy"),
+            PathBuf::from("/etc/miao/.node_select"),
+        );
+        assert_eq!(
+            persistent.last_proxy,
             PathBuf::from("/etc/miao/.last_proxy")
+        );
+        assert_eq!(
+            persistent.node_select_preference,
+            PathBuf::from("/etc/miao/.node_select")
         );
     }
 

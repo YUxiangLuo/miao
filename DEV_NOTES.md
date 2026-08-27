@@ -166,7 +166,7 @@ TUN JSON：`auto_route` + `strict_route`，`interface_name` 仍是 `sing-tun`。
 
 生成配置无条件带 `route.find_process: true`（builder.rs）：面板「链接统计」每行副标题的进程名依赖 Clash API 的 `processPath`，而 sing-box 只在有进程类规则或此开关下才跑进程搜索器——删掉它，没有进程规则的用户面板就没有进程列数据。
 
-落盘三层（详见 docs/config.md）：稳定层 `config.yaml`（port/subs/nodes/custom_rules/mcp）、易变层 `volatile.yaml`（node_select/route_mode——unix 在 tmpfs 随系统重启清空，Windows 持久）、状态层（可删）。合并视图 = volatile > config > 默认；两层各自原子写 + 跳过未变。
+落盘分层（详见 docs/config.md）：稳定层 `config.yaml`（port/subs/nodes/custom_rules/mcp + 手写启动默认值）、易变层 `volatile.yaml`（有效 node_select/route_mode——unix 在 tmpfs，Windows 持久）、选择偏好 `.node_select` / `.last_proxy`（普通 systemd Linux 与 Windows 跨重启，OpenWrt 仍在 tmpfs）、状态层（可删）。显式选择策略优先于 volatile/config 默认；`AppState::node_select_preference` 保存 requested strategy，`config.node_select` 保存 effective strategy，启动期地区筛空的 manual 不覆盖前者，刷新/配置事务必须重新 overlay requested。配置分层与 `.node_select` 原子写并跳过未变。
 
 失败回滚去网络化：先快照 `config.json` 字节，回滚按 **内存快照 → `config.json.cache` → 重新拉订阅** 分层；内核已死时先 `sing-box check` 再启动；空 cache 拒绝恢复。
 

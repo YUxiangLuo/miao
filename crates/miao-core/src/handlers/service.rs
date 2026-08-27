@@ -140,10 +140,10 @@ pub async fn set_node_select(
     })?;
 
     match crate::services::config::apply_node_select(&state, node_select).await {
-        Ok((_previous, effective, update)) => {
+        Ok((previous, effective, update)) => {
             if !node_select.is_manual() && effective.is_manual() {
                 Ok(success_no_data(crate::services::config::REGION_FALLBACK))
-            } else if update.updated() || effective != node_select {
+            } else if previous != node_select || update.updated() || effective != node_select {
                 Ok(success_no_data("Node select updated"))
             } else {
                 Ok(success_no_data("Node select unchanged"))

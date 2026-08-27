@@ -1,4 +1,5 @@
 use super::*;
+use crate::services::config::apply_node_select;
 
 #[test]
 fn tun_inbound_enables_auto_redirect_only_on_linux() {
@@ -98,6 +99,121 @@ fn build_sing_box_config_falls_back_to_selector_when_region_empty() {
         built["outbounds"][0]["outbounds"].as_array().unwrap().len(),
         3
     );
+}
+
+#[tokio::test]
+async fn explicit_node_selection_is_persisted_even_when_runtime_is_unchanged() {
+    let state = app_state(Config::default());
+
+    let (previous, effective, update) =
+        apply_node_select(&state, NodeSelect::Manual).await.unwrap();
+
+    assert_eq!(previous, NodeSelect::Manual);
+    assert_eq!(effective, NodeSelect::Manual);
+    assert_eq!(update, RuntimeUpdate::None);
+    assert_eq!(
+        tokio::fs::read_to_string(&state.runtime_paths.node_select_preference)
+            .await
+            .unwrap(),
+        "manual\n"
+    );
+    let _ = tokio::fs::remove_dir_all(&state.runtime_paths.runtime_dir).await;
+}
+
+#[tokio::test]
+async fn concurrent_node_selection_keeps_file_aligned_with_requested_strategy() {
+    let state = app_state(Config::default());
+    let first = state.clone();
+    let second = state.clone();
+
+    let (first_result, second_result) = tokio::join!(
+        apply_node_select(&first, NodeSelect::Fastest(Region::Jp)),
+        apply_node_select(&second, NodeSelect::Fastest(Region::Sg)),
+    );
+    first_result.unwrap();
+    second_result.unwrap();
+
+    let requested = *state.node_select_preference.read().await;
+    let persisted = tokio::fs::read_to_string(&state.runtime_paths.node_select_preference)
+        .await
+        .unwrap();
+    assert_eq!(persisted.trim(), requested.as_str());
+    let _ = tokio::fs::remove_dir_all(&state.runtime_paths.runtime_dir).await;
+    let _ = tokio::fs::remove_file(&state.config_path).await;
+    let _ = tokio::fs::remove_file(&state.volatile_path).await;
+}
+
+#[tokio::test]
+async fn node_selection_rejects_unwritable_preference_before_runtime_change() {
+    let root = std::env::temp_dir().join(format!(
+        "miao-node-select-write-failure-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let config_path = root.join("config.yaml");
+    let volatile_path = root.join("volatile.yaml");
+    let preference_path = root.join("preference-is-a-directory");
+    tokio::fs::create_dir_all(&preference_path).await.unwrap();
+    let paths = crate::paths::RuntimePaths::new(root.join("runtime"), &config_path)
+        .with_preferences(root.join(".last_proxy"), preference_path);
+    let config = Config::default();
+    let state = std::sync::Arc::new(
+        crate::state::AppState::with_config_layers(
+            crate::models::StableConfig::from(&config),
+            config,
+            config_path,
+            volatile_path,
+            paths,
+        )
+        .unwrap(),
+    );
+
+    let result = apply_node_select(&state, NodeSelect::Fastest(Region::Jp)).await;
+
+    assert!(result.is_err());
+    assert_eq!(state.config.read().await.node_select, NodeSelect::Manual);
+    assert_eq!(
+        *state.node_select_preference.read().await,
+        NodeSelect::Manual
+    );
+    let _ = tokio::fs::remove_dir_all(root).await;
+}
+
+#[tokio::test]
+async fn failed_runtime_apply_restores_previous_node_selection_preference() {
+    let state = app_state(Config {
+        nodes: vec![serde_json::json!({
+            "type": "hysteria2",
+            "tag": "manual-node",
+            "server": "192.0.2.1",
+            "server_port": 443,
+            "password": "secret"
+        })
+        .to_string()],
+        ..Config::default()
+    });
+    // A directory at the bindings path makes the transaction fail after the
+    // new preference has been saved but before runtime activation begins.
+    tokio::fs::create_dir_all(&state.runtime_paths.node_bindings)
+        .await
+        .unwrap();
+
+    let result = apply_node_select(&state, NodeSelect::Fastest(Region::Jp)).await;
+
+    assert!(result.is_err());
+    assert_eq!(state.config.read().await.node_select, NodeSelect::Manual);
+    assert_eq!(
+        *state.node_select_preference.read().await,
+        NodeSelect::Manual
+    );
+    assert!(!state.runtime_paths.node_select_preference.exists());
+    let _ = tokio::fs::remove_dir_all(&state.runtime_paths.node_bindings).await;
+    let _ = tokio::fs::remove_dir_all(&state.runtime_paths.runtime_dir).await;
+    let _ = tokio::fs::remove_file(&state.config_path).await;
+    let _ = tokio::fs::remove_file(&state.volatile_path).await;
 }
 
 #[tokio::test]

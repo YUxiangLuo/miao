@@ -156,6 +156,29 @@ pub fn volatile_config_path() -> PathBuf {
     }
 }
 
+/// Last explicitly selected strategy. Unlike the effective volatile value,
+/// this is not rewritten when an unavailable region temporarily falls back to
+/// manual mode.
+pub async fn load_node_select_preference(path: &Path) -> Option<NodeSelect> {
+    let content = tokio::fs::read_to_string(path).await.ok()?;
+    NodeSelect::parse(content.trim())
+}
+
+pub async fn save_node_select_preference(
+    state: &AppState,
+    node_select: NodeSelect,
+) -> AppResult<()> {
+    let content = format!("{}\n", node_select.as_str());
+    let path = &state.runtime_paths.node_select_preference;
+    if tokio::fs::read(path)
+        .await
+        .is_ok_and(|existing| existing == content.as_bytes())
+    {
+        return Ok(());
+    }
+    write_file_atomic(path, content.as_bytes()).await
+}
+
 /// 原子写入文件：先写入临时文件，再重命名为目标文件
 pub(super) async fn write_file_atomic(path: &Path, content: &[u8]) -> AppResult<()> {
     let parent = path
@@ -473,9 +496,10 @@ async fn read_sub_nodes_snapshot_at(path: &Path) -> Option<SubNodesSnapshot> {
 #[cfg(test)]
 mod tests {
     use super::{
-        get_sing_box_home, load_volatile_config_at, persist_effective_node_select,
-        read_sub_nodes_snapshot_at, restore_config_from_cache_at, restore_runtime_config_bytes_at,
-        save_config_cache_at, save_config_layered, save_sub_nodes_snapshot_at, save_volatile_to,
+        get_sing_box_home, load_node_select_preference, load_volatile_config_at,
+        persist_effective_node_select, read_sub_nodes_snapshot_at, restore_config_from_cache_at,
+        restore_runtime_config_bytes_at, save_config_cache_at, save_config_layered,
+        save_node_select_preference, save_sub_nodes_snapshot_at, save_volatile_to,
         snapshot_runtime_config_at, volatile_config_path, SubNodesSnapshot,
     };
 
@@ -877,6 +901,33 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn node_select_preference_roundtrips_and_rejects_invalid_content() {
+        use crate::models::{Config, NodeSelect, Region};
+        use crate::test_support::app_state;
+
+        let state = app_state(Config::default());
+        save_node_select_preference(&state, NodeSelect::Fastest(Region::Sg))
+            .await
+            .unwrap();
+        assert_eq!(
+            load_node_select_preference(&state.runtime_paths.node_select_preference).await,
+            Some(NodeSelect::Fastest(Region::Sg))
+        );
+
+        tokio::fs::write(
+            &state.runtime_paths.node_select_preference,
+            "not-a-strategy",
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            load_node_select_preference(&state.runtime_paths.node_select_preference).await,
+            None
+        );
+        let _ = tokio::fs::remove_dir_all(&state.runtime_paths.runtime_dir).await;
+    }
+
+    #[tokio::test]
     async fn persist_effective_node_select_writes_volatile_layer() {
         use crate::models::{Config, NodeSelect, Region};
         use crate::test_support::app_state;
@@ -890,6 +941,11 @@ mod tests {
             .unwrap();
 
         assert_eq!(state.config.read().await.node_select, NodeSelect::Manual);
+        assert_eq!(
+            *state.node_select_preference.read().await,
+            NodeSelect::Fastest(Region::Hk),
+            "effective fallback must not overwrite the requested strategy"
+        );
         // 稳定层保留启动默认值；运行选择只写 volatile。
         let yaml = tokio::fs::read_to_string(&state.config_path).await.unwrap();
         assert!(yaml.contains("node_select: fastest_hk"));
