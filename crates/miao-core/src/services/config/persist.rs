@@ -14,7 +14,8 @@ use crate::state::AppState;
 const CACHE_MANIFEST_VERSION: u32 = 1;
 /// Bump only when generated sing-box semantics become incompatible with old
 /// cached bytes. Package releases alone do not invalidate a healthy cache.
-const RUNTIME_CONFIG_SCHEMA_VERSION: u32 = 1;
+/// Version 2 excludes informational pseudo-nodes from subscription outbounds.
+const RUNTIME_CONFIG_SCHEMA_VERSION: u32 = 2;
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 struct CacheManifest {

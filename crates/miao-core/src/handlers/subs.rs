@@ -13,6 +13,7 @@ use crate::services::config::{
     regenerate_preserving_service_state, subscription_source_id, ConfigMutationError,
     SubNodesSnapshot,
 };
+use crate::services::subscription::is_informational_subscription_node;
 use crate::services::verge;
 use crate::state::AppState;
 use crate::validation::Validator;
@@ -24,7 +25,12 @@ fn snapshot_entry_set(snapshot: &SubNodesSnapshot) -> HashSet<(&str, &str)> {
         .source_ids
         .iter()
         .zip(snapshot.node_names.iter())
-        .map(|(source, name)| (source.as_str(), name.as_str()))
+        .enumerate()
+        .filter_map(|(index, (source, name))| {
+            let outbound = snapshot.outbounds.get(index)?;
+            (!is_informational_subscription_node(name, outbound))
+                .then_some((source.as_str(), name.as_str()))
+        })
         .collect()
 }
 
@@ -101,6 +107,9 @@ pub async fn get_sub_nodes(
                     ) else {
                         continue;
                     };
+                    if is_informational_subscription_node(name, outbound) {
+                        continue;
+                    }
                     let str_field = |key: &str| {
                         outbound
                             .get(key)
@@ -171,7 +180,12 @@ pub async fn set_node_disabled(
             .source_ids
             .iter()
             .zip(snapshot.node_names.iter())
-            .map(|(source, name)| (source.clone(), name.clone()))
+            .enumerate()
+            .filter_map(|(index, (source, name))| {
+                let outbound = snapshot.outbounds.get(index)?;
+                (!is_informational_subscription_node(name, outbound))
+                    .then_some((source.clone(), name.clone()))
+            })
             .collect();
         let source_id = subscription_source_id(&req.sub);
         if !entries.contains(&(source_id, req.name.clone())) {
@@ -514,7 +528,7 @@ mod tests {
         config.disabled_nodes = vec![
             disabled_entry("https://example.com/a", "node-1"),
             disabled_entry("https://example.com/a", "node-2"),
-            disabled_entry("https://example.com/a", "剩余流量：45 GB"), // 快照里没有 → 失配
+            disabled_entry("https://example.com/a", "剩余流量：45 GB"), // 信息项即使匹配快照也不计入
         ];
         let state = app_state(config);
         let snapshot = snapshot_for(
@@ -522,7 +536,7 @@ mod tests {
             &[
                 ("https://example.com/a", "node-1"),
                 ("https://example.com/a", "node-2"),
-                ("https://example.com/a", "剩余流量：44 GB"), // 订阅刷新后名字漂移
+                ("https://example.com/a", "剩余流量：45 GB"), // 自动过滤的信息项
             ],
         );
         save_sub_nodes_snapshot(&state, &snapshot).await.unwrap();
@@ -598,6 +612,26 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn get_sub_nodes_hides_informational_entries_from_old_snapshots() {
+        let subs = ["https://example.com/a"];
+        let state = app_state(config_with_subs(&subs));
+        let snapshot = snapshot_for(
+            &subs,
+            &[
+                ("https://example.com/a", "剩余流量：19.06 GB"),
+                ("https://example.com/a", "香港 01"),
+            ],
+        );
+        save_sub_nodes_snapshot(&state, &snapshot).await.unwrap();
+
+        let Json(response) = get_sub_nodes(State(state)).await;
+
+        let groups = response.data.unwrap();
+        assert_eq!(groups[0].nodes.len(), 1);
+        assert_eq!(groups[0].nodes[0].name, "香港 01");
+    }
+
+    #[tokio::test]
     async fn get_sub_nodes_returns_empty_nodes_without_snapshot() {
         let state = app_state(config_with_subs(&["https://example.com/a"]));
 
@@ -656,6 +690,31 @@ mod tests {
 
         let Err((status, _)) = result else {
             panic!("unknown node must be rejected")
+        };
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn set_node_disabled_rejects_filtered_informational_entry() {
+        let subs = ["https://example.com/a"];
+        let state = ready_state(config_with_subs(&subs));
+        let snapshot = snapshot_for(
+            &subs,
+            &[
+                ("https://example.com/a", "官网 example.com"),
+                ("https://example.com/a", "香港 01"),
+            ],
+        );
+        save_sub_nodes_snapshot(&state, &snapshot).await.unwrap();
+
+        let result = set_node_disabled(
+            State(state),
+            disable_request("https://example.com/a", "官网 example.com", true),
+        )
+        .await;
+
+        let Err((status, _)) = result else {
+            panic!("informational entries must be removed before manual disabling")
         };
         assert_eq!(status, StatusCode::BAD_REQUEST);
     }

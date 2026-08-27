@@ -6,7 +6,7 @@ use tracing::{error, info, warn};
 
 use crate::error::AppResult;
 use crate::models::{Config, DisabledNode, NodeSelect, SubStatus, SubscriptionState};
-use crate::services::subscription::fetch_sub;
+use crate::services::subscription::{fetch_sub, is_informational_subscription_node};
 use crate::state::{AppState, SkippedRule};
 
 use super::bindings::{assign_subscription_tags, reserved_node_tags, NodeTagBindings};
@@ -272,7 +272,15 @@ async fn fetch_all_subs(
                         let valid_count = fetch_result.node_names.len();
                         let total_count = fetch_result.total_count;
                         let error_count = fetch_result.parse_errors.len();
+                        let filtered_info_count = fetch_result.filtered_info_count;
 
+                        if filtered_info_count > 0 {
+                            info!(
+                                url = %sub,
+                                filtered = filtered_info_count,
+                                "Filtered informational subscription entries"
+                            );
+                        }
                         if error_count > 0 {
                             warn!(
                                 url = %sub,
@@ -331,6 +339,7 @@ async fn fetch_all_subs(
         let status = match result {
             Ok(fetch_result) => {
                 let count = fetch_result.node_names.len();
+                let filtered_info_count = fetch_result.filtered_info_count;
                 let source_id = subscription_source_id(&url);
                 final_nodes.extend(
                     fetch_result
@@ -348,6 +357,11 @@ async fn fetch_all_subs(
                     Some(format!(
                         "{} nodes skipped due to parse errors",
                         fetch_result.parse_errors.len()
+                    ))
+                } else if count == 0 && filtered_info_count > 0 {
+                    Some(format!(
+                        "No proxy nodes found ({} informational entries filtered)",
+                        filtered_info_count
                     ))
                 } else if count == 0 && fetch_result.total_count > 0 {
                     Some("All nodes invalid (missing required fields)".into())
@@ -392,14 +406,24 @@ async fn fetch_all_subs(
     final_nodes
 }
 
+fn filter_informational_fetched_nodes(nodes: Vec<FetchedNode>) -> Vec<FetchedNode> {
+    nodes
+        .into_iter()
+        .filter(|node| !is_informational_subscription_node(&node.name, &node.outbound))
+        .collect()
+}
+
 /// Build a candidate without mutating the active runtime file or diagnostics.
 async fn build_prepared(
     config: &Config,
     state: &Arc<AppState>,
     nodes: Vec<FetchedNode>,
 ) -> AppResult<GenConfigOutcome> {
-    // has_sub_nodes 是「订阅是否产出节点」的健康度语义（过滤前）：
-    // 下游用它区分「订阅获取失败」与「有节点」，过滤后为空是用户意图（全禁用），
+    // Fetch already filters these entries; repeat at the build boundary so a
+    // snapshot written by an older Miao version cannot bring them back.
+    let nodes = filter_informational_fetched_nodes(nodes);
+    // has_sub_nodes 是「订阅是否产出可用节点」的健康度语义（用户禁用过滤前）：
+    // 下游用它区分「订阅获取失败」与「有节点」，禁用后为空是用户意图（全禁用），
     // 不能误报成订阅失败（ALL_SUBS_FAILED / KeptRunningOnTotalFailure）
     let has_sub_nodes = !nodes.is_empty();
     let nodes = filter_disabled_nodes(nodes, &config.disabled_nodes);
@@ -552,8 +576,9 @@ pub async fn known_rule_targets(config: &Config, state: &AppState) -> Vec<String
 #[cfg(test)]
 mod tests {
     use super::{
-        filter_disabled_nodes, known_rule_targets, subscription_source_id, FetchedNode,
-        SubFetchRetry, STARTUP_FETCH_BUDGET, STARTUP_RETRY_SCHEDULE,
+        filter_disabled_nodes, filter_informational_fetched_nodes, known_rule_targets,
+        subscription_source_id, FetchedNode, SubFetchRetry, STARTUP_FETCH_BUDGET,
+        STARTUP_RETRY_SCHEDULE,
     };
     use crate::models::{Config, DisabledNode};
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -573,6 +598,18 @@ mod tests {
             sub: sub.to_string(),
             name: name.to_string(),
         }
+    }
+
+    #[test]
+    fn informational_filter_sanitizes_nodes_loaded_from_old_snapshots() {
+        let mut info = fetched_node("https://a", "流量信息");
+        info.outbound["server"] = serde_json::json!("127.0.0.1");
+        let expiry = fetched_node("https://a", "套餐到期：2026-09-17");
+        let normal = fetched_node("https://a", "香港 01");
+
+        let kept = filter_informational_fetched_nodes(vec![info, expiry, normal.clone()]);
+
+        assert_eq!(kept, vec![normal]);
     }
 
     #[test]
