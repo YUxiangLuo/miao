@@ -33,10 +33,10 @@ use super::warnings::{ALL_SUBS_FAILED, NO_USABLE_MANUAL, NO_USABLE_SUBS, REGION_
 pub enum RefreshPolicy {
     /// 手动刷新（面板「刷新订阅」等独立路径）：生成+校验成功后，运行字节
     /// 有变化才激活（Unix reload / 未在跑则 start）；全部订阅失败也用现有
-    /// 结果继续；激活后由本管线持久化生效的 node_select
+    /// 结果继续。node_select、节点快照与诊断状态由外层事务统一提交。
     Manual,
-    /// apply_config_change 事务内的刷新：机制同 Manual，但 node_select 由外层
-    /// 事务随新配置一并提交，本管线不提前写盘——避免「旧配置 + 新选择」的中间快照
+    /// apply_config_change 事务内的刷新：机制同 Manual；持久配置和诊断状态
+    /// 同样由外层事务提交，避免发布半完成的中间状态。
     ManualInApply,
     /// 启动路径：与启动所用缓存比对无变化则不激活。
     /// 内核已在跑时，全部订阅失败/校验失败保留当前运行配置。
@@ -388,12 +388,11 @@ pub async fn refresh_subscriptions(
     {
         info!("Generated runtime config is unchanged; sing-box keeps running");
         save_node_bindings(state, &generated.node_bindings).await?;
-        // ManualInApply belongs to the outer configuration transaction. Do not
-        // publish diagnostics or effective preferences before that transaction
-        // has durably committed.
-        if !matches!(policy, RefreshPolicy::ManualInApply) {
-            record_fresh_snapshot(config, state, &generated).await;
+        // Foreground refreshes belong to an outer transaction which publishes
+        // preferences and diagnostics only after persistence succeeds.
+        if matches!(policy, RefreshPolicy::Startup) {
             persist_effective_node_select(state, generated.node_select).await?;
+            record_fresh_snapshot(config, state, &generated).await;
             *state.skipped_rules.lock().await = generated.skipped_rules.clone();
         }
         return Ok(RefreshOutcome {
@@ -423,13 +422,14 @@ pub async fn refresh_subscriptions(
         ?runtime_update,
         "sing-box runtime config activated successfully"
     );
-    // ManualInApply 的 node_select 由外层 apply_config_change 事务一并提交
-    if !matches!(policy, RefreshPolicy::ManualInApply) {
+    // Foreground callers commit node_select and diagnostics transactionally.
+    // Startup remains availability-first after a successful activation.
+    if matches!(policy, RefreshPolicy::Startup) {
+        if let Err(err) = persist_effective_node_select(state, generated.node_select).await {
+            warn!(error = %err, "Failed to persist effective node_select after startup refresh");
+        }
         record_fresh_snapshot(config, state, &generated).await;
         *state.skipped_rules.lock().await = generated.skipped_rules.clone();
-        if let Err(err) = persist_effective_node_select(state, generated.node_select).await {
-            warn!(error = %err, "Failed to persist effective node_select after restart");
-        }
     }
 
     Ok(RefreshOutcome {

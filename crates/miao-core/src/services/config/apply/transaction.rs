@@ -44,6 +44,19 @@ pub async fn regenerate_preserving_service_state(
                     .generated
                     .as_ref()
                     .expect("checked generated outcome");
+                if let Err(commit_err) = commit_foreground_refresh(config, state, outcome).await {
+                    error!(error = %commit_err, "Foreground runtime refresh could not commit effective preferences; restoring previous runtime state");
+                    return Err(rollback_failed_foreground_commit(
+                        config,
+                        state,
+                        true,
+                        snapshot.as_deref(),
+                        bindings_snapshot.as_deref(),
+                        refresh.runtime_update.updated(),
+                        commit_err,
+                    )
+                    .await);
+                }
                 if refresh.effect == RefreshEffect::Activated {
                     finalize_started_config(config, state, outcome.has_sub_nodes).await;
                     refresh.runtime_update
@@ -79,9 +92,19 @@ pub async fn regenerate_preserving_service_state(
     } else {
         match regenerate_without_restart_runtime(config, state, SubSource::Fetch).await {
             Ok(outcome) => {
-                persist_effective_node_select(state, outcome.node_select).await?;
-                record_fresh_snapshot(config, state, &outcome).await;
-                *state.skipped_rules.lock().await = outcome.skipped_rules.clone();
+                if let Err(commit_err) = commit_foreground_refresh(config, state, &outcome).await {
+                    error!(error = %commit_err, "Stopped runtime refresh could not commit effective preferences; restoring previous runtime files");
+                    return Err(rollback_failed_foreground_commit(
+                        config,
+                        state,
+                        false,
+                        snapshot.as_deref(),
+                        bindings_snapshot.as_deref(),
+                        false,
+                        commit_err,
+                    )
+                    .await);
+                }
                 update_config_warning(config, state, outcome.has_sub_nodes).await;
                 state.set_runtime_phase(RuntimePhase::Stopped);
             }
@@ -113,6 +136,50 @@ pub(in crate::services::config) async fn finalize_started_config(
     update_config_warning(config, state, has_sub_nodes).await;
 
     spawn_restore_last_proxy(state);
+}
+
+async fn commit_foreground_refresh(
+    config: &Config,
+    state: &Arc<AppState>,
+    outcome: &GenConfigOutcome,
+) -> AppResult<()> {
+    // Persistence is the commit point. Do not publish snapshots or diagnostics
+    // until it succeeds, otherwise an API error could leave observable state
+    // describing runtime bytes that are about to be rolled back.
+    persist_effective_node_select(state, outcome.node_select).await?;
+    record_fresh_snapshot(config, state, outcome).await;
+    *state.skipped_rules.lock().await = outcome.skipped_rules.clone();
+    Ok(())
+}
+
+async fn rollback_failed_foreground_commit(
+    config: &Config,
+    state: &Arc<AppState>,
+    should_run: bool,
+    runtime_snapshot: Option<&[u8]>,
+    bindings_snapshot: Option<&[u8]>,
+    force_restart: bool,
+    commit_err: AppError,
+) -> AppError {
+    match restore_after_apply_failure(
+        config,
+        state,
+        should_run,
+        runtime_snapshot,
+        bindings_snapshot,
+        force_restart,
+    )
+    .await
+    {
+        Ok(()) => AppError::context(
+            "Failed to commit refreshed configuration; restored previous runtime config",
+            commit_err,
+        ),
+        Err(restore_err) => AppError::message(format!(
+            "Failed to commit refreshed configuration: {}. Runtime rollback failed: {}",
+            commit_err, restore_err
+        )),
+    }
 }
 
 async fn update_config_warning(config: &Config, state: &Arc<AppState>, has_sub_nodes: bool) {

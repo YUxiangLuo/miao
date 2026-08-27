@@ -1,7 +1,7 @@
 use std::{os::unix::fs::PermissionsExt, sync::atomic::Ordering, sync::Arc};
 
 use crate::{
-    models::{Config, StableConfig},
+    models::{Config, NodeSelect, Region, RuntimePhase, StableConfig},
     paths::RuntimePaths,
     services::singbox::{is_sing_box_running, start_sing_internal, stop_sing_internal},
     state::AppState,
@@ -21,6 +21,124 @@ fn manual_node(tag: &str) -> String {
         "password": "secret"
     })
     .to_string()
+}
+
+async fn refresh_commit_failure_fixture(
+    label: &str,
+) -> (std::path::PathBuf, Arc<AppState>, Config) {
+    let unique = format!(
+        "miao-refresh-commit-{label}-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    );
+    let root = std::env::temp_dir().join(unique);
+    let runtime_dir = root.join("runtime");
+    let config_path = root.join("config.yaml");
+    let volatile_path = root.join("volatile.yaml");
+    tokio::fs::create_dir_all(&runtime_dir).await.unwrap();
+    // A directory at the volatile target makes the effective node-select
+    // commit fail after generation/activation has succeeded.
+    tokio::fs::create_dir_all(&volatile_path).await.unwrap();
+
+    let fake_kernel = runtime_dir.join("sing-box");
+    tokio::fs::write(
+        &fake_kernel,
+        b"#!/bin/sh\nif [ \"$1\" = check ]; then exit 0; fi\nif [ \"$1\" = run ]; then trap ':' HUP; while :; do sleep 1; done; fi\nexit 1\n",
+    )
+    .await
+    .unwrap();
+    std::fs::set_permissions(&fake_kernel, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+    let config = Config {
+        nodes: vec![manual_node("only-node")],
+        node_select: NodeSelect::Fastest(Region::Us),
+        ..Config::default()
+    };
+    let runtime_paths = RuntimePaths::new(runtime_dir, &config_path);
+    let state = Arc::new(
+        AppState::with_config_layers(
+            StableConfig::from(&config),
+            config.clone(),
+            config_path,
+            volatile_path,
+            runtime_paths,
+        )
+        .unwrap(),
+    );
+    tokio::fs::write(
+        &state.runtime_paths.active_config,
+        br#"{"marker":"old-runtime"}"#,
+    )
+    .await
+    .unwrap();
+    tokio::fs::write(
+        &state.runtime_paths.node_bindings,
+        br#"{"marker":"old-bindings"}"#,
+    )
+    .await
+    .unwrap();
+
+    (root, state, config)
+}
+
+#[tokio::test]
+async fn running_refresh_commit_failure_reactivates_previous_runtime() {
+    let (root, state, config) = refresh_commit_failure_fixture("running").await;
+    start_sing_internal(&state).await.unwrap();
+
+    let result = regenerate_preserving_service_state(&config, &state).await;
+
+    assert!(result.is_err(), "effective preference commit must fail");
+    assert_eq!(
+        tokio::fs::read(&state.runtime_paths.active_config)
+            .await
+            .unwrap(),
+        br#"{"marker":"old-runtime"}"#
+    );
+    assert_eq!(
+        tokio::fs::read(&state.runtime_paths.node_bindings)
+            .await
+            .unwrap(),
+        br#"{"marker":"old-bindings"}"#
+    );
+    assert_eq!(state.config.read().await.node_select, config.node_select);
+    assert_eq!(state.runtime_phase(), RuntimePhase::Ready);
+    assert!(state.runtime_ready.load(Ordering::Relaxed));
+    assert!(is_sing_box_running(&state).await);
+
+    stop_sing_internal(&state).await;
+    let _ = tokio::fs::remove_dir_all(root).await;
+}
+
+#[tokio::test]
+async fn stopped_refresh_commit_failure_restores_runtime_files_and_phase() {
+    let (root, state, config) = refresh_commit_failure_fixture("stopped").await;
+    state.service_should_run.store(false, Ordering::Relaxed);
+    state.set_runtime_phase(RuntimePhase::Stopped);
+
+    let result = regenerate_preserving_service_state(&config, &state).await;
+
+    assert!(result.is_err(), "effective preference commit must fail");
+    assert_eq!(
+        tokio::fs::read(&state.runtime_paths.active_config)
+            .await
+            .unwrap(),
+        br#"{"marker":"old-runtime"}"#
+    );
+    assert_eq!(
+        tokio::fs::read(&state.runtime_paths.node_bindings)
+            .await
+            .unwrap(),
+        br#"{"marker":"old-bindings"}"#
+    );
+    assert_eq!(state.config.read().await.node_select, config.node_select);
+    assert_eq!(state.runtime_phase(), RuntimePhase::Stopped);
+    assert!(!is_sing_box_running(&state).await);
+
+    let _ = tokio::fs::remove_dir_all(root).await;
 }
 
 #[tokio::test]
