@@ -24,10 +24,10 @@ chmod +x miao && sudo ./miao
 
 ```bash
 # 或者一键安装为systemd服务
-curl -fsSL https://miao.vesein.dev/install.sh | sudo MIAO_BASE_URL=https://miao.vesein.dev/dl bash
+curl -fsSL https://pub-afa10515daab4b68acdf3f17d43d80fd.r2.dev/install.sh | sudo MIAO_BASE_URL=https://pub-afa10515daab4b68acdf3f17d43d80fd.r2.dev bash
 
 # 完全卸载服务和任何痕迹
-curl -fsSL https://miao.vesein.dev/remove.sh | sudo bash
+curl -fsSL https://pub-afa10515daab4b68acdf3f17d43d80fd.r2.dev/remove.sh | sudo bash
 ```
 
 ### Windows
