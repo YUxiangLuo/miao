@@ -24,10 +24,10 @@ chmod +x miao && sudo ./miao
 
 ```bash
 # 或者一键安装为systemd服务
-curl -fsSL https://pub-afa10515daab4b68acdf3f17d43d80fd.r2.dev/install.sh | sudo MIAO_BASE_URL=https://pub-afa10515daab4b68acdf3f17d43d80fd.r2.dev bash
+curl -fsSL https://raw.githubusercontent.com/YUxiangLuo/miao/master/install.sh | sudo bash
 
 # 完全卸载服务和任何痕迹
-curl -fsSL https://pub-afa10515daab4b68acdf3f17d43d80fd.r2.dev/remove.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/YUxiangLuo/miao/master/remove.sh | sudo bash
 ```
 
 ### Windows

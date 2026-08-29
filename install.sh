@@ -4,7 +4,6 @@
 # 用法：
 #   curl -fsSL https://raw.githubusercontent.com/YUxiangLuo/miao/master/install.sh | sudo bash
 #   sudo bash install.sh /path/to/miao-binary   # 离线安装本地二进制
-#   curl -fsSL https://miao.vesein.dev/install.sh | sudo MIAO_BASE_URL=https://miao.vesein.dev/dl bash
 # 重复运行即事务式升级：先下载并校验，最后才短暂停服替换；启动失败自动回滚。
 set -euo pipefail
 
@@ -13,12 +12,8 @@ CONFIG_DIR=/etc/miao
 UNIT_PATH=/etc/systemd/system/miao.service
 REPO=YUxiangLuo/miao
 LOCAL_BIN="${1:-}"
-BASE_URL="${MIAO_BASE_URL:-https://github.com/$REPO/releases/latest/download}"
-if [[ -n "${MIAO_BASE_URL:-}" ]]; then
-  REMOVE_SH_URL="${MIAO_BASE_URL%/dl}/remove.sh"
-else
-  REMOVE_SH_URL="https://raw.githubusercontent.com/$REPO/master/remove.sh"
-fi
+BASE_URL="https://github.com/$REPO/releases/latest/download"
+REMOVE_SH_URL="https://raw.githubusercontent.com/$REPO/master/remove.sh"
 
 log() { echo "==> $*"; }
 
