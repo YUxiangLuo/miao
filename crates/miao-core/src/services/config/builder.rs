@@ -2,7 +2,9 @@ use std::collections::HashSet;
 use tracing::warn;
 
 use crate::error::{AppError, AppResult};
-use crate::models::{Config, NodeSelect, RouteMode};
+#[cfg(test)]
+use crate::models::node_multiplier;
+use crate::models::{Config, NodeMultiplier, NodeSelect, RouteMode};
 use crate::state::SkippedRule;
 
 use super::region::{group_member_names, resolve_node_select};
@@ -176,12 +178,38 @@ fn filter_parsed_rules_with_missing_outbound(
     (kept, skipped)
 }
 
+#[cfg(test)]
 pub(super) fn build_sing_box_config(
     config: &Config,
     my_names: Vec<String>,
     my_outbounds: Vec<serde_json::Value>,
     final_node_names: Vec<String>,
     final_outbounds: Vec<serde_json::Value>,
+) -> AppResult<(serde_json::Value, Vec<SkippedRule>, NodeSelect)> {
+    let node_multipliers = my_names
+        .iter()
+        .chain(&final_node_names)
+        .map(|name| node_multiplier(name))
+        .collect();
+    build_sing_box_config_with_multipliers(
+        config,
+        my_names,
+        my_outbounds,
+        final_node_names,
+        final_outbounds,
+        node_multipliers,
+    )
+}
+
+/// 与 build_sing_box_config 相同，但倍率来自节点当前显示名，而非可能因稳定绑定
+/// 保留下来的历史 tag。node_multipliers 与“手动节点 + 订阅节点”顺序一一对应。
+pub(super) fn build_sing_box_config_with_multipliers(
+    config: &Config,
+    my_names: Vec<String>,
+    my_outbounds: Vec<serde_json::Value>,
+    final_node_names: Vec<String>,
+    final_outbounds: Vec<serde_json::Value>,
+    mut node_multipliers: Vec<Option<NodeMultiplier>>,
 ) -> AppResult<(serde_json::Value, Vec<SkippedRule>, NodeSelect)> {
     let total_nodes = my_outbounds.len() + final_outbounds.len();
     if total_nodes == 0 {
@@ -192,9 +220,33 @@ pub(super) fn build_sing_box_config(
         my_names.into_iter().chain(final_node_names).collect(),
         my_outbounds.into_iter().chain(final_outbounds).collect(),
     );
+    // 防御测试/兼容调用中的数量不一致；生产生成路径始终严格对齐。
+    node_multipliers.resize(node_names.len(), Some(NodeMultiplier::ONE));
+    node_multipliers.truncate(node_names.len());
 
-    let effective_select = resolve_node_select(config.node_select, &node_names);
-    let group_names = group_member_names(effective_select, &node_names);
+    // 最高倍率只约束自动 urltest 的候选成员；真实订阅/手动 outbound 始终保留，
+    // manual selector 也始终展示完整节点池。倍率过滤后地区无候选时沿用现有语义
+    // 回退 manual，并恢复完整成员列表。无效倍率显式排除，避免按 1x 放行。
+    let capped_names = (!config.node_select.is_manual())
+        .then_some(config.max_multiplier)
+        .flatten()
+        .map(|max_multiplier| {
+            node_names
+                .iter()
+                .zip(&node_multipliers)
+                .filter(|(_, multiplier)| {
+                    multiplier.is_some_and(|multiplier| multiplier <= max_multiplier)
+                })
+                .map(|(name, _)| name.clone())
+                .collect::<Vec<_>>()
+        });
+    let selection_names = capped_names.as_deref().unwrap_or(&node_names);
+    let effective_select = resolve_node_select(config.node_select, selection_names);
+    let group_names = if effective_select.is_manual() {
+        node_names.clone()
+    } else {
+        group_member_names(effective_select, selection_names)
+    };
 
     // 规则引用不存在的节点会让 sing-box check 失败;生成时跳过这些规则并留痕告警
     let mut available_outbounds: HashSet<String> = node_names.iter().cloned().collect();

@@ -1,16 +1,19 @@
 use futures::{stream, StreamExt};
 use sha2::{Digest, Sha256};
+use std::collections::BTreeSet;
 use std::sync::{atomic::Ordering, Arc};
 use tokio::time::{Duration, Instant};
 use tracing::{error, info, warn};
 
 use crate::error::AppResult;
-use crate::models::{Config, DisabledNode, NodeSelect, SubStatus, SubscriptionState};
+use crate::models::{
+    node_multiplier, Config, DisabledNode, NodeMultiplier, NodeSelect, SubStatus, SubscriptionState,
+};
 use crate::services::subscription::{fetch_sub, is_informational_subscription_node};
 use crate::state::{AppState, SkippedRule};
 
 use super::bindings::{assign_subscription_tags, reserved_node_tags, NodeTagBindings};
-use super::builder::build_sing_box_config;
+use super::builder::build_sing_box_config_with_multipliers;
 use super::persist::{read_sub_nodes_snapshot, save_sub_nodes_snapshot, SubNodesSnapshot};
 
 #[derive(Clone)]
@@ -19,6 +22,8 @@ pub struct GenConfigOutcome {
     pub has_sub_nodes: bool,
     pub node_select: NodeSelect,
     pub skipped_rules: Vec<SkippedRule>,
+    /// 完整可用节点池中识别出的倍率，供面板动态生成自动候选上限选项。
+    pub available_multipliers: Vec<NodeMultiplier>,
     /// 本次真拉取拿到的订阅节点集（非空才 Some）；快照重建为 None。
     /// 校验通过/启动成功后由 record_fresh_snapshot 落盘，供本地语义变更零网络重建。
     pub fresh_sub_nodes: Option<Vec<FetchedNode>>,
@@ -428,16 +433,30 @@ async fn build_prepared(
     let has_sub_nodes = !nodes.is_empty();
     let nodes = filter_disabled_nodes(nodes, &config.disabled_nodes);
     let (my_outbounds, my_names) = collect_manual_outbounds(config);
+
+    let manual_multipliers: Vec<_> = my_names.iter().map(|name| node_multiplier(name)).collect();
+    let subscription_multipliers: Vec<_> = nodes
+        .iter()
+        .map(|node| node_multiplier(&node.name))
+        .collect();
+    let mut available_multipliers = BTreeSet::new();
+    available_multipliers.extend(manual_multipliers.iter().flatten().copied());
+    available_multipliers.extend(subscription_multipliers.iter().flatten().copied());
+
     let reserved_rule_tags = custom_rule_outbound_tags(&config.custom_rules);
     let (final_node_names, final_outbounds, node_bindings) =
         assign_subscription_tags(state, &my_names, &reserved_rule_tags, nodes).await;
 
-    let (sing_box_config, skipped_rules, node_select) = build_sing_box_config(
+    let (sing_box_config, skipped_rules, node_select) = build_sing_box_config_with_multipliers(
         config,
         my_names,
         my_outbounds,
         final_node_names,
         final_outbounds,
+        manual_multipliers
+            .into_iter()
+            .chain(subscription_multipliers)
+            .collect(),
     )?;
 
     Ok(GenConfigOutcome {
@@ -445,6 +464,7 @@ async fn build_prepared(
         has_sub_nodes,
         node_select,
         skipped_rules,
+        available_multipliers: available_multipliers.into_iter().collect(),
         fresh_sub_nodes: None,
         node_bindings,
     })
@@ -491,6 +511,35 @@ fn custom_rule_outbound_tags(custom_rules: &[String]) -> Vec<String> {
         }
     }
     tags
+}
+
+/// 在配置事务真正提交后发布候选配置携带的诊断元数据。
+pub async fn publish_generation_diagnostics(state: &AppState, outcome: &GenConfigOutcome) {
+    *state.skipped_rules.lock().await = outcome.skipped_rules.clone();
+    *state.available_multipliers.write().await = outcome.available_multipliers.clone();
+}
+
+/// 从已启动的缓存配置恢复倍率选项。缓存 tag 可能是稳定绑定留下的历史名称；
+/// 后续成功的订阅后台刷新会用当前完整节点池的显示名选项替换它。
+pub async fn publish_runtime_multiplier_options(state: &AppState) {
+    let Ok(content) = tokio::fs::read_to_string(&state.runtime_paths.active_config).await else {
+        return;
+    };
+    let Ok(config) = serde_json::from_str::<serde_json::Value>(&content) else {
+        return;
+    };
+    let mut multipliers = BTreeSet::new();
+    if let Some(outbounds) = config.get("outbounds").and_then(|value| value.as_array()) {
+        for name in outbounds.iter().filter_map(|outbound| {
+            let name = outbound.get("tag")?.as_str()?;
+            (!matches!(name, "proxy" | "direct")).then_some(name)
+        }) {
+            if let Some(multiplier) = node_multiplier(name) {
+                multipliers.insert(multiplier);
+            }
+        }
+    }
+    *state.available_multipliers.write().await = multipliers.into_iter().collect();
 }
 
 pub fn collect_manual_outbounds(config: &Config) -> (Vec<serde_json::Value>, Vec<String>) {
@@ -651,6 +700,123 @@ mod tests {
         let nodes = vec![fetched_node("https://a", "node-1")];
         let kept = filter_disabled_nodes(nodes, &[disabled_node("https://a", "node-1")]);
         assert!(kept.is_empty());
+    }
+
+    #[tokio::test]
+    async fn max_multiplier_only_limits_automatic_candidates_and_keeps_all_outbounds() {
+        use crate::models::{NodeMultiplier, NodeSelect, Region};
+
+        let config = Config {
+            nodes: vec![
+                r#"{"type":"trojan","tag":"未标倍率手动节点","server":"manual.example.com","server_port":443,"password":"password123"}"#.to_string(),
+                r#"{"type":"trojan","tag":"日本手动节点 6x","server":"expensive.example.com","server_port":443,"password":"password123"}"#.to_string(),
+                r#"{"type":"trojan","tag":"日本无效倍率 1.2345x","server":"invalid.example.com","server_port":443,"password":"password123"}"#.to_string(),
+            ],
+            node_select: NodeSelect::Fastest(Region::Jp),
+            max_multiplier: NodeMultiplier::parse("2.5"),
+            ..Config::default()
+        };
+        let state = crate::test_support::app_state(config.clone());
+        let fetched = vec![
+            fetched_node("https://a", "日本[1.3x]-普通"),
+            fetched_node("https://a", "日本[18x]-专线"),
+        ];
+
+        let outcome = super::build_prepared(&config, &state, fetched)
+            .await
+            .unwrap();
+        let generated: serde_json::Value = serde_json::from_slice(&outcome.bytes).unwrap();
+        let outbounds = generated["outbounds"].as_array().unwrap();
+        let tags: Vec<&str> = outbounds
+            .iter()
+            .filter_map(|outbound| outbound["tag"].as_str())
+            .collect();
+
+        assert!(tags.contains(&"未标倍率手动节点"));
+        assert!(tags.contains(&"日本手动节点 6x"));
+        assert!(tags.contains(&"日本无效倍率 1.2345x"));
+        assert!(tags.contains(&"日本[1.3x]-普通"));
+        assert!(tags.contains(&"日本[18x]-专线"));
+        assert_eq!(outbounds[0]["type"], "urltest");
+        assert_eq!(
+            outbounds[0]["outbounds"],
+            serde_json::json!(["日本[1.3x]-普通"])
+        );
+        assert_eq!(
+            outcome
+                .available_multipliers
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>(),
+            ["1", "1.3", "6", "18"]
+        );
+    }
+
+    #[tokio::test]
+    async fn max_multiplier_uses_current_subscription_name_when_stable_tag_is_old() {
+        use crate::models::{NodeMultiplier, NodeSelect, Region};
+        use crate::services::config::bindings::save_node_bindings;
+
+        let config = Config {
+            node_select: NodeSelect::Fastest(Region::Jp),
+            max_multiplier: NodeMultiplier::parse("2.5"),
+            ..Config::default()
+        };
+        let state = crate::test_support::app_state(config.clone());
+        let mut old_name = fetched_node("https://a", "日本[1.3x]-将改名");
+        old_name.outbound["server"] = serde_json::json!("a.example.com");
+        let mut low = fetched_node("https://a", "日本[1.3x]-保留");
+        low.outbound["server"] = serde_json::json!("b.example.com");
+        let first = super::build_prepared(&config, &state, vec![old_name.clone(), low.clone()])
+            .await
+            .unwrap();
+        save_node_bindings(&state, &first.node_bindings)
+            .await
+            .unwrap();
+
+        // 同一节点只改显示名/倍率，稳定 tag 仍保留旧的 1.3x 文本。
+        old_name.name = "日本[18x]-已改名".to_string();
+        let second = super::build_prepared(&config, &state, vec![old_name, low])
+            .await
+            .unwrap();
+        let generated: serde_json::Value = serde_json::from_slice(&second.bytes).unwrap();
+
+        assert_eq!(
+            generated["outbounds"][0]["outbounds"],
+            serde_json::json!(["日本[1.3x]-保留"]),
+            "18x 节点即使稳定 tag 仍写 1.3x，也不能进入自动候选"
+        );
+        assert!(generated["outbounds"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|outbound| outbound["tag"] == "日本[1.3x]-将改名"));
+    }
+
+    #[tokio::test]
+    async fn max_multiplier_is_inactive_in_manual_mode() {
+        use crate::models::NodeMultiplier;
+
+        let config = Config {
+            nodes: vec![
+                r#"{"type":"trojan","tag":"普通节点","server":"normal.example.com","server_port":443,"password":"password123"}"#.to_string(),
+                r#"{"type":"trojan","tag":"高倍率 18x","server":"expensive.example.com","server_port":443,"password":"password123"}"#.to_string(),
+            ],
+            max_multiplier: NodeMultiplier::parse("2.5"),
+            ..Config::default()
+        };
+        let state = crate::test_support::app_state(config.clone());
+
+        let outcome = super::build_prepared(&config, &state, Vec::new())
+            .await
+            .unwrap();
+        let generated: serde_json::Value = serde_json::from_slice(&outcome.bytes).unwrap();
+
+        assert_eq!(generated["outbounds"][0]["type"], "selector");
+        assert_eq!(
+            generated["outbounds"][0]["outbounds"],
+            serde_json::json!(["普通节点", "高倍率 18x"])
+        );
     }
 
     #[tokio::test]

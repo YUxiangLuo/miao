@@ -90,7 +90,14 @@ pub struct StatusData {
     pub phase: RuntimePhase,
     pub initializing: bool,
     pub route_mode: RouteMode,
+    /// 当前运行配置实际生效的选择策略；地区无候选时可能回退 manual。
     pub node_select: NodeSelect,
+    /// 用户请求并持久化的选择策略；即使临时回退 manual 也保持 fastest_*。
+    pub requested_node_select: NodeSelect,
+    /// 当前最高倍率；None 表示不限。字符串保持十进制精度并供 select 直接使用。
+    pub max_multiplier: Option<String>,
+    /// 当前完整节点池中动态识别出的倍率，按数值升序排列。
+    pub multiplier_options: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[cfg_attr(test, ts(optional))]
     pub pid: Option<u32>,
@@ -271,6 +278,35 @@ pub struct RouteModeRequest {
 pub struct NodeSelectRequest {
     #[cfg_attr(test, ts(type = "NodeSelect"))]
     pub node_select: String,
+}
+
+#[cfg_attr(test, derive(ts_rs::TS))]
+pub struct MaxMultiplierRequest {
+    /// null = 不限；其他值为不带 x 的正十进制字符串。
+    pub max_multiplier: Option<String>,
+}
+
+impl<'de> Deserialize<'de> for MaxMultiplierRequest {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        struct RequiredField {
+            // Value 不是 Option，因此字段缺失会由 serde 返回 missing field，而显式
+            // null 仍可与字符串区分。
+            max_multiplier: serde_json::Value,
+        }
+
+        let raw = RequiredField::deserialize(deserializer)?.max_multiplier;
+        let max_multiplier = match raw {
+            serde_json::Value::Null => None,
+            serde_json::Value::String(value) => Some(value),
+            _ => {
+                return Err(serde::de::Error::custom(
+                    "max_multiplier must be a string or null",
+                ));
+            }
+        };
+        Ok(Self { max_multiplier })
+    }
 }
 
 #[derive(Clone, Serialize)]

@@ -23,6 +23,7 @@ fn collect_manual_outbounds_ignores_invalid_json_nodes() {
             route_mode: Default::default(),
                 mcp: false,
             node_select: Default::default(),
+            max_multiplier: None,
             disabled_nodes: Default::default(),
         };
 
@@ -47,6 +48,7 @@ fn collect_manual_outbounds_preserves_hysteria2_without_default_bandwidth() {
             route_mode: Default::default(),
                 mcp: false,
             node_select: Default::default(),
+            max_multiplier: None,
             disabled_nodes: Default::default(),
         };
 
@@ -101,6 +103,7 @@ fn build_sing_box_config_skips_rules_with_missing_node() {
         route_mode: Default::default(),
         mcp: false,
         node_select: Default::default(),
+        max_multiplier: None,
         disabled_nodes: Default::default(),
     };
 
@@ -185,6 +188,7 @@ fn build_sing_box_config_merges_nodes_and_valid_custom_rules() {
         route_mode: Default::default(),
         mcp: false,
         node_select: Default::default(),
+        max_multiplier: None,
         disabled_nodes: Default::default(),
     };
 
@@ -249,6 +253,7 @@ fn build_sing_box_config_global_mode_removes_split_rules() {
         route_mode: RouteMode::Global,
         mcp: false,
         node_select: Default::default(),
+        max_multiplier: None,
         disabled_nodes: Default::default(),
     };
 

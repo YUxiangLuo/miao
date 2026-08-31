@@ -7,13 +7,17 @@ export function statusMock(overrides: Partial<StatusData> = {}): StatusData {
   const running = overrides.running ?? false
   const initializing = overrides.initializing ?? false
   const ready = overrides.ready ?? (running && !initializing)
+  const nodeSelect = overrides.node_select ?? 'manual'
   return {
     running,
     ready,
     phase: overrides.phase ?? (ready ? 'ready' : initializing ? 'initializing' : 'stopped'),
     initializing,
     route_mode: 'rule',
-    node_select: 'manual',
+    node_select: nodeSelect,
+    requested_node_select: overrides.requested_node_select ?? nodeSelect,
+    max_multiplier: null,
+    multiplier_options: [],
     vps_supported: true,
     platform: 'linux',
     mcp: false,

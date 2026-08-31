@@ -24,7 +24,7 @@ pub async fn regenerate_preserving_service_state(
     // sticky until the next process restart. Keep the effective snapshot for
     // rollback if the preferred regeneration cannot commit.
     let previous_config = config;
-    let preferred_config = state.overlay_node_select_preference(config).await;
+    let preferred_config = state.overlay_preferences(config).await;
     let config = &preferred_config;
     // This is an explicit foreground refresh. Any startup fetch that began
     // earlier with the same subscription URLs must not publish after it.
@@ -168,7 +168,7 @@ async fn commit_foreground_refresh(
     // describing runtime bytes that are about to be rolled back.
     persist_effective_node_select(state, outcome.node_select).await?;
     record_fresh_snapshot(config, state, outcome).await;
-    *state.skipped_rules.lock().await = outcome.skipped_rules.clone();
+    publish_generation_diagnostics(state, outcome).await;
     Ok(())
 }
 
@@ -403,7 +403,7 @@ pub async fn apply_config_change(
     // Handlers clone the effective config, whose strategy may be a temporary
     // manual fallback. Configuration changes must regenerate with the user's
     // requested strategy instead of accidentally extending that fallback.
-    let preferred_new_config = state.overlay_node_select_preference(new_config).await;
+    let preferred_new_config = state.overlay_preferences(new_config).await;
     let new_config = &preferred_new_config;
     let should_run = state.service_should_run.load(Ordering::Relaxed);
     let apply_mode = config_apply_mode(new_config, should_run);
@@ -419,6 +419,7 @@ pub async fn apply_config_change(
         clear_runtime_config(state).await;
         *state.config.write().await = new_config.clone();
         *state.skipped_rules.lock().await = Vec::new();
+        *state.available_multipliers.write().await = Vec::new();
         return Ok(ConfigApplyEffect::Cleared);
     }
 
@@ -466,7 +467,7 @@ pub async fn apply_config_change(
                 Ok(()) => {
                     *state.config.write().await = persisted_new_config;
                     record_fresh_snapshot(new_config, state, &outcome).await;
-                    *state.skipped_rules.lock().await = outcome.skipped_rules.clone();
+                    publish_generation_diagnostics(state, &outcome).await;
                     if should_run {
                         if runtime_update.updated() {
                             finalize_started_config(new_config, state, outcome.has_sub_nodes).await;
@@ -598,8 +599,7 @@ async fn apply_config_mutation(
 ) -> Result<RuntimeUpdate, ConfigMutationError> {
     let _config_update = state.config_update.lock().await;
     let old_config = state.config.read().await.clone();
-    let mut new_config = old_config.clone();
-    new_config.node_select = *state.node_select_preference.read().await;
+    let mut new_config = state.overlay_preferences(&old_config).await;
     mutate(&mut new_config).map_err(ConfigMutationError::Rejected)?;
     if new_config == old_config {
         return Ok(RuntimeUpdate::None);
@@ -687,6 +687,53 @@ pub async fn apply_node_select(
     };
     let effective = state.config.read().await.node_select;
     Ok((previous, effective, update))
+}
+
+/// 最高倍率与节点选择共享同一事务和平台持久化语义。None 表示不限。
+pub async fn apply_max_multiplier(
+    state: &Arc<AppState>,
+    max_multiplier: Option<NodeMultiplier>,
+) -> Result<(Option<NodeMultiplier>, RuntimeUpdate), ConfigMutationError> {
+    let _config_update = state.config_update.lock().await;
+    let old_config = state.config.read().await.clone();
+    let previous = *state.max_multiplier_preference.read().await;
+    let preference_path = &state.runtime_paths.max_multiplier_preference;
+    let preference_snapshot = read_file_snapshot(preference_path)
+        .await
+        .map_err(ConfigMutationError::Apply)?;
+
+    if let Err(save_err) = save_max_multiplier_preference(state, max_multiplier).await {
+        return match restore_file_snapshot(preference_path, preference_snapshot.as_deref()).await {
+            Ok(()) => Err(ConfigMutationError::Apply(save_err)),
+            Err(rollback_err) => Err(ConfigMutationError::Apply(AppError::message(format!(
+                "Failed to persist max-multiplier preference: {save_err}. Preference rollback failed: {rollback_err}"
+            )))),
+        };
+    }
+    *state.max_multiplier_preference.write().await = max_multiplier;
+
+    let mut new_config = old_config.clone();
+    new_config.max_multiplier = max_multiplier;
+    let apply_result = if new_config == old_config {
+        Ok(RuntimeUpdate::None)
+    } else {
+        apply_config_change(state, &old_config, &new_config)
+            .await
+            .map(|effect| effect.runtime_update())
+    };
+
+    match apply_result {
+        Ok(update) => Ok((previous, update)),
+        Err(apply_err) => {
+            *state.max_multiplier_preference.write().await = previous;
+            match restore_file_snapshot(preference_path, preference_snapshot.as_deref()).await {
+                Ok(()) => Err(ConfigMutationError::Apply(apply_err)),
+                Err(rollback_err) => Err(ConfigMutationError::Apply(AppError::message(format!(
+                    "Failed to apply max multiplier: {apply_err}. Preference rollback failed: {rollback_err}"
+                )))),
+            }
+        }
+    }
 }
 
 /// 只用本地材料把磁盘 config.json 恢复到变更前状态：优先内存快照，其次缓存。

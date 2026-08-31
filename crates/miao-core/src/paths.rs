@@ -30,6 +30,7 @@ pub struct RuntimePaths {
     pub node_bindings: PathBuf,
     pub last_proxy: PathBuf,
     pub node_select_preference: PathBuf,
+    pub max_multiplier_preference: PathBuf,
 }
 
 impl RuntimePaths {
@@ -51,13 +52,20 @@ impl RuntimePaths {
             node_bindings,
             last_proxy: runtime_dir.join(".last_proxy"),
             node_select_preference: runtime_dir.join(".node_select"),
+            max_multiplier_preference: runtime_dir.join(".max_multiplier"),
             runtime_dir,
         }
     }
 
-    pub fn with_preferences(mut self, last_proxy: PathBuf, node_select: PathBuf) -> Self {
+    pub fn with_preferences(
+        mut self,
+        last_proxy: PathBuf,
+        node_select: PathBuf,
+        max_multiplier: PathBuf,
+    ) -> Self {
         self.last_proxy = last_proxy;
         self.node_select_preference = node_select;
+        self.max_multiplier_preference = max_multiplier;
         self
     }
 }
@@ -205,9 +213,14 @@ mod tests {
             default.node_select_preference,
             PathBuf::from("/tmp/runtime/.node_select")
         );
+        assert_eq!(
+            default.max_multiplier_preference,
+            PathBuf::from("/tmp/runtime/.max_multiplier")
+        );
         let persistent = default.with_preferences(
             PathBuf::from("/etc/miao/.last_proxy"),
             PathBuf::from("/etc/miao/.node_select"),
+            PathBuf::from("/etc/miao/.max_multiplier"),
         );
         assert_eq!(
             persistent.last_proxy,
@@ -216,6 +229,10 @@ mod tests {
         assert_eq!(
             persistent.node_select_preference,
             PathBuf::from("/etc/miao/.node_select")
+        );
+        assert_eq!(
+            persistent.max_multiplier_preference,
+            PathBuf::from("/etc/miao/.max_multiplier")
         );
     }
 

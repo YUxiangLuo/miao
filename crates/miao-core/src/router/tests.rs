@@ -20,6 +20,7 @@ async fn router_serves_index_page() {
         route_mode: Default::default(),
         mcp: false,
         node_select: Default::default(),
+        max_multiplier: None,
         disabled_nodes: Default::default(),
     })
     .await;
@@ -41,6 +42,7 @@ async fn router_serves_favicon_with_svg_content_type() {
         route_mode: Default::default(),
         mcp: false,
         node_select: Default::default(),
+        max_multiplier: None,
         disabled_nodes: Default::default(),
     })
     .await;
@@ -69,6 +71,7 @@ async fn router_returns_status_payload() {
         route_mode: Default::default(),
         mcp: false,
         node_select: Default::default(),
+        max_multiplier: None,
         disabled_nodes: Default::default(),
     })
     .await;
@@ -83,6 +86,9 @@ async fn router_returns_status_payload() {
     assert_eq!(json["success"], true);
     assert_eq!(json["message"], "stopped");
     assert_eq!(json["data"]["running"], false);
+    assert_eq!(json["data"]["requested_node_select"], "manual");
+    assert_eq!(json["data"]["max_multiplier"], serde_json::Value::Null);
+    assert_eq!(json["data"]["multiplier_options"], json!([]));
     assert_eq!(json["data"]["warnings"], json!([]));
     assert_eq!(
         json["data"]["vps_supported"],
@@ -104,6 +110,7 @@ async fn router_returns_version_capability_flags() {
         route_mode: Default::default(),
         mcp: false,
         node_select: Default::default(),
+        max_multiplier: None,
         disabled_nodes: Default::default(),
     })
     .await;
@@ -135,6 +142,7 @@ async fn router_returns_node_list_payload() {
             route_mode: Default::default(),
             mcp: false,
             node_select: Default::default(),
+            max_multiplier: None,
             disabled_nodes: Default::default(),
         })
         .await;
@@ -163,6 +171,7 @@ async fn router_returns_subscription_list_payload() {
         route_mode: Default::default(),
         mcp: false,
         node_select: Default::default(),
+        max_multiplier: None,
         disabled_nodes: Default::default(),
     })
     .await;
@@ -210,6 +219,7 @@ async fn router_rejects_duplicate_subscription_with_bad_request() {
         route_mode: Default::default(),
         mcp: false,
         node_select: Default::default(),
+        max_multiplier: None,
         disabled_nodes: Default::default(),
     })
     .await;
@@ -239,6 +249,7 @@ async fn router_returns_not_found_when_deleting_missing_subscription() {
         route_mode: Default::default(),
         mcp: false,
         node_select: Default::default(),
+        max_multiplier: None,
         disabled_nodes: Default::default(),
     })
     .await;
@@ -270,6 +281,7 @@ async fn router_rejects_duplicate_node_with_bad_request() {
             route_mode: Default::default(),
             mcp: false,
             node_select: Default::default(),
+            max_multiplier: None,
             disabled_nodes: Default::default(),
         })
         .await;
@@ -343,6 +355,7 @@ async fn router_returns_not_found_when_deleting_missing_node() {
             route_mode: Default::default(),
             mcp: false,
             node_select: Default::default(),
+            max_multiplier: None,
             disabled_nodes: Default::default(),
         })
         .await;
@@ -372,6 +385,7 @@ async fn router_rejects_invalid_rule_field_with_bad_request() {
         route_mode: Default::default(),
         mcp: false,
         node_select: Default::default(),
+        max_multiplier: None,
         disabled_nodes: Default::default(),
     })
     .await;
@@ -404,6 +418,7 @@ async fn router_returns_not_found_when_deleting_missing_rule() {
         route_mode: Default::default(),
         mcp: false,
         node_select: Default::default(),
+        max_multiplier: None,
         disabled_nodes: Default::default(),
     })
     .await;
@@ -435,6 +450,7 @@ async fn router_rejects_rule_delete_when_entry_moved() {
         route_mode: Default::default(),
         mcp: false,
         node_select: Default::default(),
+        max_multiplier: None,
         disabled_nodes: Default::default(),
     })
     .await;
@@ -467,6 +483,7 @@ async fn router_returns_rule_list_payload() {
         route_mode: Default::default(),
         mcp: false,
         node_select: Default::default(),
+        max_multiplier: None,
         disabled_nodes: Default::default(),
     })
     .await;
@@ -501,6 +518,7 @@ async fn router_omits_upgrade_and_vps_on_windows() {
         route_mode: Default::default(),
         mcp: false,
         node_select: Default::default(),
+        max_multiplier: None,
         disabled_nodes: Default::default(),
     })
     .await;
@@ -534,6 +552,7 @@ async fn router_rejects_vps_deploy_with_invalid_ip() {
         route_mode: Default::default(),
         mcp: false,
         node_select: Default::default(),
+        max_multiplier: None,
         disabled_nodes: Default::default(),
     })
     .await;
@@ -563,6 +582,7 @@ async fn router_rejects_vps_deploy_with_empty_password() {
         route_mode: Default::default(),
         mcp: false,
         node_select: Default::default(),
+        max_multiplier: None,
         disabled_nodes: Default::default(),
     })
     .await;
@@ -595,6 +615,7 @@ async fn router_vps_deploy_returns_existing_node_without_ssh() {
             route_mode: Default::default(),
             mcp: false,
             node_select: Default::default(),
+            max_multiplier: None,
             disabled_nodes: Default::default(),
         })
         .await;
@@ -641,6 +662,64 @@ async fn router_node_select_is_idempotent_when_state_matches() {
     let json = response_json(response).await;
     assert_eq!(json["success"], true);
     assert_eq!(json["message"], "Node select unchanged");
+}
+
+#[tokio::test]
+async fn router_updates_and_clears_max_multiplier() {
+    let state = app_state(Config::default());
+    state
+        .initializing
+        .store(false, std::sync::atomic::Ordering::Relaxed);
+    let app = build_router(state.clone());
+
+    let response = app
+        .clone()
+        .oneshot(json_request(
+            "POST",
+            "/api/max-multiplier",
+            json!({ "max_multiplier": "2.5" }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        state
+            .config
+            .read()
+            .await
+            .max_multiplier
+            .map(|value| value.to_string()),
+        Some("2.5".to_string())
+    );
+
+    let response = app
+        .oneshot(json_request(
+            "POST",
+            "/api/max-multiplier",
+            json!({ "max_multiplier": null }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(state.config.read().await.max_multiplier, None);
+}
+
+#[tokio::test]
+async fn router_rejects_invalid_or_missing_max_multiplier() {
+    for (body, expected) in [
+        (
+            json!({ "max_multiplier": "not-a-number" }),
+            StatusCode::BAD_REQUEST,
+        ),
+        (json!({}), StatusCode::UNPROCESSABLE_ENTITY),
+    ] {
+        let app = test_app(Config::default()).await;
+        let response = app
+            .oneshot(json_request("POST", "/api/max-multiplier", body))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), expected);
+    }
 }
 
 #[tokio::test]
@@ -699,6 +778,7 @@ async fn mcp_endpoint_serves_jsonrpc_when_enabled() {
     let app = test_app(Config {
         mcp: true,
         node_select: Default::default(),
+        max_multiplier: None,
         disabled_nodes: Default::default(),
         ..Default::default()
     })

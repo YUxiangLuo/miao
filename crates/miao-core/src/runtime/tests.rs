@@ -773,12 +773,15 @@ fn resolve_log_path_honors_explicit_override() {
 }
 
 #[tokio::test]
-async fn spawn_server_restores_persisted_node_selection_strategy() {
+async fn spawn_server_restores_persisted_node_and_multiplier_preferences() {
     let config_path = unique_test_config_path();
     let volatile_path = unique_test_volatile_path();
     let runtime_dir = unique_test_runtime_dir();
     tokio::fs::create_dir_all(&runtime_dir).await.unwrap();
     tokio::fs::write(runtime_dir.join(".node_select"), "fastest_jp\n")
+        .await
+        .unwrap();
+    tokio::fs::write(runtime_dir.join(".max_multiplier"), "2.5\n")
         .await
         .unwrap();
     tokio::fs::write(&volatile_path, "{}\n").await.unwrap();
@@ -804,6 +807,7 @@ async fn spawn_server_restores_persisted_node_selection_strategy() {
         .await
         .unwrap();
     assert!(response.contains("\"node_select\":\"fastest_jp\""));
+    assert!(response.contains("\"max_multiplier\":\"2.5\""));
 
     handle.shutdown().await;
     let _ = tokio::fs::remove_file(config_path).await;
@@ -816,6 +820,9 @@ async fn spawn_server_migrates_existing_volatile_node_selection() {
     let config_path = unique_test_config_path();
     let volatile_path = unique_test_volatile_path();
     let runtime_dir = unique_test_runtime_dir();
+    tokio::fs::write(&config_path, "max_multiplier: 6.5\n")
+        .await
+        .unwrap();
     tokio::fs::write(&volatile_path, "node_select: fastest_sg\n")
         .await
         .unwrap();
@@ -840,6 +847,13 @@ async fn spawn_server_migrates_existing_volatile_node_selection() {
             .unwrap(),
         "fastest_sg\n"
     );
+    let response = reqwest::get(format!("{}/api/status", handle.url()))
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(response.contains("\"max_multiplier\":\"6.5\""));
 
     handle.shutdown().await;
     let _ = tokio::fs::remove_file(config_path).await;

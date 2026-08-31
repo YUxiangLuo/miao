@@ -6,7 +6,9 @@ use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::{Mutex, RwLock};
 
-use crate::models::{Config, GitHubRelease, NodeSelect, RuntimePhase, StableConfig, SubStatus};
+use crate::models::{
+    Config, GitHubRelease, NodeMultiplier, NodeSelect, RuntimePhase, StableConfig, SubStatus,
+};
 use crate::paths::RuntimePaths;
 
 /// 应用状态容器 - 包含所有运行时状态
@@ -19,6 +21,8 @@ pub struct AppState {
     /// default. Generation paths overlay this onto the effective config so a
     /// temporary regional fallback can recover without restarting Miao.
     pub node_select_preference: RwLock<NodeSelect>,
+    /// 用户明确选择的最高倍率；None 表示不限。持久化策略与 node_select 相同。
+    pub max_multiplier_preference: RwLock<Option<NodeMultiplier>>,
     /// Stable YAML model kept separately so volatile preferences never erase
     /// boot defaults during an unrelated configuration save.
     pub stable_config: RwLock<StableConfig>,
@@ -44,6 +48,8 @@ pub struct AppState {
     pub config_warning: Mutex<Option<String>>,
     /// 最近一次生成配置时因出口节点不存在而被跳过的自定义规则,用于面板告警与规则列表标记
     pub skipped_rules: Mutex<Vec<SkippedRule>>,
+    /// 最近一次成功生成配置时，从完整节点池识别出的倍率选项。
+    pub available_multipliers: RwLock<Vec<NodeMultiplier>>,
     pub initializing: AtomicBool,
     /// Process presence and data-plane readiness are deliberately separate.
     /// The child is stored before startup probing begins, so `running` can be
@@ -103,6 +109,7 @@ impl AppState {
         runtime_paths: RuntimePaths,
     ) -> Result<Self, reqwest::Error> {
         let node_select_preference = config.node_select;
+        let max_multiplier_preference = config.max_multiplier;
         // reqwest 默认会读 HTTP_PROXY/HTTPS_PROXY 等环境变量代理。本进程自己
         // 就是代理：订阅拉取、Clash API（127.0.0.1）都不该被 root 环境里的
         // 代理变量劫持，显式禁用。
@@ -114,6 +121,7 @@ impl AppState {
         Ok(Self {
             config: RwLock::new(config),
             node_select_preference: RwLock::new(node_select_preference),
+            max_multiplier_preference: RwLock::new(max_multiplier_preference),
             stable_config: RwLock::new(stable_config),
             config_path,
             volatile_path,
@@ -126,6 +134,7 @@ impl AppState {
             sub_status: Mutex::new(HashMap::new()),
             config_warning: Mutex::new(None),
             skipped_rules: Mutex::new(Vec::new()),
+            available_multipliers: RwLock::new(Vec::new()),
             initializing: AtomicBool::new(true),
             runtime_ready: AtomicBool::new(false),
             runtime_phase: AtomicU8::new(RuntimePhase::Initializing as u8),
@@ -140,16 +149,19 @@ impl AppState {
         })
     }
 
-    pub async fn config_with_node_select_preference(&self) -> Config {
+    pub async fn config_with_preferences(&self) -> Config {
         let node_select = *self.node_select_preference.read().await;
+        let max_multiplier = *self.max_multiplier_preference.read().await;
         let mut config = self.config.read().await.clone();
         config.node_select = node_select;
+        config.max_multiplier = max_multiplier;
         config
     }
 
-    pub async fn overlay_node_select_preference(&self, config: &Config) -> Config {
+    pub async fn overlay_preferences(&self, config: &Config) -> Config {
         let mut config = config.clone();
         config.node_select = *self.node_select_preference.read().await;
+        config.max_multiplier = *self.max_multiplier_preference.read().await;
         config
     }
 
@@ -197,6 +209,7 @@ mod tests {
             route_mode: Default::default(),
             mcp: false,
             node_select: Default::default(),
+            max_multiplier: None,
             disabled_nodes: Default::default(),
         };
 
@@ -229,6 +242,7 @@ mod tests {
             route_mode: Default::default(),
             mcp: false,
             node_select: Default::default(),
+            max_multiplier: None,
             disabled_nodes: Default::default(),
         };
 

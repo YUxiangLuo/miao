@@ -106,6 +106,16 @@ pub(super) async fn prepare_compatible_startup_cache(
             "Cached config does not match the effective node_select",
         ));
     }
+    // Verified manifest 证明该缓存由当前倍率配置生成；其稳定 tag 可能保留历史
+    // 名称，不能再从 tag 反推倍率。只有无 manifest 的 legacy 缓存需要保守检查。
+    if legacy
+        && !config.node_select.is_manual()
+        && !crate::models::runtime_config_matches_max_multiplier(&json, config.max_multiplier)
+    {
+        return Err(AppError::message(
+            "Cached automatic candidates do not match the effective max_multiplier",
+        ));
+    }
 
     restore_config_from_cache(state).await?;
     Ok(legacy)
@@ -124,6 +134,7 @@ pub(super) async fn try_start_compatible_cache(config: &Config, state: &Arc<AppS
                 if legacy_cache {
                     mark_legacy_cache_used(state).await;
                 }
+                publish_runtime_multiplier_options(state).await;
                 spawn_restore_last_proxy(state);
                 true
             }
@@ -158,7 +169,7 @@ pub(super) async fn start_prepared_local_runtime(
     info!(source, "sing-box started from local startup material");
 
     save_config_cache(state).await;
-    *state.skipped_rules.lock().await = outcome.skipped_rules.clone();
+    publish_generation_diagnostics(state, outcome).await;
     *state.config_warning.lock().await =
         if !config.node_select.is_manual() && outcome.node_select.is_manual() {
             Some(REGION_FALLBACK.to_string())
@@ -202,6 +213,7 @@ pub(super) async fn initialize_runtime_locked(config: &Config, state: &Arc<AppSt
                         if legacy_cache {
                             mark_legacy_cache_used(state).await;
                         }
+                        publish_runtime_multiplier_options(state).await;
                         spawn_restore_last_proxy(state);
                         state
                             .initializing
@@ -370,7 +382,7 @@ async fn background_subscription_refresh_once(
         info!("Service stopped before background refresh; skipping");
         return BackgroundRefreshStep::Finished;
     }
-    let before_fetch = state.config_with_node_select_preference().await;
+    let before_fetch = state.config_with_preferences().await;
     if before_fetch.subs != startup_config.subs {
         info!("Subscriptions changed before background refresh; skipping");
         return BackgroundRefreshStep::Finished;
@@ -388,7 +400,7 @@ async fn background_subscription_refresh_once(
     if state.sub_refresh_generation.load(Ordering::Relaxed) != refresh_generation {
         return BackgroundRefreshStep::Superseded;
     }
-    let current = state.config_with_node_select_preference().await;
+    let current = state.config_with_preferences().await;
     if current.subs != startup_config.subs {
         info!(
             "Subscriptions changed during background refresh; skipping (panel edit already applied)"
@@ -496,7 +508,7 @@ pub(super) async fn recover_data_plane_once(state: &Arc<AppState>) -> bool {
         return true;
     }
 
-    let config = state.config_with_node_select_preference().await;
+    let config = state.config_with_preferences().await;
     let refresh_generation = state.sub_refresh_generation.load(Ordering::Relaxed);
     if state.runtime_phase() == RuntimePhase::Failed {
         state.set_runtime_phase(if config.subs.is_empty() {
@@ -518,7 +530,7 @@ pub(super) async fn recover_data_plane_once(state: &Arc<AppState>) -> bool {
         return state.runtime_ready.load(Ordering::Relaxed) && is_sing_box_running(state).await;
     }
 
-    let current = state.config_with_node_select_preference().await;
+    let current = state.config_with_preferences().await;
     if current.subs != config.subs {
         info!("Subscriptions changed during startup recovery; discarding stale fetch");
         return state.runtime_ready.load(Ordering::Relaxed) && is_sing_box_running(state).await;

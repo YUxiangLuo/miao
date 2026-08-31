@@ -10,7 +10,7 @@
 | 配置 | `/etc/miao/config.yaml` | `%LOCALAPPDATA%\io.github.yuxiangluo.miao\config.yaml` |
 | 内核运行时 | `/tmp/miao-sing-box` | `%TEMP%\miao-sing-box` |
 | 易变配置 | `/tmp/miao-sing-box/volatile.yaml`（tmpfs） | 应用数据目录（持久） |
-| 节点选择偏好 | Linux：`/etc/miao/.node_select` + `.last_proxy`（持久）；OpenWrt：运行时 tmpfs | 应用数据目录（持久） |
+| 节点偏好 | Linux：`/etc/miao/.node_select` + `.max_multiplier` + `.last_proxy`（持久）；OpenWrt：运行时 tmpfs | 应用数据目录（持久） |
 | 一键升级 / VPS 部署 | 有 | 不编进桌面进程 |
 | 开机自启 | `install.sh` → systemd | 托盘勾选（任务计划，登录免 UAC 直进托盘） |
 

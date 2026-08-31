@@ -113,6 +113,31 @@ export function useAppActions(data: AppData) {
     )
   }, [status.route_mode, openConfirm, handleSetRouteMode])
 
+  const handleSetMaxMultiplier = useCallback(async (nextMultiplier: string | null) => {
+    if (nextMultiplier === (status.max_multiplier ?? null)) return
+
+    try {
+      await apiCall(
+        'max-multiplier',
+        { method: 'POST', body: JSON.stringify({ max_multiplier: nextMultiplier }) },
+        'maxMultiplier'
+      )
+      clearDelays()
+      await fetchStatus()
+      await fetchProxies()
+      showToast(nextMultiplier === null ? '已取消倍率限制' : `最高倍率已设为 ${nextMultiplier}x`, 'success')
+    } catch (error) {
+      showToast(errorMessage(error), 'error')
+    }
+  }, [
+    status.max_multiplier,
+    apiCall,
+    clearDelays,
+    fetchStatus,
+    fetchProxies,
+    showToast
+  ])
+
   const handleSetNodeSelect = useCallback(async (nextSelect: NodeSelect) => {
     if (nextSelect === (status.node_select || 'manual')) return
 
@@ -461,6 +486,7 @@ export function useAppActions(data: AppData) {
     openNodeModal,
     closeNodeModal,
     handleOpenSetRouteModeConfirm,
+    handleSetMaxMultiplier,
     handleSetNodeSelect,
     handleSwitchProxy,
     handleAddSubscription,

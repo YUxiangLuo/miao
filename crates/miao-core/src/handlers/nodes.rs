@@ -429,6 +429,7 @@ mod tests {
             route_mode: Default::default(),
             mcp: false,
             node_select: Default::default(),
+            max_multiplier: None,
             disabled_nodes: Default::default(),
         });
 
@@ -511,6 +512,7 @@ mod tests {
             route_mode: Default::default(),
             mcp: false,
             node_select: Default::default(),
+            max_multiplier: None,
             disabled_nodes: Default::default(),
         });
 
@@ -543,6 +545,7 @@ mod tests {
             route_mode: Default::default(),
             mcp: false,
             node_select: Default::default(),
+            max_multiplier: None,
             disabled_nodes: Default::default(),
         });
 
@@ -564,6 +567,7 @@ mod tests {
             route_mode: Default::default(),
             mcp: false,
             node_select: Default::default(),
+            max_multiplier: None,
             disabled_nodes: Default::default(),
         });
 
@@ -589,6 +593,7 @@ mod tests {
             route_mode: Default::default(),
             mcp: false,
             node_select: Default::default(),
+            max_multiplier: None,
             disabled_nodes: Default::default(),
         });
 
@@ -613,6 +618,7 @@ mod tests {
             route_mode: Default::default(),
             mcp: false,
             node_select: Default::default(),
+            max_multiplier: None,
             disabled_nodes: Default::default(),
         });
 
@@ -642,6 +648,7 @@ mod tests {
             route_mode: Default::default(),
             mcp: false,
             node_select: Default::default(),
+            max_multiplier: None,
             disabled_nodes: Default::default(),
         });
 
@@ -668,6 +675,7 @@ mod tests {
             route_mode: Default::default(),
             mcp: false,
             node_select: Default::default(),
+            max_multiplier: None,
             disabled_nodes: Default::default(),
         });
 
@@ -693,6 +701,7 @@ mod tests {
             route_mode: Default::default(),
             mcp: false,
             node_select: Default::default(),
+            max_multiplier: None,
             disabled_nodes: Default::default(),
         });
 

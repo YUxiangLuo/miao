@@ -1,4 +1,4 @@
-import { memo, useEffect, useRef, useState } from 'react'
+import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { Waypoints, Zap, LoaderCircle, Plus } from 'lucide-react'
 import { ARRIVE_MS, ICON, SCAN_STAGGER_CAP } from '../tokens'
@@ -85,10 +85,12 @@ export interface ProxyCardProps {
   testingNodes: Record<string, boolean>
   testingGroup: string
   switchingNode: string
+  maxMultiplierPending?: boolean
   nodeSelectPending: boolean
   onTestDelay: (nodeName: string) => void
   onTestGroupDelays: (groupName: string, nodeNames: string[]) => void
   onSwitchProxy: (group: string, nodeName: string) => void
+  onSetMaxMultiplier?: (maxMultiplier: string | null) => Promise<void> | void
   onSetNodeSelect?: (select: NodeSelect) => Promise<void> | void
   onOpenAddNode: () => void
 }
@@ -102,18 +104,33 @@ export function ProxyCard({
   testingNodes, 
   testingGroup,
   switchingNode,
+  maxMultiplierPending = false,
   nodeSelectPending,
   onTestDelay, 
   onTestGroupDelays, 
   onSwitchProxy,
+  onSetMaxMultiplier,
   onSetNodeSelect,
   onOpenAddNode
 }: ProxyCardProps) {
   const nodeSelect = status.node_select || 'manual'
-  const isFastest = nodeSelect.startsWith('fastest_')
+  // 地区筛空时 effective node_select 会回退 manual，但用户仍需能调高/取消倍率
+  // 来恢复自动模式，因此启用状态必须看 requested strategy。
+  const requestedNodeSelect = status.requested_node_select || nodeSelect
+  const isFastest = requestedNodeSelect.startsWith('fastest_')
   // 受控 select 在 apply 期间停在用户选择上:status.node_select 要等配置激活后的
   // fetchStatus 才更新,直接受控会弹回旧值;处理器结束(成功或失败)后回到服务端真值
   const [pendingSelect, setPendingSelect] = useState('')
+  // undefined = 无请求；null = 请求中的“不限”；string = 请求中的具体倍率。
+  const [pendingMultiplier, setPendingMultiplier] = useState<string | null | undefined>(undefined)
+  const multiplierOptions = useMemo(() => {
+    const values = new Set(status.multiplier_options || [])
+    if (status.max_multiplier) values.add(status.max_multiplier)
+    return [...values].sort((left, right) => Number(left) - Number(right))
+  }, [status.multiplier_options, status.max_multiplier])
+  const displayedMultiplier = pendingMultiplier === undefined
+    ? (status.max_multiplier ?? '')
+    : (pendingMultiplier ?? '')
 
   // 切换到位检测：primaryGroup.now 变化（手动切换成功后的 refetch、自动模式
   // 轮询发现 URLTest 换节点，走同一条路径）时给新选中 tile 加 .arrive 脉冲，
@@ -150,6 +167,26 @@ export function ProxyCard({
             <Waypoints size={ICON.sm} className="section-icon" />
             <span>节点列表</span>
           </div>
+          <label className="node-select">
+            <span className="node-select-label">最高倍率</span>
+            <select
+              aria-label="最高倍率"
+              value={displayedMultiplier}
+              disabled={!isFastest || status.initializing || maxMultiplierPending}
+              title={isFastest ? '限制自动测速候选的最高倍率' : '仅在地区最快模式下生效'}
+              onChange={(event) => {
+                const next = event.target.value || null
+                setPendingMultiplier(next)
+                Promise.resolve(onSetMaxMultiplier?.(next))
+                  .finally(() => setPendingMultiplier(undefined))
+              }}
+            >
+              <option value="">不限</option>
+              {multiplierOptions.map((value) => (
+                <option key={value} value={value}>{value}x</option>
+              ))}
+            </select>
+          </label>
           <label className="node-select">
             <span className="node-select-label">节点选择</span>
             <select

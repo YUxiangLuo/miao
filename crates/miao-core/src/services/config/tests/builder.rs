@@ -10,6 +10,7 @@ fn build_sing_box_config_renames_duplicate_outbound_tags() {
         route_mode: Default::default(),
         mcp: false,
         node_select: Default::default(),
+        max_multiplier: None,
         disabled_nodes: Default::default(),
     };
 
@@ -70,6 +71,7 @@ fn build_sing_box_config_renames_tags_reserved_by_template() {
         route_mode: Default::default(),
         mcp: false,
         node_select: Default::default(),
+        max_multiplier: None,
         disabled_nodes: Default::default(),
     };
 
@@ -123,6 +125,7 @@ fn build_sing_box_config_errors_when_no_nodes_available() {
         route_mode: Default::default(),
         mcp: false,
         node_select: Default::default(),
+        max_multiplier: None,
         disabled_nodes: Default::default(),
     };
 
@@ -144,6 +147,7 @@ fn collect_manual_outbounds_handles_empty_nodes() {
         route_mode: Default::default(),
         mcp: false,
         node_select: Default::default(),
+        max_multiplier: None,
         disabled_nodes: Default::default(),
     };
 
@@ -167,6 +171,7 @@ fn collect_manual_outbounds_handles_all_invalid_nodes() {
         route_mode: Default::default(),
         mcp: false,
         node_select: Default::default(),
+        max_multiplier: None,
         disabled_nodes: Default::default(),
     };
 
@@ -187,6 +192,7 @@ fn build_sing_box_config_preserves_node_order() {
         route_mode: Default::default(),
         mcp: false,
         node_select: Default::default(),
+        max_multiplier: None,
         disabled_nodes: Default::default(),
     };
 
@@ -226,6 +232,7 @@ fn build_sing_box_config_handles_no_custom_rules() {
         route_mode: Default::default(),
         mcp: false,
         node_select: Default::default(),
+        max_multiplier: None,
         disabled_nodes: Default::default(),
     };
 
@@ -261,6 +268,7 @@ fn build_sing_box_config_splits_direct_route_rules() {
         route_mode: Default::default(),
         mcp: false,
         node_select: Default::default(),
+        max_multiplier: None,
         disabled_nodes: Default::default(),
     };
 
@@ -342,6 +350,7 @@ fn build_sing_box_config_binds_clash_api_to_localhost() {
         route_mode: Default::default(),
         mcp: false,
         node_select: Default::default(),
+        max_multiplier: None,
         disabled_nodes: Default::default(),
     };
 
@@ -380,6 +389,7 @@ fn build_sing_box_config_ignores_all_invalid_custom_rules() {
         route_mode: Default::default(),
         mcp: false,
         node_select: Default::default(),
+        max_multiplier: None,
         disabled_nodes: Default::default(),
     };
 

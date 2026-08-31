@@ -16,7 +16,8 @@ use crate::handlers::{
     proxy::set_last_proxy,
     rules::{add_rule, delete_rule, get_rules},
     service::{
-        get_status, set_node_select, set_route_mode, start_service, stop_service, test_connectivity,
+        get_status, set_max_multiplier, set_node_select, set_route_mode, start_service,
+        stop_service, test_connectivity,
     },
     static_assets::{
         serve_favicon, serve_icon_192, serve_icon_512, serve_icon_maskable_512, serve_index,
@@ -44,6 +45,7 @@ pub fn build_router(app_state: Arc<AppState>) -> Router {
         .route("/api/service/stop", post(stop_service))
         .route("/api/route-mode", post(set_route_mode))
         .route("/api/node-select", post(set_node_select))
+        .route("/api/max-multiplier", post(set_max_multiplier))
         .route("/api/connectivity", post(test_connectivity))
         .route("/api/clash/traffic", get(proxy_clash_traffic))
         .route("/api/clash/{*path}", any(proxy_clash_http))

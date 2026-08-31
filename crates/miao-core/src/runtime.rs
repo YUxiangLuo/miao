@@ -12,14 +12,15 @@ use crate::models::{Config, RuntimePhase, DEFAULT_PORT};
 use crate::services::{
     config::{
         cache_compatibility, fetch_sub_nodes_if_current, gen_config_from_nodes, has_config_cache,
-        install_prepared_runtime, load_node_select_preference, load_volatile_config_at,
-        mark_legacy_cache_used, persist_effective_node_select, read_sub_nodes_snapshot,
-        refresh_subscriptions, restore_config_from_cache, runtime_config_matches_node_select,
-        save_config_cache, save_node_select_preference, CacheCompatibility, GenConfigOutcome,
-        RefreshEffect, RefreshPolicy, SubFetchRetry, SubSource, ALL_SUBS_FAILED_KEEP_CACHE,
-        ALL_SUBS_FAILED_RETRY, DATA_PLANE_RETRYING, REFRESH_FAILED_KEEP_CACHE,
-        REFRESH_VALIDATION_FAILED, REGION_FALLBACK, STARTUP_VALIDATION_RETRY,
-        SUBS_REFRESHING_MANUAL,
+        install_prepared_runtime, load_max_multiplier_preference, load_node_select_preference,
+        load_volatile_config_at, mark_legacy_cache_used, persist_effective_node_select,
+        publish_generation_diagnostics, publish_runtime_multiplier_options,
+        read_sub_nodes_snapshot, refresh_subscriptions, restore_config_from_cache,
+        runtime_config_matches_node_select, save_config_cache, save_max_multiplier_preference,
+        save_node_select_preference, CacheCompatibility, GenConfigOutcome, RefreshEffect,
+        RefreshPolicy, SubFetchRetry, SubSource, ALL_SUBS_FAILED_KEEP_CACHE, ALL_SUBS_FAILED_RETRY,
+        DATA_PLANE_RETRYING, REFRESH_FAILED_KEEP_CACHE, REFRESH_VALIDATION_FAILED, REGION_FALLBACK,
+        STARTUP_VALIDATION_RETRY, SUBS_REFRESHING_MANUAL,
     },
     proxy::spawn_restore_last_proxy,
     singbox::{
@@ -44,7 +45,7 @@ pub struct RuntimeOptions {
     pub port_fallback: bool,
     /// Skip path resolution and load this file (missing file → in-memory default).
     pub config_path: Option<PathBuf>,
-    /// Override the volatile-layer file (node_select/route_mode). `None` uses the
+    /// Override the volatile-layer file (node_select/max_multiplier/route_mode). `None` uses the
     /// platform default. Tests must point this at a temp path so they never read
     /// or write the real runtime dir (`/tmp/miao-sing-box`).
     pub volatile_path: Option<PathBuf>,
@@ -176,11 +177,13 @@ pub async fn spawn_server(options: RuntimeOptions) -> AppResult<ServerHandle> {
         (
             runtime_dir.join(".last_proxy"),
             runtime_dir.join(".node_select"),
+            runtime_dir.join(".max_multiplier"),
         )
     } else {
         (
             crate::services::proxy::platform_last_proxy_path(),
             crate::services::proxy::platform_node_select_path(),
+            crate::services::proxy::platform_max_multiplier_path(),
         )
     };
     // route_mode/disabled_nodes 仍由易变层覆盖。node_select 则拆分为 requested
@@ -188,6 +191,7 @@ pub async fn spawn_server(options: RuntimeOptions) -> AppResult<ServerHandle> {
     // manual 只改后者，不会擦除跨重启偏好。
     let volatile_config = load_volatile_config_at(&volatile_path).await;
     let stored_node_select = load_node_select_preference(&preference_paths.1).await;
+    let stored_max_multiplier = load_max_multiplier_preference(&preference_paths.2).await;
     // Old releases only had volatile.yaml. Only a non-manual value is safe to
     // migrate: serialized manual is indistinguishable from a temporary region
     // fallback, so promoting it could permanently mask config.yaml's default.
@@ -202,8 +206,22 @@ pub async fn spawn_server(options: RuntimeOptions) -> AppResult<ServerHandle> {
     let requested_node_select = stored_node_select
         .or(migrated_node_select)
         .unwrap_or(stable_config.node_select);
+    // 最高倍率没有运行期降级值；旧版易变层里若已存在该字段则迁移非空值。
+    // None 不迁移，避免把“旧文件没有该字段”误当成用户明确选择不限。
+    let migrated_max_multiplier = if stored_max_multiplier.is_none() {
+        volatile_config
+            .as_ref()
+            .and_then(|volatile| volatile.max_multiplier)
+    } else {
+        None
+    };
+    let requested_max_multiplier = match stored_max_multiplier {
+        Some(stored) => stored,
+        None => migrated_max_multiplier.or(stable_config.max_multiplier),
+    };
     let mut config = stable_config.effective(volatile_config);
     config.node_select = requested_node_select;
+    config.max_multiplier = requested_max_multiplier;
     if stored_node_select.is_some() {
         info!(
             node_select = requested_node_select.as_str(),
@@ -222,7 +240,7 @@ pub async fn spawn_server(options: RuntimeOptions) -> AppResult<ServerHandle> {
     );
 
     let runtime_paths = crate::paths::RuntimePaths::new(runtime_dir, &config_path)
-        .with_preferences(preference_paths.0, preference_paths.1);
+        .with_preferences(preference_paths.0, preference_paths.1, preference_paths.2);
     let app_state = Arc::new(
         AppState::with_config_layers(
             stable_config,
@@ -236,6 +254,11 @@ pub async fn spawn_server(options: RuntimeOptions) -> AppResult<ServerHandle> {
     if let Some(node_select) = migrated_node_select {
         if let Err(err) = save_node_select_preference(&app_state, node_select).await {
             warn!(error = %err, "Failed to migrate volatile node-selection preference");
+        }
+    }
+    if let Some(max_multiplier) = migrated_max_multiplier {
+        if let Err(err) = save_max_multiplier_preference(&app_state, Some(max_multiplier)).await {
+            warn!(error = %err, "Failed to migrate volatile max-multiplier preference");
         }
     }
     let state_for_init = app_state.clone();

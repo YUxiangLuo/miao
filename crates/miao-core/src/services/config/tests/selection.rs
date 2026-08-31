@@ -1,5 +1,5 @@
 use super::*;
-use crate::services::config::apply_node_select;
+use crate::services::config::{apply_max_multiplier, apply_node_select};
 
 #[test]
 fn tun_inbound_enables_auto_redirect_only_on_linux() {
@@ -121,6 +121,36 @@ async fn explicit_node_selection_is_persisted_even_when_runtime_is_unchanged() {
 }
 
 #[tokio::test]
+async fn max_multiplier_uses_the_same_persistent_preference_semantics() {
+    let state = app_state(Config::default());
+    let selected = crate::models::NodeMultiplier::parse("2.5").unwrap();
+
+    let (previous, update) = apply_max_multiplier(&state, Some(selected)).await.unwrap();
+
+    assert_eq!(previous, None);
+    assert_eq!(update, RuntimeUpdate::None);
+    assert_eq!(state.config.read().await.max_multiplier, Some(selected));
+    assert_eq!(
+        tokio::fs::read_to_string(&state.runtime_paths.max_multiplier_preference)
+            .await
+            .unwrap(),
+        "2.5\n"
+    );
+
+    apply_max_multiplier(&state, None).await.unwrap();
+    assert_eq!(state.config.read().await.max_multiplier, None);
+    assert_eq!(
+        tokio::fs::read_to_string(&state.runtime_paths.max_multiplier_preference)
+            .await
+            .unwrap(),
+        "unlimited\n"
+    );
+    let _ = tokio::fs::remove_dir_all(&state.runtime_paths.runtime_dir).await;
+    let _ = tokio::fs::remove_file(&state.config_path).await;
+    let _ = tokio::fs::remove_file(&state.volatile_path).await;
+}
+
+#[tokio::test]
 async fn concurrent_node_selection_keeps_file_aligned_with_requested_strategy() {
     let state = app_state(Config::default());
     let first = state.clone();
@@ -158,7 +188,11 @@ async fn node_selection_rejects_unwritable_preference_before_runtime_change() {
     let preference_path = root.join("preference-is-a-directory");
     tokio::fs::create_dir_all(&preference_path).await.unwrap();
     let paths = crate::paths::RuntimePaths::new(root.join("runtime"), &config_path)
-        .with_preferences(root.join(".last_proxy"), preference_path);
+        .with_preferences(
+            root.join(".last_proxy"),
+            preference_path,
+            root.join(".max_multiplier"),
+        );
     let config = Config::default();
     let state = std::sync::Arc::new(
         crate::state::AppState::with_config_layers(

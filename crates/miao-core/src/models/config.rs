@@ -1,5 +1,7 @@
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
+use super::multiplier::NodeMultiplier;
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "lowercase")]
@@ -130,6 +132,10 @@ pub struct Config {
     /// 但不再写入稳定层；运行值落 volatile.yaml。
     #[serde(default, skip_serializing)]
     pub node_select: NodeSelect,
+    /// 节点最高倍率：与 node_select 一样是易变运行偏好；None 表示不限。
+    /// config.yaml 中的同名字段仅作为易变层缺失时的启动默认值。
+    #[serde(default, skip_serializing)]
+    pub max_multiplier: Option<NodeMultiplier>,
     /// 路由模式：易变层字段——config.yaml 里的值是启动默认值（volatile 缺失时生效），
     /// 运行值落 volatile.yaml，稳定层保存不再携带。
     #[serde(default, skip_serializing)]
@@ -169,6 +175,8 @@ pub struct StableConfig {
     pub mcp: bool,
     #[serde(default, skip_serializing_if = "NodeSelect::serde_is_manual")]
     pub node_select: NodeSelect,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_multiplier: Option<NodeMultiplier>,
     #[serde(default, skip_serializing_if = "RouteMode::serde_is_rule")]
     pub route_mode: RouteMode,
 }
@@ -183,6 +191,8 @@ pub const DEFAULT_PORT: u16 = 6161;
 pub struct VolatileConfig {
     #[serde(default, skip_serializing_if = "NodeSelect::serde_is_manual")]
     pub node_select: NodeSelect,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_multiplier: Option<NodeMultiplier>,
     #[serde(default, skip_serializing_if = "RouteMode::serde_is_rule")]
     pub route_mode: RouteMode,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -193,6 +203,7 @@ impl From<&Config> for VolatileConfig {
     fn from(config: &Config) -> Self {
         Self {
             node_select: config.node_select,
+            max_multiplier: config.max_multiplier,
             route_mode: config.route_mode,
             disabled_nodes: config.disabled_nodes.clone(),
         }
@@ -208,6 +219,7 @@ impl From<&Config> for StableConfig {
             custom_rules: config.custom_rules.clone(),
             mcp: config.mcp,
             node_select: config.node_select,
+            max_multiplier: config.max_multiplier,
             route_mode: config.route_mode,
         }
     }
@@ -223,11 +235,13 @@ impl StableConfig {
             custom_rules: self.custom_rules.clone(),
             mcp: self.mcp,
             node_select: self.node_select,
+            max_multiplier: self.max_multiplier,
             route_mode: self.route_mode,
             disabled_nodes: Vec::new(),
         };
         if let Some(volatile) = volatile {
             config.node_select = volatile.node_select;
+            config.max_multiplier = volatile.max_multiplier;
             config.route_mode = volatile.route_mode;
             config.disabled_nodes = volatile.disabled_nodes;
         }
@@ -244,6 +258,7 @@ impl StableConfig {
             custom_rules: config.custom_rules.clone(),
             mcp: config.mcp,
             node_select: self.node_select,
+            max_multiplier: self.max_multiplier,
             route_mode: self.route_mode,
         }
     }
@@ -256,6 +271,7 @@ impl Config {
     pub fn overlay(mut self, volatile: Option<VolatileConfig>) -> Self {
         if let Some(volatile) = volatile {
             self.node_select = volatile.node_select;
+            self.max_multiplier = volatile.max_multiplier;
             self.route_mode = volatile.route_mode;
             self.disabled_nodes = volatile.disabled_nodes;
         }
@@ -291,6 +307,7 @@ nodes: []
             route_mode: super::RouteMode::Global,
             mcp: false,
             node_select: Default::default(),
+            max_multiplier: None,
             disabled_nodes: Default::default(),
         };
 
@@ -309,6 +326,7 @@ nodes: []
             route_mode: Default::default(),
             mcp: false,
             node_select: Default::default(),
+            max_multiplier: None,
             disabled_nodes: Default::default(),
         };
 
@@ -435,14 +453,18 @@ nodes: []
     #[test]
     fn volatile_config_roundtrip() {
         use super::{NodeSelect, Region, RouteMode, VolatileConfig};
+        use crate::models::NodeMultiplier;
 
         let volatile = VolatileConfig {
             node_select: NodeSelect::Fastest(Region::Jp),
+            max_multiplier: NodeMultiplier::parse("2.5"),
             route_mode: RouteMode::Global,
             ..VolatileConfig::default()
         };
         let yaml = yaml_serde::to_string(&volatile).unwrap();
         assert!(yaml.contains("node_select: fastest_jp"));
+        assert!(yaml.contains("max_multiplier"));
+        assert!(yaml.contains("2.5"));
         assert!(yaml.contains("route_mode: global"));
 
         let loaded: VolatileConfig = yaml_serde::from_str(&yaml).unwrap();
@@ -495,13 +517,15 @@ nodes: []
     #[test]
     fn stable_config_preserves_boot_defaults_when_effective_preferences_change() {
         use super::{NodeSelect, Region, RouteMode, StableConfig, VolatileConfig};
+        use crate::models::NodeMultiplier;
 
         let stable: StableConfig = yaml_serde::from_str(
-            "route_mode: global\nnode_select: fastest_hk\nsubs: []\nnodes: []\n",
+            "route_mode: global\nnode_select: fastest_hk\nmax_multiplier: 6.5\nsubs: []\nnodes: []\n",
         )
         .unwrap();
         let effective = stable.effective(Some(VolatileConfig {
             node_select: NodeSelect::Manual,
+            max_multiplier: NodeMultiplier::parse("2.5"),
             route_mode: RouteMode::Rule,
             ..VolatileConfig::default()
         }));
@@ -512,7 +536,10 @@ nodes: []
 
         assert!(yaml.contains("route_mode: global"));
         assert!(yaml.contains("node_select: fastest_hk"));
+        assert!(yaml.contains("max_multiplier"));
+        assert!(yaml.contains("6.5"));
         assert!(yaml.contains("mcp: true"));
         assert_eq!(saved.node_select, NodeSelect::Fastest(Region::Hk));
+        assert_eq!(saved.max_multiplier, NodeMultiplier::parse("6.5"));
     }
 }

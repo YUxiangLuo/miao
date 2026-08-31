@@ -246,6 +246,23 @@ pub(super) fn tools_catalog() -> JsonValue {
             "annotations": mutating(),
         },
         {
+            "name": "set_max_multiplier",
+            "description": "设置节点最高倍率：从节点名识别 18x、6.5X、2.4倍、倍率：1.3 等标记，未标倍率按 1x。仅在 fastest_* 自动选择模式下限制 urltest 测速候选；真实订阅/手动 outbound 始终保留，manual 模式不受影响。只用本地快照重建，不刷新订阅；传 null 表示不限。可选倍率见 get_status.multiplier_options。",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "max_multiplier": {
+                        "type": ["string", "null"],
+                        "pattern": "^[0-9]+(?:\\.[0-9]{1,3})?$",
+                        "description": "最高倍率的正十进制数字符串；null 表示不限"
+                    }
+                },
+                "required": ["max_multiplier"],
+                "additionalProperties": false
+            },
+            "annotations": mutating(),
+        },
+        {
             "name": "test_delay",
             "description": "通过 sing-box Clash API 测一个节点或全部运行时节点到固定探测 URL 的延迟。返回毫秒数，-1 表示超时/失败；批量测试并发上限为 6。无配置副作用，但会产生探测流量。",
             "inputSchema": {

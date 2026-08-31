@@ -7,7 +7,7 @@ use tracing::{error, info, warn};
 use std::sync::Arc;
 
 use crate::error::{AppError, AppResult};
-use crate::models::{Config, NodeSelect, StableConfig, VolatileConfig};
+use crate::models::{Config, NodeMultiplier, NodeSelect, StableConfig, VolatileConfig};
 use crate::services::singbox::get_sing_box_home;
 use crate::state::AppState;
 
@@ -63,6 +63,13 @@ fn runtime_input_sha256(config: &Config) -> AppResult<String> {
     // changes the hash and therefore cannot accept a cache that predates it.
     if !disabled_nodes.is_empty() {
         value["disabled_nodes"] = serde_json::json!(disabled_nodes);
+    }
+    // 最高倍率仅影响自动 urltest 候选；manual 缓存与倍率偏好无关。
+    // None 保持旧版输入哈希，既有“不限倍率”缓存无需因功能升级失效。
+    if !config.node_select.is_manual() {
+        if let Some(max_multiplier) = config.max_multiplier {
+            value["max_multiplier"] = serde_json::json!(max_multiplier.as_config_value());
+        }
     }
     Ok(sha256_hex(&serde_json::to_vec(&value)?))
 }
@@ -170,6 +177,34 @@ pub async fn save_node_select_preference(
 ) -> AppResult<()> {
     let content = format!("{}\n", node_select.as_str());
     let path = &state.runtime_paths.node_select_preference;
+    if tokio::fs::read(path)
+        .await
+        .is_ok_and(|existing| existing == content.as_bytes())
+    {
+        return Ok(());
+    }
+    write_file_atomic(path, content.as_bytes()).await
+}
+
+/// 外层 Option 区分“偏好文件不存在/损坏”和“用户明确选择不限”。
+pub async fn load_max_multiplier_preference(path: &Path) -> Option<Option<NodeMultiplier>> {
+    let content = tokio::fs::read_to_string(path).await.ok()?;
+    let value = content.trim();
+    if value == "unlimited" {
+        return Some(None);
+    }
+    NodeMultiplier::parse(value).map(Some)
+}
+
+pub async fn save_max_multiplier_preference(
+    state: &AppState,
+    max_multiplier: Option<NodeMultiplier>,
+) -> AppResult<()> {
+    let content = max_multiplier
+        .map(|value| value.as_config_value())
+        .unwrap_or_else(|| "unlimited".to_string())
+        + "\n";
+    let path = &state.runtime_paths.max_multiplier_preference;
     if tokio::fs::read(path)
         .await
         .is_ok_and(|existing| existing == content.as_bytes())
@@ -496,11 +531,12 @@ async fn read_sub_nodes_snapshot_at(path: &Path) -> Option<SubNodesSnapshot> {
 #[cfg(test)]
 mod tests {
     use super::{
-        get_sing_box_home, load_node_select_preference, load_volatile_config_at,
-        persist_effective_node_select, read_sub_nodes_snapshot_at, restore_config_from_cache_at,
-        restore_runtime_config_bytes_at, save_config_cache_at, save_config_layered,
-        save_node_select_preference, save_sub_nodes_snapshot_at, save_volatile_to,
-        snapshot_runtime_config_at, volatile_config_path, SubNodesSnapshot,
+        get_sing_box_home, load_max_multiplier_preference, load_node_select_preference,
+        load_volatile_config_at, persist_effective_node_select, read_sub_nodes_snapshot_at,
+        restore_config_from_cache_at, restore_runtime_config_bytes_at, save_config_cache_at,
+        save_config_layered, save_max_multiplier_preference, save_node_select_preference,
+        save_sub_nodes_snapshot_at, save_volatile_to, snapshot_runtime_config_at,
+        volatile_config_path, SubNodesSnapshot,
     };
 
     #[test]
@@ -752,6 +788,35 @@ mod tests {
         );
     }
 
+    #[test]
+    fn cache_input_hash_uses_multiplier_only_for_automatic_selection() {
+        use super::runtime_input_sha256;
+        use crate::models::{Config, NodeMultiplier, NodeSelect, Region};
+
+        let capped_manual = Config {
+            max_multiplier: NodeMultiplier::parse("2.5"),
+            ..Config::default()
+        };
+        assert_eq!(
+            runtime_input_sha256(&capped_manual).unwrap(),
+            runtime_input_sha256(&Config::default()).unwrap()
+        );
+
+        let capped_automatic = Config {
+            node_select: NodeSelect::Fastest(Region::Jp),
+            max_multiplier: NodeMultiplier::parse("2.5"),
+            ..Config::default()
+        };
+        let unlimited_automatic = Config {
+            max_multiplier: None,
+            ..capped_automatic.clone()
+        };
+        assert_ne!(
+            runtime_input_sha256(&capped_automatic).unwrap(),
+            runtime_input_sha256(&unlimited_automatic).unwrap()
+        );
+    }
+
     #[tokio::test]
     async fn cache_manifest_binds_cache_to_effective_runtime_inputs() {
         use super::{cache_compatibility, save_config_cache, CacheCompatibility};
@@ -924,6 +989,32 @@ mod tests {
             load_node_select_preference(&state.runtime_paths.node_select_preference).await,
             None
         );
+        let _ = tokio::fs::remove_dir_all(&state.runtime_paths.runtime_dir).await;
+    }
+
+    #[tokio::test]
+    async fn max_multiplier_preference_distinguishes_unlimited_and_missing() {
+        use crate::models::{Config, NodeMultiplier};
+        use crate::test_support::app_state;
+
+        let state = app_state(Config::default());
+        let path = &state.runtime_paths.max_multiplier_preference;
+        assert_eq!(load_max_multiplier_preference(path).await, None);
+
+        let selected = NodeMultiplier::parse("6.5").unwrap();
+        save_max_multiplier_preference(&state, Some(selected))
+            .await
+            .unwrap();
+        assert_eq!(
+            load_max_multiplier_preference(path).await,
+            Some(Some(selected))
+        );
+
+        save_max_multiplier_preference(&state, None).await.unwrap();
+        assert_eq!(load_max_multiplier_preference(path).await, Some(None));
+
+        tokio::fs::write(path, "invalid").await.unwrap();
+        assert_eq!(load_max_multiplier_preference(path).await, None);
         let _ = tokio::fs::remove_dir_all(&state.runtime_paths.runtime_dir).await;
     }
 

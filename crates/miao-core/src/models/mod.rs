@@ -1,20 +1,23 @@
 pub mod api;
 pub mod config;
+pub mod multiplier;
 pub mod node;
 pub mod proxy;
 pub mod version;
 
 pub use api::{
-    ApiResponse, ConnectivityResult, DeleteRuleRequest, McpRequest, NodeSelectRequest,
-    RouteModeRequest, RuleInfo, RuleRequest, RuntimePhase, RuntimeWarning, RuntimeWarningSeverity,
-    SetNodeDisabledRequest, StatusData, SubBatchRequest, SubBatchResult, SubNodeInfo, SubNodesInfo,
-    SubRequest, SubStatus, SubscriptionState, VergeImportItem, VergeImportResult,
+    ApiResponse, ConnectivityResult, DeleteRuleRequest, MaxMultiplierRequest, McpRequest,
+    NodeSelectRequest, RouteModeRequest, RuleInfo, RuleRequest, RuntimePhase, RuntimeWarning,
+    RuntimeWarningSeverity, SetNodeDisabledRequest, StatusData, SubBatchRequest, SubBatchResult,
+    SubNodeInfo, SubNodesInfo, SubRequest, SubStatus, SubscriptionState, VergeImportItem,
+    VergeImportResult,
 };
 #[cfg(not(windows))]
 pub use api::{VpsDeployRequest, VpsDeployResponse};
 pub use config::{
     Config, DisabledNode, NodeSelect, Region, RouteMode, StableConfig, VolatileConfig, DEFAULT_PORT,
 };
+pub use multiplier::{node_multiplier, runtime_config_matches_max_multiplier, NodeMultiplier};
 pub use node::{
     BatchNodeAdded, BatchNodeFailure, BatchNodeRequest, BatchNodeResult, DeleteNodeRequest,
     NodeInfo, NodeRequest,
@@ -87,6 +90,7 @@ mod typescript_contract {
         push_decl::<McpRequest>(&mut output, &config);
         push_decl::<RouteModeRequest>(&mut output, &config);
         push_decl::<NodeSelectRequest>(&mut output, &config);
+        push_decl::<MaxMultiplierRequest>(&mut output, &config);
         push_decl::<LastProxy>(&mut output, &config);
         push_decl::<VpsDeployRequest>(&mut output, &config);
         push_decl::<VpsDeployResponse>(&mut output, &config);

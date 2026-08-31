@@ -80,10 +80,12 @@ export function DashboardScreen({ app }: { app: ReturnType<typeof useAppControll
               testingNodes={app.testingNodes}
               testingGroup={app.testingGroup}
               switchingNode={app.switchingNode}
+              maxMultiplierPending={app.loadingAction === 'maxMultiplier'}
               nodeSelectPending={app.loadingAction === 'nodeSelect'}
               onTestDelay={app.handleTestDelay}
               onTestGroupDelays={app.handleTestGroupDelays}
               onSwitchProxy={app.handleSwitchProxy}
+              onSetMaxMultiplier={app.handleSetMaxMultiplier}
               onSetNodeSelect={app.handleSetNodeSelect}
               onOpenAddNode={app.openNodeModal}
             />

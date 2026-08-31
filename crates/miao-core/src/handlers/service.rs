@@ -6,7 +6,8 @@ use tokio::time::Duration;
 
 use crate::error::AppError;
 use crate::models::{
-    ApiResponse, ConnectivityResult, NodeSelect, NodeSelectRequest, RouteModeRequest, StatusData,
+    ApiResponse, ConnectivityResult, MaxMultiplierRequest, NodeMultiplier, NodeSelect,
+    NodeSelectRequest, RouteModeRequest, StatusData,
 };
 use crate::responses::{status_error, success, success_no_data, HandlerResult};
 use crate::services::{
@@ -25,10 +26,23 @@ pub async fn get_status(State(state): State<Arc<AppState>>) -> Json<ApiResponse<
         .load(std::sync::atomic::Ordering::Relaxed);
     let warnings = runtime_warnings(&state).await;
     let warning = legacy_warning(&warnings);
-    let (route_mode, mcp, node_select) = {
+    let (route_mode, mcp, node_select, max_multiplier) = {
         let config = state.config.read().await;
-        (config.route_mode, config.mcp, config.node_select)
+        (
+            config.route_mode,
+            config.mcp,
+            config.node_select,
+            config.max_multiplier,
+        )
     };
+    let requested_node_select = *state.node_select_preference.read().await;
+    let mut multiplier_options = state.available_multipliers.read().await.clone();
+    if let Some(current) = max_multiplier {
+        if !multiplier_options.contains(&current) {
+            multiplier_options.push(current);
+            multiplier_options.sort_unstable();
+        }
+    }
 
     success(
         if running { "running" } else { "stopped" },
@@ -39,6 +53,12 @@ pub async fn get_status(State(state): State<Arc<AppState>>) -> Json<ApiResponse<
             initializing,
             route_mode,
             node_select,
+            requested_node_select,
+            max_multiplier: max_multiplier.map(|value| value.as_config_value()),
+            multiplier_options: multiplier_options
+                .into_iter()
+                .map(|value| value.as_config_value())
+                .collect(),
             pid,
             uptime_secs,
             warning,
@@ -117,6 +137,39 @@ pub async fn set_route_mode(
     match crate::services::config::apply_route_mode(&state, req.route_mode).await {
         Ok((_, update)) if update.updated() => Ok(success_no_data("Route mode updated")),
         Ok(_) => Ok(success_no_data("Route mode unchanged")),
+        Err(e) => Err(status_error(StatusCode::INTERNAL_SERVER_ERROR, e)),
+    }
+}
+
+pub async fn set_max_multiplier(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<MaxMultiplierRequest>,
+) -> HandlerResult {
+    if state.initializing.load(Ordering::Relaxed) {
+        return Err(status_error(
+            StatusCode::CONFLICT,
+            "Initialization is still in progress",
+        ));
+    }
+
+    let max_multiplier = req
+        .max_multiplier
+        .as_deref()
+        .map(|value| {
+            NodeMultiplier::parse(value).ok_or_else(|| {
+                status_error(
+                    StatusCode::BAD_REQUEST,
+                    "最高倍率必须是大于 0 且不超过 10000 的十进制数，或使用 null 表示不限",
+                )
+            })
+        })
+        .transpose()?;
+
+    match crate::services::config::apply_max_multiplier(&state, max_multiplier).await {
+        Ok((previous, update)) if previous != max_multiplier || update.updated() => {
+            Ok(success_no_data("Max multiplier updated"))
+        }
+        Ok(_) => Ok(success_no_data("Max multiplier unchanged")),
         Err(e) => Err(status_error(StatusCode::INTERNAL_SERVER_ERROR, e)),
     }
 }
@@ -232,6 +285,7 @@ mod tests {
             route_mode: Default::default(),
             mcp: false,
             node_select: Default::default(),
+            max_multiplier: None,
             disabled_nodes: Default::default(),
         });
 
@@ -251,6 +305,31 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn get_status_reports_dynamic_multiplier_options() {
+        let selected = crate::models::NodeMultiplier::parse("2.5").unwrap();
+        let state = app_state(Config {
+            max_multiplier: Some(selected),
+            ..Config::default()
+        });
+        *state.available_multipliers.write().await = vec![
+            crate::models::NodeMultiplier::ONE,
+            crate::models::NodeMultiplier::parse("6.5").unwrap(),
+        ];
+        *state.node_select_preference.write().await =
+            crate::models::NodeSelect::Fastest(crate::models::Region::Jp);
+
+        let axum::response::Json(response) = get_status(State(state)).await;
+        let data = response.data.unwrap();
+
+        assert_eq!(data.max_multiplier.as_deref(), Some("2.5"));
+        assert_eq!(
+            data.requested_node_select,
+            crate::models::NodeSelect::Fastest(crate::models::Region::Jp)
+        );
+        assert_eq!(data.multiplier_options, ["1", "2.5", "6.5"]);
+    }
+
+    #[tokio::test]
     async fn get_status_reports_route_mode_from_config() {
         let state = app_state(Config {
             port: None,
@@ -260,6 +339,7 @@ mod tests {
             route_mode: RouteMode::Global,
             mcp: false,
             node_select: Default::default(),
+            max_multiplier: None,
             disabled_nodes: Default::default(),
         });
 

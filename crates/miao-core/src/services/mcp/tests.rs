@@ -114,6 +114,7 @@ async fn tools_list_covers_panel_capabilities() {
         "delete_node",
         "switch_node",
         "set_node_select",
+        "set_max_multiplier",
         "test_delay",
         "set_route_mode",
         "list_rules",
@@ -310,6 +311,40 @@ async fn set_node_select_validates_select_value() {
         .as_str()
         .unwrap()
         .contains("manual"));
+}
+
+#[tokio::test]
+async fn set_max_multiplier_validates_value() {
+    let response = call(
+        &state(Config::default()),
+        json!({
+            "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+            "params": { "name": "set_max_multiplier", "arguments": { "max_multiplier": "free" } },
+        }),
+    )
+    .await;
+    assert_eq!(response["result"]["isError"], true);
+    assert!(response["result"]["content"][0]["text"]
+        .as_str()
+        .unwrap()
+        .contains("大于 0"));
+}
+
+#[tokio::test]
+async fn set_max_multiplier_is_idempotent_without_touching_runtime() {
+    let response = call(
+        &state(Config::default()),
+        json!({
+            "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+            "params": { "name": "set_max_multiplier", "arguments": { "max_multiplier": null } },
+        }),
+    )
+    .await;
+    let text = response["result"]["content"][0]["text"].as_str().unwrap();
+    let payload: JsonValue = serde_json::from_str(text).unwrap();
+    assert_eq!(payload["max_multiplier"], JsonValue::Null);
+    assert_eq!(payload["changed"], false);
+    assert_eq!(payload["note"], "未变化");
 }
 
 #[tokio::test]

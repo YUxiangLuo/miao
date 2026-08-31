@@ -12,6 +12,7 @@ use crate::state::AppState;
 
 const LAST_PROXY_FILENAME: &str = ".last_proxy";
 const NODE_SELECT_FILENAME: &str = ".node_select";
+const MAX_MULTIPLIER_FILENAME: &str = ".max_multiplier";
 
 /// Where `.last_proxy` is stored.
 ///
@@ -83,8 +84,17 @@ pub fn platform_last_proxy_path() -> PathBuf {
 /// selector choice: regular systemd Linux and Windows retain it, while OpenWrt
 /// keeps it in tmpfs to avoid flash writes.
 pub fn platform_node_select_path() -> PathBuf {
+    preference_path(NODE_SELECT_FILENAME)
+}
+
+/// 最高倍率与节点选择使用完全相同的平台持久化策略。
+pub fn platform_max_multiplier_path() -> PathBuf {
+    preference_path(MAX_MULTIPLIER_FILENAME)
+}
+
+fn preference_path(file_name: &str) -> PathBuf {
     let mut path = platform_last_proxy_path();
-    path.set_file_name(NODE_SELECT_FILENAME);
+    path.set_file_name(file_name);
     path
 }
 
@@ -232,8 +242,9 @@ async fn restore_last_proxy(state: &Arc<AppState>, generation: u64) {
 mod tests {
     use super::{
         get_sing_box_home, last_proxy_path_for, last_proxy_store, openwrt_like_from_paths,
-        os_release_looks_like_openwrt, platform_node_select_path, write_last_proxy_file,
-        LastProxyStore, LAST_PROXY_FILENAME, NODE_SELECT_FILENAME,
+        os_release_looks_like_openwrt, platform_max_multiplier_path, platform_node_select_path,
+        write_last_proxy_file, LastProxyStore, LAST_PROXY_FILENAME, MAX_MULTIPLIER_FILENAME,
+        NODE_SELECT_FILENAME,
     };
     use crate::models::LastProxy;
 
@@ -243,6 +254,15 @@ mod tests {
         assert_eq!(
             path.file_name().and_then(|name| name.to_str()),
             Some(NODE_SELECT_FILENAME)
+        );
+    }
+
+    #[test]
+    fn max_multiplier_preference_uses_the_platform_state_store() {
+        let path = platform_max_multiplier_path();
+        assert_eq!(
+            path.file_name().and_then(|name| name.to_str()),
+            Some(MAX_MULTIPLIER_FILENAME)
         );
     }
 

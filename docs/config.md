@@ -20,6 +20,7 @@ custom_rules:              # 可选：优先于内置分流，全局模式下仍
 mcp: true                  # 可选：MCP 端点（POST /mcp），默认关闭
 
 node_select: fastest_jp    # 可选：启动默认节点策略（manual / fastest_hk/jp/tw/sg/us）
+max_multiplier: 2.5       # 可选：节点最高倍率；null 或省略表示不限
 route_mode: global         # 可选：启动默认路由模式（rule 规则分流 / global 全局代理）
 ```
 
@@ -28,11 +29,13 @@ route_mode: global         # 可选：启动默认路由模式（rule 规则分�
 | 层 | 文件 | 内容 | 位置 |
 | --- | --- | --- | --- |
 | 稳定层 | `config.yaml` | 订阅/节点/规则等低频配置 | Linux/OpenWrt：`/etc/miao`；Windows：应用数据目录 |
-| 易变层 | `volatile.yaml` | 节点选择策略、路由模式、禁用的订阅节点 | Unix：`/tmp/miao-sing-box`（tmpfs，系统重启后回到 config.yaml 的启动默认值）；Windows：应用数据目录（持久） |
+| 易变层 | `volatile.yaml` | 节点选择策略、最高倍率、路由模式、禁用的订阅节点 | Unix：`/tmp/miao-sing-box`（tmpfs，系统重启后回到 config.yaml 的启动默认值）；Windows：应用数据目录（持久） |
 | 状态层 | `config.json` / `.cache` / 快照 | 运行时配置与缓存 | sing-box 运行目录，可删 |
-| 选择偏好 | `.node_select` / `.last_proxy` | 用户显式选择的策略 / 手动节点 | 普通 Linux：`/etc/miao`；OpenWrt：运行时 tmpfs；Windows：应用数据目录 |
+| 选择偏好 | `.node_select` / `.max_multiplier` / `.last_proxy` | 用户显式选择的策略 / 最高倍率 / 手动节点 | 普通 Linux：`/etc/miao`；OpenWrt：运行时 tmpfs；Windows：应用数据目录 |
 
-面板或 MCP 显式选择 `manual` / `fastest_*` 后会更新 `.node_select`。普通 Linux 和 Windows 重启后优先恢复该策略；启动期间因地区节点暂缺而临时回退到 `manual` 不会覆盖用户偏好，后续订阅刷新会继续尝试原策略。首次升级只自动迁移旧 `volatile.yaml` 中明确记录的 `fastest_*`；无法与临时回退区分的 `manual` 不会被提升为持久偏好。具体手动节点仍由 `.last_proxy` 独立恢复。
+面板或 MCP 显式选择 `manual` / `fastest_*` 后会更新 `.node_select`，设置最高倍率后会更新 `.max_multiplier`（`unlimited` 表示不限）。普通 Linux 和 Windows 重启后优先恢复这些偏好；启动期间因地区节点暂缺而临时回退到 `manual` 不会覆盖用户偏好，后续订阅刷新会继续尝试原策略。首次升级会迁移旧 `volatile.yaml` 中明确记录的最高倍率和 `fastest_*`；无法与临时回退区分的 `manual` 不会被提升为持久偏好。具体手动节点仍由 `.last_proxy` 独立恢复。
+
+最高倍率从节点当前显示名动态识别，例如 `18x`、`6.5X`、`2.4倍`、`倍率：1.3`；未标倍率的节点按 `1x`，明确带倍率标记但数值无效的节点不会进入受限的自动候选。该限制仅在“地区最快”自动选择模式下生效，只缩小 `urltest` 的测速候选；订阅节点、手动节点及其真实 outbound 始终保留，手动选择模式展示完整节点池。面板下拉选项来自当前完整节点池，选择“不限”可恢复全部自动候选；地区筛空而临时回退手动模式时仍可调整倍率。
 
 OpenWrt 的易变层和选择偏好写 tmpfs：切节点/切模式这类高频操作零闪存磨损。面板/进程重启（如自升级）期间文件仍保留，系统重启后则回到 `config.yaml` 的启动默认值。
 
@@ -56,7 +59,7 @@ disabled_nodes:
 MCP 尽量与面板能力同构，工具按用途分为：
 
 - 状态与诊断：`get_status`、`get_version_info`、`test_connectivity`、`get_traffic`（实时速率快照）、`list_connections`（支持分页）
-- 服务与路由：`start_service`、`stop_service`、`set_route_mode`、`set_node_select`、`switch_node`、`test_delay`
+- 服务与路由：`start_service`、`stop_service`、`set_route_mode`、`set_node_select`、`set_max_multiplier`、`switch_node`、`test_delay`
 - 订阅：`list_subscriptions`、`add_subscriptions`、`delete_subscription`、`refresh_subscriptions`、`scan_clash_verge`、`list_subscription_nodes`（按订阅列出节点及禁用状态）、`set_subscription_node_disabled`（禁用/启用订阅节点）
 - 节点：`list_nodes`（订阅 + 手动平铺池）、`list_manual_nodes`、`add_node`、`import_nodes`、`delete_node`
 - 规则：`list_rules`、`add_rule`、`delete_rule`

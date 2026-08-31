@@ -17,6 +17,7 @@ async fn save_config_performs_atomic_write() {
         route_mode: Default::default(),
         mcp: false,
         node_select: Default::default(),
+        max_multiplier: None,
         disabled_nodes: Default::default(),
     };
 
@@ -59,6 +60,7 @@ async fn save_config_overwrites_existing_file() {
         route_mode: Default::default(),
         mcp: false,
         node_select: Default::default(),
+        max_multiplier: None,
         disabled_nodes: Default::default(),
     };
     save_config_to(&config_path, &config).await.unwrap();
@@ -86,6 +88,7 @@ async fn save_config_skips_identical_content() {
         route_mode: Default::default(),
         mcp: false,
         node_select: Default::default(),
+        max_multiplier: None,
         disabled_nodes: Default::default(),
     };
 

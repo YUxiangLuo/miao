@@ -8,7 +8,7 @@ use std::{
 use tracing::{error, info, warn};
 
 use crate::error::{AppError, AppResult};
-use crate::models::{Config, NodeSelect, RouteMode, RuntimePhase};
+use crate::models::{Config, NodeMultiplier, NodeSelect, RouteMode, RuntimePhase};
 use crate::services::{
     proxy::spawn_restore_last_proxy,
     singbox::{
@@ -19,13 +19,14 @@ use crate::state::AppState;
 
 use super::bindings::save_node_bindings;
 use super::generate::{
-    gen_config, gen_config_from_nodes, gen_config_from_snapshot, record_fresh_snapshot,
-    FetchedNode, GenConfigOutcome, SubFetchRetry,
+    gen_config, gen_config_from_nodes, gen_config_from_snapshot, publish_generation_diagnostics,
+    record_fresh_snapshot, FetchedNode, GenConfigOutcome, SubFetchRetry,
 };
 use super::persist::{
     has_config_cache, has_sub_nodes_snapshot, persist_effective_node_select, read_config_cache,
     restore_config_from_cache, restore_runtime_config_bytes, save_config_cache,
-    save_config_layered, save_node_select_preference, snapshot_runtime_config, write_file_atomic,
+    save_config_layered, save_max_multiplier_preference, save_node_select_preference,
+    snapshot_runtime_config, write_file_atomic,
 };
 use super::warnings::{ALL_SUBS_FAILED, NO_USABLE_MANUAL, NO_USABLE_SUBS, REGION_FALLBACK};
 
@@ -393,7 +394,7 @@ pub async fn refresh_subscriptions(
         if matches!(policy, RefreshPolicy::Startup) {
             persist_effective_node_select(state, generated.node_select).await?;
             record_fresh_snapshot(config, state, &generated).await;
-            *state.skipped_rules.lock().await = generated.skipped_rules.clone();
+            publish_generation_diagnostics(state, &generated).await;
         }
         return Ok(RefreshOutcome {
             effect: RefreshEffect::SkippedUnchanged,
@@ -429,7 +430,7 @@ pub async fn refresh_subscriptions(
             warn!(error = %err, "Failed to persist effective node_select after startup refresh");
         }
         record_fresh_snapshot(config, state, &generated).await;
-        *state.skipped_rules.lock().await = generated.skipped_rules.clone();
+        publish_generation_diagnostics(state, &generated).await;
     }
 
     Ok(RefreshOutcome {
@@ -443,8 +444,8 @@ pub async fn refresh_subscriptions(
 mod transaction;
 
 pub use transaction::{
-    apply_config_change, apply_disabled_nodes, apply_node_select, apply_route_mode,
-    regenerate_preserving_service_state, ConfigMutationError,
+    apply_config_change, apply_disabled_nodes, apply_max_multiplier, apply_node_select,
+    apply_route_mode, regenerate_preserving_service_state, ConfigMutationError,
 };
 #[cfg(test)]
 pub(super) use transaction::{

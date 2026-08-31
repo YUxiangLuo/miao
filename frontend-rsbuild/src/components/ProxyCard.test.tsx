@@ -13,6 +13,9 @@ function statusMock(node_select: StatusData['node_select']): StatusData {
     phase: 'ready',
     initializing: false,
     node_select,
+    requested_node_select: node_select,
+    max_multiplier: null,
+    multiplier_options: [],
     route_mode: 'rule',
     vps_supported: true,
     platform: 'linux',
@@ -49,10 +52,38 @@ describe('ProxyCard accessibility', () => {
     const delayButton = screen.getByRole('button', { name: '测试 node-a 延迟' })
     expect(switchButton.contains(delayButton)).toBe(false)
     expect(switchButton).toBeDisabled()
+    expect(screen.getByRole('combobox', { name: '最高倍率' })).toBeDisabled()
 
     await user.click(delayButton)
     expect(onSwitchProxy).not.toHaveBeenCalled()
     expect(onTestDelay).toHaveBeenCalledWith('node-a')
+  })
+
+  it('keeps multiplier editable when requested fastest temporarily falls back to manual', () => {
+    render(
+      <ProxyCard
+        status={{
+          ...statusMock('manual'),
+          requested_node_select: 'fastest_jp',
+          max_multiplier: '1',
+          multiplier_options: ['1', '2.5'],
+        }}
+        primaryGroup={{ type: 'Selector', now: '日本-01', all: ['日本-01'] }}
+        primaryGroupName="proxy"
+        switchingNode=""
+        nodeSelectPending={false}
+        delays={{}}
+        testingNodes={{}}
+        testingGroup=""
+        onTestDelay={rs.fn()}
+        onTestGroupDelays={rs.fn()}
+        onSwitchProxy={rs.fn()}
+        onSetNodeSelect={rs.fn()}
+        onOpenAddNode={rs.fn()}
+      />,
+    )
+
+    expect(screen.getByRole('combobox', { name: '最高倍率' })).toBeEnabled()
   })
 
   it('switches an inactive tile', async () => {
@@ -139,10 +170,14 @@ describe('ProxyCard accessibility', () => {
     expect(onSwitchProxy).toHaveBeenCalledWith('proxy', 'node-b')
   })
 
-  it('places the node-select dropdown in the header controls (right cluster)', () => {
+  it('places multiplier and node-select dropdowns in the header controls', () => {
     render(
       <ProxyCard
-        status={statusMock('fastest_hk')}
+        status={{
+          ...statusMock('fastest_hk'),
+          max_multiplier: '2.5',
+          multiplier_options: ['1', '1.5', '2.5', '6.5'],
+        }}
         primaryGroup={{ type: 'Selector', now: '香港-01', all: ['香港-01'] }}
         primaryGroupName="proxy"
         switchingNode=""
@@ -158,6 +193,9 @@ describe('ProxyCard accessibility', () => {
       />,
     )
 
+    const multiplierSelect = screen.getByRole('combobox', { name: '最高倍率' })
+    expect(multiplierSelect).toHaveValue('2.5')
+    expect(screen.getByRole('option', { name: '6.5x' })).toBeInTheDocument()
     const select = screen.getByRole('combobox', { name: '节点选择' })
     expect(select).toHaveValue('fastest_hk')
     const title = screen.getByText('节点列表')
@@ -166,7 +204,10 @@ describe('ProxyCard accessibility', () => {
     const header = title.closest('.section-header')
     expect(header).not.toBeNull()
     if (!header) throw new Error('section-header not found')
+    expect(header.contains(multiplierSelect)).toBe(true)
     expect(header.contains(select)).toBe(true)
+    expect(header.compareDocumentPosition(multiplierSelect) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(multiplierSelect.compareDocumentPosition(select) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     const titleWrap = title.closest('.section-title-wrap')
     if (!titleWrap) throw new Error('section-title-wrap not found')
     expect(titleWrap.contains(select)).toBe(false)
@@ -199,6 +240,47 @@ describe('ProxyCard accessibility', () => {
     await user.click(screen.getByRole('button', { name: '测试 日本-02 延迟' }))
     expect(onTestDelay).toHaveBeenCalledWith('日本-02')
     expect(onSwitchProxy).not.toHaveBeenCalled()
+  })
+
+  it('renders dynamic multipliers and keeps the chosen cap while the change is in flight', async () => {
+    const user = userEvent.setup()
+    let settle: (() => void) | undefined
+    const onSetMaxMultiplier = rs.fn(
+      () => new Promise<void>((resolve) => { settle = resolve }),
+    )
+
+    render(
+      <ProxyCard
+        status={{
+          ...statusMock('fastest_jp'),
+          max_multiplier: null,
+          multiplier_options: ['1', '1.3', '2.5', '18'],
+        }}
+        primaryGroup={{ type: 'URLTest', now: 'node-a', all: ['node-a'] }}
+        primaryGroupName="proxy"
+        switchingNode=""
+        nodeSelectPending={false}
+        delays={{}}
+        testingNodes={{}}
+        testingGroup=""
+        onTestDelay={rs.fn()}
+        onTestGroupDelays={rs.fn()}
+        onSwitchProxy={rs.fn()}
+        onSetMaxMultiplier={onSetMaxMultiplier}
+        onSetNodeSelect={rs.fn()}
+        onOpenAddNode={rs.fn()}
+      />,
+    )
+
+    const select = screen.getByRole('combobox', { name: '最高倍率' })
+    expect(screen.getByRole('option', { name: '1.3x' })).toBeInTheDocument()
+    await user.selectOptions(select, '2.5')
+
+    expect(onSetMaxMultiplier).toHaveBeenCalledWith('2.5')
+    expect(select).toHaveValue('2.5')
+
+    await act(async () => { settle?.() })
+    expect(select).toHaveValue('')
   })
 
   it('keeps the chosen node-select value while the change is in flight', async () => {

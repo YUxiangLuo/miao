@@ -16,7 +16,7 @@ use futures::stream::{self, StreamExt};
 use serde_json::{json, Value as JsonValue};
 
 use crate::error::AppResult;
-use crate::models::{LastProxy, NodeSelect, RouteMode};
+use crate::models::{LastProxy, NodeMultiplier, NodeSelect, RouteMode};
 use crate::services::{
     config::{RuntimeUpdate, REGION_FALLBACK},
     singbox::{is_sing_box_running, kernel_status, CLASH_API_BASE, CLASH_TRAFFIC_WS},
@@ -156,6 +156,7 @@ async fn handle_tool_call(
         "delete_node" => panel::delete_node(state, &args).await,
         "switch_node" => tool_switch_node(state, &args).await,
         "set_node_select" => tool_set_node_select(state, &args).await,
+        "set_max_multiplier" => tool_set_max_multiplier(state, &args).await,
         "test_delay" => tool_test_delay(state, &args).await,
         "set_route_mode" => tool_set_route_mode(state, &args).await,
         "list_rules" => tool_list_rules(state).await,
@@ -544,6 +545,49 @@ async fn tool_set_node_select(
         "reloaded": runtime_update == RuntimeUpdate::Reloaded,
         "restarted": runtime_update == RuntimeUpdate::Restarted,
         "note": note,
+    }))
+}
+
+/// 与面板「最高倍率」同一条链路：限制自动测速候选并持久化偏好。
+async fn tool_set_max_multiplier(
+    state: &Arc<AppState>,
+    args: &JsonValue,
+) -> Result<JsonValue, String> {
+    let value = args
+        .get("max_multiplier")
+        .ok_or_else(|| "Invalid params: missing `max_multiplier`".to_string())?;
+    let max_multiplier = if value.is_null() {
+        None
+    } else {
+        let raw = value.as_str().ok_or_else(|| {
+            "Invalid params: `max_multiplier` 必须是正十进制数字符串或 null".to_string()
+        })?;
+        Some(NodeMultiplier::parse(raw).ok_or_else(|| {
+            "Invalid params: `max_multiplier` 必须是大于 0 且不超过 10000 的十进制数".to_string()
+        })?)
+    };
+
+    if state.initializing.load(Ordering::Relaxed) {
+        return Err("初始化进行中，稍后再试".to_string());
+    }
+
+    let (previous, runtime_update) =
+        crate::services::config::apply_max_multiplier(state, max_multiplier)
+            .await
+            .map_err(|e| format!("设置最高倍率失败: {e}"))?;
+    let format_value = |value: Option<NodeMultiplier>| {
+        value
+            .map(|multiplier| JsonValue::String(multiplier.to_string()))
+            .unwrap_or(JsonValue::Null)
+    };
+    Ok(json!({
+        "max_multiplier": format_value(max_multiplier),
+        "changed": previous != max_multiplier,
+        "runtime_updated": runtime_update.updated(),
+        "started": runtime_update == RuntimeUpdate::Started,
+        "reloaded": runtime_update == RuntimeUpdate::Reloaded,
+        "restarted": runtime_update == RuntimeUpdate::Restarted,
+        "note": if previous == max_multiplier { "未变化" } else { "已保存最高倍率偏好" },
     }))
 }
 

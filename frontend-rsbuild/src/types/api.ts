@@ -20,7 +20,23 @@ export type StatusData = { running: boolean,
  * True only after the managed sing-box instance passed its startup
  * readiness check. A spawned process may be `running` while this is false.
  */
-ready: boolean, phase: RuntimePhase, initializing: boolean, route_mode: RouteMode, node_select: NodeSelect, pid?: number, uptime_secs?: number, warning?: string,
+ready: boolean, phase: RuntimePhase, initializing: boolean, route_mode: RouteMode,
+/**
+ * 当前运行配置实际生效的选择策略；地区无候选时可能回退 manual。
+ */
+node_select: NodeSelect,
+/**
+ * 用户请求并持久化的选择策略；即使临时回退 manual 也保持 fastest_*。
+ */
+requested_node_select: NodeSelect,
+/**
+ * 当前最高倍率；None 表示不限。字符串保持十进制精度并供 select 直接使用。
+ */
+max_multiplier: string | null,
+/**
+ * 当前完整节点池中动态识别出的倍率，按数值升序排列。
+ */
+multiplier_options: Array<string>, pid?: number, uptime_secs?: number, warning?: string,
 /**
  * Structured diagnostics for new clients. `warning` remains above as a
  * compatibility projection for existing panel/API consumers.
@@ -80,6 +96,12 @@ export type McpRequest = { enabled: boolean, };
 export type RouteModeRequest = { route_mode: RouteMode, };
 
 export type NodeSelectRequest = { node_select: NodeSelect, };
+
+export type MaxMultiplierRequest = {
+/**
+ * null = 不限；其他值为不带 x 的正十进制字符串。
+ */
+max_multiplier: string | null, };
 
 export type LastProxy = { group: string, name: string, };
 
