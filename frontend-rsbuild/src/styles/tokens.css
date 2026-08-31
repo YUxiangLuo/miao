@@ -123,6 +123,7 @@
 
     /* ── 7. 描边宽度（颜色取 --border 族；focus 环统一 2px） ───────────── */
     --bw: 1px;
+    --bw-select-chevron: 1.5px; /* 自绘 select 箭头笔画 */
     --bw-strong: 2px; /* 连接卡描边、:focus-visible 环 */
     --bw-bar: 3px; /* toast 左侧语义条、规则命中内发光条 */
 
@@ -134,6 +135,7 @@
     --control-h-lg: 38px; /* 规则工作台输入 */
     --chip-h: 44px; /* 顶栏速率/当前节点 chip */
     --size-dot: 6px; /* 状态点：版本点/活跃点/当前节点点 */
+    --size-select-chevron: 5px;
     --size-toggle-w: 26px;
     --size-toggle-h: 15px;
     --size-toggle-thumb: 11px;

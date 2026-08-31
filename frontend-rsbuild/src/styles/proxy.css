@@ -3,6 +3,7 @@
     align-items: center;
     gap: var(--space-1);
     min-width: 0;
+    position: relative;
     color: var(--text-muted);
     font-size: var(--fs-xs);
     font-weight: var(--fw-medium);
@@ -12,12 +13,28 @@
 }
 .node-select select {
     max-width: var(--node-select-max);
-    padding: 2px var(--space-1);
+    appearance: none;
+    padding: 2px calc(var(--space-3) + var(--space-0)) 2px var(--space-1);
     border-radius: var(--r-sm);
     border: 1px solid var(--border);
     background: var(--surface-soft);
     color: var(--text);
     outline: none;
+}
+.node-select::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    right: var(--space-2);
+    width: var(--size-select-chevron);
+    height: var(--size-select-chevron);
+    border-right: var(--bw-select-chevron) solid var(--text-muted);
+    border-bottom: var(--bw-select-chevron) solid var(--text-muted);
+    transform: translateY(-65%) rotate(45deg);
+    pointer-events: none;
+}
+.node-select:has(select:disabled)::after {
+    opacity: var(--o-disabled);
 }
 .node-select select:focus {
     border-color: var(--accent);
