@@ -519,24 +519,22 @@ pub async fn publish_generation_diagnostics(state: &AppState, outcome: &GenConfi
     *state.available_multipliers.write().await = outcome.available_multipliers.clone();
 }
 
-/// 从已启动的缓存配置恢复倍率选项。缓存 tag 可能是稳定绑定留下的历史名称；
-/// 后续成功的订阅后台刷新会用当前完整节点池的显示名选项替换它。
-pub async fn publish_runtime_multiplier_options(state: &AppState) {
-    let Ok(content) = tokio::fs::read_to_string(&state.runtime_paths.active_config).await else {
-        return;
-    };
-    let Ok(config) = serde_json::from_str::<serde_json::Value>(&content) else {
-        return;
-    };
+/// 缓存启动后从本地 canonical 节点材料恢复倍率选项。运行时 outbound tag
+/// 可能由稳定绑定保留历史名称，不能用于重新判断倍率；订阅使用快照中的当前
+/// 显示名，手动节点使用 config 中的当前 tag。快照缺失/不匹配时宁可只发布
+/// 手动节点倍率，等待后台刷新补齐，也不发布错误选项。
+pub async fn publish_runtime_multiplier_options(config: &Config, state: &AppState) {
     let mut multipliers = BTreeSet::new();
-    if let Some(outbounds) = config.get("outbounds").and_then(|value| value.as_array()) {
-        for name in outbounds.iter().filter_map(|outbound| {
-            let name = outbound.get("tag")?.as_str()?;
-            (!matches!(name, "proxy" | "direct")).then_some(name)
-        }) {
-            if let Some(multiplier) = node_multiplier(name) {
-                multipliers.insert(multiplier);
-            }
+    let (_, manual_names) = collect_manual_outbounds(config);
+    multipliers.extend(manual_names.iter().filter_map(|name| node_multiplier(name)));
+
+    if let Some(snapshot) = read_sub_nodes_snapshot(state).await {
+        if snapshot.matches_subs(&config.subs) {
+            let nodes = filter_disabled_nodes(
+                filter_informational_fetched_nodes(snapshot.into_fetched_nodes()),
+                &config.disabled_nodes,
+            );
+            multipliers.extend(nodes.iter().filter_map(|node| node_multiplier(&node.name)));
         }
     }
     *state.available_multipliers.write().await = multipliers.into_iter().collect();
@@ -791,6 +789,57 @@ mod tests {
             .unwrap()
             .iter()
             .any(|outbound| outbound["tag"] == "日本[1.3x]-将改名"));
+    }
+
+    #[tokio::test]
+    async fn cached_multiplier_options_use_snapshot_names_instead_of_stable_tags() {
+        use crate::services::config::{save_sub_nodes_snapshot, SubNodesSnapshot};
+
+        let sub = "https://a".to_string();
+        let config = Config {
+            subs: vec![sub.clone()],
+            nodes: vec![
+                r#"{"type":"trojan","tag":"手动节点 6x","server":"manual.example.com","server_port":443,"password":"password123"}"#.to_string(),
+            ],
+            ..Config::default()
+        };
+        let state = crate::test_support::app_state(config.clone());
+        let snapshot = SubNodesSnapshot::from_fetched_nodes(
+            vec![sub],
+            vec![fetched_node("https://a", "日本[18x]-当前名称")],
+        );
+        save_sub_nodes_snapshot(&state, &snapshot).await.unwrap();
+        tokio::fs::create_dir_all(&state.runtime_paths.runtime_dir)
+            .await
+            .unwrap();
+        tokio::fs::write(
+            &state.runtime_paths.active_config,
+            serde_json::to_vec(&serde_json::json!({
+                "outbounds": [
+                    { "type": "selector", "tag": "proxy", "outbounds": ["日本[1.3x]-旧稳定标签", "手动节点 6x"] },
+                    { "type": "direct", "tag": "direct" },
+                    { "type": "trojan", "tag": "日本[1.3x]-旧稳定标签" },
+                    { "type": "trojan", "tag": "手动节点 6x" }
+                ]
+            }))
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+
+        super::publish_runtime_multiplier_options(&config, &state).await;
+
+        assert_eq!(
+            state
+                .available_multipliers
+                .read()
+                .await
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>(),
+            ["6", "18"]
+        );
+        let _ = tokio::fs::remove_dir_all(&state.runtime_paths.runtime_dir).await;
     }
 
     #[tokio::test]

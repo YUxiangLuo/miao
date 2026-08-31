@@ -195,6 +195,74 @@ describe('App onboarding integration', () => {
     expect(delayCalls).toHaveLength(0)
   })
 
+  it('can cancel a requested fastest strategy after the runtime falls back to manual', async () => {
+    let requestedNodeSelect = 'fastest_jp'
+    const fetchMock = rs.fn(async (input, options = {}) => {
+      const url = String(input)
+      if (url === '/api/status') {
+        return jsonResponse({
+          success: true,
+          data: {
+            running: true,
+            ready: true,
+            phase: 'ready',
+            initializing: false,
+            route_mode: 'rule',
+            node_select: 'manual',
+            requested_node_select: requestedNodeSelect,
+            max_multiplier: '1',
+            multiplier_options: ['1', '2.5'],
+            warnings: [],
+            mcp: false,
+          },
+        })
+      }
+      if (url === '/api/nodes' || url === '/api/subs' || url === '/api/rules') {
+        return jsonResponse({ success: true, data: [] })
+      }
+      if (url === '/api/version') {
+        return jsonResponse({
+          success: true,
+          data: { current: 'v0.44.5', latest: null, has_update: false },
+        })
+      }
+      if (url === '/api/clash/proxies') {
+        return jsonResponse({
+          proxies: {
+            proxy: { type: 'Selector', name: 'proxy', now: '日本-01', all: ['日本-01'] },
+            '日本-01': { type: 'Hysteria2', name: '日本-01' },
+          },
+        })
+      }
+      if (url.startsWith('/api/clash/proxies/') && url.includes('/delay')) {
+        return jsonResponse({ delay: 100 })
+      }
+      if (url === '/api/node-select' && options.method === 'POST') {
+        const body = JSON.parse(options.body)
+        requestedNodeSelect = body.node_select
+        return jsonResponse({ success: true, message: 'Node select updated' })
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    })
+
+    rs.stubGlobal('fetch', fetchMock)
+    stubMatchMedia()
+
+    const user = userEvent.setup()
+    render(<App />)
+
+    const select = await screen.findByRole('combobox', { name: '节点选择' })
+    expect(select).toHaveValue('fastest_jp')
+    await user.selectOptions(select, 'manual')
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith('/api/node-select', expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ node_select: 'manual' }),
+      }))
+    })
+  })
+
   it('asks for confirmation before switching route mode', async () => {
     let routeMode = 'rule'
     const fetchMock = rs.fn(async (input, options = {}) => {

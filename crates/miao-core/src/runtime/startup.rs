@@ -93,6 +93,16 @@ pub(super) async fn prepare_compatible_startup_cache(
         }
     };
 
+    // A legacy cache has no input manifest proving that its automatic members
+    // were built under the requested cap. Its public tags may also predate the
+    // current subscription display names. Reject it and let the next startup
+    // tier rebuild from the local node snapshot instead of guessing.
+    if legacy && !config.node_select.is_manual() && config.max_multiplier.is_some() {
+        return Err(AppError::message(
+            "Legacy automatic cache cannot prove max_multiplier compatibility",
+        ));
+    }
+
     // Validate and inspect the cache in place. A rejected cache must not
     // overwrite config.json, which is also the rollback snapshot source.
     validate_sing_box_config(state, &state.runtime_paths.config_cache).await?;
@@ -106,17 +116,6 @@ pub(super) async fn prepare_compatible_startup_cache(
             "Cached config does not match the effective node_select",
         ));
     }
-    // Verified manifest 证明该缓存由当前倍率配置生成；其稳定 tag 可能保留历史
-    // 名称，不能再从 tag 反推倍率。只有无 manifest 的 legacy 缓存需要保守检查。
-    if legacy
-        && !config.node_select.is_manual()
-        && !crate::models::runtime_config_matches_max_multiplier(&json, config.max_multiplier)
-    {
-        return Err(AppError::message(
-            "Cached automatic candidates do not match the effective max_multiplier",
-        ));
-    }
-
     restore_config_from_cache(state).await?;
     Ok(legacy)
 }
@@ -134,7 +133,7 @@ pub(super) async fn try_start_compatible_cache(config: &Config, state: &Arc<AppS
                 if legacy_cache {
                     mark_legacy_cache_used(state).await;
                 }
-                publish_runtime_multiplier_options(state).await;
+                publish_runtime_multiplier_options(config, state).await;
                 spawn_restore_last_proxy(state);
                 true
             }
@@ -213,7 +212,7 @@ pub(super) async fn initialize_runtime_locked(config: &Config, state: &Arc<AppSt
                         if legacy_cache {
                             mark_legacy_cache_used(state).await;
                         }
-                        publish_runtime_multiplier_options(state).await;
+                        publish_runtime_multiplier_options(config, state).await;
                         spawn_restore_last_proxy(state);
                         state
                             .initializing

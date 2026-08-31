@@ -49,6 +49,7 @@ export function useAppActions(data: AppData) {
     testDelay,
     testGroupDelays,
   } = data
+  const requestedNodeSelect = status.requested_node_select || status.node_select || 'manual'
 
   const openConfirm = useCallback((title: string, message: string, onConfirm: () => void) => {
     setConfirmState({ open: true, title, message, onConfirm })
@@ -139,7 +140,7 @@ export function useAppActions(data: AppData) {
   ])
 
   const handleSetNodeSelect = useCallback(async (nextSelect: NodeSelect) => {
-    if (nextSelect === (status.node_select || 'manual')) return
+    if (nextSelect === requestedNodeSelect) return
 
     try {
       const payload = await apiCall(
@@ -157,7 +158,7 @@ export function useAppActions(data: AppData) {
       showToast(errorMessage(error), 'error')
     }
   }, [
-    status.node_select,
+    requestedNodeSelect,
     apiCall,
     clearDelays,
     fetchStatus,
@@ -166,7 +167,7 @@ export function useAppActions(data: AppData) {
   ])
 
   const handleSwitchProxy = useCallback(async (groupName: string, nodeName: string) => {
-    if ((status.node_select || 'manual') !== 'manual') return
+    if (requestedNodeSelect !== 'manual') return
     if (switchingNode) return
     setSwitchingNode(nodeName)
     try {
@@ -191,7 +192,7 @@ export function useAppActions(data: AppData) {
     } finally {
       setSwitchingNode('')
     }
-  }, [status.node_select, clashApiBase, fetchProxies, showToast, switchingNode, setSwitchingNode])
+  }, [requestedNodeSelect, clashApiBase, fetchProxies, showToast, switchingNode, setSwitchingNode])
 
   const handleAddSubscription = useCallback(async (url: string): Promise<boolean> => {
     const trimmed = url.trim()

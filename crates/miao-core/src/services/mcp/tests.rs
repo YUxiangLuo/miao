@@ -176,8 +176,20 @@ async fn unknown_tool_returns_32602_style_error() {
 
 #[tokio::test]
 async fn get_status_works_when_stopped_without_network() {
+    let selected = crate::models::NodeMultiplier::parse("2.5").unwrap();
+    let state = state(Config {
+        max_multiplier: Some(selected),
+        ..Config::default()
+    });
+    *state.node_select_preference.write().await =
+        crate::models::NodeSelect::Fastest(crate::models::Region::Jp);
+    *state.available_multipliers.write().await = vec![
+        crate::models::NodeMultiplier::ONE,
+        selected,
+        crate::models::NodeMultiplier::parse("6.5").unwrap(),
+    ];
     let response = call(
-        &state(Config::default()),
+        &state,
         json!({
             "jsonrpc": "2.0", "id": 1, "method": "tools/call",
             "params": { "name": "get_status", "arguments": {} },
@@ -189,6 +201,10 @@ async fn get_status_works_when_stopped_without_network() {
     assert_eq!(payload["running"], false);
     assert_eq!(payload["ready"], false);
     assert_eq!(payload["route_mode"], "rule");
+    assert_eq!(payload["node_select"], "manual");
+    assert_eq!(payload["requested_node_select"], "fastest_jp");
+    assert_eq!(payload["max_multiplier"], "2.5");
+    assert_eq!(payload["multiplier_options"], json!(["1", "2.5", "6.5"]));
     assert_eq!(payload["mcp"], false);
     assert_eq!(
         payload["upgrade_supported"],

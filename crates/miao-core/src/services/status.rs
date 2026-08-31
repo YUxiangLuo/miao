@@ -1,5 +1,32 @@
-use crate::models::{RuntimeWarning, RuntimeWarningSeverity};
+use crate::models::{Config, NodeMultiplier, NodeSelect, RuntimeWarning, RuntimeWarningSeverity};
 use crate::state::AppState;
+
+/// Shared configuration projection for REST and MCP status responses.
+/// `config.node_select` is effective; `requested_node_select` survives a
+/// temporary regional fallback. The current cap remains an available option
+/// even when no currently available node advertises that exact value.
+pub struct RuntimeConfigStatus {
+    pub config: Config,
+    pub requested_node_select: NodeSelect,
+    pub multiplier_options: Vec<NodeMultiplier>,
+}
+
+pub async fn runtime_config_status(state: &AppState) -> RuntimeConfigStatus {
+    let config = state.config.read().await.clone();
+    let requested_node_select = *state.node_select_preference.read().await;
+    let mut multiplier_options = state.available_multipliers.read().await.clone();
+    if let Some(current) = config.max_multiplier {
+        if !multiplier_options.contains(&current) {
+            multiplier_options.push(current);
+            multiplier_options.sort_unstable();
+        }
+    }
+    RuntimeConfigStatus {
+        config,
+        requested_node_select,
+        multiplier_options,
+    }
+}
 
 /// Build one diagnostic snapshot for REST and MCP. Keeping the compatibility
 /// string as a projection of this list prevents the two control planes from

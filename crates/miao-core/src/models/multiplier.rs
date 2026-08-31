@@ -118,40 +118,6 @@ pub fn node_multiplier(name: &str) -> Option<NodeMultiplier> {
     }
 }
 
-/// 检查缓存中自动 urltest 的候选成员是否都满足最高倍率。真实订阅/手动
-/// outbound 不受倍率限制；这里只防止旧缓存让自动选择短暂选中高倍率节点。
-pub fn runtime_config_matches_max_multiplier(
-    config_json: &serde_json::Value,
-    max_multiplier: Option<NodeMultiplier>,
-) -> bool {
-    let Some(max_multiplier) = max_multiplier else {
-        return true;
-    };
-    let Some(proxy) = config_json
-        .get("outbounds")
-        .and_then(|value| value.as_array())
-        .and_then(|outbounds| {
-            outbounds
-                .iter()
-                .find(|outbound| outbound.get("tag").and_then(|tag| tag.as_str()) == Some("proxy"))
-        })
-    else {
-        return false;
-    };
-    if proxy.get("type").and_then(|value| value.as_str()) != Some("urltest") {
-        return false;
-    }
-    let Some(names) = proxy.get("outbounds").and_then(|value| value.as_array()) else {
-        return false;
-    };
-    !names.is_empty()
-        && names.iter().all(|name| {
-            name.as_str().is_some_and(|name| {
-                node_multiplier(name).is_some_and(|multiplier| multiplier <= max_multiplier)
-            })
-        })
-}
-
 #[cfg(test)]
 mod tests {
     use super::{node_multiplier, NodeMultiplier};
@@ -199,30 +165,6 @@ mod tests {
         assert_eq!(node_multiplier("超范围 10001x 标记"), None);
         assert_eq!(node_multiplier("错误的 1.2345x 标记"), None);
         assert_eq!(node_multiplier("错误的 倍率：1.2345 标记"), None);
-    }
-
-    #[test]
-    fn legacy_runtime_cache_must_respect_the_requested_cap() {
-        let mut config = serde_json::json!({
-            "outbounds": [
-                { "type": "urltest", "tag": "proxy", "outbounds": ["香港 [1.3x]", "日本 [18x]"] },
-                { "type": "direct", "tag": "direct" },
-                { "type": "trojan", "tag": "香港 [1.3x]" },
-                { "type": "trojan", "tag": "日本 [18x]" }
-            ]
-        });
-
-        assert!(!super::runtime_config_matches_max_multiplier(
-            &config,
-            NodeMultiplier::parse("2.5")
-        ));
-        config["outbounds"][0]["outbounds"] = serde_json::json!(["香港 [1.3x]"]);
-        // 真实 outbound 中保留 18x 不影响自动候选兼容性。
-        assert!(super::runtime_config_matches_max_multiplier(
-            &config,
-            NodeMultiplier::parse("2.5")
-        ));
-        assert!(super::runtime_config_matches_max_multiplier(&config, None));
     }
 
     #[test]

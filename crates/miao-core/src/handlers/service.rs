@@ -13,7 +13,7 @@ use crate::responses::{status_error, success, success_no_data, HandlerResult};
 use crate::services::{
     proxy::spawn_restore_last_proxy,
     singbox::{kernel_status, start_sing_internal, stop_sing_internal},
-    status::{legacy_warning, runtime_warnings},
+    status::{legacy_warning, runtime_config_status, runtime_warnings},
 };
 use crate::state::AppState;
 
@@ -26,23 +26,8 @@ pub async fn get_status(State(state): State<Arc<AppState>>) -> Json<ApiResponse<
         .load(std::sync::atomic::Ordering::Relaxed);
     let warnings = runtime_warnings(&state).await;
     let warning = legacy_warning(&warnings);
-    let (route_mode, mcp, node_select, max_multiplier) = {
-        let config = state.config.read().await;
-        (
-            config.route_mode,
-            config.mcp,
-            config.node_select,
-            config.max_multiplier,
-        )
-    };
-    let requested_node_select = *state.node_select_preference.read().await;
-    let mut multiplier_options = state.available_multipliers.read().await.clone();
-    if let Some(current) = max_multiplier {
-        if !multiplier_options.contains(&current) {
-            multiplier_options.push(current);
-            multiplier_options.sort_unstable();
-        }
-    }
+    let config_status = runtime_config_status(&state).await;
+    let config = config_status.config;
 
     success(
         if running { "running" } else { "stopped" },
@@ -51,11 +36,12 @@ pub async fn get_status(State(state): State<Arc<AppState>>) -> Json<ApiResponse<
             ready: state.runtime_ready.load(Ordering::Relaxed),
             phase: state.runtime_phase(),
             initializing,
-            route_mode,
-            node_select,
-            requested_node_select,
-            max_multiplier: max_multiplier.map(|value| value.as_config_value()),
-            multiplier_options: multiplier_options
+            route_mode: config.route_mode,
+            node_select: config.node_select,
+            requested_node_select: config_status.requested_node_select,
+            max_multiplier: config.max_multiplier.map(|value| value.as_config_value()),
+            multiplier_options: config_status
+                .multiplier_options
                 .into_iter()
                 .map(|value| value.as_config_value())
                 .collect(),
@@ -65,7 +51,7 @@ pub async fn get_status(State(state): State<Arc<AppState>>) -> Json<ApiResponse<
             warnings,
             vps_supported: crate::platform::vps_supported(),
             platform: if cfg!(windows) { "windows" } else { "linux" },
-            mcp,
+            mcp: config.mcp,
         },
     )
 }

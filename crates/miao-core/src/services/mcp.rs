@@ -20,7 +20,7 @@ use crate::models::{LastProxy, NodeMultiplier, NodeSelect, RouteMode};
 use crate::services::{
     config::{RuntimeUpdate, REGION_FALLBACK},
     singbox::{is_sing_box_running, kernel_status, CLASH_API_BASE, CLASH_TRAFFIC_WS},
-    status::{legacy_warning, runtime_warnings},
+    status::{legacy_warning, runtime_config_status, runtime_warnings},
 };
 use crate::state::AppState;
 use crate::VERSION;
@@ -240,7 +240,8 @@ async fn tool_get_status(state: &Arc<AppState>) -> Result<JsonValue, String> {
     // and clears the flag. Clash queries below still require a live process.
     let ready = state.runtime_ready.load(Ordering::Relaxed);
 
-    let config = state.config.read().await.clone();
+    let config_status = runtime_config_status(state).await;
+    let config = config_status.config;
     let route_mode = config.route_mode;
 
     let warnings = runtime_warnings(state).await;
@@ -269,6 +270,12 @@ async fn tool_get_status(state: &Arc<AppState>) -> Result<JsonValue, String> {
         "initializing": state.initializing.load(Ordering::Relaxed),
         "route_mode": route_mode,
         "node_select": config.node_select,
+        "requested_node_select": config_status.requested_node_select,
+        "max_multiplier": config.max_multiplier.map(|value| value.as_config_value()),
+        "multiplier_options": config_status.multiplier_options
+            .into_iter()
+            .map(|value| value.as_config_value())
+            .collect::<Vec<_>>(),
         "platform": if cfg!(windows) { "windows" } else { "linux" },
         "vps_supported": crate::platform::vps_supported(),
         "upgrade_supported": crate::platform::upgrade_supported(),

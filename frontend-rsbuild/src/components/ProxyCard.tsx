@@ -118,8 +118,8 @@ export function ProxyCard({
   // 来恢复自动模式，因此启用状态必须看 requested strategy。
   const requestedNodeSelect = status.requested_node_select || nodeSelect
   const isFastest = requestedNodeSelect.startsWith('fastest_')
-  // 受控 select 在 apply 期间停在用户选择上:status.node_select 要等配置激活后的
-  // fetchStatus 才更新,直接受控会弹回旧值;处理器结束(成功或失败)后回到服务端真值
+  // 下拉框表达用户请求的策略，而不是地区筛空后的临时 effective fallback。
+  // apply 期间 pendingSelect 继续让控件停在用户刚选择的值上。
   const [pendingSelect, setPendingSelect] = useState('')
   // undefined = 无请求；null = 请求中的“不限”；string = 请求中的具体倍率。
   const [pendingMultiplier, setPendingMultiplier] = useState<string | null | undefined>(undefined)
@@ -191,7 +191,7 @@ export function ProxyCard({
             <span className="node-select-label">节点选择</span>
             <select
               aria-label="节点选择"
-              value={pendingSelect || nodeSelect}
+              value={pendingSelect || requestedNodeSelect}
               disabled={status.initializing || nodeSelectPending}
               onChange={(event) => {
                 const next = event.target.value as NodeSelect

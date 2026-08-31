@@ -296,6 +296,38 @@ async fn legacy_manual_cache_requests_local_background_reconciliation() {
 
 #[cfg(unix)]
 #[tokio::test]
+async fn capped_automatic_selection_rejects_a_legacy_cache_without_provenance() {
+    let config = crate::models::Config {
+        node_select: crate::models::NodeSelect::Fastest(crate::models::Region::Jp),
+        max_multiplier: crate::models::NodeMultiplier::parse("2.5"),
+        ..crate::models::Config::default()
+    };
+    let (state, root) = local_startup_test_state(config.clone(), "legacy-capped").await;
+    tokio::fs::write(
+        &state.runtime_paths.config_cache,
+        serde_json::to_vec(&serde_json::json!({
+            "outbounds": [
+                { "type": "urltest", "tag": "proxy", "outbounds": ["日本[1.3x]-历史标签"] },
+                { "type": "direct", "tag": "direct" },
+                { "type": "trojan", "tag": "日本[1.3x]-历史标签" }
+            ]
+        }))
+        .unwrap(),
+    )
+    .await
+    .unwrap();
+
+    let result = prepare_compatible_startup_cache(&config, &state).await;
+
+    assert!(
+        result.is_err(),
+        "有倍率上限时不能信任无来源证明的旧缓存标签"
+    );
+    let _ = tokio::fs::remove_dir_all(root).await;
+}
+
+#[cfg(unix)]
+#[tokio::test]
 async fn matching_node_snapshot_starts_before_any_subscription_request() {
     let subscription = "http://127.0.0.1:9/unreachable".to_string();
     let config = crate::models::Config {

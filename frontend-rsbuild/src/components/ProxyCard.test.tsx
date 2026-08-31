@@ -59,7 +59,10 @@ describe('ProxyCard accessibility', () => {
     expect(onTestDelay).toHaveBeenCalledWith('node-a')
   })
 
-  it('keeps multiplier editable when requested fastest temporarily falls back to manual', () => {
+  it('keeps requested fastest visible and lets the user cancel a temporary manual fallback', async () => {
+    const user = userEvent.setup()
+    const onSetNodeSelect = rs.fn()
+
     render(
       <ProxyCard
         status={{
@@ -78,12 +81,17 @@ describe('ProxyCard accessibility', () => {
         onTestDelay={rs.fn()}
         onTestGroupDelays={rs.fn()}
         onSwitchProxy={rs.fn()}
-        onSetNodeSelect={rs.fn()}
+        onSetNodeSelect={onSetNodeSelect}
         onOpenAddNode={rs.fn()}
       />,
     )
 
     expect(screen.getByRole('combobox', { name: '最高倍率' })).toBeEnabled()
+    const nodeSelect = screen.getByRole('combobox', { name: '节点选择' })
+    expect(nodeSelect).toHaveValue('fastest_jp')
+
+    await user.selectOptions(nodeSelect, 'manual')
+    expect(onSetNodeSelect).toHaveBeenCalledWith('manual')
   })
 
   it('switches an inactive tile', async () => {

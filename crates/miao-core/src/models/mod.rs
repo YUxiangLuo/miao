@@ -17,7 +17,7 @@ pub use api::{VpsDeployRequest, VpsDeployResponse};
 pub use config::{
     Config, DisabledNode, NodeSelect, Region, RouteMode, StableConfig, VolatileConfig, DEFAULT_PORT,
 };
-pub use multiplier::{node_multiplier, runtime_config_matches_max_multiplier, NodeMultiplier};
+pub use multiplier::{node_multiplier, NodeMultiplier};
 pub use node::{
     BatchNodeAdded, BatchNodeFailure, BatchNodeRequest, BatchNodeResult, DeleteNodeRequest,
     NodeInfo, NodeRequest,
