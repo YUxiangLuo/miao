@@ -11,7 +11,7 @@ const subs = [
 function renderCard(overrides = {}) {
   const props = {
     subs,
-    loadingAction: '',
+    pendingActions: new Set<string>(),
     onAddSub: rs.fn().mockResolvedValue(true),
     onDeleteSub: rs.fn(),
     onRefreshSubs: rs.fn(),

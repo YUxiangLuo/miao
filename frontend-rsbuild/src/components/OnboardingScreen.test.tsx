@@ -8,7 +8,7 @@ function renderOnboarding(props = {}) {
   return render(
     <OnboardingScreen
       onAddSub={rs.fn()}
-      loadingAction=""
+      pendingActions={new Set()}
       onOpenAddNode={rs.fn()}
       showToast={rs.fn()}
       onScanVerge={rs.fn().mockResolvedValue(null)}

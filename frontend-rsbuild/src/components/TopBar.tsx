@@ -23,7 +23,7 @@ export interface TopBarProps {
   versionInfo: VersionInfo
   upgrading: boolean
   onUpgradeClick: () => void
-  loadingAction: string
+  pendingActions: ReadonlySet<string>
   onSetRouteMode: (mode: RouteMode) => void
   onOpenConnections: () => void
   primaryGroup: ClashProxy | null
@@ -38,7 +38,7 @@ export function TopBar({
   versionInfo,
   upgrading,
   onUpgradeClick,
-  loadingAction,
+  pendingActions,
   onSetRouteMode,
   onOpenConnections,
   primaryGroup,
@@ -49,7 +49,7 @@ export function TopBar({
   const upgradeSupported = versionInfo.upgrade_supported !== false
   const label = versionInfo.has_update ? versionInfo.latest : versionInfo.current || 'v--'
   const isGlobalMode = status.route_mode === 'global'
-  const modeSwitching = loadingAction === 'routeMode'
+  const modeSwitching = pendingActions.has('routeMode')
   const modeControlDisabled = modeSwitching || status.initializing
   const currentNode = primaryGroup?.now
   const currentNodeDelay = currentNode ? delays?.[currentNode] : undefined

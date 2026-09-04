@@ -76,7 +76,7 @@ const RuleRow = memo(function RuleRow({ rule, onDelete, disabled, active }: Rule
 export interface RulesCardProps {
   rules: RuleInfo[]
   isInitializing: boolean
-  loadingAction: string
+  pendingActions: ReadonlySet<string>
   onAddRule: (rule: RuleRequest) => Promise<boolean>
   onDeleteRule: (rule: RuleInfo) => void
   nodeNames?: string[]
@@ -90,7 +90,7 @@ export interface RulesCardProps {
 export function RulesCard({
   rules,
   isInitializing,
-  loadingAction,
+  pendingActions,
   onAddRule,
   onDeleteRule,
   nodeNames = [],
@@ -101,7 +101,7 @@ export function RulesCard({
   onTestNodes,
 }: RulesCardProps) {
   const [showRuleModal, setShowRuleModal] = useState(false)
-  const adding = loadingAction === 'addRule'
+  const adding = pendingActions.has('addRule')
   const activeIndexes = useMemo(
     () => activeRuleIndexes(rules, connections),
     [rules, connections],

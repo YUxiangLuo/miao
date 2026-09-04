@@ -144,7 +144,7 @@ function AddSubModal({ open, loading, onClose, onSubmit }: AddSubModalProps) {
 
 export interface SubsCardProps {
   subs: SubStatus[]
-  loadingAction: string
+  pendingActions: ReadonlySet<string>
   onAddSub: (url: string) => Promise<boolean>
   onDeleteSub: (url: string) => void
   onRefreshSubs: () => void
@@ -152,10 +152,10 @@ export interface SubsCardProps {
   isInitializing: boolean
 }
 
-export function SubsCard({ subs, loadingAction, onAddSub, onDeleteSub, onRefreshSubs, onToggleNodeDisabled, isInitializing }: SubsCardProps) {
+export function SubsCard({ subs, pendingActions, onAddSub, onDeleteSub, onRefreshSubs, onToggleNodeDisabled, isInitializing }: SubsCardProps) {
   const [showAdd, setShowAdd] = useState(false)
   const [detailSub, setDetailSub] = useState<SubStatus | null>(null)
-  const refreshing = loadingAction === 'refreshSubs'
+  const refreshing = pendingActions.has('refreshSubs')
 
   return (
     <SectionCard
@@ -207,7 +207,7 @@ export function SubsCard({ subs, loadingAction, onAddSub, onDeleteSub, onRefresh
       />
       <AddSubModal
         open={showAdd}
-        loading={loadingAction === 'addSub'}
+        loading={pendingActions.has('addSub')}
         onClose={() => setShowAdd(false)}
         onSubmit={onAddSub}
       />

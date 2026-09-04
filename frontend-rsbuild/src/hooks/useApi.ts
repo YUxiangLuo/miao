@@ -48,22 +48,30 @@ export function useToast() {
   return { toasts, showToast, dismissToast }
 }
 
-export interface UseApiOptions {
-  setLoadingAction: (action: string) => void
-}
+export function useApi() {
+  const [pendingActions, setPendingActions] = useState<ReadonlySet<string>>(new Set())
+  const pendingCountsRef = useRef(new Map<string, number>())
 
-export function useApi({ setLoadingAction }: UseApiOptions) {
+  const setActionPending = useCallback((action: string, pending: boolean) => {
+    if (!action) return
+    const counts = pendingCountsRef.current
+    const nextCount = (counts.get(action) ?? 0) + (pending ? 1 : -1)
+    if (nextCount > 0) counts.set(action, nextCount)
+    else counts.delete(action)
+    setPendingActions(new Set(counts.keys()))
+  }, [])
+
   const apiCall = useCallback(async <T = unknown>(endpoint: string, options: RequestInit = {}, action = ''): Promise<ApiResponse<T>> => {
-    setLoadingAction(action)
+    setActionPending(action, true)
     try {
       const response = await fetch(`/api/${endpoint}`, { headers: API_HEADERS, ...options })
       const payload: ApiResponse<T> = await response.json()
       if (!response.ok || !payload.success) throw new Error(payload.message || '请求失败')
       return payload
     } finally {
-      setLoadingAction('')
+      setActionPending(action, false)
     }
-  }, [setLoadingAction])
+  }, [setActionPending])
 
-  return { apiCall }
+  return { apiCall, pendingActions }
 }

@@ -54,7 +54,7 @@ disabled_nodes:
 
 ## MCP：让 AI agent 操作代理
 
-配置里加一行 `mcp: true`（默认关闭），端点是 `POST http://<面板地址>/mcp`（MCP 2026-07-28，无状态 JSON-RPC，无握手无会话）。面板右下角的浮动控件可以一键开关并复制地址。
+配置里加一行 `mcp: true`（默认关闭），端点是 `http://<面板地址>/mcp`。它实现 MCP `2025-11-25` Streamable HTTP：客户端先发送 `initialize`，收到响应后发送 `notifications/initialized`，后续请求携带 `MCP-Protocol-Version`。服务端使用无 session 的 JSON 响应，不提供 SSE，因而 `GET /mcp` 返回 405。面板右下角的浮动控件可以一键开关并复制地址。
 
 MCP 尽量与面板能力同构，工具按用途分为：
 

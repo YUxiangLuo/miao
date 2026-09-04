@@ -23,7 +23,6 @@ export interface ConfirmState {
 
 export function useAppData() {
   const [firstLoadDone, setFirstLoadDone] = useState(false)
-  const [loadingAction, setLoadingAction] = useState('')
   const [upgrading, setUpgrading] = useState(false)
   const [nodeForm, setNodeForm] = useState<NodeForm>(EMPTY_NODE_FORM)
   const [nodeType, setNodeType] = useState<NodeType>('hysteria2')
@@ -36,7 +35,7 @@ export function useAppData() {
   const clashApiBase = CLASH_API_BASE
 
   const { toasts, showToast, dismissToast } = useToast()
-  const { apiCall } = useApi({ setLoadingAction })
+  const { apiCall, pendingActions } = useApi()
   const { status, statusLoaded, statusFailures, fetchStatus } = useStatus()
   const { subs, fetchSubs } = useSubs()
   const { nodes, fetchNodes } = useNodes()
@@ -179,7 +178,7 @@ export function useAppData() {
 
   return {
     firstLoadDone,
-    loadingAction,
+    pendingActions,
     upgrading,
     setUpgrading,
     nodeForm,

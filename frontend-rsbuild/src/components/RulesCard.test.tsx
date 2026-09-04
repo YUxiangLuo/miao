@@ -15,7 +15,7 @@ function renderCard(props = {}) {
     <RulesCard
       rules={rules}
       isInitializing={false}
-      loadingAction=""
+      pendingActions={new Set()}
       onAddRule={rs.fn().mockResolvedValue(true)}
       onDeleteRule={rs.fn()}
       {...props}

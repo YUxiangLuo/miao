@@ -22,9 +22,6 @@ pub(super) async fn initialize_runtime(
                 state
                     .initializing
                     .store(false, std::sync::atomic::Ordering::Relaxed);
-                // Panel is already bound. Waiting would keep a successful
-                // binary in `booting` and roll it back on the next start.
-                crate::services::version::mark_upgrade_healthy();
                 return;
             }
             Err(err) => {
@@ -38,32 +35,48 @@ pub(super) async fn initialize_runtime(
                 state
                     .initializing
                     .store(false, std::sync::atomic::Ordering::Relaxed);
-                crate::services::version::mark_upgrade_healthy();
                 return;
             }
         }
     }
 
-    // Panel is already bound. Checkpoint before the first start attempt so a
-    // reboot during cache rebuild or the Startup fetch cannot roll back a live
-    // upgraded process. Background refresh/retry stay after this.
-    crate::services::version::mark_upgrade_healthy();
-
     state.set_runtime_phase(RuntimePhase::Initializing);
     // config_update 只覆盖本地启核。订阅 HTTP 一律在锁外拉取。
-    let started_from_local_state = {
+    let needs_background_refresh = {
         let _config_update = state.config_update.lock().await;
         initialize_runtime_locked(&config, &state).await
     };
 
-    if started_from_local_state {
+    // An upgraded binary is healthy only after extraction and the expected
+    // data plane have settled. Empty configurations have no data plane yet;
+    // local cache/snapshot/manual starts have already passed readiness here.
+    if startup_is_settled(&state).await {
+        crate::services::version::mark_upgrade_healthy();
+    }
+
+    if needs_background_refresh {
         refresh_subscriptions_in_background(&config, &state).await;
     } else if should_retry_failed_startup(&state).await {
-        recover_data_plane_once(&state).await;
-        if should_retry_failed_startup(&state).await {
+        let settled = recover_data_plane_once(&state).await;
+        if !settled && should_retry_failed_startup(&state).await {
             retry_failed_startup(&state).await;
         }
     }
+    // Configuration can be removed while a failed startup fetch is in flight,
+    // including between the initial checkpoint and the retry guard above.
+    if startup_is_settled(&state).await {
+        crate::services::version::mark_upgrade_healthy();
+    }
+}
+
+pub(super) async fn startup_is_settled(state: &Arc<AppState>) -> bool {
+    if state.runtime_ready.load(Ordering::Relaxed)
+        || !state.service_should_run.load(Ordering::Relaxed)
+    {
+        return true;
+    }
+    let config = state.config.read().await;
+    config.subs.is_empty() && config.nodes.is_empty()
 }
 
 pub(super) async fn should_retry_failed_startup(state: &Arc<AppState>) -> bool {
@@ -498,7 +511,7 @@ pub(super) fn next_startup_recovery_delay(current: Duration) -> Duration {
 
 /// One fetch-outside-lock + install-under-lock attempt. Returns true when the
 /// data plane is ready or the service is no longer desired.
-pub(super) async fn recover_data_plane_once(state: &Arc<AppState>) -> bool {
+pub(crate) async fn recover_data_plane_once(state: &Arc<AppState>) -> bool {
     if !should_retry_failed_startup(state).await {
         return true;
     }

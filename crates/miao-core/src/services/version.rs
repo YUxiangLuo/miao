@@ -78,8 +78,9 @@ fn write_upgrade_pending(path: &Path, pending: &UpgradePending) -> AppResult<()>
 }
 
 /// Reconcile a previous self-upgrade before normal startup. The first boot of
-/// the new binary moves `installed` to `booting`; a second boot before the
-/// health checkpoint rolls back to the retained executable.
+/// the new binary moves `installed` to `booting`; a second boot before embedded
+/// extraction and the expected data plane become healthy rolls back to the
+/// retained executable.
 #[cfg(not(windows))]
 fn upgrade_requires_rollback(current_exe: &Path) -> AppResult<bool> {
     let backup = std::path::PathBuf::from(format!("{}.bak", current_exe.display()));

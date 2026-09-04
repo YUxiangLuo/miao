@@ -8,22 +8,22 @@ import type { VergeImportItem, VergeImportResult } from '../types/api'
 
 export interface OnboardingScreenProps {
   onAddSub: (url: string) => Promise<boolean>
-  loadingAction: string
+  pendingActions: ReadonlySet<string>
   onOpenAddNode: () => void
   showToast: (message: string, tone?: ToastTone) => number
   onScanVerge: () => Promise<VergeImportResult | null>
   onImportVerge: (urls: string[]) => Promise<boolean>
 }
 
-export function OnboardingScreen({ onAddSub, loadingAction, onOpenAddNode, showToast, onScanVerge, onImportVerge }: OnboardingScreenProps) {
+export function OnboardingScreen({ onAddSub, pendingActions, onOpenAddNode, showToast, onScanVerge, onImportVerge }: OnboardingScreenProps) {
   const [subUrl, setSubUrl] = useState('')
   // null = 导入面板收起；扫描到订阅后才展开
   const [vergeItems, setVergeItems] = useState<VergeImportItem[] | null>(null)
   const [vergeSelected, setVergeSelected] = useState<ReadonlySet<string>>(new Set())
 
-  const isLoading = loadingAction === 'addSub'
-  const isScanning = loadingAction === 'scanVerge'
-  const isImporting = loadingAction === 'importVerge'
+  const isLoading = pendingActions.has('addSub')
+  const isScanning = pendingActions.has('scanVerge')
+  const isImporting = pendingActions.has('importVerge')
 
   const handleAddSub = async () => {
     if (isLoading) return

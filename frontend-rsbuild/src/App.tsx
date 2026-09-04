@@ -24,7 +24,7 @@ export default function App() {
       <div className="shell">
         <OnboardingScreen
           onAddSub={app.handleOnboardingAddSub}
-          loadingAction={app.loadingAction}
+          pendingActions={app.pendingActions}
           onOpenAddNode={app.openNodeModal}
           showToast={app.showToast}
           onScanVerge={app.scanClashVerge}
@@ -37,7 +37,7 @@ export default function App() {
           setNodeType={app.setNodeType}
           form={app.nodeForm}
           setForm={app.setNodeForm}
-          loading={app.loadingAction === 'addNode'}
+          loading={['addNode', 'importNodes', 'deployVps'].some((action) => app.pendingActions.has(action))}
           onClose={app.closeNodeModal}
           onSubmit={app.handleAddNode}
           onImport={app.handleImportNodes}

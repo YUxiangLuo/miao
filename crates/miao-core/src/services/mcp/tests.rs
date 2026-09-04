@@ -18,6 +18,19 @@ async fn call(state: &Arc<crate::state::AppState>, body: JsonValue) -> JsonValue
         .expect("request must produce a response")
 }
 
+fn initialize_request(version: &str) -> JsonValue {
+    json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+            "protocolVersion": version,
+            "capabilities": {},
+            "clientInfo": { "name": "miao-test", "version": "1.0" }
+        }
+    })
+}
+
 #[test]
 fn flat_node_pool_covers_outbounds_beyond_group_members() {
     let proxies = json!({
@@ -54,33 +67,98 @@ async fn notification_gets_no_response() {
 }
 
 #[tokio::test]
-async fn unknown_method_returns_32601() {
-    let response = call(
-        &state(Config::default()),
-        json!({ "jsonrpc": "2.0", "id": 1, "method": "resources/list" }),
+async fn batch_and_invalid_jsonrpc_are_rejected() {
+    let state = state(Config::default());
+    let batch = call(&state, json!([])).await;
+    assert_eq!(batch["error"]["code"], -32600);
+
+    let invalid_version = call(
+        &state,
+        json!({ "jsonrpc": "1.0", "id": 1, "method": "ping" }),
     )
     .await;
-    assert_eq!(response["error"]["code"], -32601);
+    assert_eq!(invalid_version["error"]["code"], -32600);
 }
 
 #[tokio::test]
-async fn discover_reports_protocol_version_and_tools_capability() {
-    for method in ["initialize", "server/discover"] {
+async fn client_response_is_accepted_without_a_response() {
+    let response = json!({ "jsonrpc": "2.0", "id": 1, "result": {} });
+    assert!(handle(&state(Config::default()), response.to_string().as_bytes())
+        .await
+        .is_none());
+}
+
+#[tokio::test]
+async fn malformed_client_response_is_rejected() {
+    for response in [
+        json!({ "jsonrpc": "2.0", "id": 1, "result": 42 }),
+        json!({ "jsonrpc": "2.0", "id": 1, "error": { "code": "bad" } }),
+    ] {
+        let response = call(&state(Config::default()), response).await;
+        assert_eq!(response["error"]["code"], -32600);
+        assert_eq!(response["id"], JsonValue::Null);
+    }
+}
+
+#[tokio::test]
+async fn numeric_request_id_is_preserved() {
+    let response = call(
+        &state(Config::default()),
+        json!({ "jsonrpc": "2.0", "id": 1.5, "method": "ping" }),
+    )
+    .await;
+    assert_eq!(response["id"], 1.5);
+    assert!(response["result"].is_object());
+}
+
+#[tokio::test]
+async fn unknown_method_returns_32601() {
+    for method in ["resources/list", "server/discover"] {
         let response = call(
             &state(Config::default()),
             json!({ "jsonrpc": "2.0", "id": 1, "method": method }),
         )
         .await;
-        let result = &response["result"];
-        assert_eq!(result["protocolVersion"], MCP_PROTOCOL_VERSION);
-        assert_eq!(result["serverInfo"]["name"], "miao");
-        assert!(result["capabilities"]["tools"].is_object());
-        // 调用者须知：流量可能经过本代理，破坏性操作不能自行确认
-        let instructions = result["instructions"].as_str().unwrap();
-        assert!(instructions.contains("流量很可能正经过它"));
-        assert!(instructions.contains("绝不能自行把 confirm 设为 true"));
-        assert!(instructions.contains("敏感信息"));
+        assert_eq!(response["error"]["code"], -32601);
     }
+}
+
+#[tokio::test]
+async fn initialize_negotiates_protocol_version_and_tools_capability() {
+    let response = call(
+        &state(Config::default()),
+        initialize_request(MCP_PROTOCOL_VERSION),
+    )
+    .await;
+    let result = &response["result"];
+    assert_eq!(result["protocolVersion"], MCP_PROTOCOL_VERSION);
+    assert_eq!(result["serverInfo"]["name"], "miao");
+    assert_eq!(result["capabilities"]["tools"]["listChanged"], false);
+    // 调用者须知：流量可能经过本代理，破坏性操作不能自行确认
+    let instructions = result["instructions"].as_str().unwrap();
+    assert!(instructions.contains("流量很可能正经过它"));
+    assert!(instructions.contains("绝不能自行把 confirm 设为 true"));
+    assert!(instructions.contains("敏感信息"));
+}
+
+#[tokio::test]
+async fn initialize_uses_latest_version_when_requested_version_is_unknown() {
+    let response = call(
+        &state(Config::default()),
+        initialize_request("2099-01-01"),
+    )
+    .await;
+    assert_eq!(response["result"]["protocolVersion"], MCP_PROTOCOL_VERSION);
+}
+
+#[tokio::test]
+async fn initialize_requires_standard_client_fields() {
+    let response = call(
+        &state(Config::default()),
+        json!({ "jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {} }),
+    )
+    .await;
+    assert_eq!(response["error"]["code"], -32602);
 }
 
 #[tokio::test]
@@ -153,7 +231,7 @@ async fn tools_list_covers_panel_capabilities() {
         assert_eq!(tool["inputSchema"]["properties"]["confirm"]["const"], true);
         assert_eq!(tool["annotations"]["destructiveHint"], true);
     }
-    assert!(response["result"]["ttlMs"].is_number());
+    assert!(response["result"].get("ttlMs").is_none());
 }
 
 #[tokio::test]
@@ -166,12 +244,24 @@ async fn unknown_tool_returns_32602_style_error() {
         }),
     )
     .await;
-    // 未知工具走 isError 结果（MCP 惯例），不是协议错误
-    assert_eq!(response["result"]["isError"], true);
-    assert!(response["result"]["content"][0]["text"]
+    assert_eq!(response["error"]["code"], -32602);
+    assert!(response["error"]["message"]
         .as_str()
         .unwrap()
         .contains("Unknown tool"));
+}
+
+#[tokio::test]
+async fn malformed_tool_call_returns_protocol_error() {
+    let response = call(
+        &state(Config::default()),
+        json!({
+            "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+            "params": { "name": "get_status", "arguments": [] },
+        }),
+    )
+    .await;
+    assert_eq!(response["error"]["code"], -32602);
 }
 
 #[tokio::test]
@@ -198,6 +288,8 @@ async fn get_status_works_when_stopped_without_network() {
     .await;
     let text = response["result"]["content"][0]["text"].as_str().unwrap();
     let payload: JsonValue = serde_json::from_str(text).unwrap();
+    assert_eq!(response["result"]["isError"], false);
+    assert_eq!(response["result"]["structuredContent"], payload);
     assert_eq!(payload["running"], false);
     assert_eq!(payload["ready"], false);
     assert_eq!(payload["route_mode"], "rule");

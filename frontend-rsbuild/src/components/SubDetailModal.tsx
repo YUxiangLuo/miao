@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useState } from 'react'
+import { useCallback, useEffect, useId, useRef, useState } from 'react'
 import { Rss, X } from 'lucide-react'
 import { ICON } from '../tokens'
 import { useDialog } from '../hooks/useDialog'
@@ -22,11 +22,15 @@ export function SubDetailModal({ sub, onClose, onToggleNode }: SubDetailModalPro
   const [loadError, setLoadError] = useState('')
   // 正在切换的节点名：行级 busy，防止重复点击
   const [pendingNames, setPendingNames] = useState<ReadonlySet<string>>(new Set())
+  const loadGenerationRef = useRef(0)
+  const subGenerationRef = useRef(0)
 
   const load = useCallback(async (url: string) => {
+    const generation = ++loadGenerationRef.current
     try {
       const response = await fetch('/api/subs/nodes')
       const payload: ApiResponse<SubNodesInfo[]> = await response.json()
+      if (generation !== loadGenerationRef.current) return
       if (payload.success && payload.data) {
         const group = payload.data.find((item) => item.url === url)
         setNodes(group?.nodes ?? [])
@@ -36,28 +40,37 @@ export function SubDetailModal({ sub, onClose, onToggleNode }: SubDetailModalPro
         setLoadError(payload.message || '加载节点列表失败')
       }
     } catch {
-      setLoadError('加载节点列表失败')
+      if (generation === loadGenerationRef.current) setLoadError('加载节点列表失败')
     }
   }, [])
 
   // 打开时拉取；关闭时清空，下次打开重新加载
   useEffect(() => {
+    subGenerationRef.current += 1
     if (!sub) {
+      loadGenerationRef.current += 1
       setNodes(null)
       setStaleDisabled([])
       setLoadError('')
       setPendingNames(new Set())
       return
     }
+    setNodes(null)
+    setStaleDisabled([])
+    setLoadError('')
+    setPendingNames(new Set())
     void load(sub.url)
   }, [sub, load])
 
   if (!sub) return null
 
   const toggle = async (name: string, disabled: boolean) => {
+    const subGeneration = subGenerationRef.current
     setPendingNames((prev) => new Set(prev).add(name))
     const ok = await onToggleNode(sub.url, name, disabled)
+    if (subGeneration !== subGenerationRef.current) return
     if (ok) await load(sub.url)
+    if (subGeneration !== subGenerationRef.current) return
     setPendingNames((prev) => {
       const next = new Set(prev)
       next.delete(name)
@@ -71,9 +84,12 @@ export function SubDetailModal({ sub, onClose, onToggleNode }: SubDetailModalPro
 
   // 移除失配的禁用条目（走「启用」路径按名字删除，不要求节点仍存在）
   const clearStale = async (name: string) => {
+    const subGeneration = subGenerationRef.current
     setPendingNames((prev) => new Set(prev).add(name))
     const ok = await onToggleNode(sub.url, name, false)
+    if (subGeneration !== subGenerationRef.current) return
     if (ok) await load(sub.url)
+    if (subGeneration !== subGenerationRef.current) return
     setPendingNames((prev) => {
       const next = new Set(prev)
       next.delete(name)

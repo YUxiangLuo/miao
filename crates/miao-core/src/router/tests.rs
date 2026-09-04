@@ -1,4 +1,4 @@
-use axum::http::{header::CONTENT_TYPE, StatusCode};
+use axum::http::{header::CONTENT_TYPE, HeaderValue, StatusCode};
 use serde_json::json;
 use tower::ServiceExt;
 
@@ -788,7 +788,16 @@ async fn mcp_endpoint_serves_jsonrpc_when_enabled() {
         .oneshot(json_request(
             "POST",
             "/mcp",
-            json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/list" }),
+            json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": "2025-11-25",
+                    "capabilities": {},
+                    "clientInfo": { "name": "router-test", "version": "1.0" }
+                }
+            }),
         ))
         .await
         .unwrap();
@@ -796,8 +805,87 @@ async fn mcp_endpoint_serves_jsonrpc_when_enabled() {
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(
         response.headers().get("MCP-Protocol-Version").unwrap(),
-        "2026-07-28"
+        "2025-11-25"
     );
     let json = response_json(response).await;
-    assert!(json["result"]["tools"].is_array());
+    assert_eq!(json["result"]["protocolVersion"], "2025-11-25");
+}
+
+#[tokio::test]
+async fn mcp_endpoint_accepts_initialized_notification() {
+    let app = test_app(Config {
+        mcp: true,
+        ..Default::default()
+    })
+    .await;
+    let mut request = json_request(
+        "POST",
+        "/mcp",
+        json!({ "jsonrpc": "2.0", "method": "notifications/initialized" }),
+    );
+    request.headers_mut().insert(
+        "mcp-protocol-version",
+        HeaderValue::from_static("2025-11-25"),
+    );
+
+    let response = app.oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::ACCEPTED);
+}
+
+#[tokio::test]
+async fn mcp_endpoint_rejects_unsupported_protocol_header() {
+    let app = test_app(Config {
+        mcp: true,
+        ..Default::default()
+    })
+    .await;
+    let mut request = json_request(
+        "POST",
+        "/mcp",
+        json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/list" }),
+    );
+    request.headers_mut().insert(
+        "mcp-protocol-version",
+        HeaderValue::from_static("2026-07-28"),
+    );
+
+    let response = app.oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let json = response_json(response).await;
+    assert!(json["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("Unsupported"));
+}
+
+#[tokio::test]
+async fn mcp_endpoint_requires_negotiated_protocol_after_initialize() {
+    let app = test_app(Config {
+        mcp: true,
+        ..Default::default()
+    })
+    .await;
+
+    let response = app
+        .oneshot(json_request(
+            "POST",
+            "/mcp",
+            json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/list" }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn mcp_get_returns_method_not_allowed_when_enabled() {
+    let app = test_app(Config {
+        mcp: true,
+        ..Default::default()
+    })
+    .await;
+
+    let response = app.oneshot(empty_request("GET", "/mcp")).await.unwrap();
+    assert_eq!(response.status(), StatusCode::METHOD_NOT_ALLOWED);
+    assert_eq!(response.headers().get("Allow").unwrap(), "POST");
 }

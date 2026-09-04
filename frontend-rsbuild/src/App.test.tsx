@@ -459,4 +459,69 @@ describe('App onboarding integration', () => {
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
     expect(screen.getByText('节点列表')).toBeInTheDocument()
   })
+
+  it('lets the user retry a failed proxy service', async () => {
+    let started = false
+    const fetchMock = rs.fn(async (input, options = {}) => {
+      const url = String(input)
+      if (url === '/api/status') {
+        return jsonResponse({
+          success: true,
+          data: {
+            running: started,
+            ready: started,
+            phase: started ? 'ready' : 'failed',
+            initializing: false,
+            route_mode: 'rule',
+          },
+        })
+      }
+      if (url === '/api/nodes') {
+        return jsonResponse({
+          success: true,
+          data: [{ tag: 'node-a', server: 'example.com', server_port: 443, node_type: 'hysteria2' }],
+        })
+      }
+      if (url === '/api/subs' || url === '/api/rules') {
+        return jsonResponse({ success: true, data: [] })
+      }
+      if (url === '/api/version') {
+        return jsonResponse({
+          success: true,
+          data: { current: 'v0.44.6', latest: null, has_update: false },
+        })
+      }
+      if (url === '/api/service/start' && options.method === 'POST') {
+        started = true
+        return jsonResponse({ success: true, message: 'sing-box started successfully' })
+      }
+      if (url === '/api/clash/proxies') {
+        return jsonResponse({
+          proxies: {
+            proxy: { type: 'Selector', name: 'proxy', now: 'node-a', all: ['node-a'] },
+          },
+        })
+      }
+      if (url === '/api/clash/connections') {
+        return jsonResponse({ connections: [], uploadTotal: 0, downloadTotal: 0 })
+      }
+      if (url.startsWith('/api/clash/proxies/') && url.includes('/delay')) {
+        return jsonResponse({ delay: 80 })
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    })
+    rs.stubGlobal('fetch', fetchMock)
+    stubMatchMedia()
+    const user = userEvent.setup()
+    render(<App />)
+
+    const retry = await screen.findByRole('button', { name: '重新启动' })
+    await user.click(retry)
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith('/api/service/start', expect.objectContaining({ method: 'POST' }))
+    })
+    expect(await screen.findByText('代理服务已重新启动')).toBeInTheDocument()
+    await waitFor(() => expect(screen.queryByRole('button', { name: '重新启动' })).not.toBeInTheDocument())
+  })
 })

@@ -39,6 +39,6 @@ curl -fsSL https://raw.githubusercontent.com/YUxiangLuo/miao/master/remove.sh | 
 - 官网：<https://miao.vesein.dev>（特性、设计哲学、架构、FAQ）
 - 配置参考与 MCP：[docs/config.md](docs/config.md)
 - 平台对照与运行细节（Windows / OpenWrt / PWA / 卸载）：[docs/platforms.md](docs/platforms.md)
-- 从源码构建：依赖 Bun、Go、Rust、curl，`./build.sh`；开发约定见 [DEV_NOTES.md](DEV_NOTES.md)
+- 从源码构建：依赖 Bun、Go、Rust、curl，`./build.sh`；fresh clone 只跑 Rust 测试可用 `./scripts/test-rust.sh`（不会启动代理或 TUN）；开发约定见 [DEV_NOTES.md](DEV_NOTES.md)
 
 [MIT License](LICENSE)

@@ -1,7 +1,12 @@
 use axum::{
-    body::Bytes, extract::State, http::StatusCode, response::IntoResponse, response::Json,
+    body::Bytes,
+    extract::State,
+    http::{header::ALLOW, HeaderMap, HeaderValue, StatusCode},
+    response::IntoResponse,
+    response::Json,
     response::Response,
 };
+use serde_json::{json, Value as JsonValue};
 use std::sync::{atomic::Ordering, Arc};
 
 use crate::models::McpRequest;
@@ -11,23 +16,79 @@ use crate::state::AppState;
 
 /// POST /mcp — MCP（Model Context Protocol）JSON-RPC 端点。
 /// 默认关闭（config `mcp: true` 开启）；关闭时表现为 404，不暴露端点存在。
-pub async fn handle_mcp(State(state): State<Arc<AppState>>, body: Bytes) -> Response {
+pub async fn handle_mcp(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
     if !state.config.read().await.mcp {
         return StatusCode::NOT_FOUND.into_response();
     }
 
+    let response_version = match request_protocol_version(&headers, &body) {
+        Ok(version) => version,
+        Err(message) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({
+                    "jsonrpc": "2.0",
+                    "error": { "code": -32600, "message": message },
+                })),
+            )
+                .into_response()
+        }
+    };
+
     match crate::services::mcp::handle(&state, &body).await {
         Some(payload) => (
-            [(
-                "MCP-Protocol-Version",
-                crate::services::mcp::MCP_PROTOCOL_VERSION,
-            )],
-            axum::Json(payload),
+            [("mcp-protocol-version", response_version)],
+            Json(payload),
         )
             .into_response(),
         // 通知类消息无需应答
         None => StatusCode::ACCEPTED.into_response(),
     }
+}
+
+/// GET /mcp — 本实现不提供服务端 SSE 流，按 Streamable HTTP 规范返回 405。
+pub async fn handle_mcp_get(State(state): State<Arc<AppState>>) -> Response {
+    if !state.config.read().await.mcp {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+    let mut response = StatusCode::METHOD_NOT_ALLOWED.into_response();
+    response
+        .headers_mut()
+        .insert(ALLOW, HeaderValue::from_static("POST"));
+    response
+}
+
+fn request_protocol_version(
+    headers: &HeaderMap,
+    body: &[u8],
+) -> Result<&'static str, &'static str> {
+    let request = serde_json::from_slice::<JsonValue>(body).ok();
+    let method = request
+        .as_ref()
+        .and_then(|request| request.get("method"))
+        .and_then(JsonValue::as_str);
+
+    if method == Some("initialize") {
+        let requested = request
+            .as_ref()
+            .and_then(|request| request.pointer("/params/protocolVersion"))
+            .and_then(JsonValue::as_str)
+            .unwrap_or(crate::services::mcp::MCP_PROTOCOL_VERSION);
+        return Ok(crate::services::mcp::negotiate_protocol_version(requested));
+    }
+
+    // 2025-11-25 要求初始化后的请求声明协商版本。缺失时按规范视为
+    // 2025-03-26；本端点不实现该版本，因此与其他不支持版本一样返回 400。
+    let requested = match headers.get("mcp-protocol-version") {
+        Some(value) => value.to_str().map_err(|_| "Invalid MCP-Protocol-Version")?,
+        None => crate::services::mcp::MCP_FALLBACK_PROTOCOL_VERSION,
+    };
+    crate::services::mcp::supported_protocol_version(requested)
+        .ok_or("Unsupported MCP-Protocol-Version")
 }
 
 /// POST /api/mcp — 面板里的 MCP 开关。

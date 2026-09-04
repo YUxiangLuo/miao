@@ -11,7 +11,7 @@ use crate::handlers::version::upgrade;
 use crate::handlers::vps::deploy_vps;
 use crate::handlers::{
     clash::{proxy_clash_http, proxy_clash_traffic},
-    mcp::{handle_mcp, set_mcp},
+    mcp::{handle_mcp, handle_mcp_get, set_mcp},
     nodes::{add_node, delete_node, get_nodes, import_nodes},
     proxy::set_last_proxy,
     rules::{add_rule, delete_rule, get_rules},
@@ -67,7 +67,7 @@ pub fn build_router(app_state: Arc<AppState>) -> Router {
         .route("/api/rules", delete(delete_rule))
         .route("/api/mcp", post(set_mcp))
         .route("/api/last-proxy", post(set_last_proxy))
-        .route("/mcp", post(handle_mcp));
+        .route("/mcp", get(handle_mcp_get).post(handle_mcp));
 
     #[cfg(not(windows))]
     let router = router

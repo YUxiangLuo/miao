@@ -80,8 +80,10 @@ export function useConnections(status: Pick<StatusData, 'ready'>, clashApiBase: 
   const [connectionsLoading, setConnectionsLoading] = useState(false)
   const [connectionsError, setConnectionsError] = useState('')
   const lastConnectionsRef = useRef<{ at: number; connections: Map<string, ClashConnection> }>({ at: 0, connections: new Map() })
+  const requestGenerationRef = useRef(0)
 
   const fetchConnections = useCallback(async (): Promise<ClashConnectionsPayload | null> => {
+    const generation = ++requestGenerationRef.current
     if (!status.ready) {
       setConnectionsInfo(EMPTY_CONNECTIONS)
       setConnectionsError('')
@@ -96,6 +98,7 @@ export function useConnections(status: Pick<StatusData, 'ready'>, clashApiBase: 
         throw new Error(details || `链接统计获取失败 (${response.status})`)
       }
       const payload: ClashConnectionsPayload = await response.json()
+      if (generation !== requestGenerationRef.current) return payload
       const connections = Array.isArray(payload.connections) ? payload.connections : []
       const now = Date.now()
       const previous = lastConnectionsRef.current
@@ -122,15 +125,18 @@ export function useConnections(status: Pick<StatusData, 'ready'>, clashApiBase: 
       setConnectionsError('')
       return payload
     } catch (error) {
-      setConnectionsError(error instanceof Error ? error.message : '链接统计获取失败')
+      if (generation === requestGenerationRef.current) {
+        setConnectionsError(error instanceof Error ? error.message : '链接统计获取失败')
+      }
       return null
     } finally {
-      setConnectionsLoading(false)
+      if (generation === requestGenerationRef.current) setConnectionsLoading(false)
     }
   }, [clashApiBase, status.ready])
 
   useEffect(() => {
     if (!status.ready) {
+      requestGenerationRef.current += 1
       setConnectionsInfo(EMPTY_CONNECTIONS)
       setConnectionsError('')
       setConnectionsLoading(false)

@@ -11,9 +11,10 @@ import {
   NodeModal,
   ToastStack,
 } from './index'
-import { LoaderCircle, TriangleAlert, WifiOff } from 'lucide-react'
+import { LoaderCircle, RotateCw, TriangleAlert, WifiOff } from 'lucide-react'
 import { ICON } from '../tokens'
 import type { useAppController } from '../hooks/useAppController'
+import { Button } from './ui'
 
 const PHASE_MESSAGE = {
   initializing: '正在初始化运行环境…',
@@ -51,6 +52,17 @@ export function DashboardScreen({ app }: { app: ReturnType<typeof useAppControll
               ? <TriangleAlert size={ICON.sm} />
               : <LoaderCircle size={ICON.sm} className="spin" />}
             <span>{phaseMessage}</span>
+            {phaseFailed && (
+              <Button
+                tone="secondary"
+                size="sm"
+                icon={<RotateCw size={ICON.xs} />}
+                loading={app.pendingActions.has('startService')}
+                onClick={app.handleStartService}
+              >
+                重新启动
+              </Button>
+            )}
           </div>
         )}
 
@@ -60,7 +72,7 @@ export function DashboardScreen({ app }: { app: ReturnType<typeof useAppControll
           versionInfo={app.versionInfo}
           upgrading={app.upgrading}
           onUpgradeClick={app.handleUpgradeClick}
-          loadingAction={app.loadingAction}
+          pendingActions={app.pendingActions}
           onSetRouteMode={app.handleOpenSetRouteModeConfirm}
           onOpenConnections={app.handleOpenConnections}
           primaryGroup={app.primaryGroup}
@@ -80,8 +92,8 @@ export function DashboardScreen({ app }: { app: ReturnType<typeof useAppControll
               testingNodes={app.testingNodes}
               testingGroup={app.testingGroup}
               switchingNode={app.switchingNode}
-              maxMultiplierPending={app.loadingAction === 'maxMultiplier'}
-              nodeSelectPending={app.loadingAction === 'nodeSelect'}
+              maxMultiplierPending={app.pendingActions.has('maxMultiplier')}
+              nodeSelectPending={app.pendingActions.has('nodeSelect')}
               onTestDelay={app.handleTestDelay}
               onTestGroupDelays={app.handleTestGroupDelays}
               onSwitchProxy={app.handleSwitchProxy}
@@ -101,7 +113,7 @@ export function DashboardScreen({ app }: { app: ReturnType<typeof useAppControll
 
             <SubsCard
               subs={app.subs}
-              loadingAction={app.loadingAction}
+              pendingActions={app.pendingActions}
               onAddSub={app.handleAddSubscription}
               onDeleteSub={app.handleOpenDeleteSubConfirm}
               onRefreshSubs={app.handleRefreshSubscriptions}
@@ -112,7 +124,7 @@ export function DashboardScreen({ app }: { app: ReturnType<typeof useAppControll
             <RulesCard
               rules={app.rules}
               isInitializing={app.status.initializing}
-              loadingAction={app.loadingAction}
+              pendingActions={app.pendingActions}
               onAddRule={app.handleAddRule}
               onDeleteRule={app.handleOpenDeleteRuleConfirm}
               nodeNames={app.ruleNodeNames}
@@ -141,7 +153,7 @@ export function DashboardScreen({ app }: { app: ReturnType<typeof useAppControll
 
       <McpFloat
         enabled={Boolean(app.status.mcp)}
-        pending={app.loadingAction === 'toggleMcp'}
+        pending={app.pendingActions.has('toggleMcp')}
         onToggle={app.handleToggleMcp}
         showToast={app.showToast}
       />
@@ -154,7 +166,7 @@ export function DashboardScreen({ app }: { app: ReturnType<typeof useAppControll
         setNodeType={app.setNodeType}
         form={app.nodeForm}
         setForm={app.setNodeForm}
-        loading={app.loadingAction === 'addNode'}
+        loading={['addNode', 'importNodes', 'deployVps'].some((action) => app.pendingActions.has(action))}
         onClose={app.closeNodeModal}
         onSubmit={app.handleAddNode}
         onImport={app.handleImportNodes}

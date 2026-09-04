@@ -33,7 +33,6 @@ export function useAppActions(data: AppData) {
     fetchSubs,
     fetchNodes,
     fetchRules,
-    fetchConnections,
     fetchVersion,
     versionInfo,
     clashApiBase,
@@ -384,8 +383,18 @@ export function useAppActions(data: AppData) {
     }
 
     setShowConnectionsModal(true)
-    fetchConnections()
-  }, [fetchConnections, showToast, setShowConnectionsModal])
+  }, [showToast, setShowConnectionsModal])
+
+  const handleStartService = useCallback(async () => {
+    try {
+      await apiCall('service/start', { method: 'POST' }, 'startService')
+      await fetchStatus()
+      await fetchProxies()
+      showToast('代理服务已重新启动', 'success')
+    } catch (error) {
+      showToast(errorMessage(error), 'error')
+    }
+  }, [apiCall, fetchProxies, fetchStatus, showToast])
 
   const handleUpgradeClick = useCallback(async () => {
     if (versionInfo.upgrade_supported === false) {
@@ -397,6 +406,8 @@ export function useAppActions(data: AppData) {
       const fresh = await fetchVersion()
       if (fresh?.has_update) {
         showToast(`发现新版本 ${fresh.latest}`, 'success')
+      } else if (!fresh?.latest) {
+        showToast('暂未获取到最新版本信息，请稍后重试', 'info')
       } else {
         showToast('当前已是最新版本', 'info')
       }
@@ -501,6 +512,7 @@ export function useAppActions(data: AppData) {
     handleTestDelay,
     handleTestGroupDelays,
     handleOpenConnections,
+    handleStartService,
     handleUpgradeClick,
     handleOpenDeleteNodeConfirm,
     handleOpenDeleteSubConfirm,

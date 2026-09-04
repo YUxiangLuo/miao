@@ -1,5 +1,5 @@
-//! MCP（Model Context Protocol）端点核心：无状态 JSON-RPC 2.0 over POST /mcp。
-//! 协议版本 2026-07-28：无握手、无会话，每个请求自描述。
+//! MCP（Model Context Protocol）端点核心：无状态 JSON-RPC 2.0 over Streamable HTTP。
+//! 实现标准 initialize 生命周期，不分配会话，不提供服务端 SSE 流。
 //! 节点模型与面板一致：全部订阅 + 手动节点构成一个平铺节点池，没有分组概念；
 //! 运行时的 sing-box selector（tag "proxy"）只是实现细节，不向 MCP 暴露。
 
@@ -25,7 +25,8 @@ use crate::services::{
 use crate::state::AppState;
 use crate::VERSION;
 
-pub const MCP_PROTOCOL_VERSION: &str = "2026-07-28";
+pub const MCP_PROTOCOL_VERSION: &str = "2025-11-25";
+pub const MCP_FALLBACK_PROTOCOL_VERSION: &str = "2025-03-26";
 /// 配置模板里唯一的 selector；全部节点的容器，对外不暴露
 const SELECTOR_TAG: &str = "proxy";
 const DELAY_TIMEOUT_MS: u64 = 3000;
@@ -49,27 +50,70 @@ pub async fn handle(state: &Arc<AppState>, body: &[u8]) -> Option<JsonValue> {
         }
     };
 
-    let id = request.get("id").cloned().unwrap_or(JsonValue::Null);
-    let method = request.get("method").and_then(JsonValue::as_str);
+    let Some(request) = request.as_object() else {
+        return Some(rpc_error(
+            JsonValue::Null,
+            -32600,
+            "Invalid Request: expected one JSON-RPC object",
+        ));
+    };
+    if request.get("jsonrpc").and_then(JsonValue::as_str) != Some("2.0") {
+        return Some(rpc_error(
+            JsonValue::Null,
+            -32600,
+            "Invalid Request: jsonrpc must be `2.0`",
+        ));
+    }
 
-    // 通知没有 id：不处理、不应答（MCP 客户端启动后会发 notifications/initialized 等）
-    let _ = request.get("id")?;
-
-    let Some(method) = method else {
-        return Some(rpc_error(id, -32600, "Invalid Request: missing method"));
+    let Some(method) = request.get("method").and_then(JsonValue::as_str) else {
+        // Streamable HTTP clients may POST responses to server-originated requests.
+        // This server never sends such requests, but valid responses are still accepted.
+        if is_client_response(request) {
+            return None;
+        }
+        return Some(rpc_error(
+            JsonValue::Null,
+            -32600,
+            "Invalid Request: missing method",
+        ));
     };
 
+    let Some(id) = request.get("id") else {
+        // Notifications, including notifications/initialized, are accepted without a body.
+        return None;
+    };
+    if !valid_request_id(id) {
+        return Some(rpc_error(
+            JsonValue::Null,
+            -32600,
+            "Invalid Request: id must be a string or number",
+        ));
+    }
+    let id = id.clone();
+    if request
+        .get("params")
+        .is_some_and(|params| !params.is_object())
+    {
+        return Some(rpc_error(
+            id,
+            -32602,
+            "Invalid params: expected an object",
+        ));
+    }
+
     let result = match method {
-        "initialize" | "server/discover" => Ok(discover_result()),
+        "initialize" => initialize_result(request.get("params")),
         "ping" => Ok(json!({})),
-        "tools/list" => Ok(json!({
-            "tools": tools_catalog(),
-            // 工具目录是静态的，客户端可长期缓存
-            "ttlMs": 86_400_000u64,
-        })),
-        "tools/call" => match handle_tool_call(state, request.get("params")).await {
-            Ok(payload) => Ok(tool_result(payload)),
-            Err(message) => Ok(tool_error_result(&message)),
+        "tools/list" => tools_list_result(request.get("params")),
+        "tools/call" => match tool_call_params(request.get("params")) {
+            Err(message) => Err((-32602, message)),
+            Ok((name, args)) if !tool_exists(name) => {
+                Err((-32602, format!("Unknown tool: {name}")))
+            }
+            Ok((name, args)) => match handle_tool_call(state, name, &args).await {
+                Ok(payload) => Ok(tool_result(payload)),
+                Err(message) => Ok(tool_error_result(&message)),
+            },
         },
         _ => Err((-32601, format!("Method not found: {method}"))),
     };
@@ -80,15 +124,84 @@ pub async fn handle(state: &Arc<AppState>, body: &[u8]) -> Option<JsonValue> {
     })
 }
 
-fn discover_result() -> JsonValue {
-    json!({
-        "protocolVersion": MCP_PROTOCOL_VERSION,
+pub fn supported_protocol_version(requested: &str) -> Option<&'static str> {
+    (requested == MCP_PROTOCOL_VERSION).then_some(MCP_PROTOCOL_VERSION)
+}
+
+pub fn negotiate_protocol_version(requested: &str) -> &'static str {
+    supported_protocol_version(requested).unwrap_or(MCP_PROTOCOL_VERSION)
+}
+
+fn valid_request_id(id: &JsonValue) -> bool {
+    id.is_string() || id.is_number()
+}
+
+fn is_client_response(request: &serde_json::Map<String, JsonValue>) -> bool {
+    if !request.get("id").is_some_and(valid_request_id) {
+        return false;
+    }
+    match (request.get("result"), request.get("error")) {
+        (Some(result), None) => result.is_object(),
+        (None, Some(error)) => error.as_object().is_some_and(|error| {
+            error
+                .get("code")
+                .is_some_and(|code| code.as_i64().is_some() || code.as_u64().is_some())
+                && error.get("message").is_some_and(JsonValue::is_string)
+        }),
+        _ => false,
+    }
+}
+
+fn initialize_result(params: Option<&JsonValue>) -> Result<JsonValue, (i64, String)> {
+    let params = params
+        .and_then(JsonValue::as_object)
+        .ok_or_else(|| (-32602, "Invalid params: initialize params are required".to_string()))?;
+    let requested = params
+        .get("protocolVersion")
+        .and_then(JsonValue::as_str)
+        .ok_or_else(|| {
+            (
+                -32602,
+                "Invalid params: missing protocolVersion".to_string(),
+            )
+        })?;
+    if !params.get("capabilities").is_some_and(JsonValue::is_object) {
+        return Err((
+            -32602,
+            "Invalid params: capabilities must be an object".to_string(),
+        ));
+    }
+    let client_info = params
+        .get("clientInfo")
+        .and_then(JsonValue::as_object)
+        .ok_or_else(|| (-32602, "Invalid params: clientInfo must be an object".to_string()))?;
+    if !client_info.get("name").is_some_and(JsonValue::is_string)
+        || !client_info.get("version").is_some_and(JsonValue::is_string)
+    {
+        return Err((
+            -32602,
+            "Invalid params: clientInfo requires name and version".to_string(),
+        ));
+    }
+
+    Ok(json!({
+        "protocolVersion": negotiate_protocol_version(requested),
         "capabilities": { "tools": { "listChanged": false } },
         "serverInfo": { "name": "miao", "version": VERSION },
         // 给调用者的使用说明：客户端连接时读取。核心目的——防「自伤」：
         // agent 的出网流量很可能正经过本代理，破坏性操作会断它自己的网
         "instructions": "Miao 是本机/路由器的透明代理控制面，你的出网流量很可能正经过它。读取状态、列表和版本没有配置副作用；切换当前节点不重启内核，通常只影响新连接。修改订阅/节点/规则/模式会校验并热应用配置，可能短暂影响连接。停止服务、删除配置、部署 VPS、关闭 MCP 或升级 Miao 属于破坏性操作：执行前必须向用户说明具体影响并取得明确确认，绝不能自行把 confirm 设为 true。订阅 URL、连接记录和 VPS 密码属于敏感信息，不要在回答中无必要地复述。",
-    })
+    }))
+}
+
+fn tools_list_result(params: Option<&JsonValue>) -> Result<JsonValue, (i64, String)> {
+    if params
+        .and_then(|params| params.get("cursor"))
+        .is_some_and(|cursor| !cursor.is_string())
+    {
+        return Err((-32602, "Invalid params: cursor must be a string".to_string()));
+    }
+    Ok(json!({ "tools": tools_catalog() }))
 }
 
 fn rpc_result(id: JsonValue, result: JsonValue) -> JsonValue {
@@ -105,12 +218,18 @@ fn rpc_error(id: JsonValue, code: i64, message: &str) -> JsonValue {
 
 /// 工具成功结果：payload 以 JSON 文本装进 content（MCP 惯例）
 fn tool_result(payload: JsonValue) -> JsonValue {
-    json!({
+    let text = serde_json::to_string_pretty(&payload).unwrap_or_else(|_| payload.to_string());
+    let mut result = json!({
         "content": [{
             "type": "text",
-            "text": serde_json::to_string_pretty(&payload).unwrap_or_else(|_| payload.to_string()),
+            "text": text,
         }],
-    })
+        "isError": false,
+    });
+    if payload.is_object() {
+        result["structuredContent"] = payload;
+    }
+    result
 }
 
 /// 工具级失败：不是协议错误，isError 让客户端把信息带给模型
@@ -121,11 +240,10 @@ fn tool_error_result(message: &str) -> JsonValue {
     })
 }
 
-async fn handle_tool_call(
-    state: &Arc<AppState>,
-    params: Option<&JsonValue>,
-) -> Result<JsonValue, String> {
-    let params = params.cloned().unwrap_or(JsonValue::Null);
+fn tool_call_params(params: Option<&JsonValue>) -> Result<(&str, JsonValue), String> {
+    let params = params
+        .and_then(JsonValue::as_object)
+        .ok_or_else(|| "Invalid params: tools/call params are required".to_string())?;
     let name = params
         .get("name")
         .and_then(JsonValue::as_str)
@@ -134,40 +252,58 @@ async fn handle_tool_call(
         .get("arguments")
         .cloned()
         .unwrap_or_else(|| json!({}));
+    if !args.is_object() {
+        return Err("Invalid params: tool arguments must be an object".to_string());
+    }
+    Ok((name, args))
+}
 
+fn tool_exists(name: &str) -> bool {
+    tools_catalog().as_array().is_some_and(|tools| {
+        tools
+            .iter()
+            .any(|tool| tool.get("name").and_then(JsonValue::as_str) == Some(name))
+    })
+}
+
+async fn handle_tool_call(
+    state: &Arc<AppState>,
+    name: &str,
+    args: &JsonValue,
+) -> Result<JsonValue, String> {
     match name {
         "get_status" => tool_get_status(state).await,
         "get_version_info" => panel::get_version_info(state).await,
-        "start_service" => panel::start_service(state, &args).await,
-        "stop_service" => panel::stop_service(state, &args).await,
+        "start_service" => panel::start_service(state, args).await,
+        "stop_service" => panel::stop_service(state, args).await,
         "list_subscriptions" => panel::list_subscriptions(state).await,
-        "add_subscriptions" => panel::add_subscriptions(state, &args).await,
-        "delete_subscription" => panel::delete_subscription(state, &args).await,
+        "add_subscriptions" => panel::add_subscriptions(state, args).await,
+        "delete_subscription" => panel::delete_subscription(state, args).await,
         "refresh_subscriptions" => tool_refresh_subscriptions(state).await,
         "scan_clash_verge" => panel::scan_clash_verge(state).await,
         "list_subscription_nodes" => panel::list_subscription_nodes(state).await,
         "set_subscription_node_disabled" => {
-            panel::set_subscription_node_disabled(state, &args).await
+            panel::set_subscription_node_disabled(state, args).await
         }
         "list_nodes" => tool_list_nodes(state).await,
         "list_manual_nodes" => panel::list_manual_nodes(state).await,
-        "add_node" => panel::add_node(state, &args).await,
-        "import_nodes" => panel::import_nodes(state, &args).await,
-        "delete_node" => panel::delete_node(state, &args).await,
-        "switch_node" => tool_switch_node(state, &args).await,
-        "set_node_select" => tool_set_node_select(state, &args).await,
-        "set_max_multiplier" => tool_set_max_multiplier(state, &args).await,
-        "test_delay" => tool_test_delay(state, &args).await,
-        "set_route_mode" => tool_set_route_mode(state, &args).await,
+        "add_node" => panel::add_node(state, args).await,
+        "import_nodes" => panel::import_nodes(state, args).await,
+        "delete_node" => panel::delete_node(state, args).await,
+        "switch_node" => tool_switch_node(state, args).await,
+        "set_node_select" => tool_set_node_select(state, args).await,
+        "set_max_multiplier" => tool_set_max_multiplier(state, args).await,
+        "test_delay" => tool_test_delay(state, args).await,
+        "set_route_mode" => tool_set_route_mode(state, args).await,
         "list_rules" => tool_list_rules(state).await,
-        "add_rule" => panel::add_rule(state, &args).await,
-        "delete_rule" => panel::delete_rule(state, &args).await,
+        "add_rule" => panel::add_rule(state, args).await,
+        "delete_rule" => panel::delete_rule(state, args).await,
         "get_traffic" => tool_get_traffic(state).await,
-        "list_connections" => tool_list_connections(state, &args).await,
-        "test_connectivity" => panel::test_connectivity(state, &args).await,
-        "set_mcp_enabled" => panel::set_mcp_enabled(state, &args).await,
-        "deploy_vps" => panel::deploy_vps(state, &args).await,
-        "upgrade_miao" => panel::upgrade_miao(state, &args).await,
+        "list_connections" => tool_list_connections(state, args).await,
+        "test_connectivity" => panel::test_connectivity(state, args).await,
+        "set_mcp_enabled" => panel::set_mcp_enabled(state, args).await,
+        "deploy_vps" => panel::deploy_vps(state, args).await,
+        "upgrade_miao" => panel::upgrade_miao(state, args).await,
         other => Err(format!("Unknown tool: {other}")),
     }
 }

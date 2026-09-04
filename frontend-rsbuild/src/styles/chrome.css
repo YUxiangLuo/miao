@@ -541,6 +541,9 @@
     background: var(--surface-red);
     color: var(--danger);
 }
+.runtime-banner .btn {
+    margin-left: auto;
+}
 .toast-stack {
     position: fixed;
     top: var(--float-offset);

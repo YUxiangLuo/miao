@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, rs } from '@rstest/core'
 import { SubDetailModal } from './SubDetailModal'
@@ -102,6 +102,81 @@ describe('SubDetailModal', () => {
     renderModal()
 
     expect(await screen.findByText(/暂无节点/)).toBeInTheDocument()
+  })
+
+  it('ignores an older response after switching subscriptions', async () => {
+    const resolvers: Array<(response: Response) => void> = []
+    rs.stubGlobal('fetch', rs.fn(() => new Promise<Response>((resolve) => {
+      resolvers.push(resolve)
+    })))
+    const firstSub = subMock({ url: 'https://example.com/first' })
+    const secondSub = subMock({ url: 'https://example.com/second' })
+    const { rerender } = renderModal({ sub: firstSub })
+    await waitFor(() => expect(resolvers).toHaveLength(1))
+
+    rerender(
+      <SubDetailModal
+        sub={secondSub}
+        onClose={rs.fn()}
+        onToggleNode={rs.fn().mockResolvedValue(true)}
+      />,
+    )
+    await waitFor(() => expect(resolvers).toHaveLength(2))
+
+    await act(async () => {
+      resolvers[1]({
+        ok: true,
+        json: async () => subNodesPayload([
+          subNodesInfoMock({ url: secondSub.url, nodes: [subNodeMock({ name: '新订阅节点' })] }),
+        ]),
+      } as Response)
+    })
+    expect(screen.getByText('新订阅节点')).toBeInTheDocument()
+
+    await act(async () => {
+      resolvers[0]({
+        ok: true,
+        json: async () => subNodesPayload([
+          subNodesInfoMock({ url: firstSub.url, nodes: [subNodeMock({ name: '旧订阅节点' })] }),
+        ]),
+      } as Response)
+    })
+    expect(screen.queryByText('旧订阅节点')).not.toBeInTheDocument()
+    expect(screen.getByText('新订阅节点')).toBeInTheDocument()
+  })
+
+  it('ignores a reload from a mutation on the previously open subscription', async () => {
+    const user = userEvent.setup()
+    const firstSub = subMock({ url: 'https://example.com/first' })
+    const secondSub = subMock({ url: 'https://example.com/second' })
+    const fetchMock = rs.fn(async () => ({
+      ok: true,
+      json: async () => subNodesPayload([
+        subNodesInfoMock({ url: firstSub.url, nodes: [subNodeMock({ name: '旧订阅节点' })] }),
+        subNodesInfoMock({ url: secondSub.url, nodes: [subNodeMock({ name: '新订阅节点' })] }),
+      ]),
+    }))
+    rs.stubGlobal('fetch', fetchMock)
+    let resolveToggle: (value: boolean) => void = () => {}
+    const onToggleNode = rs.fn(() => new Promise<boolean>((resolve) => {
+      resolveToggle = resolve
+    }))
+    const { rerender } = renderModal({ sub: firstSub, onToggleNode })
+
+    await user.click(await screen.findByRole('switch', { name: '禁用节点 旧订阅节点' }))
+    rerender(
+      <SubDetailModal
+        sub={secondSub}
+        onClose={rs.fn()}
+        onToggleNode={onToggleNode}
+      />,
+    )
+    expect(await screen.findByText('新订阅节点')).toBeInTheDocument()
+
+    await act(async () => resolveToggle(true))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+    expect(screen.queryByText('旧订阅节点')).not.toBeInTheDocument()
+    expect(screen.getByText('新订阅节点')).toBeInTheDocument()
   })
 
   it('lists stale disabled entries and clears them via the enable path', async () => {

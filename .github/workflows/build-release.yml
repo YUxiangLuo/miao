@@ -12,6 +12,61 @@ jobs:
   quality:
     uses: ./.github/workflows/quality.yml
 
+  resolve_embedded:
+    name: Resolve embedded sources
+    runs-on: ubuntu-latest
+    needs: quality
+    outputs:
+      sing_box_ref: ${{ steps.refs.outputs.sing_box_ref }}
+      sing_geoip_ref: ${{ steps.refs.outputs.sing_geoip_ref }}
+      direct_rules_ref: ${{ steps.refs.outputs.direct_rules_ref }}
+    steps:
+      - name: Resolve upstream commits
+        id: refs
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          resolve_ref() {
+            local remote="$1"
+            local requested="$2"
+            local line sha resolved
+            line="$(git ls-remote --exit-code "$remote" "$requested")" || return 1
+            IFS=$'\t' read -r sha resolved <<< "$line" || return 1
+            [[ "$resolved" == "$requested" ]] || return 1
+            [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || return 1
+            printf '%s\n' "$sha"
+          }
+
+          sing_box_ref="$(resolve_ref https://github.com/SagerNet/sing-box.git HEAD)"
+          sing_geoip_ref="$(resolve_ref https://github.com/SagerNet/sing-geoip.git refs/heads/rule-set)"
+          direct_rules_ref="$(resolve_ref https://github.com/Loyalsoldier/v2ray-rules-dat.git refs/heads/release)"
+
+          {
+            printf 'sing_box_ref=%s\n' "$sing_box_ref"
+            printf 'sing_geoip_ref=%s\n' "$sing_geoip_ref"
+            printf 'direct_rules_ref=%s\n' "$direct_rules_ref"
+          } >> "$GITHUB_OUTPUT"
+
+          {
+            printf 'sing-box %s\n' "$sing_box_ref"
+            printf 'sing-geoip %s\n' "$sing_geoip_ref"
+            printf 'v2ray-rules-dat %s\n' "$direct_rules_ref"
+          } > miao-embedded-sources.txt
+
+          {
+            printf '### Embedded upstream commits\n'
+            printf -- '- sing-box: `%s`\n' "$sing_box_ref"
+            printf -- '- sing-geoip/rule-set: `%s`\n' "$sing_geoip_ref"
+            printf -- '- v2ray-rules-dat/release: `%s`\n' "$direct_rules_ref"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload source manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: miao-embedded-sources
+          path: miao-embedded-sources.txt
+
   frontend:
     runs-on: ubuntu-latest
     needs: quality
@@ -33,7 +88,11 @@ jobs:
 
   build-linux:
     runs-on: ubuntu-latest
-    needs: frontend
+    needs: [frontend, resolve_embedded]
+    env:
+      SING_BOX_REF: ${{ needs.resolve_embedded.outputs.sing_box_ref }}
+      SING_GEOIP_REF: ${{ needs.resolve_embedded.outputs.sing_geoip_ref }}
+      DIRECT_RULES_REF: ${{ needs.resolve_embedded.outputs.direct_rules_ref }}
     strategy:
       matrix:
         include:
@@ -59,9 +118,9 @@ jobs:
       - name: Detect sing-box Go version
         shell: bash
         run: |
-          # 内核跟默认分支 HEAD，Go 版本也跟随其 go.mod 声明——
+          # 内核版本由 resolve_embedded 对整次发布统一快照，Go 版本跟随其 go.mod 声明——
           # 不跟 stable 频道（1.27 曾改 std 内嵌 http2 导致 linkname 断链）
-          GO_VER=$(curl -fsSL https://raw.githubusercontent.com/SagerNet/sing-box/HEAD/go.mod \
+          GO_VER=$(curl -fsSL "https://raw.githubusercontent.com/SagerNet/sing-box/${SING_BOX_REF}/go.mod" \
             | grep -E '^go [0-9]+\.[0-9]+' | head -1 | awk '{print $2}')
           echo "sing-box go.mod requires go $GO_VER"
           echo "GO_VER=$GO_VER" >> "$GITHUB_ENV"
@@ -105,7 +164,11 @@ jobs:
 
   build-windows:
     runs-on: windows-latest
-    needs: frontend
+    needs: [frontend, resolve_embedded]
+    env:
+      SING_BOX_REF: ${{ needs.resolve_embedded.outputs.sing_box_ref }}
+      SING_GEOIP_REF: ${{ needs.resolve_embedded.outputs.sing_geoip_ref }}
+      DIRECT_RULES_REF: ${{ needs.resolve_embedded.outputs.direct_rules_ref }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -122,7 +185,7 @@ jobs:
       - name: Detect sing-box Go version
         shell: bash
         run: |
-          GO_VER=$(curl -fsSL https://raw.githubusercontent.com/SagerNet/sing-box/HEAD/go.mod \
+          GO_VER=$(curl -fsSL "https://raw.githubusercontent.com/SagerNet/sing-box/${SING_BOX_REF}/go.mod" \
             | grep -E '^go [0-9]+\.[0-9]+' | head -1 | awk '{print $2}')
           echo "sing-box go.mod requires go $GO_VER"
           echo "GO_VER=$GO_VER" >> "$GITHUB_ENV"
@@ -186,3 +249,4 @@ jobs:
             miao-rust-linux-arm64.sha256
             miao-windows-amd64-setup.exe
             miao-windows-amd64-setup.exe.sha256
+            miao-embedded-sources.txt

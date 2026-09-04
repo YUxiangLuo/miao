@@ -1,6 +1,9 @@
 use std::path::PathBuf;
 
-use super::{panel_bind_addr, prepare_compatible_startup_cache, spawn_server, RuntimeOptions};
+use super::{
+    panel_bind_addr, prepare_compatible_startup_cache, spawn_server, startup_is_settled,
+    RuntimeOptions,
+};
 // 仅被 #[cfg(unix)] 测试使用（Windows 测试构建下 import 会报未使用）。
 #[cfg(unix)]
 use super::{initialize_runtime_locked, recover_data_plane_once};
@@ -683,6 +686,22 @@ async fn recovery_activates_manuals_when_fetch_fails_and_nothing_is_running() {
 
     crate::services::singbox::stop_sing_internal(&state).await;
     let _ = tokio::fs::remove_dir_all(root).await;
+}
+
+#[tokio::test]
+async fn empty_configuration_is_a_settled_startup_state() {
+    use std::sync::atomic::Ordering;
+
+    let state = crate::test_support::app_state(crate::models::Config {
+        subs: vec!["https://example.com/sub".to_string()],
+        ..crate::models::Config::default()
+    });
+    state.initializing.store(false, Ordering::Relaxed);
+    state.set_runtime_phase(crate::models::RuntimePhase::Failed);
+    assert!(!startup_is_settled(&state).await);
+
+    state.config.write().await.subs.clear();
+    assert!(startup_is_settled(&state).await);
 }
 
 #[cfg(unix)]

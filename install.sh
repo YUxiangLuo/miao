@@ -10,12 +10,60 @@ set -euo pipefail
 BIN_PATH=/usr/local/bin/miao
 CONFIG_DIR=/etc/miao
 UNIT_PATH=/etc/systemd/system/miao.service
+SELF_UPGRADE_BACKUP="${BIN_PATH}.bak"
+SELF_UPGRADE_PENDING="${BIN_PATH}.upgrade-pending.json"
 REPO=YUxiangLuo/miao
 LOCAL_BIN="${1:-}"
 BASE_URL="https://github.com/$REPO/releases/latest/download"
 REMOVE_SH_URL="https://raw.githubusercontent.com/$REPO/master/remove.sh"
 
 log() { echo "==> $*"; }
+
+self_upgrade_pending() {
+  [[ -e "$SELF_UPGRADE_BACKUP" || -e "$SELF_UPGRADE_PENDING" ]]
+}
+
+resolve_panel_port() {
+  local config="$CONFIG_DIR/config.yaml"
+  local line raw value digits
+  if [[ -f "$config" ]]; then
+    while IFS= read -r line || [[ -n "$line" ]]; do
+      line="${line%%#*}"
+      if [[ "$line" =~ ^port[[:space:]]*:[[:space:]]*([+]?(0[xX][0-9a-fA-F]+|0[oO][0-7]+|0[bB][01]+|[0-9]+))[[:space:]]*$ ]]; then
+        raw="${BASH_REMATCH[1]}"
+        raw="${raw#+}"
+        if [[ "$raw" == 0x* || "$raw" == 0X* ]]; then
+          digits="${raw:2}"
+          while [[ ${#digits} -gt 1 && "$digits" == 0* ]]; do digits="${digits#0}"; done
+          [[ ${#digits} -le 4 ]] || continue
+          value=$((16#$digits))
+        elif [[ "$raw" == 0o* || "$raw" == 0O* ]]; then
+          digits="${raw:2}"
+          while [[ ${#digits} -gt 1 && "$digits" == 0* ]]; do digits="${digits#0}"; done
+          [[ ${#digits} -le 6 ]] || continue
+          value=$((8#$digits))
+        elif [[ "$raw" == 0b* || "$raw" == 0B* ]]; then
+          digits="${raw:2}"
+          while [[ ${#digits} -gt 1 && "$digits" == 0* ]]; do digits="${digits#0}"; done
+          [[ ${#digits} -le 16 ]] || continue
+          value=$((2#$digits))
+        else
+          digits="$raw"
+          while [[ ${#digits} -gt 1 && "$digits" == 0* ]]; do digits="${digits#0}"; done
+          [[ ${#digits} -le 5 ]] || continue
+          value=$((10#$digits))
+        fi
+        if (( value > 0 && value <= 65535 )); then
+          printf '%s\n' "$value"
+          return
+        fi
+      fi
+    done < "$config"
+  fi
+  printf '6161\n'
+}
+
+PANEL_PORT=$(resolve_panel_port)
 
 if [[ "$(id -u)" -ne 0 ]]; then
   echo "需要 root 权限，请用 sudo 运行：" >&2
@@ -101,6 +149,11 @@ if [[ ! "$candidate_version" =~ ^miao[[:space:]]v[0-9]+\.[0-9]+\.[0-9]+ ]]; then
 fi
 log "候选版本校验通过: $candidate_version"
 
+if self_upgrade_pending; then
+  echo "检测到尚未完成的面板自升级，请等待其完成或重启 miao 让其回滚后再运行安装脚本" >&2
+  exit 1
+fi
+
 candidate_unit="$work_dir/miao.service"
 cat > "$candidate_unit" <<'EOF'
 [Unit]
@@ -146,12 +199,22 @@ if systemctl is-active --quiet miao 2>/dev/null; then
   systemctl stop miao
 fi
 
-# 旧 systemd 实例停止后再检查端口；此时命中的才是其他实例/程序。
-if command -v ss >/dev/null 2>&1 && ss -tlnH '( sport = :6161 )' | grep -q .; then
+# 捕获第一次检查后并发发生的面板自升级。此时进程已停，不会再产生新状态；
+# 保留其文件并重新启动，让内置恢复逻辑自行完成或回滚。
+if self_upgrade_pending; then
   if [[ "$service_was_active" == yes ]]; then
     systemctl start miao || true
   fi
-  echo "端口 6161 被其他进程占用，请先停止占用进程" >&2
+  echo "停服期间检测到面板自升级，系统安装已中止；请待 miao 状态稳定后重试" >&2
+  exit 1
+fi
+
+# 旧 systemd 实例停止后再检查端口；此时命中的才是其他实例/程序。
+if command -v ss >/dev/null 2>&1 && ss -tlnH "( sport = :$PANEL_PORT )" | grep -q .; then
+  if [[ "$service_was_active" == yes ]]; then
+    systemctl start miao || true
+  fi
+  echo "端口 $PANEL_PORT 被其他进程占用，请先停止占用进程" >&2
   exit 1
 fi
 
@@ -205,9 +268,7 @@ if ! systemctl is-active --quiet miao; then
   exit 1
 fi
 
-# 自更新机制可能留下 .bak；系统安装健康后不再需要它。
-rm -f "${BIN_PATH}.bak"
-log "完成！面板地址: http://localhost:6161"
+log "完成！面板地址: http://localhost:$PANEL_PORT"
 echo
 echo "常用命令:"
 echo "  systemctl status miao    # 查看状态"

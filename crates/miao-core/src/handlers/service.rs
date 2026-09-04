@@ -7,12 +7,12 @@ use tokio::time::Duration;
 use crate::error::AppError;
 use crate::models::{
     ApiResponse, ConnectivityResult, MaxMultiplierRequest, NodeMultiplier, NodeSelect,
-    NodeSelectRequest, RouteModeRequest, StatusData,
+    NodeSelectRequest, RouteModeRequest, RuntimePhase, StatusData,
 };
 use crate::responses::{status_error, success, success_no_data, HandlerResult};
 use crate::services::{
     proxy::spawn_restore_last_proxy,
-    singbox::{kernel_status, start_sing_internal, stop_sing_internal},
+    singbox::{extract_sing_box_to, kernel_status, start_sing_internal, stop_sing_internal},
     status::{legacy_warning, runtime_config_status, runtime_warnings},
 };
 use crate::state::AppState;
@@ -64,7 +64,7 @@ pub async fn start_service(State(state): State<Arc<AppState>>) -> HandlerResult 
         ));
     }
 
-    let _config_update = state.config_update.lock().await;
+    let config_update = state.config_update.lock().await;
     let config = state.config.read().await;
     if config.subs.is_empty() && config.nodes.is_empty() {
         return Err(status_error(
@@ -78,6 +78,45 @@ pub async fn start_service(State(state): State<Arc<AppState>>) -> HandlerResult 
     // subsequent config fix should retry starting instead of silently keeping
     // the explicitly stopped state.
     state.service_should_run.store(true, Ordering::Relaxed);
+
+    if state.runtime_phase() == RuntimePhase::Failed {
+        state.set_runtime_phase(RuntimePhase::Extracting);
+        let runtime_dir = state.runtime_paths.runtime_dir.clone();
+        let extracted =
+            tokio::task::spawn_blocking(move || extract_sing_box_to(&runtime_dir)).await;
+        match extracted {
+            Ok(Ok(_)) => {}
+            Ok(Err(err)) => {
+                state.set_runtime_phase(RuntimePhase::Failed);
+                return Err(status_error(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Failed to prepare embedded runtime: {err}"),
+                ));
+            }
+            Err(err) => {
+                state.set_runtime_phase(RuntimePhase::Failed);
+                return Err(status_error(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Embedded runtime extraction task failed: {err}"),
+                ));
+            }
+        }
+
+        // The recovery helper fetches subscriptions without this lock and takes
+        // it again only while publishing a current result.
+        drop(config_update);
+        state.set_runtime_phase(RuntimePhase::Failed);
+        if crate::runtime::recover_data_plane_once(&state).await
+            && state.runtime_ready.load(Ordering::Relaxed)
+        {
+            crate::services::version::mark_upgrade_healthy();
+            return Ok(success_no_data("sing-box recovered successfully"));
+        }
+        return Err(status_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to recover sing-box runtime",
+        ));
+    }
 
     match start_sing_internal(&state).await {
         Ok(_) => {

@@ -15,7 +15,10 @@ case "$host_goarch" in
     ;;
 esac
 
-# Default: remote default branch (latest code). Set SING_BOX_REF=vX.Y.Z to pin.
+# Defaults follow the upstream branches for local builds. Release CI resolves
+# all three refs once and passes immutable commit SHAs to every target build.
+sing_geoip_ref="${SING_GEOIP_REF:-rule-set}"
+direct_rules_ref="${DIRECT_RULES_REF:-release}"
 
 target="${MIAO_TARGET:-}"
 if [[ -z "$target" ]]; then
@@ -103,13 +106,13 @@ chmod 755 "$EMBEDDED_DIR/sing-box-host" "$EMBEDDED_DIR/$outfile"
 echo "==> Downloading and compiling geo rule files..."
 curl --fail --location --retry 3 \
   -o "$EMBEDDED_DIR/geoip-cn.srs" \
-  https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/geoip-cn.srs
+  "https://raw.githubusercontent.com/SagerNet/sing-geoip/${sing_geoip_ref}/geoip-cn.srs"
 
 direct_list="$TMP_DIR/direct-list.txt"
 direct_json="$TMP_DIR/direct-list.json"
 curl --fail --location --retry 3 \
   -o "$direct_list" \
-  https://raw.githubusercontent.com/Loyalsoldier/v2ray-rules-dat/release/direct-list.txt
+  "https://raw.githubusercontent.com/Loyalsoldier/v2ray-rules-dat/${direct_rules_ref}/direct-list.txt"
 
 bun "$ROOT_DIR/scripts/compile-direct-rules.mjs" "$direct_list" "$direct_json"
 "$EMBEDDED_DIR/sing-box-host" rule-set compile "$direct_json" \

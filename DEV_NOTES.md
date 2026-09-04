@@ -44,7 +44,7 @@ bun run --cwd frontend-rsbuild dev / test / lint / typecheck
 ./scripts/generate-api-types.sh  # 修改 Rust API models 后更新 TS binding
 
 # 默认成员门禁（与 CI 一致）
-cargo test --locked --all-targets
+./scripts/test-rust.sh  # fresh clone 也可直接运行；只用临时 inert 内核，不启动 TUN
 cargo fmt --all -- --check
 cargo clippy --locked --all-targets --all-features -- -D warnings
 
@@ -78,7 +78,7 @@ cargo run -p miao-cli
 
 **PWA**：`frontend-rsbuild/public/` 的 manifest/sw.js/图标经 rsbuild 拷进 `public/` 再嵌进二进制——新增静态资源必须同时在 `router.rs` 注册路由。SW 只是 Chrome 安装门槛的门票：只给导航请求做 network-first 兜底，**永远别缓存 `/api`**。
 
-**fresh clone**：`embedded/` 不入库，先 `./scripts/build-embedded.sh` 或 `./build.sh`。CI quality 用 stub 绕过，本地别学。Windows 交叉 check 还需要 `embedded/sing-box-windows-amd64.exe`（stub 够编译、不够当真内核）。
+**fresh clone**：跑 Rust 测试直接用 `./scripts/test-rust.sh`，它会构建前端、只为缺失资源临时创建 inert stub，并在测试结束时清理；不会启动代理或 TUN，也不会覆盖已有真实内核。构建可运行产物仍用 `./scripts/build-embedded.sh` 或 `./build.sh`。Windows 交叉 check 需要真实或显式准备的 `embedded/sing-box-windows-amd64.exe`。
 
 ## 在 Arch 上怎么「做」Windows
 
@@ -172,7 +172,7 @@ TUN JSON：`auto_route` + `strict_route`，`interface_name` 仍是 `sing-tun`。
 
 订阅刷新只有一条管线 `refresh_subscriptions`，策略 `RefreshPolicy`：`Manual`（用户在场，失败即报）/ `ManualInApply`（事务内，node_select 随外层事务提交）/ `Startup`（全失败保留运行中的缓存）。节点集来源 `SubSource`：本地语义变更用 `sub-nodes.json` 快照零网络重建，增删订阅/手动刷新/启动才真拉取。订阅全失败时有本地材料则回滚保留现状，三者全无才落盘+停核。
 
-启动两条路：`config.json.cache` 存在且过 `sing-box check` → 秒开 + `Startup` 策略后台刷新（拉取阶段不持锁）；否则同步拉取。
+启动两条路：`config.json.cache` 存在且过 `sing-box check` → 秒开 + `Startup` 策略后台刷新（拉取阶段不持锁）；否则同步拉取。自升级健康点在内嵌文件释放成功且预期数据面 ready 后；空配置无需数据面，用户明确停服也视为运行状态已稳定。
 
 依赖与供应链：YAML 用 `yaml_serde`（serde_yaml 已归档）；`AppState.http_client` 显式 `no_proxy()`（本进程自己就是代理）；VPS 部署与后台刷新都不在 `config_update` 锁内做网络等待；VPS 的 Hysteria2 钉版 + `hashes.txt` 校验（升级靠人工 bump `HYSTERIA_VERSION`），凭据经 stdin 注入不进 argv，SSH `accept-new`（TOFU）。
 
@@ -190,7 +190,7 @@ push/PR 跑 `ci.yml`：Frontend quality（install → audit → lint → **typec
 
 - `install.sh` / `remove.sh`：提交前 `shellcheck`
 - `build-embedded.sh` 的 `MIAO_TARGET=windows-amd64` 也会编 host 规则编译器 `sing-box-host`，不要拿它去抽本机正在跑的实例
-- `SING_BOX_REF` 接受分支/tag/完整 sha；仅手动钉版用，CI 始终跟默认分支 HEAD
+- `SING_BOX_REF`、`SING_GEOIP_REF`、`DIRECT_RULES_REF` 接受分支/tag/完整 sha；本地默认跟上游分支，release CI 在单独 job 中把三者解析为一次快照并供所有平台共用，版本清单随 Release 发布
 
 ## 前端调试（agent-browser）
 

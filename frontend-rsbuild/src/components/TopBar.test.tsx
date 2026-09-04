@@ -17,7 +17,7 @@ function renderTopBar(overrides: Partial<TopBarProps> = {}) {
     },
     upgrading: false,
     onUpgradeClick: rs.fn(),
-    loadingAction: '',
+    pendingActions: new Set<string>(),
     onSetRouteMode: rs.fn(),
     onOpenConnections: rs.fn(),
     primaryGroup: { type: 'Selector', now: 'node-a', all: ['node-a'] },
