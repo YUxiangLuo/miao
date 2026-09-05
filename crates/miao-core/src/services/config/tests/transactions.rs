@@ -43,11 +43,11 @@ fn sub_source_is_snapshot_when_subs_unchanged() {
     // 节点选择/规则/MCP/手动节点等本地语义变更不动 subs → 快照重建
     let mut new = old.clone();
     new.mcp = true;
-    assert_eq!(sub_source_for(&old, &new), SubSource::SnapshotOrFetch);
+    assert_eq!(sub_source_for(&old, &new), SubSource::SnapshotOrLocal);
 
     let mut new = old.clone();
     new.nodes.push("manual-node".to_string());
-    assert_eq!(sub_source_for(&old, &new), SubSource::SnapshotOrFetch);
+    assert_eq!(sub_source_for(&old, &new), SubSource::SnapshotOrLocal);
 
     // 增删订阅 → 必须真拉取
     let mut new = old.clone();

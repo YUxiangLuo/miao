@@ -1,3 +1,4 @@
+import { memo, useMemo } from 'react'
 import { ArrowDown, ArrowUp } from 'lucide-react'
 import { ICON, PATH_ICON_CELL } from '../tokens'
 import { formatBytes, formatSpeed } from '../utils'
@@ -60,22 +61,24 @@ function PathCard({ tone, label, stats, domains }: {
 }
 
 /** 直连 / 代理双通道统计卡：速率、累计流量、链接数与通道内站点 favicon 条 */
-export function ConnectionStats({ connections }: { connections: EnrichedConnection[] }) {
-  const stats = splitConnectionStats(connections)
+export const ConnectionStats = memo(function ConnectionStats({ connections }: { connections: EnrichedConnection[] }) {
+  const stats = useMemo(() => splitConnectionStats(connections), [connections])
+  const proxyDomains = useMemo(() => domainsForPath(connections, false), [connections])
+  const directDomains = useMemo(() => domainsForPath(connections, true), [connections])
   return (
     <div className="path-stats">
       <PathCard
         tone="info"
         label="代理"
         stats={stats.proxy}
-        domains={domainsForPath(connections, false)}
+        domains={proxyDomains}
       />
       <PathCard
         tone="success"
         label="直连"
         stats={stats.direct}
-        domains={domainsForPath(connections, true)}
+        domains={directDomains}
       />
     </div>
   )
-}
+})

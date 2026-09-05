@@ -14,25 +14,30 @@ import { FLIP_MS } from '../tokens'
  * active=false（如弹窗关闭）时清空位置记录：下次激活是全新布局，
  * 不应从陈旧位置滑入。
  */
-export function useFlipContainer<T extends HTMLElement>(active = true): RefObject<T | null> {
+export function useFlipContainer<T extends HTMLElement>(active = true, revision?: string): RefObject<T | null> {
   const containerRef = useRef<T>(null)
   // 上一帧布局位置（offsetTop/offsetLeft，相对容器，滚动安全）
   const prevPositionsRef = useRef(new Map<string, { top: number; left: number }>())
 
+  const lastRevision = useRef<string | undefined>(undefined)
   useLayoutEffect(() => {
     if (!active) {
       prevPositionsRef.current.clear()
+      lastRevision.current = undefined
       return
     }
     const container = containerRef.current
     if (!container) {
       // 行容器未挂载（筛选无匹配 / 数据面未就绪的空态）：与失活同理，从空白开始
       prevPositionsRef.current.clear()
+      lastRevision.current = undefined
       return
     }
+    if (revision !== undefined && lastRevision.current === revision) return
+    lastRevision.current = revision
     const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
     const next = new Map<string, { top: number; left: number }>()
-    for (const el of container.querySelectorAll<HTMLElement>('[data-flip-key]')) {
+    for (const el of container.querySelectorAll<HTMLElement>(':scope > [data-flip-key]')) {
       const key = el.dataset.flipKey as string
       const pos = { top: el.offsetTop, left: el.offsetLeft }
       const prev = prevPositionsRef.current.get(key)

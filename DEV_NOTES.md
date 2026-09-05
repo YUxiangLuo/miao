@@ -162,15 +162,15 @@ TUN JSON：`auto_route` + `strict_route`，`interface_name` 仍是 `sing-tun`。
 
 ## 配置与内核管线（后端核心）
 
-变更链路：`config_update` 锁 → 改克隆 → `apply_config_change`（分层落盘 → 生成 → `sing-box check` → 热重启）。面板不直接碰内核，走 Clash API（`127.0.0.1:6262`）。
+变更链路：订阅增删/刷新先在锁外拉取，按 `sub_refresh_generation` 淘汰旧请求，再持 `config_update` 锁合并当前设置、生成候选、`sing-box check`、激活和提交。显式停服取消在途订阅刷新；校验子进程限时 10 秒。面板读取 Clash API 反代；节点切换统一走 `POST /api/proxy/switch`，与 MCP 共用串行切换/持久化服务，并使旧恢复任务失效。
 
 生成配置无条件带 `route.find_process: true`（builder.rs）：面板「链接统计」每行副标题的进程名依赖 Clash API 的 `processPath`，而 sing-box 只在有进程类规则或此开关下才跑进程搜索器——删掉它，没有进程规则的用户面板就没有进程列数据。
 
-落盘分层（详见 docs/config.md）：稳定层 `config.yaml`（port/subs/nodes/custom_rules/mcp + 手写启动默认值）、易变层 `volatile.yaml`（有效 node_select/max_multiplier/route_mode——unix 在 tmpfs，Windows 持久）、选择偏好 `.node_select` / `.max_multiplier` / `.last_proxy`（普通 systemd Linux 与 Windows 跨重启，OpenWrt 仍在 tmpfs）、状态层（可删）。显式选择策略和最高倍率优先于 volatile/config 默认；`AppState::node_select_preference` 保存 requested strategy，`config.node_select` 保存 effective strategy，启动期地区筛空的 manual 不覆盖前者，刷新/配置事务必须重新 overlay requested。配置分层和选择偏好均原子写并跳过未变。倍率从完整节点池的当前显示名动态收集，未标倍率按 1x、无效显式倍率 fail-closed；只在 requested node_select 为 fastest_* 时过滤 urltest 候选，真实订阅/手动 outbound 和 manual selector 成员始终完整保留。过滤必须携带绑定前倍率，不能从可能保留历史名称的稳定 tag 重新解析。
+落盘分层（详见 docs/config.md）：稳定层 `config.yaml`（port/subs/nodes/custom_rules/mcp + 手写启动默认值）、易变层 `volatile.yaml`（有效 node_select/max_multiplier/route_mode——unix 在 tmpfs，Windows 持久）、选择偏好 `.node_select` / `.max_multiplier` / `.last_proxy`（普通 systemd Linux 与 Windows 跨重启，OpenWrt 仍在 tmpfs）、状态层（可删）。显式选择策略和最高倍率优先于 volatile/config 默认；`AppState::node_select_preference` 保存 requested strategy，`config.node_select` 保存 effective strategy，启动期地区筛空的 manual 不覆盖前者，刷新/配置事务必须重新 overlay requested。配置分层和选择偏好均原子写并跳过未变。倍率从完整节点池的当前显示名动态收集，未标倍率按 1x、无效显式倍率 fail-closed；只在 requested node_select 为 fastest_* 时过滤 urltest 候选，真实订阅/手动 outbound 和 manual selector 成员始终完整保留。地区筛选和倍率过滤必须携带绑定前的当前显示元数据，不能从可能保留历史名称的稳定 tag 重新解析。
 
-失败回滚去网络化：先快照 `config.json` 字节，回滚按 **内存快照 → `config.json.cache` → 重新拉订阅** 分层；内核已死时先 `sing-box check` 再启动；空 cache 拒绝恢复。
+失败回滚去网络化：先快照 `config.json` 字节，回滚按 **内存快照 → `config.json.cache` → 本地节点快照/手动节点** 分层；内核已死时先 `sing-box check` 再启动；空 cache 拒绝恢复。持锁回滚不触网；本地材料不足时保留可用运行态并报错，由显式刷新或启动后台恢复负责网络。
 
-订阅刷新只有一条管线 `refresh_subscriptions`，策略 `RefreshPolicy`：`Manual`（用户在场，失败即报）/ `ManualInApply`（事务内，node_select 随外层事务提交）/ `Startup`（全失败保留运行中的缓存）。节点集来源 `SubSource`：本地语义变更用 `sub-nodes.json` 快照零网络重建，增删订阅/手动刷新/启动才真拉取。订阅全失败时有本地材料则回滚保留现状，三者全无才落盘+停核。
+订阅刷新只有一条管线 `refresh_subscriptions`，策略 `RefreshPolicy`：`Manual`（用户在场，失败即报）/ `ManualInApply`（事务内，node_select 随外层事务提交）/ `Startup`（全失败保留运行中的缓存）。节点集来源 `SubSource`：本地语义变更用 `sub-nodes.json` 快照零网络重建，增删订阅/手动刷新/启动才真拉取。失败订阅按来源保留最近成功节点，成功空列表覆盖该来源；缓存节点不计入新鲜拉取健康度。快照在内存中共享不可变读模型，按提交替换。快照缺失的本地变更不退化为网络请求：纯手动运行态可本地重建，无法证明订阅材料完整则提示先刷新。
 
 启动两条路：`config.json.cache` 存在且过 `sing-box check` → 秒开 + `Startup` 策略后台刷新（拉取阶段不持锁）；否则同步拉取。自升级健康点在内嵌文件释放成功且预期数据面 ready 后；空配置无需数据面，用户明确停服也视为运行状态已稳定。
 
@@ -198,3 +198,9 @@ push/PR 跑 `ci.yml`：Frontend quality（install → audit → lint → **typec
 - `eval` 跨调用保留 JS 上下文，同名 `const` 会炸，用 IIFE
 - React 受控组件要走原生 setter + `input`/`change` 事件
 - Arch 的生产实例面板可用来看共享 UI，不能用来验 UAC / WebView2 / WinTun
+
+## 面板读取与大列表
+
+状态/代理/连接按 3 秒轮询；订阅、手动节点、规则按 `data_revision` 变化刷新，30 秒轮询兜底。首次读取由同一轮询器负责；资源请求统一限时、取消和代次检查，晚到结果不能覆盖新状态。测速批次在清空或卸载时取消，自动历史与手动测量按时间比较。
+
+连接明细使用可视区虚拟列表，行高与间距分别由 `CONNECTION_ROW_HEIGHT` / `CONNECTION_ROW_GAP` 镜像 CSS token；更改几何尺寸须同步。FLIP 只测量可视行且仅在顺序变化时触发。规则活跃检测先为连接建立签名索引，避免规则数乘连接数的重复解析。

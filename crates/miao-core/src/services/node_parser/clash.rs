@@ -8,6 +8,7 @@ use super::protocols::{is_supported_node_type, parse_single_node};
 /// 节点解析结果，包含有效节点和错误记录
 #[derive(Debug)]
 pub struct ParseResult {
+    pub has_proxy_list: bool,
     pub nodes: Vec<(String, JsonValue)>, // (name, outbound_json)
     pub errors: Vec<String>,             // 记录解析失败的节点及原因
     pub total_count: usize,              // YAML 中 proxies 列表的原始总数
@@ -18,13 +19,11 @@ pub fn parse_clash_proxies(clash_yaml: &str) -> AppResult<ParseResult> {
     let clash_obj: Value = yaml_serde::from_str(clash_yaml)
         .map_err(|e| AppError::context("Failed to parse subscription YAML", e))?;
 
-    let proxies = clash_obj
-        .get("proxies")
-        .and_then(|p| p.as_sequence())
-        .cloned()
-        .unwrap_or_default();
+    let proxy_list = clash_obj.get("proxies").and_then(|p| p.as_sequence());
+    let proxies = proxy_list.map(Vec::as_slice).unwrap_or_default();
 
     let mut result = ParseResult {
+        has_proxy_list: proxy_list.is_some(),
         nodes: vec![],
         errors: vec![],
         total_count: proxies.len(),

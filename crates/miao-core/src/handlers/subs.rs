@@ -1,5 +1,5 @@
 use axum::{extract::State, http::StatusCode, response::Json};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::{atomic::Ordering, Arc};
 
 use crate::models::{
@@ -9,30 +9,13 @@ use crate::models::{
 };
 use crate::responses::{status_error, success, success_no_data, HandlerResult};
 use crate::services::config::{
-    apply_config_change, apply_disabled_nodes, collect_manual_outbounds, read_sub_nodes_snapshot,
-    regenerate_preserving_service_state, subscription_source_id, ConfigMutationError,
-    SubNodesSnapshot,
+    apply_disabled_nodes, collect_manual_outbounds, edit_subscriptions, read_sub_nodes_snapshot,
+    refresh_subscriptions_foreground, subscription_source_id, ConfigMutationError,
 };
 use crate::services::subscription::is_informational_subscription_node;
 use crate::services::verge;
 use crate::state::AppState;
 use crate::validation::Validator;
-
-/// 快照中的 (source_id, 节点名) 集合：禁用条目「生效」的判据
-/// （订阅刷新后改名/消失的节点不再匹配任何条目，条目随之失效）
-fn snapshot_entry_set(snapshot: &SubNodesSnapshot) -> HashSet<(&str, &str)> {
-    snapshot
-        .source_ids
-        .iter()
-        .zip(snapshot.node_names.iter())
-        .enumerate()
-        .filter_map(|(index, (source, name))| {
-            let outbound = snapshot.outbounds.get(index)?;
-            (!is_informational_subscription_node(name, outbound))
-                .then_some((source.as_str(), name.as_str()))
-        })
-        .collect()
-}
 
 pub async fn get_subs(State(state): State<Arc<AppState>>) -> Json<ApiResponse<Vec<SubStatus>>> {
     // 快照磁盘读先于一切锁：本 handler 是面板轮询热点，不把 IO 关进临界区
@@ -41,8 +24,22 @@ pub async fn get_subs(State(state): State<Arc<AppState>>) -> Json<ApiResponse<Ve
     let status_map = state.sub_status.lock().await;
     // disabled_count 用生效口径：只统计匹配当前快照节点的条目；
     // 失配条目（如机场的「剩余流量」信息节点改名后）不产生效果，不应计入
-    let live_entries = snapshot.as_ref().map(snapshot_entry_set);
 
+    let source_by_url: HashMap<&str, String> = config
+        .subs
+        .iter()
+        .map(|url| (url.as_str(), subscription_source_id(url)))
+        .collect();
+    let mut disabled_counts: HashMap<&str, usize> = HashMap::new();
+    for entry in &config.disabled_nodes {
+        if source_by_url
+            .get(entry.sub.as_str())
+            .and_then(|source| snapshot.as_ref()?.live_names.get(source))
+            .is_some_and(|names| names.contains(&entry.name))
+        {
+            *disabled_counts.entry(&entry.sub).or_default() += 1;
+        }
+    }
     let subs_with_status: Vec<SubStatus> = config
         .subs
         .iter()
@@ -55,20 +52,7 @@ pub async fn get_subs(State(state): State<Arc<AppState>>) -> Json<ApiResponse<Ve
                 state: SubscriptionState::Pending,
                 error: None,
             });
-            status.disabled_count = config
-                .disabled_nodes
-                .iter()
-                .filter(|entry| &entry.sub == url)
-                .filter(|entry| {
-                    let Some(live) = &live_entries else {
-                        return false;
-                    };
-                    live.contains(&(
-                        subscription_source_id(&entry.sub).as_str(),
-                        entry.name.as_str(),
-                    ))
-                })
-                .count();
+            status.disabled_count = disabled_counts.get(url.as_str()).copied().unwrap_or(0);
             status
         })
         .collect();
@@ -245,6 +229,9 @@ pub async fn set_node_disabled(
         } else {
             "节点状态未变化"
         })),
+        Err(ConfigMutationError::Superseded) => {
+            Err(status_error(StatusCode::CONFLICT, "操作已被更新的请求取代"))
+        }
         Err(ConfigMutationError::Rejected(message)) => {
             Err(status_error(StatusCode::BAD_REQUEST, message))
         }
@@ -269,23 +256,16 @@ pub async fn add_sub(
         return Err(status_error(StatusCode::BAD_REQUEST, e));
     }
 
-    let _config_update = state.config_update.lock().await;
-    let old_config = state.config.read().await.clone();
-    let mut new_config = old_config.clone();
-
-    if new_config.subs.contains(&req.url) {
-        return Err(status_error(
-            StatusCode::BAD_REQUEST,
-            "Subscription already exists",
-        ));
-    }
-
-    new_config.subs.push(req.url);
-
-    match apply_config_change(&state, &old_config, &new_config).await {
-        Ok(_) => Ok(success_no_data("Subscription added")),
-        Err(e) => Err(status_error(StatusCode::INTERNAL_SERVER_ERROR, e)),
-    }
+    edit_subscriptions(&state, false, |subs| {
+        if subs.contains(&req.url) {
+            return Err("Subscription already exists".to_string());
+        }
+        subs.push(req.url);
+        Ok(())
+    })
+    .await
+    .map_err(|error| subscription_error(error, StatusCode::BAD_REQUEST))?;
+    Ok(success_no_data("Subscription added"))
 }
 
 /// 扫描本机 clash-verge-rev 的订阅（只读）。未安装/无 remote 订阅时 found=false。
@@ -335,34 +315,29 @@ pub async fn add_subs_batch(
         }
     }
 
-    let _config_update = state.config_update.lock().await;
-    let old_config = state.config.read().await.clone();
-    let mut new_config = old_config.clone();
-
-    let mut skipped = 0usize;
-    for url in urls {
-        if new_config.subs.contains(&url) {
-            skipped += 1;
-            continue;
+    let (result, _) = edit_subscriptions(&state, false, |subs| {
+        let mut added = 0;
+        let mut skipped = 0;
+        for url in urls {
+            if subs.contains(&url) {
+                skipped += 1;
+            } else {
+                subs.push(url);
+                added += 1;
+            }
         }
-        new_config.subs.push(url);
-    }
-    let added = new_config.subs.len() - old_config.subs.len();
-
-    if added == 0 {
-        return Ok(success(
-            "No new subscriptions to add",
-            SubBatchResult { added, skipped },
-        ));
-    }
-
-    match apply_config_change(&state, &old_config, &new_config).await {
-        Ok(_) => Ok(success(
-            "Subscriptions added",
-            SubBatchResult { added, skipped },
-        )),
-        Err(e) => Err(status_error(StatusCode::INTERNAL_SERVER_ERROR, e)),
-    }
+        Ok(SubBatchResult { added, skipped })
+    })
+    .await
+    .map_err(|error| subscription_error(error, StatusCode::BAD_REQUEST))?;
+    Ok(success(
+        if result.added == 0 {
+            "No new subscriptions to add"
+        } else {
+            "Subscriptions added"
+        },
+        result,
+    ))
 }
 
 pub async fn delete_sub(
@@ -376,24 +351,17 @@ pub async fn delete_sub(
         ));
     }
 
-    let _config_update = state.config_update.lock().await;
-    let old_config = state.config.read().await.clone();
-    let mut new_config = old_config.clone();
-
-    let original_len = new_config.subs.len();
-    new_config.subs.retain(|s| s != &req.url);
-
-    if new_config.subs.len() == original_len {
-        return Err(status_error(
-            StatusCode::NOT_FOUND,
-            "Subscription not found",
-        ));
-    }
-
-    match apply_config_change(&state, &old_config, &new_config).await {
-        Ok(_) => Ok(success_no_data("Subscription deleted")),
-        Err(e) => Err(status_error(StatusCode::INTERNAL_SERVER_ERROR, e)),
-    }
+    edit_subscriptions(&state, false, |subs| {
+        let previous = subs.len();
+        subs.retain(|url| url != &req.url);
+        if previous == subs.len() {
+            return Err("Subscription not found".to_string());
+        }
+        Ok(())
+    })
+    .await
+    .map_err(|error| subscription_error(error, StatusCode::NOT_FOUND))?;
+    Ok(success_no_data("Subscription deleted"))
 }
 
 pub async fn refresh_subs(State(state): State<Arc<AppState>>) -> HandlerResult {
@@ -404,16 +372,26 @@ pub async fn refresh_subs(State(state): State<Arc<AppState>>) -> HandlerResult {
         ));
     }
 
-    let _config_update = state.config_update.lock().await;
-    let config = state.config.read().await.clone();
+    let update = refresh_subscriptions_foreground(&state)
+        .await
+        .map_err(|error| subscription_error(error, StatusCode::BAD_REQUEST))?;
+    Ok(success_no_data(if update.updated() {
+        "Subscriptions refreshed and runtime updated"
+    } else {
+        "Subscriptions refreshed"
+    }))
+}
 
-    match regenerate_preserving_service_state(&config, &state).await {
-        Ok(update) if update.updated() => Ok(success_no_data(
-            "Subscriptions refreshed and runtime updated",
-        )),
-        Ok(_) => Ok(success_no_data("Subscriptions refreshed")),
-        Err(e) => Err(status_error(StatusCode::INTERNAL_SERVER_ERROR, e)),
-    }
+fn subscription_error<T: serde::Serialize>(
+    error: ConfigMutationError,
+    rejected: StatusCode,
+) -> (StatusCode, Json<ApiResponse<T>>) {
+    let status = match &error {
+        ConfigMutationError::Rejected(_) => rejected,
+        ConfigMutationError::Superseded => StatusCode::CONFLICT,
+        ConfigMutationError::Apply(_) => StatusCode::INTERNAL_SERVER_ERROR,
+    };
+    status_error(status, error)
 }
 
 #[cfg(test)]

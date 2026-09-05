@@ -181,6 +181,7 @@
     --rule-list-min-h: 80px;
     --rule-list-max-h: 280px;
     --verge-list-max-h: 240px; /* Clash Verge 导入订阅列表：超高内滚，操作按钮始终可达 */
+    --conn-row-height: 60px; /* virtual list: CONNECTION_ROW_HEIGHT in tokens.ts */
     --conn-row-min-h: 56px; /* 链接统计行最小高度 */
     --conn-num-w: 5rem; /* 链接统计行数字子列定宽（速率/累计的上下行共用，右对齐成列） */
     --path-num-w: 5.5rem; /* 通道卡列宽（身份/速率/累计三列共用，跨两卡列位一致） */

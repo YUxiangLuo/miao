@@ -1,4 +1,5 @@
 use sha2::{Digest, Sha256};
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use tokio::io::AsyncWriteExt;
@@ -15,7 +16,8 @@ const CACHE_MANIFEST_VERSION: u32 = 1;
 /// Bump only when generated sing-box semantics become incompatible with old
 /// cached bytes. Package releases alone do not invalidate a healthy cache.
 /// Version 2 excludes informational pseudo-nodes from subscription outbounds.
-const RUNTIME_CONFIG_SCHEMA_VERSION: u32 = 2;
+// Version 3 derives regional candidates from current metadata, not stable tags.
+const RUNTIME_CONFIG_SCHEMA_VERSION: u32 = 3;
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 struct CacheManifest {
@@ -215,7 +217,7 @@ pub async fn save_max_multiplier_preference(
 }
 
 /// 原子写入文件：先写入临时文件，再重命名为目标文件
-pub(super) async fn write_file_atomic(path: &Path, content: &[u8]) -> AppResult<()> {
+pub(crate) async fn write_file_atomic(path: &Path, content: &[u8]) -> AppResult<()> {
     let parent = path
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
@@ -453,6 +455,41 @@ pub struct SubNodesSnapshot {
     pub source_ids: Vec<String>,
 }
 
+/// Immutable read projection. The full JSON and informational-node filtering
+/// are parsed once per snapshot, rather than on every panel poll.
+pub struct SubNodesReadModel {
+    snapshot: SubNodesSnapshot,
+    pub live_names: HashMap<String, HashSet<String>>,
+}
+impl std::ops::Deref for SubNodesReadModel {
+    type Target = SubNodesSnapshot;
+    fn deref(&self) -> &Self::Target {
+        &self.snapshot
+    }
+}
+impl SubNodesReadModel {
+    fn new(snapshot: SubNodesSnapshot) -> Self {
+        let mut live_names: HashMap<String, HashSet<String>> = HashMap::new();
+        for ((source, name), outbound) in snapshot
+            .source_ids
+            .iter()
+            .zip(&snapshot.node_names)
+            .zip(&snapshot.outbounds)
+        {
+            if !crate::services::subscription::is_informational_subscription_node(name, outbound) {
+                live_names
+                    .entry(source.clone())
+                    .or_default()
+                    .insert(name.clone());
+            }
+        }
+        Self {
+            snapshot,
+            live_names,
+        }
+    }
+}
+
 impl SubNodesSnapshot {
     /// 快照能否服务于当前订阅列表
     pub fn matches_subs(&self, subs: &[String]) -> bool {
@@ -477,15 +514,19 @@ impl SubNodesSnapshot {
         }
     }
 
-    pub fn into_fetched_nodes(self) -> Vec<super::generate::FetchedNode> {
-        let mut source_ids = self.source_ids.into_iter();
+    pub fn to_fetched_nodes(&self) -> Vec<super::generate::FetchedNode> {
         self.node_names
-            .into_iter()
-            .zip(self.outbounds)
-            .map(|(name, outbound)| super::generate::FetchedNode {
-                source_id: source_ids.next().unwrap_or_else(|| "legacy".to_string()),
-                name,
-                outbound,
+            .iter()
+            .zip(&self.outbounds)
+            .enumerate()
+            .map(|(index, (name, outbound))| super::generate::FetchedNode {
+                source_id: self
+                    .source_ids
+                    .get(index)
+                    .cloned()
+                    .unwrap_or_else(|| "legacy".to_string()),
+                name: name.clone(),
+                outbound: outbound.clone(),
             })
             .collect()
     }
@@ -503,7 +544,11 @@ pub async fn save_sub_nodes_snapshot(
     state: &AppState,
     snapshot: &SubNodesSnapshot,
 ) -> AppResult<()> {
-    save_sub_nodes_snapshot_at(sub_nodes_snapshot_path(state), snapshot).await
+    let mut cached = state.sub_nodes_cache.write().await;
+    save_sub_nodes_snapshot_at(sub_nodes_snapshot_path(state), snapshot).await?;
+    *cached = Some(Arc::new(SubNodesReadModel::new(snapshot.clone())));
+    state.data_revision.fetch_add(1, Ordering::Relaxed);
+    Ok(())
 }
 
 async fn save_sub_nodes_snapshot_at(path: &Path, snapshot: &SubNodesSnapshot) -> AppResult<()> {
@@ -519,8 +564,20 @@ async fn save_sub_nodes_snapshot_at(path: &Path, snapshot: &SubNodesSnapshot) ->
 }
 
 /// 读取快照；文件缺失、读不出、内容损坏都视为没有快照（调用方退化到拉取路径）
-pub async fn read_sub_nodes_snapshot(state: &AppState) -> Option<SubNodesSnapshot> {
-    read_sub_nodes_snapshot_at(sub_nodes_snapshot_path(state)).await
+pub async fn read_sub_nodes_snapshot(state: &AppState) -> Option<Arc<SubNodesReadModel>> {
+    if let Some(snapshot) = state.sub_nodes_cache.read().await.as_ref() {
+        return Some(snapshot.clone());
+    }
+    // Serialize the initial load with writers so an older disk read cannot
+    // replace a freshly committed in-memory snapshot.
+    let mut cached = state.sub_nodes_cache.write().await;
+    if cached.is_none() {
+        *cached = read_sub_nodes_snapshot_at(sub_nodes_snapshot_path(state))
+            .await
+            .map(SubNodesReadModel::new)
+            .map(Arc::new);
+    }
+    cached.clone()
 }
 
 async fn read_sub_nodes_snapshot_at(path: &Path) -> Option<SubNodesSnapshot> {

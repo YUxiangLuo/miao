@@ -9,6 +9,7 @@ export function statusMock(overrides: Partial<StatusData> = {}): StatusData {
   const ready = overrides.ready ?? (running && !initializing)
   const nodeSelect = overrides.node_select ?? 'manual'
   return {
+    data_revision: 0,
     running,
     ready,
     phase: overrides.phase ?? (ready ? 'ready' : initializing ? 'initializing' : 'stopped'),

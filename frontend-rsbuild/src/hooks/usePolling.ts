@@ -12,7 +12,7 @@ export type PollTask = () => unknown
 export function usePolling(tasks: PollTask[], enabled = true, interval = POLL_INTERVAL) {
   const tasksRef = useRef(tasks)
   const timerRef = useRef<number | null>(null)
-  const runningTaskIndexesRef = useRef(new Set<number>())
+  const runningTasksRef = useRef(new Set<PollTask>())
 
   // 保持 tasksRef 最新，避免定时器重建
   useEffect(() => {
@@ -25,14 +25,14 @@ export function usePolling(tasks: PollTask[], enabled = true, interval = POLL_IN
       return Promise.resolve([])
     }
 
-    const startedTasks = currentTasks.flatMap((task, index) => {
-      if (runningTaskIndexesRef.current.has(index)) return []
+    const startedTasks = currentTasks.flatMap((task) => {
+      if (runningTasksRef.current.has(task)) return []
 
-      runningTaskIndexesRef.current.add(index)
+      runningTasksRef.current.add(task)
       const promise = Promise.resolve()
         .then(() => task())
         .catch(() => undefined)
-        .finally(() => runningTaskIndexesRef.current.delete(index))
+        .finally(() => runningTasksRef.current.delete(task))
       return [promise]
     })
 
@@ -60,7 +60,7 @@ export function usePolling(tasks: PollTask[], enabled = true, interval = POLL_IN
       timerRef.current = window.setInterval(runTasks, interval)
     }
 
-    startTimer()
+    if (!document.hidden) startTimer()
 
     // 页面隐藏时暂停轮询，恢复可见时立即补一次
     const handleVisibilityChange = () => {

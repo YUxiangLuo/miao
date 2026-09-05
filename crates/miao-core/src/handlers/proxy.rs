@@ -15,3 +15,13 @@ pub async fn set_last_proxy(
         Err(e) => error(format!("Failed to save: {}", e)),
     }
 }
+
+pub async fn switch_proxy(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<LastProxy>,
+) -> crate::responses::HandlerResult<crate::models::SwitchProxyResult> {
+    let result = crate::services::proxy::switch_proxy(&state, &req)
+        .await
+        .map_err(|error| crate::responses::status_error(axum::http::StatusCode::CONFLICT, error))?;
+    Ok(crate::responses::success("Proxy selected", result))
+}

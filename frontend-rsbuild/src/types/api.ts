@@ -15,7 +15,11 @@ export type RuntimeWarning = { code: string, message: string, severity: RuntimeW
 
 export type ApiResponse<T> = { success: boolean, message: string, data?: T, };
 
-export type StatusData = { running: boolean,
+export type StatusData = {
+/**
+ * Revision of subscription, node and rule read projections.
+ */
+data_revision: number, running: boolean,
 /**
  * True only after the managed sing-box instance passed its startup
  * readiness check. A spawned process may be `running` while this is false.
@@ -104,6 +108,8 @@ export type MaxMultiplierRequest = {
 max_multiplier: string | null, };
 
 export type LastProxy = { group: string, name: string, };
+
+export type SwitchProxyResult = { changed: boolean, persisted: boolean, };
 
 export type VpsDeployRequest = { ip: string, password: string, };
 

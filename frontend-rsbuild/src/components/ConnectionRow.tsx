@@ -1,3 +1,4 @@
+import { memo } from 'react'
 import { ArrowDown, ArrowUp } from 'lucide-react'
 import { ICON } from '../tokens'
 import { classNames, formatBytes, formatSpeed } from '../utils'
@@ -17,6 +18,8 @@ import { AnimatedValue, SiteMark } from './connectionUi'
 
 export interface ConnectionRowProps {
   connection: EnrichedConnection
+  position?: number
+  total?: number
 }
 
 /**
@@ -24,7 +27,7 @@ export interface ConnectionRowProps {
  * 活跃链接全亮并带速率比例条，空闲链接降为 dim。
  * data-flip-key 供容器 FLIP 动画按连接 id 追踪跨帧位置（见 hooks/useFlip.ts）。
  */
-export function ConnectionRow({ connection }: ConnectionRowProps) {
+export const ConnectionRow = memo(function ConnectionRow({ connection, position, total }: ConnectionRowProps) {
   const domain = connectionDomain(connection)
   const outbound = connectionOutbound(connection)
   const meta = connection.metadata || {}
@@ -47,6 +50,7 @@ export function ConnectionRow({ connection }: ConnectionRowProps) {
       className={classNames('conn-row', active ? 'active' : 'idle')}
       aria-label={`${domain} 链接`}
       data-flip-key={connection.id}
+      role="listitem" aria-posinset={position} aria-setsize={total}
     >
       <div className="conn-row-main">
         <SiteMark domain={domain} />
@@ -81,4 +85,4 @@ export function ConnectionRow({ connection }: ConnectionRowProps) {
       </div>
     </article>
   )
-}
+})

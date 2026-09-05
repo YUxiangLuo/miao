@@ -19,8 +19,8 @@ use crate::state::AppState;
 
 use super::bindings::save_node_bindings;
 use super::generate::{
-    gen_config, gen_config_from_nodes, gen_config_from_snapshot, publish_generation_diagnostics,
-    record_fresh_snapshot, FetchedNode, GenConfigOutcome, SubFetchRetry,
+    gen_config, gen_config_from_fetch, gen_config_from_snapshot, publish_generation_diagnostics,
+    record_fresh_snapshot, FetchedSubscriptions, GenConfigOutcome, SubFetchRetry,
 };
 use super::persist::{
     has_config_cache, has_sub_nodes_snapshot, persist_effective_node_select, read_config_cache,
@@ -106,18 +106,18 @@ pub struct RefreshOutcome {
 pub enum SubSource {
     /// 真拉取（增删订阅/手动刷新/启动）
     Fetch,
-    /// 快照优先，缺失或与当前订阅列表不匹配时退化到真拉取
+    /// 快照优先；缺失时仅使用可证明完整的本地手动节点材料，绝不持锁触网。
     /// （本地语义变更：节点选择/路由模式/规则/手动节点——切换不是刷新）
-    SnapshotOrFetch,
+    SnapshotOrLocal,
     /// 已预拉取的订阅节点集（启动后台刷新：网络等待在配置锁外完成，
     /// 持锁落地阶段只复用结果，不再碰网络）
-    Prefetched(Vec<FetchedNode>),
+    Prefetched(FetchedSubscriptions),
 }
 
 /// 订阅列表没变就是本地语义变更，走快照重建；变了才需要真拉取
 pub(super) fn sub_source_for(old_config: &Config, new_config: &Config) -> SubSource {
     if old_config.subs == new_config.subs {
-        SubSource::SnapshotOrFetch
+        SubSource::SnapshotOrLocal
     } else {
         SubSource::Fetch
     }
@@ -362,8 +362,8 @@ pub async fn refresh_subscriptions(
     let active_bytes = snapshot_runtime_config(state).await;
     let generated = match source {
         SubSource::Fetch => gen_config(config, state, retry).await,
-        SubSource::SnapshotOrFetch => gen_config_from_snapshot(config, state).await,
-        SubSource::Prefetched(nodes) => gen_config_from_nodes(config, state, nodes).await,
+        SubSource::SnapshotOrLocal => gen_config_from_snapshot(config, state).await,
+        SubSource::Prefetched(nodes) => gen_config_from_fetch(config, state, nodes).await,
     }
     .map_err(|e| AppError::context("Failed to regenerate config", e))?;
     info!("Config regenerated successfully");
@@ -445,7 +445,7 @@ mod transaction;
 
 pub use transaction::{
     apply_config_change, apply_disabled_nodes, apply_max_multiplier, apply_node_select,
-    apply_route_mode, regenerate_preserving_service_state, ConfigMutationError,
+    apply_route_mode, edit_subscriptions, refresh_subscriptions_foreground, ConfigMutationError,
 };
 #[cfg(test)]
 pub(super) use transaction::{
@@ -455,3 +455,6 @@ pub(super) use transaction::{
 
 #[cfg(all(test, unix))]
 mod transaction_tests;
+
+#[cfg(test)]
+pub use transaction::regenerate_preserving_service_state;

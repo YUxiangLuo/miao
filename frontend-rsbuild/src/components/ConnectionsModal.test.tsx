@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, rs } from '@rstest/core'
 import { ConnectionsModal } from './ConnectionsModal'
@@ -162,6 +162,20 @@ describe('ConnectionsModal connection list', () => {
     const rows = screen.getAllByLabelText(/\.dev 链接$/)
     // 速率降序：fast-one 在前；flip key 与连接 id 一致，跨轮询稳定
     expect(rows.map((row) => (row as HTMLElement).dataset.flipKey)).toEqual(['fast-one', 'slow-one'])
+  })
+
+  it('bounds DOM rows for large lists and renders the end when scrolled', () => {
+    const connections = Array.from({ length: 5000 }, (_, i) => connection({
+      id: `item-${i}`, downloadSpeed: 5000 - i, metadata: { host: `host-${i}.dev` },
+    }))
+    renderModal(connections)
+    expect(document.querySelectorAll('.conn-row').length).toBeLessThan(30)
+    expect(screen.getByLabelText('host-0.dev 链接')).toBeInTheDocument()
+    const list = screen.getByRole('list', { name: '连接列表' })
+    fireEvent.scroll(list, { target: { scrollTop: 5000 * 66 } })
+    expect(document.querySelectorAll('.conn-row').length).toBeLessThan(30)
+    expect(screen.getByLabelText('host-4999.dev 链接')).toBeInTheDocument()
+    expect(screen.queryByLabelText('host-0.dev 链接')).not.toBeInTheDocument()
   })
 
 })

@@ -1,6 +1,6 @@
 use futures::{stream, StreamExt};
 use sha2::{Digest, Sha256};
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 use std::sync::{atomic::Ordering, Arc};
 use tokio::time::{Duration, Instant};
 use tracing::{error, info, warn};
@@ -13,7 +13,7 @@ use crate::services::subscription::{fetch_sub, is_informational_subscription_nod
 use crate::state::{AppState, SkippedRule};
 
 use super::bindings::{assign_subscription_tags, reserved_node_tags, NodeTagBindings};
-use super::builder::build_sing_box_config_with_multipliers;
+use super::builder::{build_sing_box_config_with_multipliers, NodeMetadata};
 use super::persist::{read_sub_nodes_snapshot, save_sub_nodes_snapshot, SubNodesSnapshot};
 
 #[derive(Clone)]
@@ -24,7 +24,7 @@ pub struct GenConfigOutcome {
     pub skipped_rules: Vec<SkippedRule>,
     /// 完整可用节点池中识别出的倍率，供面板动态生成自动候选上限选项。
     pub available_multipliers: Vec<NodeMultiplier>,
-    /// 本次真拉取拿到的订阅节点集（非空才 Some）；快照重建为 None。
+    /// 本轮接受的节点集（含失败来源保留的节点，允许成功空列表）；本地重建为 None。
     /// 校验通过/启动成功后由 record_fresh_snapshot 落盘，供本地语义变更零网络重建。
     pub fresh_sub_nodes: Option<Vec<FetchedNode>>,
     pub node_bindings: NodeTagBindings,
@@ -35,6 +35,28 @@ pub struct FetchedNode {
     pub source_id: String,
     pub name: String,
     pub outbound: serde_json::Value,
+}
+
+/// A fetch result keeps availability separate from network health. Cached
+/// nodes may serve failed sources, but must never end startup's recovery loop.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct FetchedSubscriptions {
+    pub nodes: Vec<FetchedNode>,
+    pub has_fresh_nodes: bool,
+    pub successful_sources: Vec<String>,
+}
+
+pub async fn gen_config_from_fetch(
+    config: &Config,
+    state: &Arc<AppState>,
+    fetched: FetchedSubscriptions,
+) -> AppResult<GenConfigOutcome> {
+    let mut outcome = build_prepared(config, state, fetched.nodes.clone()).await?;
+    outcome.has_sub_nodes = fetched.has_fresh_nodes;
+    // Includes successful empty sources: an old snapshot must not resurrect
+    // nodes intentionally removed by a provider on the next local edit.
+    outcome.fresh_sub_nodes = Some(fetched.nodes);
+    Ok(outcome)
 }
 
 pub fn subscription_source_id(url: &str) -> String {
@@ -109,7 +131,7 @@ pub async fn gen_config(
     retry: SubFetchRetry,
 ) -> AppResult<GenConfigOutcome> {
     let nodes = fetch_sub_nodes(config, state, retry).await;
-    gen_config_from_nodes(config, state, nodes).await
+    gen_config_from_fetch(config, state, nodes).await
 }
 
 /// 只拉取订阅节点集（不写盘）：订阅全失败时按 retry 预算退避重试。
@@ -118,7 +140,7 @@ async fn fetch_sub_nodes(
     config: &Config,
     state: &Arc<AppState>,
     retry: SubFetchRetry,
-) -> Vec<FetchedNode> {
+) -> FetchedSubscriptions {
     fetch_sub_nodes_inner(config, state, retry, None).await
 }
 
@@ -131,8 +153,17 @@ pub async fn fetch_sub_nodes_if_current(
     state: &Arc<AppState>,
     retry: SubFetchRetry,
     expected_generation: u64,
-) -> Vec<FetchedNode> {
-    fetch_sub_nodes_inner(config, state, retry, Some(expected_generation)).await
+) -> FetchedSubscriptions {
+    let cancelled = state.sub_refresh_cancel.notified();
+    tokio::pin!(cancelled);
+    cancelled.as_mut().enable();
+    if !refresh_generation_is_current(state, Some(expected_generation)) {
+        return FetchedSubscriptions::default();
+    }
+    tokio::select! {
+        result = fetch_sub_nodes_inner(config, state, retry, Some(expected_generation)) => result,
+        _ = cancelled => FetchedSubscriptions::default(),
+    }
 }
 
 fn refresh_generation_is_current(state: &AppState, expected_generation: Option<u64>) -> bool {
@@ -145,27 +176,27 @@ async fn fetch_sub_nodes_inner(
     state: &Arc<AppState>,
     retry: SubFetchRetry,
     expected_generation: Option<u64>,
-) -> Vec<FetchedNode> {
+) -> FetchedSubscriptions {
     let schedule = retry.schedule();
     let deadline =
         matches!(retry, SubFetchRetry::Startup).then(|| Instant::now() + startup_fetch_budget());
     let mut attempt = 0usize;
     loop {
         if !refresh_generation_is_current(state, expected_generation) {
-            return Vec::new();
+            return FetchedSubscriptions::default();
         }
         if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
             warn!("Startup subscription refresh budget exhausted");
-            return Vec::new();
+            return FetchedSubscriptions::default();
         }
 
         let nodes = fetch_all_subs(config, state, deadline, expected_generation).await;
         if !refresh_generation_is_current(state, expected_generation) {
-            return Vec::new();
+            return FetchedSubscriptions::default();
         }
         // 是否值得退避重试：配置了订阅却一个订阅节点都没拿到才算
         // （全部秒败是网络未就绪的典型瞬态）；部分成功/其他错误更像订阅本身坏了
-        if !nodes.is_empty() || config.subs.is_empty() {
+        if nodes.has_fresh_nodes || !nodes.successful_sources.is_empty() || config.subs.is_empty() {
             return nodes;
         }
         let Some(delay) = schedule.get(attempt) else {
@@ -196,7 +227,7 @@ pub async fn gen_config_from_nodes(
     Ok(outcome)
 }
 
-/// 用订阅节点集快照零网络重建配置；快照缺失或与当前订阅列表不匹配时退化到真拉取。
+/// 用订阅节点集快照零网络重建配置；缺失时仅允许可证明完整的手动节点重建。
 /// 本地语义变更（节点选择/路由模式/规则/手动节点）走这里：
 /// 切换不是刷新，不该被订阅网络故障拖累。
 pub async fn gen_config_from_snapshot(
@@ -206,11 +237,36 @@ pub async fn gen_config_from_snapshot(
     if let Some(snapshot) = read_sub_nodes_snapshot(state).await {
         if snapshot.matches_subs(&config.subs) {
             info!("Rebuilding config from subscription node snapshot (no network)");
-            return build_prepared(config, state, snapshot.into_fetched_nodes()).await;
+            return build_prepared(config, state, snapshot.to_fetched_nodes()).await;
         }
-        warn!("Subscription list changed since snapshot; fetching subscriptions");
+        warn!("Subscription snapshot does not match the requested sources");
     }
-    gen_config(config, state, SubFetchRetry::None).await
+    if config.subs.is_empty() {
+        return build_prepared(config, state, Vec::new()).await;
+    }
+    // Local edits run inside the config transaction. Missing subscription
+    // material must not turn them into unbounded network operations. A runtime
+    // containing only known manual nodes can still be edited offline.
+    let old = state.config.read().await.clone();
+    let (_, manual_names) = collect_manual_outbounds(&old);
+    let active = tokio::fs::read(&state.runtime_paths.active_config)
+        .await
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok());
+    let has_subscription_runtime = active.as_ref().is_some_and(|json| {
+        runtime_config_node_tags(json)
+            .iter()
+            .any(|tag| !manual_names.contains(tag))
+    });
+    if !config.subs.is_empty()
+        && (has_subscription_runtime
+            || (active.is_none() && super::persist::has_config_cache(state)))
+    {
+        return Err(crate::error::AppError::message(
+            "订阅节点快照不可用，当前运行配置已保留；请先刷新订阅后重试",
+        ));
+    }
+    build_prepared(config, state, Vec::new()).await
 }
 
 /// 校验通过/启动成功后调用：把本次真拉取的节点集落成快照（best-effort，写失败只告警）。
@@ -234,15 +290,21 @@ async fn fetch_all_subs(
     state: &Arc<AppState>,
     deadline: Option<Instant>,
     expected_generation: Option<u64>,
-) -> Vec<FetchedNode> {
-    let mut final_nodes = vec![];
+) -> FetchedSubscriptions {
+    let mut fetched = FetchedSubscriptions::default();
+    let mut cached: HashMap<String, Vec<FetchedNode>> = HashMap::new();
+    if let Some(snapshot) = read_sub_nodes_snapshot(state).await {
+        for node in snapshot.to_fetched_nodes() {
+            cached.entry(node.source_id.clone()).or_default().push(node);
+        }
+    }
 
     {
         let mut status_map = state.sub_status.lock().await;
         // Re-check after acquiring the status lock. A foreground refresh may
         // have advanced the generation while this task was waiting for it.
         if !refresh_generation_is_current(state, expected_generation) {
-            return final_nodes;
+            return fetched;
         }
         status_map.retain(|url, _| config.subs.contains(url));
         for url in &config.subs {
@@ -257,6 +319,8 @@ async fn fetch_all_subs(
             status.state = SubscriptionState::Refreshing;
         }
     }
+
+    state.data_revision.fetch_add(1, Ordering::Relaxed);
 
     let sub_futures: Vec<_> = config
         .subs
@@ -341,12 +405,23 @@ async fn fetch_all_subs(
         if !refresh_generation_is_current(state, expected_generation) {
             break;
         }
+        // A body whose entries all failed parsing is a failed source, not an
+        // authoritative empty list. Keep its last good nodes just like HTTP errors.
+        let result = result.and_then(|fetched| {
+            if fetched.node_names.is_empty() && fetched.total_count > fetched.filtered_info_count {
+                Err("All subscription nodes failed to parse; keeping previous nodes".to_string())
+            } else {
+                Ok(fetched)
+            }
+        });
         let status = match result {
             Ok(fetch_result) => {
                 let count = fetch_result.node_names.len();
                 let filtered_info_count = fetch_result.filtered_info_count;
                 let source_id = subscription_source_id(&url);
-                final_nodes.extend(
+                fetched.successful_sources.push(source_id.clone());
+                fetched.has_fresh_nodes |= count > 0;
+                fetched.nodes.extend(
                     fetch_result
                         .node_names
                         .into_iter()
@@ -389,14 +464,21 @@ async fn fetch_all_subs(
                     error: error_info,
                 }
             }
-            Err(e) => SubStatus {
-                url: url.clone(),
-                success: false,
-                node_count: 0,
-                disabled_count: 0,
-                state: SubscriptionState::Failed,
-                error: Some(e),
-            },
+            Err(e) => {
+                let old_nodes = cached
+                    .remove(&subscription_source_id(&url))
+                    .unwrap_or_default();
+                let count = old_nodes.len();
+                fetched.nodes.extend(old_nodes);
+                SubStatus {
+                    url: url.clone(),
+                    success: false,
+                    node_count: count,
+                    disabled_count: 0,
+                    state: SubscriptionState::Failed,
+                    error: Some(e),
+                }
+            }
         };
         let mut status_map = state.sub_status.lock().await;
         // Keep the generation check and status publication in the same
@@ -406,9 +488,10 @@ async fn fetch_all_subs(
             break;
         }
         status_map.insert(url, status);
+        state.data_revision.fetch_add(1, Ordering::Relaxed);
     }
 
-    final_nodes
+    fetched
 }
 
 fn filter_informational_fetched_nodes(nodes: Vec<FetchedNode>) -> Vec<FetchedNode> {
@@ -443,6 +526,14 @@ async fn build_prepared(
     available_multipliers.extend(manual_multipliers.iter().flatten().copied());
     available_multipliers.extend(subscription_multipliers.iter().flatten().copied());
 
+    let metadata = my_names
+        .iter()
+        .chain(nodes.iter().map(|node| &node.name))
+        .map(|name| NodeMetadata {
+            display_name: name.clone(),
+            multiplier: node_multiplier(name),
+        })
+        .collect();
     let reserved_rule_tags = custom_rule_outbound_tags(&config.custom_rules);
     let (final_node_names, final_outbounds, node_bindings) =
         assign_subscription_tags(state, &my_names, &reserved_rule_tags, nodes).await;
@@ -453,10 +544,7 @@ async fn build_prepared(
         my_outbounds,
         final_node_names,
         final_outbounds,
-        manual_multipliers
-            .into_iter()
-            .chain(subscription_multipliers)
-            .collect(),
+        metadata,
     )?;
 
     Ok(GenConfigOutcome {
@@ -517,6 +605,7 @@ fn custom_rule_outbound_tags(custom_rules: &[String]) -> Vec<String> {
 pub async fn publish_generation_diagnostics(state: &AppState, outcome: &GenConfigOutcome) {
     *state.skipped_rules.lock().await = outcome.skipped_rules.clone();
     *state.available_multipliers.write().await = outcome.available_multipliers.clone();
+    state.data_revision.fetch_add(1, Ordering::Relaxed);
 }
 
 /// 缓存启动后从本地 canonical 节点材料恢复倍率选项。运行时 outbound tag
@@ -531,7 +620,7 @@ pub async fn publish_runtime_multiplier_options(config: &Config, state: &AppStat
     if let Some(snapshot) = read_sub_nodes_snapshot(state).await {
         if snapshot.matches_subs(&config.subs) {
             let nodes = filter_disabled_nodes(
-                filter_informational_fetched_nodes(snapshot.into_fetched_nodes()),
+                filter_informational_fetched_nodes(snapshot.to_fetched_nodes()),
                 &config.disabled_nodes,
             );
             multipliers.extend(nodes.iter().filter_map(|node| node_multiplier(&node.name)));
@@ -994,3 +1083,7 @@ mod tests {
         assert_eq!(attempts.load(Ordering::Relaxed), 1);
     }
 }
+
+#[cfg(test)]
+#[path = "generate_recovery_tests.rs"]
+mod recovery_tests;

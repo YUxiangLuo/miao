@@ -39,3 +39,7 @@ export const PATH_ICON_CELL = 58
 export const HOME_SITE_CARD_WIDTH = 144
 export const HOME_SITE_CARD_GAP = 10
 export const HOME_CONNECTIONS_MORE_WIDTH = 48
+
+// Must match --conn-row-height and --space-1 in styles/tokens.css.
+export const CONNECTION_ROW_HEIGHT = 60
+export const CONNECTION_ROW_GAP = 6

@@ -2,26 +2,13 @@ import { act, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, rs } from '@rstest/core'
 import { ProxyCard } from './ProxyCard'
+import { statusMock as makeStatus } from '../testFixtures'
 import { ARRIVE_MS } from '../tokens'
 import type { StatusData } from '../types/api'
 import type { ClashProxy } from '../types/clash'
 
 function statusMock(node_select: StatusData['node_select']): StatusData {
-  return {
-    running: true,
-    ready: true,
-    phase: 'ready',
-    initializing: false,
-    node_select,
-    requested_node_select: node_select,
-    max_multiplier: null,
-    multiplier_options: [],
-    route_mode: 'rule',
-    vps_supported: true,
-    platform: 'linux',
-    warnings: [],
-    mcp: false,
-  }
+  return makeStatus({ running: true, node_select })
 }
 
 describe('ProxyCard accessibility', () => {

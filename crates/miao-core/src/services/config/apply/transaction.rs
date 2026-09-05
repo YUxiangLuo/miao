@@ -15,9 +15,90 @@ pub(in crate::services::config) async fn regenerate_and_restart_runtime(
     Ok(outcome)
 }
 
+/// Network fetches never own the configuration transaction lock. Only the
+/// newest subscription operation may commit; local edits made during the
+/// fetch are rebased by copying only the requested subscription list.
+pub async fn edit_subscriptions<T>(
+    state: &Arc<AppState>,
+    force_refresh: bool,
+    mutate: impl FnOnce(&mut Vec<String>) -> Result<T, String>,
+) -> Result<(T, RuntimeUpdate), ConfigMutationError> {
+    let guard = state.config_update.lock().await;
+    let before = state.config_with_preferences().await;
+    let mut candidate = before.clone();
+    let value = mutate(&mut candidate.subs).map_err(ConfigMutationError::Rejected)?;
+    if !force_refresh && candidate.subs == before.subs {
+        return Ok((value, RuntimeUpdate::None));
+    }
+    let generation = state.next_sub_refresh();
+    drop(guard);
+    let fetched = super::super::generate::fetch_sub_nodes_if_current(
+        &candidate,
+        state,
+        SubFetchRetry::None,
+        generation,
+    )
+    .await;
+    let _guard = state.config_update.lock().await;
+    if state.sub_refresh_generation.load(Ordering::Relaxed) != generation {
+        return Err(ConfigMutationError::Superseded);
+    }
+    let old_config = state.config.read().await.clone();
+    let mut new_config = old_config.clone();
+    new_config.subs = candidate.subs;
+    new_config
+        .disabled_nodes
+        .retain(|entry| new_config.subs.contains(&entry.sub));
+    let has_fresh_nodes = fetched.has_fresh_nodes;
+    let update = if new_config.subs == old_config.subs {
+        regenerate_from_source(
+            &old_config,
+            state,
+            SubSource::Prefetched(fetched),
+            generation,
+        )
+        .await
+    } else {
+        apply_config_change_with_source(
+            state,
+            &old_config,
+            &new_config,
+            SubSource::Prefetched(fetched),
+        )
+        .await
+        .map(|effect| effect.runtime_update())
+    }
+    .map_err(ConfigMutationError::Apply)?;
+    if has_fresh_nodes {
+        state
+            .sub_refresh_success_generation
+            .store(generation, Ordering::Relaxed);
+    }
+    Ok((value, update))
+}
+
+pub async fn refresh_subscriptions_foreground(
+    state: &Arc<AppState>,
+) -> Result<RuntimeUpdate, ConfigMutationError> {
+    edit_subscriptions(state, true, |_| Ok(()))
+        .await
+        .map(|(_, update)| update)
+}
+
+#[cfg(test)]
 pub async fn regenerate_preserving_service_state(
     config: &Config,
     state: &Arc<AppState>,
+) -> AppResult<RuntimeUpdate> {
+    let generation = state.next_sub_refresh();
+    regenerate_from_source(config, state, SubSource::Fetch, generation).await
+}
+
+async fn regenerate_from_source(
+    config: &Config,
+    state: &Arc<AppState>,
+    source: SubSource,
+    refresh_generation: u64,
 ) -> AppResult<RuntimeUpdate> {
     // Effective state may be manual after a regional fallback. Every explicit
     // refresh retries the requested strategy rather than making that fallback
@@ -28,7 +109,6 @@ pub async fn regenerate_preserving_service_state(
     let config = &preferred_config;
     // This is an explicit foreground refresh. Any startup fetch that began
     // earlier with the same subscription URLs must not publish after it.
-    let refresh_generation = state.sub_refresh_generation.fetch_add(1, Ordering::Relaxed) + 1;
     let should_run = state.service_should_run.load(Ordering::Relaxed);
     state.set_runtime_phase(RuntimePhase::ApplyingConfig);
 
@@ -43,9 +123,7 @@ pub async fn regenerate_preserving_service_state(
     let bindings_snapshot = read_file_snapshot(&state.runtime_paths.node_bindings).await?;
 
     let (runtime_update, has_sub_nodes) = if should_run {
-        match regenerate_and_restart_runtime(config, state, RefreshPolicy::Manual, SubSource::Fetch)
-            .await
-        {
+        match regenerate_and_restart_runtime(config, state, RefreshPolicy::Manual, source).await {
             Ok(refresh) => {
                 let outcome = refresh
                     .generated
@@ -98,13 +176,7 @@ pub async fn regenerate_preserving_service_state(
             }
         }
     } else {
-        let has_sub_nodes = match regenerate_without_restart_runtime(
-            config,
-            state,
-            SubSource::Fetch,
-        )
-        .await
-        {
+        let has_sub_nodes = match regenerate_without_restart_runtime(config, state, source).await {
             Ok(outcome) => {
                 if let Err(commit_err) = commit_foreground_refresh(config, state, &outcome).await {
                     error!(error = %commit_err, "Stopped runtime refresh could not commit effective preferences; restoring previous runtime files");
@@ -225,8 +297,8 @@ pub(in crate::services::config) async fn regenerate_without_restart_runtime(
 ) -> AppResult<GenConfigOutcome> {
     let outcome = match source {
         SubSource::Fetch => gen_config(config, state, SubFetchRetry::None).await,
-        SubSource::SnapshotOrFetch => gen_config_from_snapshot(config, state).await,
-        SubSource::Prefetched(nodes) => gen_config_from_nodes(config, state, nodes).await,
+        SubSource::SnapshotOrLocal => gen_config_from_snapshot(config, state).await,
+        SubSource::Prefetched(nodes) => gen_config_from_fetch(config, state, nodes).await,
     }
     .map_err(|e| AppError::context("Failed to regenerate config", e))?;
     info!("Config regenerated successfully");
@@ -301,6 +373,8 @@ async fn clear_runtime_config(state: &Arc<AppState>) {
     // Also drops node-bindings.json: with no remaining nodes a later add
     // must not inherit ghost tag reservations.
     remove_runtime_config_files(state).await;
+    *state.sub_nodes_cache.write().await = None;
+    state.data_revision.fetch_add(1, Ordering::Relaxed);
     state.sub_status.lock().await.clear();
     *state.config_warning.lock().await = None;
 }
@@ -323,6 +397,8 @@ pub(in crate::services::config) async fn persist_config_without_usable_nodes_at(
     save_config_layered(state, &persisted_config).await?;
     stop_sing_internal(state).await;
     remove_runtime_config_files_at(runtime_config_path, cache_path, sub_nodes_path).await;
+    *state.sub_nodes_cache.write().await = None;
+    state.data_revision.fetch_add(1, Ordering::Relaxed);
     *state.config.write().await = persisted_config.clone();
     *state.config_warning.lock().await = Some(no_usable_nodes_warning(&persisted_config));
     Ok(())
@@ -400,6 +476,16 @@ pub async fn apply_config_change(
     old_config: &Config,
     new_config: &Config,
 ) -> AppResult<ConfigApplyEffect> {
+    let source = sub_source_for(old_config, new_config);
+    apply_config_change_with_source(state, old_config, new_config, source).await
+}
+
+async fn apply_config_change_with_source(
+    state: &Arc<AppState>,
+    old_config: &Config,
+    new_config: &Config,
+    source: SubSource,
+) -> AppResult<ConfigApplyEffect> {
     // Handlers clone the effective config, whose strategy may be a temporary
     // manual fallback. Configuration changes must regenerate with the user's
     // requested strategy instead of accidentally extending that fallback.
@@ -429,9 +515,8 @@ pub async fn apply_config_change(
     // 无法完整回滚的事务。
     let bindings_snapshot = read_file_snapshot(&state.runtime_paths.node_bindings).await?;
     // 订阅列表没变就是本地语义变更（节点选择/路由模式/规则/手动节点），走快照零网络重建
-    let source = sub_source_for(old_config, new_config);
     if matches!(&source, SubSource::Fetch) {
-        state.sub_refresh_generation.fetch_add(1, Ordering::Relaxed);
+        state.next_sub_refresh();
     }
     state.set_runtime_phase(RuntimePhase::ApplyingConfig);
 
@@ -577,6 +662,7 @@ pub async fn apply_config_change(
 #[derive(Debug)]
 pub enum ConfigMutationError {
     Rejected(String),
+    Superseded,
     Apply(AppError),
 }
 
@@ -584,6 +670,7 @@ impl std::fmt::Display for ConfigMutationError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Rejected(message) => write!(f, "{message}"),
+            Self::Superseded => write!(f, "订阅操作已被更新的请求或停止服务取代"),
             Self::Apply(err) => write!(f, "{err}"),
         }
     }
@@ -779,13 +866,9 @@ async fn restore_previous_running_config(
                 return Ok(());
             }
             Ok(false) => {
-                // 本地没有任何材料（新装/清场后）：才退化到重新生成（网络）
-                let outcome =
-                    regenerate_without_restart_runtime(old_config, state, SubSource::Fetch).await?;
-                update_config_warning(old_config, state, outcome.has_sub_nodes).await;
-                state.runtime_ready.store(true, Ordering::Relaxed);
-                state.set_runtime_phase(RuntimePhase::Ready);
-                return Ok(());
+                return Err(AppError::message(
+                    "运行配置回滚缺少本地快照，请刷新订阅恢复",
+                ));
             }
             Err(err) => return Err(err),
         }
@@ -838,10 +921,11 @@ async fn restart_with_previous_config(
         }
     }
 
-    // 本地材料全部不可用/失败，才退化到重新生成（网络）
+    // 本地材料不可用时只尝试节点快照/手动节点；网络恢复由锁外刷新负责。
     // Unix 热重载可能留下一个存活但不健康的进程；同步再启动前统一收口。
     stop_sing_internal(state).await;
-    let outcome = regenerate_without_restart_runtime(old_config, state, SubSource::Fetch).await?;
+    let outcome =
+        regenerate_without_restart_runtime(old_config, state, SubSource::SnapshotOrLocal).await?;
     start_sing_internal(state)
         .await
         .map_err(|e| AppError::context("Failed to restart sing-box with previous config", e))?;
@@ -869,7 +953,8 @@ async fn restore_previous_stopped_config(
         }
         Ok(false) => {
             let outcome =
-                regenerate_without_restart_runtime(old_config, state, SubSource::Fetch).await?;
+                regenerate_without_restart_runtime(old_config, state, SubSource::SnapshotOrLocal)
+                    .await?;
             update_config_warning(old_config, state, outcome.has_sub_nodes).await;
             state.set_runtime_phase(RuntimePhase::Stopped);
             Ok(())

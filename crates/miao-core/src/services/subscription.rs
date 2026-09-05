@@ -144,6 +144,13 @@ pub async fn fetch_sub(link: &str, client: &reqwest::Client) -> AppResult<FetchR
         )
     })?;
 
+    // A generic Clash config may omit proxies, but a subscription response
+    // must explicitly contain a list. Maintenance text is not an empty pool.
+    if !parse_result.has_proxy_list {
+        return Err(AppError::message(
+            "Subscription response does not contain a proxies list",
+        ));
+    }
     let total_count = parse_result.total_count;
     let parse_errors = parse_result.errors;
     let (nodes, filtered_info_count) = filter_informational_nodes(parse_result.nodes);

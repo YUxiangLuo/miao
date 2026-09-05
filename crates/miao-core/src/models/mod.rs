@@ -24,7 +24,7 @@ pub use node::{
 };
 #[cfg(not(windows))]
 pub use node::{Hysteria2, Hysteria2Obfs, Tls};
-pub use proxy::LastProxy;
+pub use proxy::{LastProxy, SwitchProxyResult};
 #[cfg(any(not(windows), test))]
 pub use version::GitHubAsset;
 pub use version::{GitHubRelease, VersionInfo};
@@ -92,6 +92,7 @@ mod typescript_contract {
         push_decl::<NodeSelectRequest>(&mut output, &config);
         push_decl::<MaxMultiplierRequest>(&mut output, &config);
         push_decl::<LastProxy>(&mut output, &config);
+        push_decl::<SwitchProxyResult>(&mut output, &config);
         push_decl::<VpsDeployRequest>(&mut output, &config);
         push_decl::<VpsDeployResponse>(&mut output, &config);
         push_decl::<NodeRequest>(&mut output, &config);

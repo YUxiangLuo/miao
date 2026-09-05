@@ -372,3 +372,46 @@ async fn config_update_lock_serializes_overlapping_node_adds() {
     stop_sing_internal(&state).await;
     let _ = tokio::fs::remove_dir_all(root).await;
 }
+
+#[tokio::test]
+async fn stopping_service_cancels_a_refresh_without_waiting_for_subscription_http() {
+    use axum::{extract::State, routing::get, Router};
+    let entered = Arc::new(tokio::sync::Notify::new());
+    let notify = entered.clone();
+    let app = Router::new().route(
+        "/sub",
+        get(move || {
+            let notify = notify.clone();
+            async move {
+                notify.notify_one();
+                std::future::pending::<String>().await
+            }
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}/sub", listener.local_addr().unwrap());
+    let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let state = crate::test_support::app_state(Config {
+        subs: vec![url],
+        ..Config::default()
+    });
+    state.initializing.store(false, Ordering::Relaxed);
+    let cloned = state.clone();
+    let refresh =
+        tokio::spawn(async move { super::refresh_subscriptions_foreground(&cloned).await });
+    entered.notified().await;
+    assert!(tokio::time::timeout(
+        std::time::Duration::from_secs(1),
+        crate::handlers::service::stop_service(State(state.clone()))
+    )
+    .await
+    .expect("stop must acquire the lock while the subscription is pending")
+    .is_ok());
+    assert!(matches!(
+        refresh.await.unwrap(),
+        Err(super::ConfigMutationError::Superseded)
+    ));
+    assert!(!state.service_should_run.load(Ordering::Relaxed));
+    assert!(!state.runtime_paths.active_config.exists());
+    server.abort();
+}

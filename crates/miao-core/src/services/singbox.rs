@@ -164,14 +164,19 @@ pub async fn validate_sing_box_config(
     let sing_box_home = &state.runtime_paths.runtime_dir;
     let sing_box_path = sing_box_home.join(sing_box_file_name());
 
-    let output = tokio::process::Command::new(&sing_box_path)
-        .current_dir(sing_box_home)
-        .arg("check")
-        .arg("-c")
-        .arg(config_path)
-        .output()
-        .await
-        .map_err(|e| AppError::context("Failed to run sing-box config check", e))?;
+    let output = tokio::time::timeout(
+        Duration::from_secs(10),
+        tokio::process::Command::new(&sing_box_path)
+            .kill_on_drop(true)
+            .current_dir(sing_box_home)
+            .arg("check")
+            .arg("-c")
+            .arg(config_path)
+            .output(),
+    )
+    .await
+    .map_err(|_| AppError::message("sing-box config check timed out after 10 seconds"))?
+    .map_err(|e| AppError::context("Failed to run sing-box config check", e))?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);

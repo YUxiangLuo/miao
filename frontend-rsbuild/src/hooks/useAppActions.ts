@@ -5,6 +5,7 @@ import { buildNodeRequest } from '../nodeForm'
 import type { useAppData } from './useAppData'
 import type {
   NodeRequest,
+  SwitchProxyResult,
   BatchNodeResult,
   NodeSelect,
   RouteMode,
@@ -170,28 +171,20 @@ export function useAppActions(data: AppData) {
     if (switchingNode) return
     setSwitchingNode(nodeName)
     try {
-      const response = await fetch(`${clashApiBase}/proxies/${encodeURIComponent(groupName)}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: nodeName }),
-      })
-      if (!response.ok) {
-        const details = (await response.text()).trim()
-        throw new Error(details || `切换节点失败 (${response.status})`)
-      }
+      const response = await apiCall<SwitchProxyResult>('proxy/switch', {
+        method: 'POST', body: JSON.stringify({ group: groupName, name: nodeName }),
+      }, 'switchProxy')
       await fetchProxies()
-      fetch('/api/last-proxy', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ group: groupName, name: nodeName }),
-      }).catch((err) => console.warn('Failed to save last proxy:', err))
-      showToast(`已切换到 ${nodeName}`, 'success')
+      showToast(response.data?.persisted
+        ? `已切换到 ${nodeName}`
+        : `已切换到 ${nodeName}，但保存选择失败，重启后可能恢复旧节点`,
+      response.data?.persisted ? 'success' : 'error')
     } catch (error) {
       showToast(errorMessage(error) || '切换节点失败', 'error')
     } finally {
       setSwitchingNode('')
     }
-  }, [requestedNodeSelect, clashApiBase, fetchProxies, showToast, switchingNode, setSwitchingNode])
+  }, [requestedNodeSelect, apiCall, fetchProxies, showToast, switchingNode, setSwitchingNode])
 
   const handleAddSubscription = useCallback(async (url: string): Promise<boolean> => {
     const trimmed = url.trim()

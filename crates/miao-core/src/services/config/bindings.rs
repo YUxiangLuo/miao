@@ -57,18 +57,16 @@ fn outbound_bytes(outbound: &serde_json::Value) -> Vec<u8> {
     serde_json::to_vec(&outbound_without_tag(outbound)).unwrap_or_default()
 }
 
-fn stable_key(node: &FetchedNode, duplicate_index: usize) -> String {
-    let bytes = outbound_bytes(&node.outbound);
+fn stable_key(source: &str, bytes: &[u8], duplicate_index: usize) -> String {
     sha256_parts(&[
-        node.source_id.as_bytes(),
-        &bytes,
+        source.as_bytes(),
+        bytes,
         duplicate_index.to_string().as_bytes(),
     ])
 }
 
-fn content_key(node: &FetchedNode, duplicate_index: usize) -> String {
-    let bytes = outbound_bytes(&node.outbound);
-    sha256_parts(&[&bytes, duplicate_index.to_string().as_bytes()])
+fn content_key(bytes: &[u8], duplicate_index: usize) -> String {
+    sha256_parts(&[bytes, duplicate_index.to_string().as_bytes()])
 }
 
 fn affinity_key(node: &FetchedNode) -> String {
@@ -173,10 +171,10 @@ pub async fn assign_subscription_tags(
     for node in nodes {
         let fingerprint = outbound_bytes(&node.outbound);
         let occurrence = fingerprint_occurrences
-            .entry((node.source_id.clone(), fingerprint))
+            .entry((node.source_id.clone(), fingerprint.clone()))
             .or_default();
-        let key = stable_key(&node, *occurrence);
-        let content = content_key(&node, *occurrence);
+        let key = stable_key(&node.source_id, &fingerprint, *occurrence);
+        let content = content_key(&fingerprint, *occurrence);
         *occurrence += 1;
         prepared.push((node, key, content));
     }
@@ -194,6 +192,34 @@ pub async fn assign_subscription_tags(
             .entry(binding.affinity_key.clone())
             .or_insert(0usize) += 1;
     }
+    // Historical identity reservations remain intact for returning nodes and
+    // dormant rules. Index them once; never scan the entire history per node.
+    let mut exact_index = HashMap::new();
+    let mut content_index: HashMap<&str, Vec<usize>> = HashMap::new();
+    let mut affinity_index: HashMap<&str, Vec<usize>> = HashMap::new();
+    for (index, binding) in bindings.bindings.iter().enumerate() {
+        exact_index
+            .entry(binding.stable_key.clone())
+            .or_insert(index);
+        content_index
+            .entry(&binding.content_key)
+            .or_default()
+            .push(index);
+        affinity_index
+            .entry(&binding.affinity_key)
+            .or_default()
+            .push(index);
+    }
+    // Own only the lookup keys so bindings can be updated without invalidating
+    // the indexes. Assigned tags prevent any old index from being reused.
+    let content_index: HashMap<String, Vec<usize>> = content_index
+        .into_iter()
+        .map(|(key, value)| (key.to_string(), value))
+        .collect();
+    let affinity_index: HashMap<String, Vec<usize>> = affinity_index
+        .into_iter()
+        .map(|(key, value)| (key.to_string(), value))
+        .collect();
     let mut active_tags = active_tag_by_fingerprint(state).await;
     let mut assigned_tags = HashSet::new();
     let mut names = Vec::with_capacity(prepared.len());
@@ -201,22 +227,20 @@ pub async fn assign_subscription_tags(
 
     for (node, key, content) in prepared {
         let affinity = affinity_key(&node);
-        let exact = bindings
-            .bindings
-            .iter()
-            .position(|binding| binding.stable_key == key);
+        let available = |index: &usize| !assigned_tags.contains(&bindings.bindings[*index].tag);
+        let exact = exact_index.get(&key).copied().filter(available);
         let content_match = exact.or_else(|| {
-            bindings.bindings.iter().position(|binding| {
-                binding.content_key == content && !assigned_tags.contains(&binding.tag)
-            })
+            content_index
+                .get(&content)
+                .and_then(|indexes| indexes.iter().copied().find(available))
         });
         let transferable = if content_match.is_none()
             && affinity_counts.get(&affinity) == Some(&1)
             && old_affinity_counts.get(&affinity) == Some(&1)
         {
-            bindings.bindings.iter().position(|binding| {
-                binding.affinity_key == affinity && !assigned_tags.contains(&binding.tag)
-            })
+            affinity_index
+                .get(&affinity)
+                .and_then(|indexes| indexes.iter().copied().find(available))
         } else {
             None
         };

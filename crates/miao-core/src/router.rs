@@ -13,7 +13,7 @@ use crate::handlers::{
     clash::{proxy_clash_http, proxy_clash_traffic},
     mcp::{handle_mcp, handle_mcp_get, set_mcp},
     nodes::{add_node, delete_node, get_nodes, import_nodes},
-    proxy::set_last_proxy,
+    proxy::{set_last_proxy, switch_proxy},
     rules::{add_rule, delete_rule, get_rules},
     service::{
         get_status, set_max_multiplier, set_node_select, set_route_mode, start_service,
@@ -67,6 +67,7 @@ pub fn build_router(app_state: Arc<AppState>) -> Router {
         .route("/api/rules", delete(delete_rule))
         .route("/api/mcp", post(set_mcp))
         .route("/api/last-proxy", post(set_last_proxy))
+        .route("/api/proxy/switch", post(switch_proxy))
         .route("/mcp", get(handle_mcp_get).post(handle_mcp));
 
     #[cfg(not(windows))]

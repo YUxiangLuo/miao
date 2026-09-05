@@ -94,11 +94,7 @@ pub async fn handle(state: &Arc<AppState>, body: &[u8]) -> Option<JsonValue> {
         .get("params")
         .is_some_and(|params| !params.is_object())
     {
-        return Some(rpc_error(
-            id,
-            -32602,
-            "Invalid params: expected an object",
-        ));
+        return Some(rpc_error(id, -32602, "Invalid params: expected an object"));
     }
 
     let result = match method {
@@ -107,7 +103,7 @@ pub async fn handle(state: &Arc<AppState>, body: &[u8]) -> Option<JsonValue> {
         "tools/list" => tools_list_result(request.get("params")),
         "tools/call" => match tool_call_params(request.get("params")) {
             Err(message) => Err((-32602, message)),
-            Ok((name, args)) if !tool_exists(name) => {
+            Ok((name, _args)) if !tool_exists(name) => {
                 Err((-32602, format!("Unknown tool: {name}")))
             }
             Ok((name, args)) => match handle_tool_call(state, name, &args).await {
@@ -153,9 +149,12 @@ fn is_client_response(request: &serde_json::Map<String, JsonValue>) -> bool {
 }
 
 fn initialize_result(params: Option<&JsonValue>) -> Result<JsonValue, (i64, String)> {
-    let params = params
-        .and_then(JsonValue::as_object)
-        .ok_or_else(|| (-32602, "Invalid params: initialize params are required".to_string()))?;
+    let params = params.and_then(JsonValue::as_object).ok_or_else(|| {
+        (
+            -32602,
+            "Invalid params: initialize params are required".to_string(),
+        )
+    })?;
     let requested = params
         .get("protocolVersion")
         .and_then(JsonValue::as_str)
@@ -174,7 +173,12 @@ fn initialize_result(params: Option<&JsonValue>) -> Result<JsonValue, (i64, Stri
     let client_info = params
         .get("clientInfo")
         .and_then(JsonValue::as_object)
-        .ok_or_else(|| (-32602, "Invalid params: clientInfo must be an object".to_string()))?;
+        .ok_or_else(|| {
+            (
+                -32602,
+                "Invalid params: clientInfo must be an object".to_string(),
+            )
+        })?;
     if !client_info.get("name").is_some_and(JsonValue::is_string)
         || !client_info.get("version").is_some_and(JsonValue::is_string)
     {
@@ -199,7 +203,10 @@ fn tools_list_result(params: Option<&JsonValue>) -> Result<JsonValue, (i64, Stri
         .and_then(|params| params.get("cursor"))
         .is_some_and(|cursor| !cursor.is_string())
     {
-        return Err((-32602, "Invalid params: cursor must be a string".to_string()));
+        return Err((
+            -32602,
+            "Invalid params: cursor must be a string".to_string(),
+        ));
     }
     Ok(json!({ "tools": tools_catalog() }))
 }
@@ -495,55 +502,16 @@ async fn tool_switch_node(state: &Arc<AppState>, args: &JsonValue) -> Result<Jso
         .and_then(JsonValue::as_str)
         .ok_or_else(|| "Invalid params: missing `name`".to_string())?;
 
-    if state.initializing.load(Ordering::Relaxed) {
-        return Err("初始化进行中，稍后再试".to_string());
-    }
-    if !state.config.read().await.node_select.is_manual() {
-        return Err("当前是地区最快模式，由内核自动选节点；先切回手动选择再指定节点".to_string());
-    }
-    if !runtime_is_ready(state).await {
-        return Err("服务未运行或代理数据面尚未就绪，无法切换节点".to_string());
-    }
-
-    let proxies = fetch_proxies(state)
-        .await
-        .map_err(|_| "Clash API 不可达".to_string())?;
-    let (all, now) = selector_view(&proxies).ok_or("节点池为空".to_string())?;
-    if !all.iter().any(|candidate| candidate == name) {
-        return Err(format!("未知节点: {name}（用 list_nodes 查看可选节点）"));
-    }
-    if now.as_deref() == Some(name) {
-        return Ok(json!({ "switched": name, "changed": false, "note": "已是当前节点" }));
-    }
-
-    let url = format!("{CLASH_API_BASE}/proxies/{SELECTOR_TAG}");
-    let response = state
-        .http_client
-        .put(&url)
-        .timeout(Duration::from_secs(5))
-        .json(&json!({ "name": name }))
-        .send()
-        .await
-        .map_err(|e| format!("切换请求失败: {e}"))?;
-    if !response.status().is_success() {
-        return Err(format!("切换失败: Clash API 返回 {}", response.status()));
-    }
-
-    // 与面板切换同路径：持久化选择，重启后自动恢复
-    let persist = crate::services::proxy::save_last_proxy(
+    let result = crate::services::proxy::switch_proxy(
         state,
         &LastProxy {
             group: SELECTOR_TAG.to_string(),
             name: name.to_string(),
         },
     )
-    .await;
-
-    Ok(json!({
-        "switched": name,
-        "changed": true,
-        "persisted": persist.is_ok(),
-    }))
+    .await
+    .map_err(|error| error.to_string())?;
+    Ok(json!({ "switched": name, "changed": result.changed, "persisted": result.persisted }))
 }
 
 async fn tool_test_delay(state: &Arc<AppState>, args: &JsonValue) -> Result<JsonValue, String> {
@@ -744,13 +712,9 @@ async fn tool_refresh_subscriptions(state: &Arc<AppState>) -> Result<JsonValue, 
         return Err("没有配置订阅，无可刷新".to_string());
     }
 
-    let _config_update = state.config_update.lock().await;
-    let config = state.config.read().await.clone();
-
-    let runtime_update =
-        crate::services::config::regenerate_preserving_service_state(&config, state)
-            .await
-            .map_err(|e| format!("刷新订阅失败: {e}"))?;
+    let runtime_update = crate::services::config::refresh_subscriptions_foreground(state)
+        .await
+        .map_err(|e| format!("刷新订阅失败: {e}"))?;
     let runtime_updated = runtime_update.updated();
 
     let warning = state.config_warning.lock().await.clone();

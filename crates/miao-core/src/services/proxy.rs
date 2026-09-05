@@ -6,7 +6,7 @@ use tokio::time::{sleep, Duration};
 use tracing::{error, info, warn};
 
 use crate::error::{AppError, AppResult};
-use crate::models::LastProxy;
+use crate::models::{LastProxy, SwitchProxyResult};
 use crate::services::singbox::get_sing_box_home;
 use crate::state::AppState;
 
@@ -109,14 +109,76 @@ async fn write_last_proxy_file(path: &Path, proxy: &LastProxy) -> AppResult<()> 
     }
 
     let json = serde_json::to_string(proxy)?;
-    tokio::fs::write(path, json)
-        .await
-        .map_err(|e| AppError::context("Failed to write last-proxy file", e))?;
+    crate::services::config::write_file_atomic(path, json.as_bytes()).await?;
     Ok(())
 }
 
 pub async fn save_last_proxy(state: &AppState, proxy: &LastProxy) -> AppResult<()> {
+    let _guard = state.config_update.lock().await;
+    state
+        .proxy_selection_generation
+        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     write_last_proxy_file(&state.runtime_paths.last_proxy, proxy).await
+}
+
+pub async fn switch_proxy(state: &AppState, proxy: &LastProxy) -> AppResult<SwitchProxyResult> {
+    switch_proxy_at(state, proxy, crate::services::singbox::CLASH_API_BASE).await
+}
+
+async fn switch_proxy_at(
+    state: &AppState,
+    proxy: &LastProxy,
+    base: &str,
+) -> AppResult<SwitchProxyResult> {
+    let _guard = state.config_update.lock().await;
+    if proxy.group != "proxy" || !state.node_select_preference.read().await.is_manual() {
+        return Err(AppError::message(
+            "当前是地区最快模式或无效分组，请先切换为手动选择模式",
+        ));
+    }
+    if !state
+        .runtime_ready
+        .load(std::sync::atomic::Ordering::Relaxed)
+    {
+        return Err(AppError::message("服务未运行或代理数据面尚未就绪"));
+    }
+    let url = format!("{base}/proxies/{}", urlencoding::encode(&proxy.group));
+    let info: serde_json::Value = state
+        .http_client
+        .get(&url)
+        .timeout(Duration::from_secs(2))
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
+    if info["type"] != "Selector"
+        || !info["all"]
+            .as_array()
+            .is_some_and(|nodes| nodes.iter().any(|node| node.as_str() == Some(&proxy.name)))
+    {
+        return Err(AppError::message("节点不在当前手动选择列表中"));
+    }
+    let changed = info["now"].as_str() != Some(&proxy.name);
+    if changed {
+        state
+            .http_client
+            .put(&url)
+            .timeout(Duration::from_secs(2))
+            .json(&serde_json::json!({"name":proxy.name}))
+            .send()
+            .await?
+            .error_for_status()?;
+    }
+    // Also supersede old restore work when persistence fails: an accepted
+    // runtime selection must not be replaced by a previously stored choice.
+    state
+        .proxy_selection_generation
+        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let persisted = write_last_proxy_file(&state.runtime_paths.last_proxy, proxy)
+        .await
+        .is_ok();
+    Ok(SwitchProxyResult { changed, persisted })
 }
 
 async fn load_last_proxy(path: &Path) -> Option<LastProxy> {
@@ -134,9 +196,12 @@ pub fn spawn_restore_last_proxy(state: &Arc<AppState>) {
     let generation = state
         .sing_generation
         .load(std::sync::atomic::Ordering::Relaxed);
+    let selection = state
+        .proxy_selection_generation
+        .load(std::sync::atomic::Ordering::Relaxed);
     let state = state.clone();
     tokio::spawn(async move {
-        restore_last_proxy(&state, generation).await;
+        restore_last_proxy_if_current(&state, generation, selection).await;
     });
 }
 
@@ -147,7 +212,23 @@ fn is_superseded(state: &AppState, generation: u64) -> bool {
         != generation
 }
 
+#[cfg(test)]
 async fn restore_last_proxy(state: &Arc<AppState>, generation: u64) {
+    let selection = state
+        .proxy_selection_generation
+        .load(std::sync::atomic::Ordering::Relaxed);
+    restore_last_proxy_if_current(state, generation, selection).await;
+}
+
+async fn restore_last_proxy_if_current(state: &Arc<AppState>, generation: u64, selection: u64) {
+    let _guard = state.config_update.lock().await;
+    if state
+        .proxy_selection_generation
+        .load(std::sync::atomic::Ordering::Relaxed)
+        != selection
+    {
+        return;
+    }
     if is_superseded(state, generation) {
         return;
     }
@@ -414,5 +495,48 @@ mod tests {
         assert!(content.contains("node-a"));
         assert!(content.contains("proxy"));
         let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+    #[tokio::test]
+    async fn concurrent_switches_persist_the_final_runtime_selection() {
+        use axum::{routing::get, Json, Router};
+        let current = std::sync::Arc::new(tokio::sync::Mutex::new("a".to_string()));
+        let read = current.clone();
+        let write = current.clone();
+        let app = Router::new().route("/proxies/proxy", get(move || {
+            let current = read.clone();
+            async move { Json(serde_json::json!({"type":"Selector","all":["a","b","c"],"now":*current.lock().await})) }
+        }).put(move |Json(body): Json<serde_json::Value>| {
+            let current = write.clone();
+            async move { *current.lock().await = body["name"].as_str().unwrap().to_string(); axum::http::StatusCode::NO_CONTENT }
+        }));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let state = crate::test_support::app_state(crate::models::Config::default());
+        state
+            .runtime_ready
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+        let b = LastProxy {
+            group: "proxy".to_string(),
+            name: "b".to_string(),
+        };
+        let c = LastProxy {
+            group: "proxy".to_string(),
+            name: "c".to_string(),
+        };
+        let (first, second) = tokio::join!(
+            super::switch_proxy_at(&state, &b, &base),
+            super::switch_proxy_at(&state, &c, &base)
+        );
+        assert!(first.unwrap().persisted);
+        assert!(second.unwrap().persisted);
+        let saved = super::load_last_proxy(&state.runtime_paths.last_proxy)
+            .await
+            .unwrap();
+        assert_eq!(saved.name, *current.lock().await);
+        // Old restore work is retired even though the kernel generation is unchanged.
+        super::restore_last_proxy_if_current(&state, 0, 0).await;
+        assert_eq!(saved.name, *current.lock().await);
+        server.abort();
     }
 }

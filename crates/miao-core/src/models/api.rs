@@ -83,6 +83,8 @@ impl<T: Serialize> ApiResponse<T> {
 #[derive(Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
 pub struct StatusData {
+    /// Revision of subscription, node and rule read projections.
+    pub data_revision: u64,
     pub running: bool,
     /// True only after the managed sing-box instance passed its startup
     /// readiness check. A spawned process may be `running` while this is false.

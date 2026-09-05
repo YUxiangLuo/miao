@@ -1,9 +1,12 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
+import { fetchJson } from './request'
+import { useLatestRequest } from './useLatestRequest'
 import type { ApiResponse, NodeInfo, RuleInfo, StatusData, SubStatus, VersionInfo } from '../types/api'
 
 // 未拿到首个响应前的占位状态。vps_supported: true 与历史上的 undefined 等价
 // （消费方判断 `!== false`）；platform 兜底与 ruleFieldOptions 的默认参数一致。
 const INITIAL_STATUS: StatusData = {
+  data_revision: 0,
   running: false,
   ready: false,
   phase: 'initializing',
@@ -19,81 +22,63 @@ const INITIAL_STATUS: StatusData = {
   mcp: false,
 }
 
-export function useStatus() {
-  const [status, setStatus] = useState<StatusData>(INITIAL_STATUS)
-  // 是否成功拿到过后端响应：区分「服务未运行」与「后端根本没起来」
-  const [statusLoaded, setStatusLoaded] = useState(false)
-  // 连续失败次数（成功即清零），作为面板断线提示的健康度信号
-  const [statusFailures, setStatusFailures] = useState(0)
-
-  const fetchStatus = useCallback(async () => {
+function useResource<T>(path: string, initial: T) {
+  const [data, setData] = useState(initial)
+  const [loaded, setLoaded] = useState(false)
+  const [settled, setSettled] = useState(false)
+  const [failures, setFailures] = useState(0)
+  const { begin } = useLatestRequest()
+  const refresh = useCallback(async (): Promise<T | null> => {
+    const request = begin()
     try {
-      const response = await fetch('/api/status')
-      const payload: ApiResponse<StatusData> = await response.json()
-      if (payload.success && payload.data) {
-        const ready = payload.data.ready ?? (payload.data.running && !payload.data.initializing)
-        const phase = payload.data.phase ?? (ready ? 'ready' : payload.data.initializing ? 'initializing' : 'stopped')
-        setStatus({ ...payload.data, ready, phase })
-        setStatusLoaded(true)
-        setStatusFailures(0)
-        return
-      }
+      const payload = await fetchJson<ApiResponse<T>>(path, { signal: request.signal })
+      if (!request.isCurrent()) return null
+      if (!payload.success || payload.data == null) throw new Error(payload.message || '请求失败')
+      const next = payload.data
+      // Stable references let memoized rules and lists survive health polling.
+      setData(previous => JSON.stringify(previous) === JSON.stringify(next) ? previous : next)
+      setLoaded(true)
+      setFailures(0)
+      return next
     } catch {
-      // 失败计数在下方统一处理
+      if (request.isCurrent()) setFailures(count => count + 1)
+      return null
+    } finally {
+      if (request.isCurrent()) setSettled(true)
     }
-    // Keep the last known state during transient failures.
-    setStatusFailures((count) => count + 1)
-  }, [])
+  }, [path, begin])
+  return { data, loaded, settled, failures, refresh }
+}
 
-  return { status, statusLoaded, statusFailures, fetchStatus }
+export function useStatus() {
+  const resource = useResource('/api/status', INITIAL_STATUS)
+  const status = useMemo(() => {
+    const value = resource.data
+    const ready = value.ready ?? (value.running && !value.initializing)
+    return { ...value, ready, phase: value.phase ?? (ready ? 'ready' : value.initializing ? 'initializing' : 'stopped') }
+  }, [resource.data])
+  return {
+    status,
+    statusLoaded: resource.loaded,
+    statusSettled: resource.settled,
+    statusFailures: resource.failures,
+    fetchStatus: resource.refresh,
+  }
 }
 
 export function useSubs() {
-  const [subs, setSubs] = useState<SubStatus[]>([])
-
-  const fetchSubs = useCallback(async () => {
-    try {
-      const response = await fetch('/api/subs')
-      const payload: ApiResponse<SubStatus[]> = await response.json()
-      if (payload.success && payload.data) setSubs(payload.data)
-    } catch {
-      // Keep the last known state during transient failures.
-    }
-  }, [])
-
-  return { subs, fetchSubs }
+  const resource = useResource<SubStatus[]>('/api/subs', [])
+  return { subs: resource.data, subsLoaded: resource.settled, subsAvailable: resource.loaded, fetchSubs: resource.refresh }
 }
 
 export function useNodes() {
-  const [nodes, setNodes] = useState<NodeInfo[]>([])
-
-  const fetchNodes = useCallback(async () => {
-    try {
-      const response = await fetch('/api/nodes')
-      const payload: ApiResponse<NodeInfo[]> = await response.json()
-      if (payload.success && payload.data) setNodes(payload.data)
-    } catch {
-      // Keep the last known state during transient failures.
-    }
-  }, [])
-
-  return { nodes, fetchNodes }
+  const resource = useResource<NodeInfo[]>('/api/nodes', [])
+  return { nodes: resource.data, nodesLoaded: resource.settled, nodesAvailable: resource.loaded, fetchNodes: resource.refresh }
 }
 
 export function useRules() {
-  const [rules, setRules] = useState<RuleInfo[]>([])
-
-  const fetchRules = useCallback(async () => {
-    try {
-      const response = await fetch('/api/rules')
-      const payload: ApiResponse<RuleInfo[]> = await response.json()
-      if (payload.success && payload.data) setRules(payload.data)
-    } catch {
-      // Keep the last known state during transient failures.
-    }
-  }, [])
-
-  return { rules, fetchRules }
+  const resource = useResource<RuleInfo[]>('/api/rules', [])
+  return { rules: resource.data, rulesLoaded: resource.settled, fetchRules: resource.refresh }
 }
 
 const INITIAL_VERSION: VersionInfo = {
@@ -105,21 +90,6 @@ const INITIAL_VERSION: VersionInfo = {
 }
 
 export function useVersion() {
-  const [versionInfo, setVersionInfo] = useState<VersionInfo>(INITIAL_VERSION)
-
-  const fetchVersion = useCallback(async (): Promise<VersionInfo | null> => {
-    try {
-      const response = await fetch('/api/version')
-      const payload: ApiResponse<VersionInfo> = await response.json()
-      if (payload.success && payload.data) {
-        setVersionInfo(payload.data)
-        return payload.data
-      }
-    } catch {
-      // Keep the last known state during transient failures.
-    }
-    return null
-  }, [])
-
-  return { versionInfo, fetchVersion }
+  const resource = useResource('/api/version', INITIAL_VERSION)
+  return { versionInfo: resource.data, fetchVersion: resource.refresh }
 }

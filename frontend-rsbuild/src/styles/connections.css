@@ -234,7 +234,18 @@
     /* FLIP：子行 offsetTop 相对本容器测量（offsetParent），列表滚动不会误滑 */
     position: relative;
 }
+.conn-virtual-content {
+    position: relative;
+    flex: 0 0 auto;
+    width: 100%;
+}
+.conn-virtual-item {
+    position: absolute;
+    width: 100%;
+    height: var(--conn-row-height);
+}
 .conn-row {
+    height: var(--conn-row-height);
     min-width: 0;
     border: var(--bw-strong) solid var(--border-soft);
     border-radius: var(--r-md);

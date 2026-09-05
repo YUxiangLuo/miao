@@ -29,6 +29,7 @@ pub fn node_matches_region(tag: &str, region: Region) -> bool {
         .any(|name| compact.contains(name))
 }
 
+#[cfg(test)]
 pub fn resolve_node_select(select: NodeSelect, names: &[String]) -> NodeSelect {
     match select.region() {
         Some(region) if names.iter().any(|name| node_matches_region(name, region)) => select,
@@ -37,6 +38,7 @@ pub fn resolve_node_select(select: NodeSelect, names: &[String]) -> NodeSelect {
     }
 }
 
+#[cfg(test)]
 pub fn group_member_names(select: NodeSelect, names: &[String]) -> Vec<String> {
     match select.region() {
         Some(region) => names

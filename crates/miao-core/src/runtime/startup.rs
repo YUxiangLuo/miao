@@ -124,7 +124,7 @@ pub(super) async fn prepare_compatible_startup_cache(
         .map_err(|e| AppError::context("Failed to read cached config", e))?;
     let json: serde_json::Value = serde_json::from_str(&content)
         .map_err(|e| AppError::context("Cached config is invalid JSON", e))?;
-    if !runtime_config_matches_node_select(&json, config.node_select) {
+    if legacy && !runtime_config_matches_node_select(&json, config.node_select) {
         return Err(AppError::message(
             "Cached config does not match the effective node_select",
         ));
@@ -251,7 +251,7 @@ pub(super) async fn initialize_runtime_locked(config: &Config, state: &Arc<AppSt
     if let Some(snapshot) = read_sub_nodes_snapshot(state).await {
         if snapshot.matches_subs(&config.subs) {
             info!("Rebuilding startup config from subscription node snapshot (no network)");
-            match gen_config_from_nodes(config, state, snapshot.into_fetched_nodes()).await {
+            match gen_config_from_nodes(config, state, snapshot.to_fetched_nodes()).await {
                 Ok(outcome) => {
                     match start_prepared_local_runtime(config, state, &outcome, "node_snapshot")
                         .await

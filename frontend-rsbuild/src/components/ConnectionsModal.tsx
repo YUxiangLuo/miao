@@ -2,9 +2,8 @@ import { useId, useMemo, useState } from 'react'
 import { Activity, X } from 'lucide-react'
 import { ICON } from '../tokens'
 import { useDialog } from '../hooks/useDialog'
-import { useFlipContainer } from '../hooks/useFlip'
 import { ConnectionsToolbar } from './ConnectionsToolbar'
-import { ConnectionRow } from './ConnectionRow'
+import { VirtualConnections } from './VirtualConnections'
 import { ConnectionStats } from './ConnectionStats'
 import {
   filterConnectionsByPath,
@@ -42,12 +41,11 @@ export function ConnectionsModal({
   }, [data?.connections])
 
   const visibleConnections = useMemo(
-    () => sortConnections(filterConnectionsByPath(connections, path)),
-    [connections, path],
+    () => open ? sortConnections(filterConnectionsByPath(connections, path)) : [],
+    [connections, path, open],
   )
-  const pathCounts = useMemo(() => pathCountsForConnections(connections), [connections])
+  const pathCounts = useMemo(() => pathCountsForConnections(open ? connections : []), [connections, open])
   // 行级 FLIP：速率排序变化时从旧位置滑入新位置；弹窗关闭时清空位置记录
-  const rowsRef = useFlipContainer<HTMLDivElement>(open)
 
   if (!open) return null
 
@@ -90,14 +88,7 @@ export function ConnectionsModal({
               />
 
               {visibleConnections.length > 0 ? (
-                <div className="conn-rows" ref={rowsRef}>
-                  {visibleConnections.map((connection) => (
-                    <ConnectionRow
-                      key={connection.id}
-                      connection={connection}
-                    />
-                  ))}
-                </div>
+                <VirtualConnections key={path} connections={visibleConnections} />
               ) : (
                 <div className="connections-empty inline">
                   {loading && connections.length === 0 ? '加载中…' : '暂无匹配链接'}

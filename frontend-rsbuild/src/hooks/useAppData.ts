@@ -6,6 +6,7 @@ import { usePolling, type PollTask } from './usePolling'
 import { useDesktopLayout } from './useDesktopLayout'
 import {
   CLASH_API_BASE,
+  CONFIG_POLL_INTERVAL,
   EMPTY_NODE_FORM,
   nodeTypeDefaults,
   STATUS_FAILURE_THRESHOLD,
@@ -22,7 +23,6 @@ export interface ConfirmState {
 }
 
 export function useAppData() {
-  const [firstLoadDone, setFirstLoadDone] = useState(false)
   const [upgrading, setUpgrading] = useState(false)
   const [nodeForm, setNodeForm] = useState<NodeForm>(EMPTY_NODE_FORM)
   const [nodeType, setNodeType] = useState<NodeType>('hysteria2')
@@ -36,10 +36,10 @@ export function useAppData() {
 
   const { toasts, showToast, dismissToast } = useToast()
   const { apiCall, pendingActions } = useApi()
-  const { status, statusLoaded, statusFailures, fetchStatus } = useStatus()
-  const { subs, fetchSubs } = useSubs()
-  const { nodes, fetchNodes } = useNodes()
-  const { rules, fetchRules } = useRules()
+  const { status, statusLoaded, statusFailures, statusSettled, fetchStatus } = useStatus()
+  const { subs, subsLoaded, subsAvailable, fetchSubs } = useSubs()
+  const { nodes, nodesLoaded, nodesAvailable, fetchNodes } = useNodes()
+  const { rules, rulesLoaded, fetchRules } = useRules()
   const { proxies, primaryGroupName, primaryGroup, fetchProxies } = useProxies(status)
 
   // 节点名 → 协议类型（Clash API 的 type，如 Hysteria2/AnyTLS/VLESS）；分组项不入图
@@ -70,7 +70,7 @@ export function useAppData() {
     fetchConnections,
   } = useConnections(status, clashApiBase)
   const { versionInfo, fetchVersion } = useVersion()
-  const { delays, testingNodes, testingGroup, testDelay, testGroupDelays, clearDelays } = useDelays()
+  const { delays, delayMeasuredAt, testingNodes, testingGroup, testDelay, testGroupDelays, clearDelays } = useDelays()
 
   // 进入首页且当前节点就绪后,自动测一次延迟;切换节点后也会测新节点。
   // 每个节点每次会话只自动测一次,手动点测不受影响。
@@ -90,34 +90,28 @@ export function useAppData() {
   // fastest(urltest) 模式的延迟展示回落到 /proxies 自带的 urltest 周期测速
   // history(每轮 fetchProxies 自动刷新);手动点测结果优先显示——它与 history
   // 同源(sing-box 测完即写回),下一轮轮询即收敛。
-  const historyDelays = useMemo(() => {
-    if (!isUrlTestGroup) return {}
-    const map: Record<string, number> = {}
+  const displayDelays = useMemo(() => {
+    const map = { ...delays }
+    if (!isUrlTestGroup) return map
     Object.entries(proxies || {}).forEach(([name, proxy]) => {
       if (isClashProxyGroup(proxy?.type)) return
-      const delay = proxy?.history?.[0]?.delay
-      if (delay) map[name] = delay
+      const history = proxy?.history?.length ? proxy.history.reduce((latest, item) =>
+        Date.parse(item.time) > Date.parse(latest.time) ? item : latest) : undefined
+      if (history?.delay && (!(name in map) || Date.parse(history.time) > (delayMeasuredAt[name] ?? 0))) {
+        map[name] = history.delay
+      }
     })
     return map
-  }, [proxies, isUrlTestGroup])
-
-  const displayDelays = useMemo(
-    () => ({ ...historyDelays, ...delays }),
-    [historyDelays, delays],
-  )
+  }, [proxies, isUrlTestGroup, delays, delayMeasuredAt])
 
   const resetNodeForm = useCallback(() => {
     setNodeType('hysteria2')
     setNodeForm({ ...EMPTY_NODE_FORM, ...nodeTypeDefaults('hysteria2') })
   }, [])
 
-  // 首次加载：获取初始状态后再决定显示 onboarding 还是 dashboard
-  // Clash API 不属于首屏关键路径：内核未就绪或 API 卡顿时不能拖住整个面板。
-  // status/subs/nodes/rules 都由 miao 本身直接提供，足够决定首屏结构。
-  useEffect(() => {
-    Promise.all([fetchStatus(), fetchSubs(), fetchNodes(), fetchRules()])
-      .finally(() => setFirstLoadDone(true))
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  // A later successful read can complete startup even if the first request
+  // failed. The polling hooks own initial reads as well as subsequent refreshes.
+  const firstLoadDone = statusSettled && (!statusLoaded || (subsLoaded && nodesLoaded && rulesLoaded))
 
   // 连续失败达到阈值视为后端不可达：面板显示断线提示，且不再按空数据误判进入引导页
   const backendUnreachable = statusFailures >= STATUS_FAILURE_THRESHOLD
@@ -127,16 +121,17 @@ export function useAppData() {
     && !backendUnreachable
     && !status.initializing
     && !status.ready
+    && subsAvailable && nodesAvailable
     && subs.length === 0
     && nodes.length === 0
 
   const pollingTasks = useMemo<PollTask[]>(() => {
-    const tasks: PollTask[] = [fetchStatus, fetchSubs, fetchNodes, fetchRules]
+    const tasks: PollTask[] = [fetchStatus]
     if (status.ready) {
       tasks.push(fetchProxies)
     }
     return tasks
-  }, [fetchStatus, fetchSubs, fetchNodes, fetchRules, fetchProxies, status.ready])
+  }, [fetchStatus, fetchProxies, status.ready])
 
   // ready 由 false 变为 true 时立即补取 Clash 数据，不能等下一轮常规轮询；
   // 这样后端提前展示面板后，数据面一就绪节点列表就会立刻出现。
@@ -146,6 +141,18 @@ export function useAppData() {
 
   const connectionPollingTasks = useMemo(() => [fetchConnections], [fetchConnections])
 
+  const configTasks = useMemo(() => [fetchSubs, fetchNodes, fetchRules], [fetchSubs, fetchNodes, fetchRules])
+  const lastRevision = useRef<number | undefined>(undefined)
+  useEffect(() => {
+    if (!statusLoaded) return
+    const revision = status.data_revision ?? 0
+    if (lastRevision.current !== undefined && lastRevision.current !== revision) {
+      configTasks.forEach(task => { void task() })
+    }
+    lastRevision.current = revision
+  }, [statusLoaded, status.data_revision, configTasks])
+
+  usePolling(configTasks, statusLoaded, CONFIG_POLL_INTERVAL)
   usePolling(pollingTasks)
   usePolling(
     connectionPollingTasks,
@@ -154,7 +161,7 @@ export function useAppData() {
 
   useEffect(() => {
     fetchVersion()
-  }, [status.ready, fetchVersion])
+  }, [fetchVersion])
 
   useEffect(() => {
     return () => closeSockets()

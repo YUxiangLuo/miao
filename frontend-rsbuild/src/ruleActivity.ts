@@ -118,8 +118,26 @@ export function activeRuleIndexes(rules: RuleInfo[], connections: RuleBearingCon
   if (!Array.isArray(rules) || !Array.isArray(connections) || connections.length === 0) {
     return active
   }
+  const targetsByMatcher = new Map<string, Set<string | null>>()
+  const key = (signature: RuleSignature) => JSON.stringify([signature.field, signature.value])
+  for (const connection of connections) {
+    const signature = signatureFromClashRule(connection?.rule)
+    if (!signature) continue
+    const matcher = key(signature)
+    let targets = targetsByMatcher.get(matcher)
+    if (!targets) {
+      targets = new Set()
+      targetsByMatcher.set(matcher, targets)
+    }
+    targets.add(signature.target || null)
+  }
   for (const rule of rules) {
-    if (isCustomRuleActive(rule, connections)) active.add(rule.index)
+    const signature = signatureFromCustomRule(rule)
+    if (!signature) continue
+    const targets = targetsByMatcher.get(key(signature))
+    if (targets && (!signature.target || targets.has(null) || targets.has(signature.target))) {
+      active.add(rule.index)
+    }
   }
   return active
 }

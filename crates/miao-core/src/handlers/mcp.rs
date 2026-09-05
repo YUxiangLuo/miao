@@ -40,11 +40,9 @@ pub async fn handle_mcp(
     };
 
     match crate::services::mcp::handle(&state, &body).await {
-        Some(payload) => (
-            [("mcp-protocol-version", response_version)],
-            Json(payload),
-        )
-            .into_response(),
+        Some(payload) => {
+            ([("mcp-protocol-version", response_version)], Json(payload)).into_response()
+        }
         // 通知类消息无需应答
         None => StatusCode::ACCEPTED.into_response(),
     }
@@ -117,6 +115,7 @@ pub async fn set_mcp(
         .await
         .map_err(|e| status_error(StatusCode::INTERNAL_SERVER_ERROR, e))?;
     *state.config.write().await = new_config;
+    state.data_revision.fetch_add(1, Ordering::Relaxed);
 
     Ok(success_no_data(if req.enabled {
         "MCP enabled"

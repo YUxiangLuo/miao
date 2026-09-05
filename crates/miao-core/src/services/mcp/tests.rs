@@ -83,9 +83,11 @@ async fn batch_and_invalid_jsonrpc_are_rejected() {
 #[tokio::test]
 async fn client_response_is_accepted_without_a_response() {
     let response = json!({ "jsonrpc": "2.0", "id": 1, "result": {} });
-    assert!(handle(&state(Config::default()), response.to_string().as_bytes())
-        .await
-        .is_none());
+    assert!(
+        handle(&state(Config::default()), response.to_string().as_bytes())
+            .await
+            .is_none()
+    );
 }
 
 #[tokio::test]
@@ -143,11 +145,7 @@ async fn initialize_negotiates_protocol_version_and_tools_capability() {
 
 #[tokio::test]
 async fn initialize_uses_latest_version_when_requested_version_is_unknown() {
-    let response = call(
-        &state(Config::default()),
-        initialize_request("2099-01-01"),
-    )
-    .await;
+    let response = call(&state(Config::default()), initialize_request("2099-01-01")).await;
     assert_eq!(response["result"]["protocolVersion"], MCP_PROTOCOL_VERSION);
 }
 

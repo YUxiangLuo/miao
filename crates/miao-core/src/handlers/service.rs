@@ -32,6 +32,7 @@ pub async fn get_status(State(state): State<Arc<AppState>>) -> Json<ApiResponse<
     success(
         if running { "running" } else { "stopped" },
         StatusData {
+            data_revision: state.data_revision.load(Ordering::Relaxed),
             running,
             ready: state.runtime_ready.load(Ordering::Relaxed),
             phase: state.runtime_phase(),
@@ -143,6 +144,17 @@ pub async fn stop_service(State(state): State<Arc<AppState>>) -> HandlerResult {
     }
 
     let _config_update = state.config_update.lock().await;
+    state.next_sub_refresh();
+    for status in state.sub_status.lock().await.values_mut() {
+        if status.state == crate::models::SubscriptionState::Refreshing {
+            status.state = if status.success {
+                crate::models::SubscriptionState::Ready
+            } else {
+                crate::models::SubscriptionState::Failed
+            };
+        }
+    }
+    state.data_revision.fetch_add(1, Ordering::Relaxed);
     state.service_should_run.store(false, Ordering::Relaxed);
     stop_sing_internal(&state).await;
     Ok(success_no_data("sing-box stopped"))
@@ -289,6 +301,17 @@ mod tests {
     async fn start_rejects_an_empty_configuration() {
         let state = app_state(Config::default());
         state.initializing.store(false, Ordering::Relaxed);
+        state.next_sub_refresh();
+        for status in state.sub_status.lock().await.values_mut() {
+            if status.state == crate::models::SubscriptionState::Refreshing {
+                status.state = if status.success {
+                    crate::models::SubscriptionState::Ready
+                } else {
+                    crate::models::SubscriptionState::Failed
+                };
+            }
+        }
+        state.data_revision.fetch_add(1, Ordering::Relaxed);
         state.service_should_run.store(false, Ordering::Relaxed);
 
         let status = match start_service(State(state.clone())).await {

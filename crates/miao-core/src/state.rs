@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::{Mutex, Notify, RwLock};
 
 use crate::models::{
     Config, GitHubRelease, NodeMultiplier, NodeSelect, RuntimePhase, StableConfig, SubStatus,
@@ -35,16 +35,20 @@ pub struct AppState {
     /// 每次有意启动/停止 sing-box 都会递增。崩溃看门狗以此识别自己监护的
     /// 那次启动是否已被取代，避免与配置热重载、用户停核等路径打架。
     pub sing_generation: AtomicU64,
+    pub proxy_selection_generation: AtomicU64,
     /// Every foreground subscription fetch advances this generation. Startup
     /// background/recovery fetches capture it before leaving the config lock
     /// and must discard their result when a newer user operation supersedes it.
     pub sub_refresh_generation: AtomicU64,
+    pub sub_refresh_cancel: Notify,
     /// Latest foreground refresh generation that fetched usable subscription
     /// nodes and committed them. A foreground request can complete using only
     /// manual nodes after its subscription fetch failed; that must not cancel
     /// startup's network-recovery loop.
     pub sub_refresh_success_generation: AtomicU64,
     pub sub_status: Mutex<HashMap<String, SubStatus>>,
+    pub sub_nodes_cache: RwLock<Option<Arc<crate::services::config::SubNodesReadModel>>>,
+    pub data_revision: AtomicU64,
     pub config_warning: Mutex<Option<String>>,
     /// 最近一次生成配置时因出口节点不存在而被跳过的自定义规则,用于面板告警与规则列表标记
     pub skipped_rules: Mutex<Vec<SkippedRule>>,
@@ -129,9 +133,13 @@ impl AppState {
             config_update: Arc::new(Mutex::new(())),
             sing_process: Mutex::new(None),
             sing_generation: AtomicU64::new(0),
+            proxy_selection_generation: AtomicU64::new(0),
             sub_refresh_generation: AtomicU64::new(0),
+            sub_refresh_cancel: Notify::new(),
             sub_refresh_success_generation: AtomicU64::new(0),
             sub_status: Mutex::new(HashMap::new()),
+            sub_nodes_cache: RwLock::new(None),
+            data_revision: AtomicU64::new(1),
             config_warning: Mutex::new(None),
             skipped_rules: Mutex::new(Vec::new()),
             available_multipliers: RwLock::new(Vec::new()),
@@ -147,6 +155,12 @@ impl AppState {
             #[cfg(not(windows))]
             upgrading: AtomicBool::new(false),
         })
+    }
+
+    pub fn next_sub_refresh(&self) -> u64 {
+        let generation = self.sub_refresh_generation.fetch_add(1, Ordering::Relaxed) + 1;
+        self.sub_refresh_cancel.notify_waiters();
+        generation
     }
 
     pub async fn config_with_preferences(&self) -> Config {
