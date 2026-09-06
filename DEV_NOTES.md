@@ -164,6 +164,8 @@ TUN JSON：`auto_route` + `strict_route`，`interface_name` 仍是 `sing-tun`。
 
 CLI 参数在 `cli.rs` 统一校验，先于提权/文件写入；保留 `--config[=]PATH`、`--version/-V`，支持 `--help/-h` 与互斥的 `--sub[=]URL [HK|JP|TW|SG|US]`。`--sub` 用权限 0700 的独立临时 profile，通过现有 `RuntimeOptions.config_path/runtime_dir/volatile_path` 进入同一启动管线，不复用原配置或偏好；临时目录所有权保留到内核关闭后。桌面/SDK 的 `spawn_server` 接口不变。测试成功路径必须注入假内核 + 本地订阅服务器，不能执行真实 TUN。
 
+业务入口：`services/commands/` 不依赖 Axum；REST handler 只做参数提取和 `responses.rs` 的统一结果映射，MCP 直接调用业务服务，不得构造 HTTP `State/Json` 或调用 handler。节点/规则/VPS 节点落盘通过 `ConfigEdit` 持有读改写锁；策略/倍率共用偏好事务，失败恢复 requested 内存值及精确原文件字节。`RuntimeCheckpoint` 严格读取 active config + bindings，无法读取则拒绝开始；`commit_generated` 统一配置接受与派生状态发布。详见 [状态模型与提交边界](docs/runtime-state.md)。
+
 变更链路：订阅增删/刷新先在锁外拉取，按 `sub_refresh_generation` 淘汰旧请求，再持 `config_update` 锁合并当前设置、生成候选、`sing-box check`、激活和提交。显式停服取消在途订阅刷新；校验子进程限时 10 秒。面板读取 Clash API 反代；节点切换统一走 `POST /api/proxy/switch`，与 MCP 共用串行切换/持久化服务，并使旧恢复任务失效。
 
 生成配置无条件带 `route.find_process: true`（builder.rs）：面板「链接统计」每行副标题的进程名依赖 Clash API 的 `processPath`，而 sing-box 只在有进程类规则或此开关下才跑进程搜索器——删掉它，没有进程规则的用户面板就没有进程列数据。
@@ -172,7 +174,7 @@ CLI 参数在 `cli.rs` 统一校验，先于提权/文件写入；保留 `--conf
 
 失败回滚去网络化：先快照 `config.json` 字节，回滚按 **内存快照 → `config.json.cache` → 本地节点快照/手动节点** 分层；内核已死时先 `sing-box check` 再启动；空 cache 拒绝恢复。持锁回滚不触网；本地材料不足时保留可用运行态并报错，由显式刷新或启动后台恢复负责网络。
 
-订阅刷新只有一条管线 `refresh_subscriptions`，策略 `RefreshPolicy`：`Manual`（用户在场，失败即报）/ `ManualInApply`（事务内，node_select 随外层事务提交）/ `Startup`（全失败保留运行中的缓存）。节点集来源 `SubSource`：本地语义变更用 `sub-nodes.json` 快照零网络重建，增删订阅/手动刷新/启动才真拉取。失败订阅按来源保留最近成功节点，成功空列表覆盖该来源；缓存节点不计入新鲜拉取健康度。快照在内存中共享不可变读模型，按提交替换。快照缺失的本地变更不退化为网络请求：纯手动运行态可本地重建，无法证明订阅材料完整则提示先刷新。
+订阅刷新只有一条管线 `refresh_subscriptions`，策略 `RefreshPolicy`：`Manual`（用户在场，失败即报）/ `ManualInApply`（事务内，node_select 随外层事务提交）/ `Startup`（全失败保留运行中的缓存）。节点集来源 `SubSource` 只有 `SnapshotOrLocal` / `Prefetched`：本地语义变更用 `sub-nodes.json` 快照零网络重建，增删订阅/手动刷新/启动先在锁外真拉取，再将材料交给安装管线；没有隐式持锁 Fetch 分支。失败订阅按来源保留最近成功节点，成功空列表覆盖该来源；缓存节点不计入新鲜拉取健康度。快照在内存中共享不可变读模型，按提交替换。快照缺失的本地变更不退化为网络请求：纯手动运行态可本地重建，无法证明订阅材料完整则提示先刷新。
 
 内核生命周期由 `state/lifecycle.rs` 集中管理 `phase/ready/should_run/generation`，原独立原子字段已移除。启停/重载在进程槽锁内分配代次，异步完成按原代次发布；停止先淘汰旧任务再等待进程退出。REST/MCP 从 `kernel_status` 读取同一份进程与生命周期观察。配置准备仅借用阶段（RAII guard），不得自行授予 readiness；回滚存活但未就绪的进程必须重新探测。watchdog 在拿到进程槽锁、退避后拿到配置锁时均检查所有权。服务关闭有不可逆的终止标记，防止排空中的请求再次启核。`initializing` 保留为启动入口闸，Windows 重启与 Unix SIGHUP 共用状态机。
 
@@ -184,7 +186,7 @@ CLI 参数在 `cli.rs` 统一校验，先于提权/文件写入；保留 `--conf
 
 ## MCP 端点
 
-`POST /mcp`：MCP 无状态 JSON-RPC，配置 `mcp: true` 开启（默认关，关闭时 404）。工具覆盖面板的状态、版本、订阅、手动节点、规则、连接、模式、MCP 开关、VPS 与升级能力；浏览器本地主题/PWA 不属于服务端工具。写操作必须复用现有 handler/service，禁止复制配置事务。节点模型保持平铺，selector 永不暴露；`switch_node` 走 Clash PUT + `save_last_proxy`（与面板同路径）。破坏性工具必须带 `destructiveHint`、明确后果，并在执行前校验 `confirm: true`。测试优先覆盖目录/文案契约、纯分发、参数校验、确认闸和无网络读路径；不要在单测中实际升级、SSH、拉订阅或启动 TUN。
+`POST /mcp`：MCP 无状态 JSON-RPC，配置 `mcp: true` 开启（默认关，关闭时 404）。工具覆盖面板的状态、版本、订阅、手动节点、规则、连接、模式、MCP 开关、VPS 与升级能力；浏览器本地主题/PWA 不属于服务端工具。写操作必须复用 `services/commands` 或现有领域服务，禁止调用 HTTP handler 或复制配置事务。节点模型保持平铺，selector 永不暴露；`switch_node` 走 Clash PUT + `save_last_proxy`（与面板同路径）。破坏性工具必须带 `destructiveHint`、明确后果，并在执行前校验 `confirm: true`。测试优先覆盖目录/文案契约、纯分发、参数校验、确认闸和无网络读路径；不要在单测中实际升级、SSH、拉订阅或启动 TUN。
 
 ## CI
 

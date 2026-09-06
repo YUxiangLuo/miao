@@ -7,11 +7,10 @@ use axum::{
     response::Response,
 };
 use serde_json::{json, Value as JsonValue};
-use std::sync::{atomic::Ordering, Arc};
+use std::sync::Arc;
 
 use crate::models::McpRequest;
-use crate::responses::{status_error, success_no_data, HandlerResult};
-use crate::services::config::save_stable_fields;
+use crate::responses::HandlerResult;
 use crate::state::AppState;
 
 /// POST /mcp — MCP（Model Context Protocol）JSON-RPC 端点。
@@ -96,32 +95,7 @@ pub async fn set_mcp(
     State(state): State<Arc<AppState>>,
     Json(req): Json<McpRequest>,
 ) -> HandlerResult {
-    if state.initializing.load(Ordering::Relaxed) {
-        return Err(status_error(
-            StatusCode::CONFLICT,
-            "Initialization is still in progress",
-        ));
-    }
-
-    let _config_update = state.config_update.lock().await;
-    let old_config = state.config.read().await.clone();
-    if old_config.mcp == req.enabled {
-        return Ok(success_no_data("MCP setting unchanged"));
-    }
-
-    let mut new_config = old_config.clone();
-    new_config.mcp = req.enabled;
-    save_stable_fields(&state, &new_config)
-        .await
-        .map_err(|e| status_error(StatusCode::INTERNAL_SERVER_ERROR, e))?;
-    *state.config.write().await = new_config;
-    state.data_revision.fetch_add(1, Ordering::Relaxed);
-
-    Ok(success_no_data(if req.enabled {
-        "MCP enabled"
-    } else {
-        "MCP disabled"
-    }))
+    crate::responses::command_result(crate::services::commands::settings::set_mcp(state, req).await)
 }
 
 #[cfg(test)]

@@ -1,10 +1,7 @@
 use std::sync::Arc;
-use std::time::Instant;
 
-use axum::{extract::State, response::Json};
 use serde::Serialize;
 use serde_json::{json, Value as JsonValue};
-use tokio::time::Duration;
 
 #[cfg(not(windows))]
 use crate::models::VpsDeployRequest;
@@ -12,7 +9,7 @@ use crate::models::{
     BatchNodeRequest, DeleteNodeRequest, DeleteRuleRequest, McpRequest, NodeRequest, RuleRequest,
     SetNodeDisabledRequest, SubBatchRequest, SubRequest,
 };
-use crate::responses::HandlerResult;
+use crate::services::commands::{self, CommandReply, CommandResult};
 use crate::state::AppState;
 use crate::validation::Validator;
 
@@ -26,19 +23,12 @@ fn require_confirmation(args: &JsonValue, action: &str) -> Result<(), String> {
     }
 }
 
-fn handler_payload<T: Serialize>(result: HandlerResult<T>) -> Result<JsonValue, String> {
-    match result {
-        Ok(Json(response)) => Ok(json!({
-            "message": response.message,
-            "data": response.data,
-        })),
-        Err((_status, Json(response))) => Err(response.message),
-    }
+fn command_payload<T: Serialize>(result: CommandResult<T>) -> Result<JsonValue, String> {
+    let reply = result.map_err(|error| error.to_string())?;
+    Ok(json!({ "message": reply.message, "data": reply.data }))
 }
 
-fn response_data<T: Serialize>(
-    response: crate::models::ApiResponse<T>,
-) -> Result<JsonValue, String> {
+pub(super) fn response_data<T: Serialize>(response: CommandReply<T>) -> Result<JsonValue, String> {
     let data = response
         .data
         .ok_or_else(|| "读取接口未返回预期数据".to_string())?;
@@ -55,7 +45,7 @@ pub(super) async fn start_service(
     args: &JsonValue,
 ) -> Result<JsonValue, String> {
     require_confirmation(args, "启动透明代理")?;
-    handler_payload(crate::handlers::service::start_service(State(state.clone())).await)
+    command_payload(commands::service::start_service(state.clone()).await)
 }
 
 pub(super) async fn stop_service(
@@ -63,11 +53,11 @@ pub(super) async fn stop_service(
     args: &JsonValue,
 ) -> Result<JsonValue, String> {
     require_confirmation(args, "停止透明代理")?;
-    handler_payload(crate::handlers::service::stop_service(State(state.clone())).await)
+    command_payload(commands::service::stop_service(state.clone()).await)
 }
 
 pub(super) async fn list_subscriptions(state: &Arc<AppState>) -> Result<JsonValue, String> {
-    let Json(response) = crate::handlers::subs::get_subs(State(state.clone())).await;
+    let response = commands::subs::get_subs(state.clone()).await;
     let subscriptions = response_data(response)?;
     Ok(json!({ "subscriptions": subscriptions }))
 }
@@ -81,9 +71,7 @@ pub(super) async fn add_subscriptions(
     if request.urls.is_empty() {
         return Err("Invalid params: `urls` 不能为空".to_string());
     }
-    handler_payload(
-        crate::handlers::subs::add_subs_batch(State(state.clone()), Json(request)).await,
-    )
+    command_payload(commands::subs::add_subs_batch(state.clone(), request).await)
 }
 
 pub(super) async fn delete_subscription(
@@ -95,19 +83,19 @@ pub(super) async fn delete_subscription(
         .get("url")
         .and_then(JsonValue::as_str)
         .ok_or_else(|| "Invalid params: missing `url`".to_string())?;
-    handler_payload(
-        crate::handlers::subs::delete_sub(
-            State(state.clone()),
-            Json(SubRequest {
+    command_payload(
+        commands::subs::delete_sub(
+            state.clone(),
+            SubRequest {
                 url: url.to_string(),
-            }),
+            },
         )
         .await,
     )
 }
 
 pub(super) async fn list_subscription_nodes(state: &Arc<AppState>) -> Result<JsonValue, String> {
-    let Json(response) = crate::handlers::subs::get_sub_nodes(State(state.clone())).await;
+    let response = commands::subs::get_sub_nodes(state.clone()).await;
     let groups = response_data(response)?;
     Ok(json!({ "subscriptions": groups }))
 }
@@ -118,18 +106,16 @@ pub(super) async fn set_subscription_node_disabled(
 ) -> Result<JsonValue, String> {
     let request: SetNodeDisabledRequest =
         serde_json::from_value(args.clone()).map_err(|err| format!("Invalid params: {err}"))?;
-    handler_payload(
-        crate::handlers::subs::set_node_disabled(State(state.clone()), Json(request)).await,
-    )
+    command_payload(commands::subs::set_node_disabled(state.clone(), request).await)
 }
 
 pub(super) async fn scan_clash_verge(state: &Arc<AppState>) -> Result<JsonValue, String> {
-    let Json(response) = crate::handlers::subs::get_verge_import(State(state.clone())).await;
+    let response = commands::subs::get_verge_import(state.clone()).await;
     response_data(response)
 }
 
 pub(super) async fn list_manual_nodes(state: &Arc<AppState>) -> Result<JsonValue, String> {
-    let Json(response) = crate::handlers::nodes::get_nodes(State(state.clone())).await;
+    let response = commands::nodes::get_nodes(state.clone()).await;
     let nodes = response_data(response)?;
     Ok(json!({ "nodes": nodes }))
 }
@@ -137,7 +123,7 @@ pub(super) async fn list_manual_nodes(state: &Arc<AppState>) -> Result<JsonValue
 pub(super) async fn add_node(state: &Arc<AppState>, args: &JsonValue) -> Result<JsonValue, String> {
     let request: NodeRequest =
         serde_json::from_value(args.clone()).map_err(|err| format!("Invalid params: {err}"))?;
-    handler_payload(crate::handlers::nodes::add_node(State(state.clone()), Json(request)).await)
+    command_payload(commands::nodes::add_node(state.clone(), request).await)
 }
 
 pub(super) async fn import_nodes(
@@ -149,7 +135,7 @@ pub(super) async fn import_nodes(
     if request.nodes.is_empty() {
         return Err("Invalid params: `nodes` 不能为空".to_string());
     }
-    handler_payload(crate::handlers::nodes::import_nodes(State(state.clone()), Json(request)).await)
+    command_payload(commands::nodes::import_nodes(state.clone(), request).await)
 }
 
 pub(super) async fn delete_node(
@@ -161,12 +147,12 @@ pub(super) async fn delete_node(
         .get("tag")
         .and_then(JsonValue::as_str)
         .ok_or_else(|| "Invalid params: missing `tag`".to_string())?;
-    handler_payload(
-        crate::handlers::nodes::delete_node(
-            State(state.clone()),
-            Json(DeleteNodeRequest {
+    command_payload(
+        commands::nodes::delete_node(
+            state.clone(),
+            DeleteNodeRequest {
                 tag: tag.to_string(),
-            }),
+            },
         )
         .await,
     )
@@ -175,7 +161,7 @@ pub(super) async fn delete_node(
 pub(super) async fn add_rule(state: &Arc<AppState>, args: &JsonValue) -> Result<JsonValue, String> {
     let request: RuleRequest =
         serde_json::from_value(args.clone()).map_err(|err| format!("Invalid params: {err}"))?;
-    handler_payload(crate::handlers::rules::add_rule(State(state.clone()), Json(request)).await)
+    command_payload(commands::rules::add_rule(state.clone(), request).await)
 }
 
 pub(super) async fn delete_rule(
@@ -185,7 +171,7 @@ pub(super) async fn delete_rule(
     require_confirmation(args, "删除自定义规则")?;
     let request: DeleteRuleRequest =
         serde_json::from_value(args.clone()).map_err(|err| format!("Invalid params: {err}"))?;
-    handler_payload(crate::handlers::rules::delete_rule(State(state.clone()), Json(request)).await)
+    command_payload(commands::rules::delete_rule(state.clone(), request).await)
 }
 
 pub(super) async fn test_connectivity(
@@ -198,17 +184,19 @@ pub(super) async fn test_connectivity(
         .ok_or_else(|| "Invalid params: missing `url`".to_string())?;
     Validator::subscription_url(url).map_err(|err| format!("Invalid params: {err}"))?;
 
-    let start = Instant::now();
-    let response = state
-        .http_client
-        .head(url)
-        .timeout(Duration::from_secs(5))
-        .send()
-        .await;
+    let response = commands::service::test_connectivity(
+        state.clone(),
+        commands::service::ConnectivityRequest {
+            url: url.to_string(),
+        },
+    )
+    .await
+    .data
+    .ok_or_else(|| "读取接口未返回预期数据".to_string())?;
     Ok(json!({
         "url": url,
-        "success": response.is_ok(),
-        "latency_ms": response.ok().map(|_| start.elapsed().as_millis() as u64),
+        "success": response.success,
+        "latency_ms": response.latency_ms,
         "note": "请求由 Miao 后端直连发出，不经过 HTTP_PROXY/HTTPS_PROXY 环境变量",
     }))
 }
@@ -222,9 +210,8 @@ pub(super) async fn set_mcp_enabled(
         .get("enabled")
         .and_then(JsonValue::as_bool)
         .ok_or_else(|| "Invalid params: missing `enabled`".to_string())?;
-    let mut payload = handler_payload(
-        crate::handlers::mcp::set_mcp(State(state.clone()), Json(McpRequest { enabled })).await,
-    )?;
+    let mut payload =
+        command_payload(commands::settings::set_mcp(state.clone(), McpRequest { enabled }).await)?;
     if !enabled {
         payload["note"] = json!("MCP 已关闭；本次响应后 /mcp 将返回 404");
     }
@@ -247,13 +234,13 @@ pub(super) async fn deploy_vps(
 
     #[cfg(not(windows))]
     {
-        handler_payload(
-            crate::handlers::vps::deploy_vps(
-                State(state.clone()),
-                Json(VpsDeployRequest {
+        command_payload(
+            commands::vps::deploy_vps(
+                state.clone(),
+                VpsDeployRequest {
                     ip: ip.to_string(),
                     password: password.to_string(),
-                }),
+                },
             )
             .await,
         )

@@ -1,5 +1,42 @@
 use super::*;
 
+/// Rollback material is captured before generation/installation, under the
+/// transaction lock. Unreadable files reject the edit rather than losing the
+/// ability to restore tag bindings or the active runtime.
+struct RuntimeCheckpoint {
+    runtime: Option<Vec<u8>>,
+    bindings: Option<Vec<u8>>,
+}
+
+impl RuntimeCheckpoint {
+    async fn capture(state: &AppState) -> AppResult<Self> {
+        Ok(Self {
+            runtime: read_file_snapshot(&state.runtime_paths.active_config)
+                .await?
+                .filter(|bytes| !bytes.is_empty()),
+            bindings: read_file_snapshot(&state.runtime_paths.node_bindings).await?,
+        })
+    }
+
+    async fn restore(
+        &self,
+        config: &Config,
+        state: &Arc<AppState>,
+        should_run: bool,
+        force_restart: bool,
+    ) -> AppResult<()> {
+        restore_after_apply_failure(
+            config,
+            state,
+            should_run,
+            self.runtime.as_deref(),
+            self.bindings.as_deref(),
+            force_restart,
+        )
+        .await
+    }
+}
+
 pub(in crate::services::config) async fn regenerate_and_restart_runtime(
     config: &Config,
     state: &Arc<AppState>,
@@ -92,7 +129,14 @@ pub async fn regenerate_preserving_service_state(
     state: &Arc<AppState>,
 ) -> AppResult<RuntimeUpdate> {
     let generation = state.next_sub_refresh();
-    regenerate_from_source(config, state, SubSource::Fetch, generation).await
+    let fetched = super::super::generate::fetch_sub_nodes_if_current(
+        config,
+        state,
+        SubFetchRetry::None,
+        generation,
+    )
+    .await;
+    regenerate_from_source(config, state, SubSource::Prefetched(fetched), generation).await
 }
 
 async fn regenerate_from_source(
@@ -121,9 +165,7 @@ async fn regenerate_from_source(
         return Ok(RuntimeUpdate::None);
     }
 
-    // Snapshot bytes before this refresh so rollback can restore without a fetch.
-    let snapshot = snapshot_runtime_config(state).await;
-    let bindings_snapshot = read_file_snapshot(&state.runtime_paths.node_bindings).await?;
+    let checkpoint = RuntimeCheckpoint::capture(state).await?;
 
     let (runtime_update, accepted_response) = if should_run {
         match regenerate_and_restart_runtime(config, state, RefreshPolicy::Manual, source).await {
@@ -132,14 +174,15 @@ async fn regenerate_from_source(
                     .generated
                     .as_ref()
                     .expect("checked generated outcome");
-                if let Err(commit_err) = commit_foreground_refresh(config, state, outcome).await {
+                if let Err(commit_err) =
+                    commit_generated(config, state, outcome, CommitScope::EffectiveSelection).await
+                {
                     error!(error = %commit_err, "Foreground runtime refresh could not commit effective preferences; restoring previous runtime state");
                     return Err(rollback_failed_foreground_commit(
                         previous_config,
                         state,
                         true,
-                        snapshot.as_deref(),
-                        bindings_snapshot.as_deref(),
+                        &checkpoint,
                         refresh.runtime_update.updated(),
                         commit_err,
                     )
@@ -159,15 +202,9 @@ async fn regenerate_from_source(
                 // Candidate validation never replaces config.json. Activation
                 // may have, so rewind runtime + bindings before surfacing err.
                 error!(error = %err, "Failed to refresh subscriptions, restoring previous runtime state");
-                let restore = restore_after_apply_failure(
-                    previous_config,
-                    state,
-                    true,
-                    snapshot.as_deref(),
-                    bindings_snapshot.as_deref(),
-                    false,
-                )
-                .await;
+                let restore = checkpoint
+                    .restore(previous_config, state, true, false)
+                    .await;
                 return match restore {
                     Ok(()) => Err(err),
                     Err(restore_err) => Err(AppError::message(format!(
@@ -182,14 +219,15 @@ async fn regenerate_from_source(
             .await
         {
             Ok(outcome) => {
-                if let Err(commit_err) = commit_foreground_refresh(config, state, &outcome).await {
+                if let Err(commit_err) =
+                    commit_generated(config, state, &outcome, CommitScope::EffectiveSelection).await
+                {
                     error!(error = %commit_err, "Stopped runtime refresh could not commit effective preferences; restoring previous runtime files");
                     return Err(rollback_failed_foreground_commit(
                         previous_config,
                         state,
                         false,
-                        snapshot.as_deref(),
-                        bindings_snapshot.as_deref(),
+                        &checkpoint,
                         false,
                         commit_err,
                     )
@@ -200,16 +238,12 @@ async fn regenerate_from_source(
             }
             Err(err) => {
                 error!(error = %err, "Failed to regenerate config, restoring previous runtime config");
-                let _ = restore_after_apply_failure(
-                    previous_config,
-                    state,
-                    false,
-                    snapshot.as_deref(),
-                    bindings_snapshot.as_deref(),
-                    false,
-                )
-                .await;
-                return Err(err);
+                return match checkpoint.restore(previous_config, state, false, false).await {
+                    Ok(()) => Err(err),
+                    Err(rollback_err) => Err(AppError::message(format!(
+                        "Failed to regenerate config: {err}. Runtime rollback failed: {rollback_err}"
+                    ))),
+                };
             }
         };
         (RuntimeUpdate::None, accepted_response)
@@ -233,15 +267,35 @@ pub(in crate::services::config) async fn finalize_started_config(
     spawn_restore_last_proxy(state);
 }
 
-async fn commit_foreground_refresh(
+enum CommitScope {
+    /// Refresh only changes effective selection; retain concurrently edited inputs.
+    EffectiveSelection,
+    /// Local/subscription edit accepts all candidate inputs and effective selection.
+    Configuration,
+}
+
+async fn commit_generated(
     config: &Config,
     state: &Arc<AppState>,
     outcome: &GenConfigOutcome,
+    scope: CommitScope,
 ) -> AppResult<()> {
     // Persistence is the commit point. Do not publish snapshots or diagnostics
     // until it succeeds, otherwise an API error could leave observable state
     // describing runtime bytes that are about to be rolled back.
-    persist_effective_node_select(state, outcome.node_select).await?;
+    match scope {
+        CommitScope::EffectiveSelection => {
+            persist_effective_node_select(state, outcome.node_select).await?;
+        }
+        CommitScope::Configuration => {
+            let accepted = Config {
+                node_select: outcome.node_select,
+                ..config.clone()
+            };
+            save_config_layered(state, &accepted).await?;
+            *state.config.write().await = accepted;
+        }
+    }
     record_fresh_snapshot(config, state, outcome).await;
     publish_generation_diagnostics(state, outcome).await;
     Ok(())
@@ -251,20 +305,13 @@ async fn rollback_failed_foreground_commit(
     config: &Config,
     state: &Arc<AppState>,
     should_run: bool,
-    runtime_snapshot: Option<&[u8]>,
-    bindings_snapshot: Option<&[u8]>,
+    checkpoint: &RuntimeCheckpoint,
     force_restart: bool,
     commit_err: AppError,
 ) -> AppError {
-    match restore_after_apply_failure(
-        config,
-        state,
-        should_run,
-        runtime_snapshot,
-        bindings_snapshot,
-        force_restart,
-    )
-    .await
+    match checkpoint
+        .restore(config, state, should_run, force_restart)
+        .await
     {
         Ok(()) => AppError::context(
             "Failed to commit refreshed configuration; restored previous runtime config",
@@ -301,7 +348,6 @@ pub(in crate::services::config) async fn regenerate_without_restart_runtime(
     source: SubSource,
 ) -> AppResult<GenConfigOutcome> {
     let outcome = match source {
-        SubSource::Fetch => gen_config(config, state, SubFetchRetry::None).await,
         SubSource::SnapshotOrLocal => gen_config_from_snapshot(config, state).await,
         SubSource::Prefetched(nodes) => gen_config_from_fetch(config, state, nodes).await,
     }
@@ -476,22 +522,38 @@ async fn restore_after_apply_failure(
     }
 }
 
+// Low-level fault-injection tests supply their own before/candidate snapshots.
+// Production local edits must own ConfigEdit; subscriptions must prefetch.
+#[cfg(test)]
 pub async fn apply_config_change(
     state: &Arc<AppState>,
     old_config: &Config,
     new_config: &Config,
 ) -> AppResult<ConfigApplyEffect> {
-    let source = sub_source_for(old_config, new_config);
+    let source = if old_config.subs == new_config.subs {
+        SubSource::SnapshotOrLocal
+    } else {
+        let generation = state.next_sub_refresh();
+        SubSource::Prefetched(
+            super::super::generate::fetch_sub_nodes_if_current(
+                new_config,
+                state,
+                SubFetchRetry::None,
+                generation,
+            )
+            .await,
+        )
+    };
     apply_config_change_with_source(state, old_config, new_config, source).await
 }
 
-async fn apply_config_change_with_source(
+pub(super) async fn apply_config_change_with_source(
     state: &Arc<AppState>,
     old_config: &Config,
     new_config: &Config,
     source: SubSource,
 ) -> AppResult<ConfigApplyEffect> {
-    // Handlers clone the effective config, whose strategy may be a temporary
+    // Application edits clone the effective config, whose strategy may be a temporary
     // manual fallback. Configuration changes must regenerate with the user's
     // requested strategy instead of accidentally extending that fallback.
     let preferred_new_config = state.overlay_preferences(new_config).await;
@@ -512,15 +574,7 @@ async fn apply_config_change_with_source(
         return Ok(ConfigApplyEffect::Cleared);
     }
 
-    // 回滚 tier 1 材料：变更前正在运行/最近可用的运行时配置字节（config.json）
-    let snapshot = snapshot_runtime_config(state).await;
-    // node-bindings.json 与运行时配置共同提交；旧值读不出时不要开始一个
-    // 无法完整回滚的事务。
-    let bindings_snapshot = read_file_snapshot(&state.runtime_paths.node_bindings).await?;
-    // 订阅列表没变就是本地语义变更（节点选择/路由模式/规则/手动节点），走快照零网络重建
-    if matches!(&source, SubSource::Fetch) {
-        state.next_sub_refresh();
-    }
+    let checkpoint = RuntimeCheckpoint::capture(state).await?;
     let _activity = state
         .lifecycle
         .activity(crate::state::lifecycle::RuntimeActivity::ApplyingConfig);
@@ -549,15 +603,8 @@ async fn apply_config_change_with_source(
 
     match apply_result {
         Ok((outcome, runtime_update)) => {
-            let persisted_new_config = Config {
-                node_select: outcome.node_select,
-                ..new_config.clone()
-            };
-            match save_config_layered(state, &persisted_new_config).await {
+            match commit_generated(new_config, state, &outcome, CommitScope::Configuration).await {
                 Ok(()) => {
-                    *state.config.write().await = persisted_new_config;
-                    record_fresh_snapshot(new_config, state, &outcome).await;
-                    publish_generation_diagnostics(state, &outcome).await;
                     if should_run {
                         if runtime_update.updated() {
                             finalize_started_config(
@@ -594,15 +641,9 @@ async fn apply_config_change_with_source(
                 }
                 Err(save_err) => {
                     error!(error = %save_err, "Runtime config applied but persistent config write failed, attempting runtime rollback");
-                    match restore_after_apply_failure(
-                        old_config,
-                        state,
-                        should_run,
-                        snapshot.as_deref(),
-                        bindings_snapshot.as_deref(),
-                        runtime_update.updated(),
-                    )
-                    .await
+                    match checkpoint
+                        .restore(old_config, state, should_run, runtime_update.updated())
+                        .await
                     {
                         Ok(()) => Err(AppError::context(
                             "Failed to persist config change; restored previous runtime config",
@@ -619,17 +660,14 @@ async fn apply_config_change_with_source(
         Err(apply_err) if apply_err.is_no_usable_nodes() => {
             // 有本地可用材料（运行时快照/cache/节点集快照）时，订阅全失败不再停核清场：
             // 回滚到变更前状态，把订阅故障作为普通变更失败报给用户
-            if snapshot.is_some() || has_config_cache(state) || has_sub_nodes_snapshot(state) {
+            if checkpoint.runtime.is_some()
+                || has_config_cache(state)
+                || has_sub_nodes_snapshot(state)
+            {
                 warn!(error = %apply_err, "All subscriptions failed during config change; keeping previous runtime state");
-                match restore_after_apply_failure(
-                    old_config,
-                    state,
-                    should_run,
-                    snapshot.as_deref(),
-                    bindings_snapshot.as_deref(),
-                    false,
-                )
-                .await
+                match checkpoint
+                    .restore(old_config, state, should_run, false)
+                    .await
                 {
                     Ok(()) => Err(AppError::context(
                         "所有订阅获取失败，已保留当前运行配置",
@@ -650,15 +688,9 @@ async fn apply_config_change_with_source(
         }
         Err(apply_err) => {
             error!(error = %apply_err, "Failed to apply runtime config change, attempting runtime rollback");
-            match restore_after_apply_failure(
-                old_config,
-                state,
-                should_run,
-                snapshot.as_deref(),
-                bindings_snapshot.as_deref(),
-                false,
-            )
-            .await
+            match checkpoint
+                .restore(old_config, state, should_run, false)
+                .await
             {
                 Ok(()) => Err(AppError::context(
                     "Failed to apply config change; restored previous runtime config",
@@ -673,9 +705,8 @@ async fn apply_config_change_with_source(
     }
 }
 
-/// Caller must not already hold `config_update`.
-/// Returns `(previous, runtime_update)` observed under that lock.
-/// 配置变更的错误两分：闭包拒绝（请求校验失败，调用方映射 400）与事务失败（500）。
+/// A rejected candidate, an obsolete subscription operation, or a failed apply.
+/// Transport adapters decide how to represent each outcome.
 #[derive(Debug)]
 pub enum ConfigMutationError {
     Rejected(String),
@@ -701,14 +732,13 @@ async fn apply_config_mutation(
     state: &Arc<AppState>,
     mutate: impl FnOnce(&mut Config) -> Result<(), String>,
 ) -> Result<RuntimeUpdate, ConfigMutationError> {
-    let _config_update = state.config_update.lock().await;
-    let old_config = state.config.read().await.clone();
-    let mut new_config = state.overlay_preferences(&old_config).await;
-    mutate(&mut new_config).map_err(ConfigMutationError::Rejected)?;
-    if new_config == old_config {
+    let mut edit = ConfigEdit::begin(state).await;
+    edit.candidate = state.overlay_preferences(edit.original()).await;
+    mutate(&mut edit.candidate).map_err(ConfigMutationError::Rejected)?;
+    if edit.candidate == *edit.original() {
         return Ok(RuntimeUpdate::None);
     }
-    apply_config_change(state, &old_config, &new_config)
+    edit.commit()
         .await
         .map(|effect| effect.runtime_update())
         .map_err(ConfigMutationError::Apply)
@@ -735,109 +765,6 @@ pub async fn apply_disabled_nodes(
     mutate: impl FnOnce(&mut Config) -> Result<(), String>,
 ) -> Result<RuntimeUpdate, ConfigMutationError> {
     apply_config_mutation(state, mutate).await
-}
-
-/// Caller must not already hold `config_update`.
-/// Returns `(previous, effective, runtime_update)` observed under that lock.
-/// `effective` may fall back to manual when the region has no nodes.
-pub async fn apply_node_select(
-    state: &Arc<AppState>,
-    node_select: NodeSelect,
-) -> Result<(NodeSelect, NodeSelect, RuntimeUpdate), ConfigMutationError> {
-    // Keep runtime activation and preference persistence under the same lock:
-    // concurrent strategy changes must not let an older request write its
-    // preference after a newer request has already become effective.
-    let _config_update = state.config_update.lock().await;
-    let old_config = state.config.read().await.clone();
-    let previous = *state.node_select_preference.read().await;
-    let preference_path = &state.runtime_paths.node_select_preference;
-    let preference_snapshot = read_file_snapshot(preference_path)
-        .await
-        .map_err(ConfigMutationError::Apply)?;
-
-    // Persistence is part of accepting the request. Do it before changing the
-    // runtime, then restore it if runtime activation fails.
-    if let Err(save_err) = save_node_select_preference(state, node_select).await {
-        return match restore_file_snapshot(preference_path, preference_snapshot.as_deref()).await {
-            Ok(()) => Err(ConfigMutationError::Apply(save_err)),
-            Err(rollback_err) => Err(ConfigMutationError::Apply(AppError::message(format!(
-                "Failed to persist node-selection strategy: {save_err}. Preference rollback failed: {rollback_err}"
-            )))),
-        };
-    }
-    *state.node_select_preference.write().await = node_select;
-
-    let mut new_config = old_config.clone();
-    new_config.node_select = node_select;
-    let apply_result = if new_config == old_config {
-        Ok(RuntimeUpdate::None)
-    } else {
-        apply_config_change(state, &old_config, &new_config)
-            .await
-            .map(|effect| effect.runtime_update())
-    };
-    let update = match apply_result {
-        Ok(update) => update,
-        Err(apply_err) => {
-            *state.node_select_preference.write().await = previous;
-            return match restore_file_snapshot(preference_path, preference_snapshot.as_deref()).await
-            {
-                Ok(()) => Err(ConfigMutationError::Apply(apply_err)),
-                Err(rollback_err) => Err(ConfigMutationError::Apply(AppError::message(format!(
-                    "Failed to apply node-selection strategy: {apply_err}. Preference rollback failed: {rollback_err}"
-                )))),
-            };
-        }
-    };
-    let effective = state.config.read().await.node_select;
-    Ok((previous, effective, update))
-}
-
-/// 最高倍率与节点选择共享同一事务和平台持久化语义。None 表示不限。
-pub async fn apply_max_multiplier(
-    state: &Arc<AppState>,
-    max_multiplier: Option<NodeMultiplier>,
-) -> Result<(Option<NodeMultiplier>, RuntimeUpdate), ConfigMutationError> {
-    let _config_update = state.config_update.lock().await;
-    let old_config = state.config.read().await.clone();
-    let previous = *state.max_multiplier_preference.read().await;
-    let preference_path = &state.runtime_paths.max_multiplier_preference;
-    let preference_snapshot = read_file_snapshot(preference_path)
-        .await
-        .map_err(ConfigMutationError::Apply)?;
-
-    if let Err(save_err) = save_max_multiplier_preference(state, max_multiplier).await {
-        return match restore_file_snapshot(preference_path, preference_snapshot.as_deref()).await {
-            Ok(()) => Err(ConfigMutationError::Apply(save_err)),
-            Err(rollback_err) => Err(ConfigMutationError::Apply(AppError::message(format!(
-                "Failed to persist max-multiplier preference: {save_err}. Preference rollback failed: {rollback_err}"
-            )))),
-        };
-    }
-    *state.max_multiplier_preference.write().await = max_multiplier;
-
-    let mut new_config = old_config.clone();
-    new_config.max_multiplier = max_multiplier;
-    let apply_result = if new_config == old_config {
-        Ok(RuntimeUpdate::None)
-    } else {
-        apply_config_change(state, &old_config, &new_config)
-            .await
-            .map(|effect| effect.runtime_update())
-    };
-
-    match apply_result {
-        Ok(update) => Ok((previous, update)),
-        Err(apply_err) => {
-            *state.max_multiplier_preference.write().await = previous;
-            match restore_file_snapshot(preference_path, preference_snapshot.as_deref()).await {
-                Ok(()) => Err(ConfigMutationError::Apply(apply_err)),
-                Err(rollback_err) => Err(ConfigMutationError::Apply(AppError::message(format!(
-                    "Failed to apply max multiplier: {apply_err}. Preference rollback failed: {rollback_err}"
-                )))),
-            }
-        }
-    }
 }
 
 /// 只用本地材料把磁盘 config.json 恢复到变更前状态：优先内存快照，其次缓存。

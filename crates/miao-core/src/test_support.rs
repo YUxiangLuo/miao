@@ -48,6 +48,30 @@ pub fn app_state(config: Config) -> Arc<AppState> {
     )
 }
 
+/// New transaction tests own every path (including preferences) and keep the
+/// temporary profile alive until all work has completed. No kernel is started.
+pub fn isolated_stopped_state(config: Config) -> (tempfile::TempDir, Arc<AppState>) {
+    let root = tempfile::tempdir().unwrap();
+    let config_path = root.path().join("config.yaml");
+    let runtime_dir = root.path().join("runtime");
+    std::fs::create_dir_all(&runtime_dir).unwrap();
+    let state = Arc::new(
+        AppState::with_config_layers(
+            StableConfig::from(&config),
+            config,
+            config_path.clone(),
+            root.path().join("volatile.yaml"),
+            RuntimePaths::new(runtime_dir, &config_path),
+        )
+        .unwrap(),
+    );
+    state
+        .initializing
+        .store(false, std::sync::atomic::Ordering::Relaxed);
+    state.lifecycle.request_running(false);
+    (root, state)
+}
+
 pub async fn reset_version_cache(state: &Arc<AppState>) {
     state
         .version_cache

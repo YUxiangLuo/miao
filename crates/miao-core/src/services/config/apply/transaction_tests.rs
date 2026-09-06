@@ -144,6 +144,36 @@ async fn stopped_refresh_commit_failure_restores_runtime_files_and_phase() {
 }
 
 #[tokio::test]
+async fn stopped_refresh_surfaces_rollback_failure_and_still_restores_bindings() {
+    let (root, state, config) = refresh_commit_failure_fixture("rollback-failure").await;
+    state.lifecycle.request_running(false);
+    // Sabotage only this temporary profile, after its checkpoint is captured.
+    // A validation error plus an unwritable restore target must report both.
+    tokio::fs::write(state.runtime_paths.runtime_dir.join("sing-box"),
+        b"#!/bin/sh\nbase=$(dirname \"$0\")\nrm -f \"$base/config.json\"\nmkdir \"$base/config.json\"\nexit 1\n",
+    ).await.unwrap();
+    let error = regenerate_preserving_service_state(&config, &state)
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(
+        error.contains("Config validation or installation failed"),
+        "{error}"
+    );
+    assert!(error.contains("Runtime rollback failed"), "{error}");
+    assert_eq!(
+        tokio::fs::read(&state.runtime_paths.node_bindings)
+            .await
+            .unwrap(),
+        br#"{"marker":"old-bindings"}"#
+    );
+    assert_eq!(*state.config.read().await, config);
+    assert!(state.sing_process.lock().await.is_none());
+    assert!(!state.lifecycle.snapshot().ready);
+    tokio::fs::remove_dir_all(root).await.unwrap();
+}
+
+#[tokio::test]
 async fn persistent_save_failure_reactivates_previous_runtime_and_restores_bindings() {
     let unique = format!(
         "miao-transaction-{}-{}",
@@ -282,7 +312,7 @@ async fn unchanged_runtime_bytes_still_start_a_missing_desired_process() {
         .unwrap(),
     );
 
-    regenerate_without_restart_runtime(&config, &state, SubSource::Fetch)
+    regenerate_without_restart_runtime(&config, &state, SubSource::SnapshotOrLocal)
         .await
         .unwrap();
     assert!(!is_sing_box_running(&state).await);

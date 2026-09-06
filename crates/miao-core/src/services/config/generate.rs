@@ -138,8 +138,9 @@ impl SubFetchRetry {
     }
 }
 
-/// 拉取订阅并写出 sing-box 配置；订阅全失败时按 retry 预算退避重试。
-/// 返回是否拿到订阅节点，以及实际生效的 node_select。
+/// Test convenience for fetch + generation. Production explicitly separates
+/// fetching from generation so installation cannot perform locked network I/O.
+#[cfg(test)]
 pub async fn gen_config(
     config: &Config,
     state: &Arc<AppState>,
@@ -151,6 +152,7 @@ pub async fn gen_config(
 
 /// 只拉取订阅节点集（不写盘）：订阅全失败时按 retry 预算退避重试。
 /// 供「先拉取、后持锁落地」的调用方（启动后台刷新）把网络等待移出配置锁。
+#[cfg(test)]
 async fn fetch_sub_nodes(
     config: &Config,
     state: &Arc<AppState>,

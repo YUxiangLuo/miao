@@ -7,6 +7,34 @@ use crate::models::ApiResponse;
 
 pub type HandlerResult<T = ()> = Result<Json<ApiResponse<T>>, (StatusCode, Json<ApiResponse<T>>)>;
 
+/// The only mapping from application errors to HTTP status codes.
+pub fn command_result<T: Serialize>(
+    result: crate::services::commands::CommandResult<T>,
+) -> HandlerResult<T> {
+    use crate::services::commands::CommandErrorKind;
+    result.map(command_reply).map_err(|error| {
+        let status = match error.kind {
+            CommandErrorKind::InvalidInput => StatusCode::BAD_REQUEST,
+            CommandErrorKind::Conflict => StatusCode::CONFLICT,
+            CommandErrorKind::NotFound => StatusCode::NOT_FOUND,
+            CommandErrorKind::Internal => StatusCode::INTERNAL_SERVER_ERROR,
+            #[cfg(not(windows))]
+            CommandErrorKind::Upstream => StatusCode::BAD_GATEWAY,
+        };
+        status_error(status, error)
+    })
+}
+
+pub fn command_reply<T: Serialize>(
+    reply: crate::services::commands::CommandReply<T>,
+) -> Json<ApiResponse<T>> {
+    Json(ApiResponse {
+        success: true,
+        message: reply.message,
+        data: reply.data,
+    })
+}
+
 pub fn success<T: Serialize>(message: impl Display, data: T) -> Json<ApiResponse<T>> {
     Json(ApiResponse::success(message.to_string(), data))
 }
@@ -67,6 +95,30 @@ mod tests {
         assert!(!response.success);
         assert_eq!(response.message, "boom");
         assert!(response.data.is_none());
+    }
+
+    #[test]
+    fn application_errors_keep_the_http_status_and_envelope() {
+        use crate::services::commands::{CommandError, CommandErrorKind::*};
+        for (kind, expected) in [
+            (InvalidInput, StatusCode::BAD_REQUEST),
+            (Conflict, StatusCode::CONFLICT),
+            (NotFound, StatusCode::NOT_FOUND),
+            (Internal, StatusCode::INTERNAL_SERVER_ERROR),
+            #[cfg(not(windows))]
+            (Upstream, StatusCode::BAD_GATEWAY),
+        ] {
+            let (status, Json(response)) = super::command_result::<()>(Err(CommandError {
+                kind,
+                message: "unchanged message".into(),
+            }))
+            .err()
+            .unwrap();
+            assert_eq!(status, expected);
+            assert!(!response.success);
+            assert_eq!(response.message, "unchanged message");
+            assert!(response.data.is_none());
+        }
     }
 
     #[test]

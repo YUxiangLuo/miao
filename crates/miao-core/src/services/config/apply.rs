@@ -19,7 +19,7 @@ use crate::state::AppState;
 
 use super::bindings::save_node_bindings;
 use super::generate::{
-    gen_config, gen_config_from_fetch, gen_config_from_snapshot, publish_generation_diagnostics,
+    gen_config_from_fetch, gen_config_from_snapshot, publish_generation_diagnostics,
     record_fresh_snapshot, FetchedSubscriptions, GenConfigOutcome, SubFetchRetry,
 };
 use super::persist::{
@@ -101,26 +101,16 @@ pub struct RefreshOutcome {
     pub generated: Option<GenConfigOutcome>,
 }
 
-/// 生成配置时订阅节点集的来源：真拉取，或优先用上次拉取的快照零网络重建。
+/// Configuration installation accepts local or already fetched material only.
+/// There is deliberately no variant that can fetch while holding config_update.
 #[derive(Clone, Debug, PartialEq)]
 pub enum SubSource {
-    /// 真拉取（增删订阅/手动刷新/启动）
-    Fetch,
     /// 快照优先；缺失时仅使用可证明完整的本地手动节点材料，绝不持锁触网。
     /// （本地语义变更：节点选择/路由模式/规则/手动节点——切换不是刷新）
     SnapshotOrLocal,
     /// 已预拉取的订阅节点集（启动后台刷新：网络等待在配置锁外完成，
     /// 持锁落地阶段只复用结果，不再碰网络）
     Prefetched(FetchedSubscriptions),
-}
-
-/// 订阅列表没变就是本地语义变更，走快照重建；变了才需要真拉取
-pub(super) fn sub_source_for(old_config: &Config, new_config: &Config) -> SubSource {
-    if old_config.subs == new_config.subs {
-        SubSource::SnapshotOrLocal
-    } else {
-        SubSource::Fetch
-    }
 }
 
 /// 刷新后是否需要激活新配置：与当前运行字节不同才需要；读不出内容时保守激活
@@ -351,17 +341,8 @@ pub async fn refresh_subscriptions(
     source: SubSource,
 ) -> AppResult<RefreshOutcome> {
     let startup = matches!(policy, RefreshPolicy::Startup);
-    // 启动路径的订阅全失败多为「先于路由/DHCP 就绪」的瞬态，给退避预算；
-    // 手动刷新用户在场，失败即报，不重试
-    let retry = if startup {
-        SubFetchRetry::Startup
-    } else {
-        SubFetchRetry::None
-    };
-
     let active_bytes = snapshot_runtime_config(state).await;
     let generated = match source {
-        SubSource::Fetch => gen_config(config, state, retry).await,
         SubSource::SnapshotOrLocal => gen_config_from_snapshot(config, state).await,
         SubSource::Prefetched(nodes) => gen_config_from_fetch(config, state, nodes).await,
     }
@@ -440,13 +421,19 @@ pub async fn refresh_subscriptions(
     })
 }
 
+mod edit;
+mod preferences;
 mod transaction;
+pub(crate) use edit::ConfigEdit;
+pub use preferences::{apply_max_multiplier, apply_node_select};
 
+#[cfg(test)]
+pub use transaction::apply_config_change;
 #[cfg(all(test, unix))]
 pub(super) use transaction::regenerate_without_restart_runtime;
 pub use transaction::{
-    apply_config_change, apply_disabled_nodes, apply_max_multiplier, apply_node_select,
-    apply_route_mode, edit_subscriptions, refresh_subscriptions_foreground, ConfigMutationError,
+    apply_disabled_nodes, apply_route_mode, edit_subscriptions, refresh_subscriptions_foreground,
+    ConfigMutationError,
 };
 #[cfg(test)]
 pub(super) use transaction::{
@@ -454,6 +441,8 @@ pub(super) use transaction::{
     ConfigApplyMode,
 };
 
+#[cfg(test)]
+mod edit_tests;
 #[cfg(all(test, unix))]
 mod transaction_tests;
 

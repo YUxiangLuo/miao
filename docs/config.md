@@ -92,7 +92,7 @@ MCP 尽量与面板能力同构，工具按用途分为：
 - 规则：`list_rules`、`add_rule`、`delete_rule`
 - 管理：`set_mcp_enabled`、`deploy_vps`、`upgrade_miao`（平台不支持时返回明确错误）
 
-主题切换、弹窗和 PWA 安装属于浏览器本地 UI 状态，没有服务端语义，因此不暴露为 MCP 工具。分享链接解析也保留在浏览器端；MCP 调用者可自行解析后交给结构化的 `add_node` / `import_nodes`。节点/订阅/规则写操作复用面板 HTTP handler，不另造一套配置逻辑。
+主题切换、弹窗和 PWA 安装属于浏览器本地 UI 状态，没有服务端语义，因此不暴露为 MCP 工具。分享链接解析也保留在浏览器端；MCP 调用者可自行解析后交给结构化的 `add_node` / `import_nodes`。节点/订阅/规则写操作与 REST 共用 `services/commands` 业务服务，不调用 HTTP handler，也不另造一套配置逻辑；[事务与提交边界](runtime-state.md#业务入口与配置事务)由配置服务统一负责。
 
 连接时服务端通过 `instructions` 告知调用者：流量很可能正经过本代理，配置热应用可能影响连接；订阅 URL、连接记录和 VPS 密码属于敏感信息。停止服务、删除配置、部署 VPS、关闭 MCP、升级 Miao 等破坏性工具既在描述和 `annotations` 中标记，也要求 `confirm: true`；agent 必须先取得用户明确确认，不能自行确认。
 

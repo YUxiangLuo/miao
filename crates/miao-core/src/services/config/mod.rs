@@ -9,9 +9,11 @@ mod warnings;
 #[cfg(test)]
 mod tests;
 
+#[cfg(all(test, unix))]
+pub use apply::apply_config_change;
 pub use apply::{
-    apply_config_change, apply_disabled_nodes, apply_max_multiplier, apply_node_select,
-    apply_route_mode, edit_subscriptions, install_prepared_runtime, refresh_subscriptions,
+    apply_disabled_nodes, apply_max_multiplier, apply_node_select, apply_route_mode,
+    edit_subscriptions, install_prepared_runtime, refresh_subscriptions,
     refresh_subscriptions_foreground, ConfigMutationError, RefreshEffect, RefreshPolicy,
     RuntimeUpdate, SubSource,
 };
@@ -40,4 +42,5 @@ pub use warnings::{
 #[cfg(all(test, unix))]
 pub use apply::regenerate_preserving_service_state;
 
+pub(crate) use apply::ConfigEdit;
 pub(crate) use persist::write_file_atomic;

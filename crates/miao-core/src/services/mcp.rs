@@ -7,7 +7,6 @@ mod catalog;
 mod panel;
 
 use catalog::tools_catalog;
-use std::collections::HashSet;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
@@ -731,22 +730,9 @@ async fn tool_refresh_subscriptions(state: &Arc<AppState>) -> Result<JsonValue, 
 }
 
 async fn tool_list_rules(state: &Arc<AppState>) -> Result<JsonValue, String> {
-    let config = state.config.read().await.clone();
-    let skipped_rules = state.skipped_rules.lock().await;
-    let skipped_raws: HashSet<&str> = skipped_rules.iter().map(|rule| rule.raw.as_str()).collect();
-
-    let rules: Vec<_> = config
-        .custom_rules
-        .iter()
-        .enumerate()
-        .map(|(index, raw)| {
-            let mut info = crate::handlers::rules::describe_rule(index, raw);
-            info.skipped = skipped_raws.contains(raw.as_str());
-            info
-        })
-        .collect();
-
-    Ok(json!({ "rules": serde_json::to_value(rules).unwrap_or_default() }))
+    let rules =
+        panel::response_data(crate::services::commands::rules::get_rules(state.clone()).await)?;
+    Ok(json!({ "rules": rules }))
 }
 
 fn pagination_value(

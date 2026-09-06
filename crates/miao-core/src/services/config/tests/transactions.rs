@@ -35,34 +35,6 @@ async fn clearing_the_last_source_drops_node_bindings() {
 }
 
 #[test]
-fn sub_source_is_snapshot_when_subs_unchanged() {
-    let old = Config {
-        subs: vec!["https://a.example.com".to_string()],
-        ..Config::default()
-    };
-    // 节点选择/规则/MCP/手动节点等本地语义变更不动 subs → 快照重建
-    let mut new = old.clone();
-    new.mcp = true;
-    assert_eq!(sub_source_for(&old, &new), SubSource::SnapshotOrLocal);
-
-    let mut new = old.clone();
-    new.nodes.push("manual-node".to_string());
-    assert_eq!(sub_source_for(&old, &new), SubSource::SnapshotOrLocal);
-
-    // 增删订阅 → 必须真拉取
-    let mut new = old.clone();
-    new.subs.push("https://b.example.com".to_string());
-    assert_eq!(sub_source_for(&old, &new), SubSource::Fetch);
-
-    let new = Config {
-        subs: vec![],
-        nodes: vec!["manual-node".to_string()],
-        ..Config::default()
-    };
-    assert_eq!(sub_source_for(&old, &new), SubSource::Fetch);
-}
-
-#[test]
 fn unusable_node_warning_distinguishes_manual_and_subscription_configs() {
     let manual = Config {
         nodes: vec!["invalid-node".to_string()],
