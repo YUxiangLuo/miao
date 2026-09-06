@@ -11,6 +11,9 @@ use crate::models::{
 };
 use crate::paths::RuntimePaths;
 
+mod subscriptions;
+use subscriptions::SubscriptionRefresh;
+
 /// 应用状态容器 - 包含所有运行时状态
 /// 通过依赖注入传递，避免全局静态变量
 pub struct AppState {
@@ -41,8 +44,9 @@ pub struct AppState {
     /// and must discard their result when a newer user operation supersedes it.
     pub sub_refresh_generation: AtomicU64,
     pub sub_refresh_cancel: Notify,
-    /// Latest foreground refresh generation that fetched usable subscription
-    /// nodes and committed them. A foreground request can complete using only
+    pub subscription_refresh: SubscriptionRefresh,
+    /// Latest foreground refresh generation that accepted a subscription
+    /// response (including an empty list) and committed it. A foreground request can complete using only
     /// manual nodes after its subscription fetch failed; that must not cancel
     /// startup's network-recovery loop.
     pub sub_refresh_success_generation: AtomicU64,
@@ -136,6 +140,7 @@ impl AppState {
             proxy_selection_generation: AtomicU64::new(0),
             sub_refresh_generation: AtomicU64::new(0),
             sub_refresh_cancel: Notify::new(),
+            subscription_refresh: SubscriptionRefresh::default(),
             sub_refresh_success_generation: AtomicU64::new(0),
             sub_status: Mutex::new(HashMap::new()),
             sub_nodes_cache: RwLock::new(None),
@@ -159,6 +164,7 @@ impl AppState {
 
     pub fn next_sub_refresh(&self) -> u64 {
         let generation = self.sub_refresh_generation.fetch_add(1, Ordering::Relaxed) + 1;
+        self.subscription_refresh.reset(generation);
         self.sub_refresh_cancel.notify_waiters();
         generation
     }

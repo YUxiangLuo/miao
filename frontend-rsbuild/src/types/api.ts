@@ -9,6 +9,20 @@ export type NodeSelect = "manual" | "fastest_hk" | "fastest_jp" | "fastest_tw" |
 
 export type RuntimePhase = "initializing" | "extracting" | "validating" | "fetching_subscriptions" | "starting" | "ready" | "refreshing_subscriptions" | "applying_config" | "reloading" | "stopping" | "stopped" | "failed";
 
+export type SubscriptionFailureKind = "network" | "http" | "timeout" | "parse";
+
+export type SubscriptionFetchOutcome = "not_requested" | "success" | "empty" | "partial_failure" | "failed";
+
+export type SubscriptionFetchReport = { successful_sources: number, failed_sources: number,
+/**
+ * Before user disable/region/multiplier filters.
+ */
+fresh_nodes: number, cached_nodes: number, };
+
+export type SubscriptionRefreshPhase = "idle" | "fetching" | "waiting" | "completed" | "failed";
+
+export type SubscriptionRefreshStatus = { phase: SubscriptionRefreshPhase, outcome: SubscriptionFetchOutcome, report: SubscriptionFetchReport, retry_in_secs: number | null, };
+
 export type RuntimeWarningSeverity = "warning" | "error" | "info";
 
 export type RuntimeWarning = { code: string, message: string, severity: RuntimeWarningSeverity, };
@@ -24,7 +38,7 @@ data_revision: number, running: boolean,
  * True only after the managed sing-box instance passed its startup
  * readiness check. A spawned process may be `running` while this is false.
  */
-ready: boolean, phase: RuntimePhase, initializing: boolean, route_mode: RouteMode,
+ready: boolean, phase: RuntimePhase, subscription_refresh: SubscriptionRefreshStatus, initializing: boolean, route_mode: RouteMode,
 /**
  * 当前运行配置实际生效的选择策略；地区无候选时可能回退 manual。
  */
@@ -63,11 +77,16 @@ skipped: boolean, raw: string, };
 
 export type SubscriptionState = "pending" | "refreshing" | "ready" | "failed";
 
-export type SubStatus = { url: string, success: boolean, node_count: number,
+export type SubStatus = { url: string,
+/**
+ * Accepted subscription response, including an authoritative empty list.
+ * `node_count` may be nonzero on failure when cached nodes were retained.
+ */
+success: boolean, node_count: number,
 /**
  * 该订阅被禁用的节点数（易变层 disabled_nodes 中匹配此订阅的条目数）
  */
-disabled_count: number, state: SubscriptionState, error?: string, };
+disabled_count: number, state: SubscriptionState, failure_kind?: SubscriptionFailureKind, error?: string, };
 
 export type SubNodeInfo = { name: string, server: string, server_port: number, node_type: string, disabled: boolean, };
 

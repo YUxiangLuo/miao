@@ -31,6 +31,7 @@ pub async fn edit_subscriptions<T>(
         return Ok((value, RuntimeUpdate::None));
     }
     let generation = state.next_sub_refresh();
+    let _foreground = state.subscription_refresh.foreground(generation);
     drop(guard);
     let fetched = super::super::generate::fetch_sub_nodes_if_current(
         &candidate,
@@ -49,7 +50,7 @@ pub async fn edit_subscriptions<T>(
     new_config
         .disabled_nodes
         .retain(|entry| new_config.subs.contains(&entry.sub));
-    let has_fresh_nodes = fetched.has_fresh_nodes;
+    let accepted_response = fetched.report.accepted_response();
     let update = if new_config.subs == old_config.subs {
         regenerate_from_source(
             &old_config,
@@ -69,7 +70,7 @@ pub async fn edit_subscriptions<T>(
         .map(|effect| effect.runtime_update())
     }
     .map_err(ConfigMutationError::Apply)?;
-    if has_fresh_nodes {
+    if accepted_response {
         state
             .sub_refresh_success_generation
             .store(generation, Ordering::Relaxed);
@@ -122,7 +123,7 @@ async fn regenerate_from_source(
     let snapshot = snapshot_runtime_config(state).await;
     let bindings_snapshot = read_file_snapshot(&state.runtime_paths.node_bindings).await?;
 
-    let (runtime_update, has_sub_nodes) = if should_run {
+    let (runtime_update, accepted_response) = if should_run {
         match regenerate_and_restart_runtime(config, state, RefreshPolicy::Manual, source).await {
             Ok(refresh) => {
                 let outcome = refresh
@@ -143,15 +144,16 @@ async fn regenerate_from_source(
                     .await);
                 }
                 let runtime_update = if refresh.effect == RefreshEffect::Activated {
-                    finalize_started_config(config, state, outcome.has_sub_nodes).await;
+                    finalize_started_config(config, state, outcome.subscription_fetch_failed())
+                        .await;
                     refresh.runtime_update
                 } else {
-                    update_config_warning(config, state, outcome.has_sub_nodes).await;
+                    update_config_warning(config, state, outcome.subscription_fetch_failed()).await;
                     state.runtime_ready.store(true, Ordering::Relaxed);
                     state.set_runtime_phase(RuntimePhase::Ready);
                     RuntimeUpdate::None
                 };
-                (runtime_update, outcome.has_sub_nodes)
+                (runtime_update, outcome.accepted_subscription_response())
             }
             Err(err) => {
                 // Candidate validation never replaces config.json. Activation
@@ -176,7 +178,9 @@ async fn regenerate_from_source(
             }
         }
     } else {
-        let has_sub_nodes = match regenerate_without_restart_runtime(config, state, source).await {
+        let accepted_response = match regenerate_without_restart_runtime(config, state, source)
+            .await
+        {
             Ok(outcome) => {
                 if let Err(commit_err) = commit_foreground_refresh(config, state, &outcome).await {
                     error!(error = %commit_err, "Stopped runtime refresh could not commit effective preferences; restoring previous runtime files");
@@ -191,9 +195,9 @@ async fn regenerate_from_source(
                     )
                     .await);
                 }
-                update_config_warning(config, state, outcome.has_sub_nodes).await;
+                update_config_warning(config, state, outcome.subscription_fetch_failed()).await;
                 state.set_runtime_phase(RuntimePhase::Stopped);
-                outcome.has_sub_nodes
+                outcome.accepted_subscription_response()
             }
             Err(err) => {
                 error!(error = %err, "Failed to regenerate config, restoring previous runtime config");
@@ -209,10 +213,10 @@ async fn regenerate_from_source(
                 return Err(err);
             }
         };
-        (RuntimeUpdate::None, has_sub_nodes)
+        (RuntimeUpdate::None, accepted_response)
     };
 
-    if has_sub_nodes {
+    if accepted_response {
         state
             .sub_refresh_success_generation
             .store(refresh_generation, Ordering::Relaxed);
@@ -223,9 +227,9 @@ async fn regenerate_from_source(
 pub(in crate::services::config) async fn finalize_started_config(
     config: &Config,
     state: &Arc<AppState>,
-    has_sub_nodes: bool,
+    subscription_fetch_failed: bool,
 ) {
-    update_config_warning(config, state, has_sub_nodes).await;
+    update_config_warning(config, state, subscription_fetch_failed).await;
 
     spawn_restore_last_proxy(state);
 }
@@ -274,16 +278,18 @@ async fn rollback_failed_foreground_commit(
     }
 }
 
-async fn update_config_warning(config: &Config, state: &Arc<AppState>, has_sub_nodes: bool) {
+async fn update_config_warning(
+    config: &Config,
+    state: &Arc<AppState>,
+    subscription_fetch_failed: bool,
+) {
     save_config_cache(state).await;
 
     let effective = state.config.read().await.node_select;
     *state.config_warning.lock().await = if !config.node_select.is_manual() && effective.is_manual()
     {
         Some(REGION_FALLBACK.to_string())
-    } else if has_sub_nodes {
-        None
-    } else if !config.subs.is_empty() {
+    } else if subscription_fetch_failed && !config.subs.is_empty() {
         Some(ALL_SUBS_FAILED.to_string())
     } else {
         None
@@ -555,14 +561,29 @@ async fn apply_config_change_with_source(
                     publish_generation_diagnostics(state, &outcome).await;
                     if should_run {
                         if runtime_update.updated() {
-                            finalize_started_config(new_config, state, outcome.has_sub_nodes).await;
+                            finalize_started_config(
+                                new_config,
+                                state,
+                                outcome.subscription_fetch_failed(),
+                            )
+                            .await;
                         } else {
-                            update_config_warning(new_config, state, outcome.has_sub_nodes).await;
+                            update_config_warning(
+                                new_config,
+                                state,
+                                outcome.subscription_fetch_failed(),
+                            )
+                            .await;
                             state.runtime_ready.store(true, Ordering::Relaxed);
                             state.set_runtime_phase(RuntimePhase::Ready);
                         }
                     } else {
-                        update_config_warning(new_config, state, outcome.has_sub_nodes).await;
+                        update_config_warning(
+                            new_config,
+                            state,
+                            outcome.subscription_fetch_failed(),
+                        )
+                        .await;
                         state.set_runtime_phase(RuntimePhase::Stopped);
                     }
                     Ok(if should_run {
@@ -929,7 +950,7 @@ async fn restart_with_previous_config(
     start_sing_internal(state)
         .await
         .map_err(|e| AppError::context("Failed to restart sing-box with previous config", e))?;
-    finalize_started_config(old_config, state, outcome.has_sub_nodes).await;
+    finalize_started_config(old_config, state, outcome.subscription_fetch_failed()).await;
     Ok(())
 }
 
@@ -955,7 +976,7 @@ async fn restore_previous_stopped_config(
             let outcome =
                 regenerate_without_restart_runtime(old_config, state, SubSource::SnapshotOrLocal)
                     .await?;
-            update_config_warning(old_config, state, outcome.has_sub_nodes).await;
+            update_config_warning(old_config, state, outcome.subscription_fetch_failed()).await;
             state.set_runtime_phase(RuntimePhase::Stopped);
             Ok(())
         }

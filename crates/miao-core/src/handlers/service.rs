@@ -36,6 +36,7 @@ pub async fn get_status(State(state): State<Arc<AppState>>) -> Json<ApiResponse<
             running,
             ready: state.runtime_ready.load(Ordering::Relaxed),
             phase: state.runtime_phase(),
+            subscription_refresh: state.subscription_refresh.snapshot(),
             initializing,
             route_mode: config.route_mode,
             node_select: config.node_select,

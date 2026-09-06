@@ -2,7 +2,7 @@ import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, rs } from '@rstest/core'
 import { SubsCard } from './SubsCard'
-import { subMock, subNodeMock } from '../testFixtures'
+import { statusMock, subMock, subNodeMock } from '../testFixtures'
 
 const subs = [
   subMock({ url: 'https://example.com/subscription-token-abcdef', node_count: 42 }),
@@ -51,6 +51,13 @@ describe('SubsCard subscription detail entry', () => {
     expect(screen.getByRole('button', { name: /42 个节点 · 禁用 2/ })).toBeInTheDocument()
   })
 
+  it('shows successful empty responses without a failure badge', () => {
+    renderCard({ subs: [subMock({ success: true, state: 'ready', node_count: 0 })] })
+    expect(screen.getByText('获取成功，暂无代理节点')).toBeInTheDocument()
+    expect(screen.queryByText('获取失败')).not.toBeInTheDocument()
+    expect(document.querySelector('.status-icon-badge.error')).not.toBeInTheDocument()
+  })
+
   it('keeps the node count non-clickable for failed subscriptions', () => {
     renderCard({
       subs: [subMock({ success: false, node_count: 0, state: 'failed', error: 'boom' })],
@@ -62,6 +69,14 @@ describe('SubsCard subscription detail entry', () => {
 })
 
 describe('SubsCard header actions', () => {
+  it('shows background retry independently and leaves manual refresh available', () => {
+    renderCard({ refreshStatus: {
+      ...statusMock().subscription_refresh, phase: 'waiting', retry_in_secs: 1800,
+    } })
+    expect(screen.getByRole('status')).toHaveTextContent('后台等待重试（约 30 分钟后），可手动刷新')
+    expect(screen.getByRole('button', { name: '刷新订阅' })).toBeEnabled()
+  })
+
   it('places the refresh button next to the title and add at the far right', async () => {
     const user = userEvent.setup()
     const { props } = renderCard()

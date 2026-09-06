@@ -10,6 +10,7 @@ use super::{initialize_runtime_locked, recover_data_plane_once};
 
 #[cfg(unix)]
 mod background_retry;
+mod subscription_state;
 
 #[tokio::test]
 async fn incompatible_cache_is_rejected_before_it_replaces_active_config() {
@@ -755,6 +756,7 @@ async fn foreground_refresh_supersedes_an_older_startup_fetch() {
             node_count: 99,
             disabled_count: 0,
             state: crate::models::SubscriptionState::Ready,
+            failure_kind: None,
             error: None,
         },
     );

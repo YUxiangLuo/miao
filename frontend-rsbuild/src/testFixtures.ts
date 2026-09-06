@@ -10,6 +10,10 @@ export function statusMock(overrides: Partial<StatusData> = {}): StatusData {
   const nodeSelect = overrides.node_select ?? 'manual'
   return {
     data_revision: 0,
+    subscription_refresh: {
+      phase: 'idle', outcome: 'not_requested', retry_in_secs: null,
+      report: { successful_sources: 0, failed_sources: 0, fresh_nodes: 0, cached_nodes: 0 },
+    },
     running,
     ready,
     phase: overrides.phase ?? (ready ? 'ready' : initializing ? 'initializing' : 'stopped'),

@@ -103,6 +103,7 @@ async fn unusable_config_is_persisted_and_stale_runtime_files_are_removed() {
             node_count: 0,
             disabled_count: 0,
             state: crate::models::SubscriptionState::Failed,
+            failure_kind: Some(crate::models::SubscriptionFailureKind::Network),
             error: Some("fetch failed".to_string()),
         },
     );

@@ -5,7 +5,7 @@ import { Button, SectionCard } from './ui'
 import { useDialog } from '../hooks/useDialog'
 import { classNames, maskSubscription } from '../utils'
 import { SubDetailModal } from './SubDetailModal'
-import type { SubStatus } from '../types/api'
+import type { SubStatus, SubscriptionRefreshStatus } from '../types/api'
 
 interface SubRowProps {
   sub: SubStatus
@@ -51,7 +51,7 @@ const SubRow = memo(function SubRow({ sub, onDelete, onShowNodes, disabled }: Su
                 : state === 'refreshing'
                   ? sub.success ? `正在刷新，上次获取 ${sub.node_count} 个节点` : '正在获取订阅'
                   : sub.success
-                    ? `${sub.node_count} 个节点`
+                    ? sub.node_count > 0 ? `${sub.node_count} 个节点` : '获取成功，暂无代理节点'
                     : sub.error || '获取失败'}
             </div>
           )}
@@ -144,6 +144,7 @@ function AddSubModal({ open, loading, onClose, onSubmit }: AddSubModalProps) {
 
 export interface SubsCardProps {
   subs: SubStatus[]
+  refreshStatus?: SubscriptionRefreshStatus
   pendingActions: ReadonlySet<string>
   onAddSub: (url: string) => Promise<boolean>
   onDeleteSub: (url: string) => void
@@ -152,7 +153,7 @@ export interface SubsCardProps {
   isInitializing: boolean
 }
 
-export function SubsCard({ subs, pendingActions, onAddSub, onDeleteSub, onRefreshSubs, onToggleNodeDisabled, isInitializing }: SubsCardProps) {
+export function SubsCard({ subs, refreshStatus, pendingActions, onAddSub, onDeleteSub, onRefreshSubs, onToggleNodeDisabled, isInitializing }: SubsCardProps) {
   const [showAdd, setShowAdd] = useState(false)
   const [detailSub, setDetailSub] = useState<SubStatus | null>(null)
   const refreshing = pendingActions.has('refreshSubs')
@@ -188,6 +189,14 @@ export function SubsCard({ subs, pendingActions, onAddSub, onDeleteSub, onRefres
       }
     >
       <div className="list-stack">
+        {subs.length > 0 && refreshStatus?.phase === 'waiting' && (
+          <div className="list-row" role="status">
+            <div className="list-row-meta">
+              后台等待重试{refreshStatus.retry_in_secs != null && refreshStatus.retry_in_secs > 0
+                ? `（约 ${Math.ceil(refreshStatus.retry_in_secs / 60)} 分钟后）` : ''}，可手动刷新
+            </div>
+          </div>
+        )}
         {subs.length === 0 
           ? <div className="empty-block">暂无订阅</div> 
           : subs.map((sub) => (

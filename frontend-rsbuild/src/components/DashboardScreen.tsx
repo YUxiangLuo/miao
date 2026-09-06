@@ -113,6 +113,7 @@ export function DashboardScreen({ app }: { app: ReturnType<typeof useAppControll
 
             <SubsCard
               subs={app.subs}
+              refreshStatus={app.status.subscription_refresh}
               pendingActions={app.pendingActions}
               onAddSub={app.handleAddSubscription}
               onDeleteSub={app.handleOpenDeleteSubConfirm}

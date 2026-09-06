@@ -16,5 +16,7 @@ pub const SUBS_REFRESHING_MANUAL: &str = "订阅正在后台刷新，暂时使�
 // Keep the interval in sync with runtime/startup.rs::SUBS_SLOW_RETRY_INTERVAL.
 pub const SUBS_RETRYING_SLOWLY: &str =
     "订阅刷新失败，继续使用当前配置；已结束启动重试，每 30 分钟后台重试，也可手动刷新";
+pub const SUBS_NO_USABLE_KEEP_CACHE: &str =
+    "订阅已获取，但解析和筛选后没有可用节点；继续使用当前配置，请检查订阅内容或禁用设置，也可手动刷新";
 pub const NO_USABLE_MANUAL: &str = "没有可用的手动节点，请检查配置或添加节点";
-pub const NO_USABLE_SUBS: &str = "所有订阅获取失败且没有可用手动节点，请检查订阅或添加节点";
+pub const NO_USABLE_SUBS: &str = "当前没有可用的订阅或手动节点，请检查订阅内容、禁用设置或添加节点";

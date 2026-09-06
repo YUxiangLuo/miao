@@ -42,6 +42,8 @@ async fn exhausted_startup_retries_preserve_manual_runtime_and_later_recover_qui
 
     let (requests, mut received) = tokio::sync::mpsc::unbounded_channel();
     let release = Arc::new(tokio::sync::Notify::new());
+    let first_release = Arc::new(tokio::sync::Notify::new());
+    let first_request_release = first_release.clone();
     let release_request = release.clone();
     let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let request_calls = calls.clone();
@@ -49,11 +51,15 @@ async fn exhausted_startup_retries_preserve_manual_runtime_and_later_recover_qui
         "/sub",
         get(move || {
             let release = release_request.clone();
+            let first_release = first_request_release.clone();
             let requests = requests.clone();
             let calls = request_calls.clone();
             async move {
                 let attempt = calls.fetch_add(1, Ordering::Relaxed) + 1;
                 requests.send(attempt).unwrap();
+                if attempt == 1 {
+                    first_release.notified().await;
+                }
                 // Hold low-frequency requests so the test can inspect phase
                 // while HTTP is in flight, rather than missing a brief flicker.
                 if attempt > FAST_REQUESTS {
@@ -81,7 +87,28 @@ async fn exhausted_startup_retries_preserve_manual_runtime_and_later_recover_qui
         super::super::refresh_subscriptions_in_background(&config, &background_state).await;
     });
 
+    assert_eq!(
+        tokio::time::timeout(std::time::Duration::from_secs(2), received.recv())
+            .await
+            .unwrap(),
+        Some(1)
+    );
+    assert_eq!(
+        state.runtime_phase(),
+        RuntimePhase::Ready,
+        "even the first fetch must not borrow the proxy phase"
+    );
+    assert_eq!(
+        state.subscription_refresh.snapshot().phase,
+        crate::models::SubscriptionRefreshPhase::Fetching
+    );
+    first_release.notify_one();
+
     wait_for_slow_retry(&state).await;
+    assert_eq!(
+        state.subscription_refresh.snapshot().phase,
+        crate::models::SubscriptionRefreshPhase::Waiting
+    );
     assert_eq!(calls.load(Ordering::Relaxed), FAST_REQUESTS);
     assert!(state.runtime_ready.load(Ordering::Relaxed));
     assert_eq!(state.runtime_phase(), RuntimePhase::Ready);
@@ -120,6 +147,10 @@ async fn exhausted_startup_retries_preserve_manual_runtime_and_later_recover_qui
         .unwrap()
         .unwrap();
     assert_eq!(calls.load(Ordering::Relaxed), FAST_REQUESTS + 2);
+    assert_eq!(
+        state.subscription_refresh.snapshot().phase,
+        crate::models::SubscriptionRefreshPhase::Completed
+    );
     assert_eq!(state.runtime_phase(), RuntimePhase::Ready);
     assert!(state.config_warning.lock().await.is_none());
     assert_eq!(
@@ -156,6 +187,10 @@ async fn stopping_service_interrupts_the_slow_retry_wait() {
         .unwrap();
     assert_eq!(calls.load(Ordering::Relaxed), FAST_REQUESTS);
     assert_eq!(state.runtime_phase(), RuntimePhase::Stopped);
+    assert_eq!(
+        state.subscription_refresh.snapshot(),
+        crate::models::SubscriptionRefreshStatus::default()
+    );
     let _ = tokio::fs::remove_dir_all(root).await;
 }
 
@@ -227,6 +262,11 @@ async fn failed_foreground_refresh_does_not_reset_the_fast_retry_budget() {
         .await
         .unwrap();
     tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+    assert_eq!(
+        state.subscription_refresh.snapshot().phase,
+        crate::models::SubscriptionRefreshPhase::Waiting,
+        "a foreground failure must restore the original background wait projection"
+    );
     assert_eq!(
         calls.load(Ordering::Relaxed),
         FAST_REQUESTS + 1,

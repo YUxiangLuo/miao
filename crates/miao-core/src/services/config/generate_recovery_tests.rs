@@ -61,12 +61,35 @@ async fn failed_sources_keep_nodes_but_successful_empty_sources_replace_them() {
         .await
         .unwrap();
     assert!(partial.has_sub_nodes);
+    assert_eq!(
+        partial.subscription_fetch.unwrap().outcome(),
+        crate::models::SubscriptionFetchOutcome::PartialFailure
+    );
     assert!(partial.skipped_rules.is_empty());
     assert_eq!(partial.fresh_sub_nodes.as_ref().unwrap().len(), 2);
     let failed_status = state.sub_status.lock().await[&config.subs[1]].clone();
     assert!(!failed_status.success);
     assert_eq!(failed_status.node_count, 1);
+    assert_eq!(
+        failed_status.failure_kind,
+        Some(crate::models::SubscriptionFailureKind::Http)
+    );
     record_fresh_snapshot(&config, &state, &partial).await;
+
+    let only_failed_source = Config {
+        subs: vec![config.subs[1].clone()],
+        ..config.clone()
+    };
+    let cached_only = gen_config(&only_failed_source, &state, SubFetchRetry::None)
+        .await
+        .unwrap();
+    assert!(cached_only.has_sub_nodes, "cached nodes are available");
+    assert!(
+        cached_only.subscription_fetch_failed(),
+        "cached nodes are not fresh success"
+    );
+    assert!(!cached_only.accepted_subscription_response());
+    assert_eq!(cached_only.subscription_fetch.unwrap().cached_nodes, 1);
 
     for failure in [3, 4] {
         mode.store(failure, Ordering::Relaxed);
@@ -78,6 +101,10 @@ async fn failed_sources_keep_nodes_but_successful_empty_sources_replace_them() {
             "unparseable nodes are not an intentional empty list"
         );
         assert_eq!(malformed.fresh_sub_nodes.as_ref().unwrap().len(), 2);
+        assert_eq!(
+            state.sub_status.lock().await[&config.subs[1]].failure_kind,
+            Some(crate::models::SubscriptionFailureKind::Parse)
+        );
     }
 
     // A failed subscription explicitly removed by the user must not reappear.
@@ -93,6 +120,11 @@ async fn failed_sources_keep_nodes_but_successful_empty_sources_replace_them() {
         .await
         .unwrap();
     assert_eq!(empty.skipped_rules.len(), 1);
+    let empty_status = state.sub_status.lock().await[&config.subs[1]].clone();
+    assert!(empty_status.success);
+    assert_eq!(empty_status.state, crate::models::SubscriptionState::Ready);
+    assert_eq!(empty_status.node_count, 0);
+    assert_eq!(empty_status.failure_kind, None);
     record_fresh_snapshot(&config, &state, &empty).await;
     let local = gen_config_from_snapshot(&config, &state).await.unwrap();
     assert_eq!(

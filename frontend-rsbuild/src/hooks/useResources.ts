@@ -7,6 +7,10 @@ import type { ApiResponse, NodeInfo, RuleInfo, StatusData, SubStatus, VersionInf
 // （消费方判断 `!== false`）；platform 兜底与 ruleFieldOptions 的默认参数一致。
 const INITIAL_STATUS: StatusData = {
   data_revision: 0,
+  subscription_refresh: {
+    phase: 'idle', outcome: 'not_requested', retry_in_secs: null,
+    report: { successful_sources: 0, failed_sources: 0, fresh_nodes: 0, cached_nodes: 0 },
+  },
   running: false,
   ready: false,
   phase: 'initializing',

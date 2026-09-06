@@ -50,6 +50,7 @@ pub async fn get_subs(State(state): State<Arc<AppState>>) -> Json<ApiResponse<Ve
                 node_count: 0,
                 disabled_count: 0,
                 state: SubscriptionState::Pending,
+                failure_kind: None,
                 error: None,
             });
             status.disabled_count = disabled_counts.get(url.as_str()).copied().unwrap_or(0);

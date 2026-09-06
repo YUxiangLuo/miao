@@ -370,7 +370,7 @@ pub async fn refresh_subscriptions(
 
     let runtime_ready =
         state.runtime_ready.load(Ordering::Relaxed) && is_sing_box_running(state).await;
-    if startup && !generated.has_sub_nodes && !config.subs.is_empty() {
+    if startup && generated.subscription_fetch_failed() {
         if runtime_ready {
             return Ok(RefreshOutcome {
                 effect: RefreshEffect::KeptRunningOnTotalFailure,

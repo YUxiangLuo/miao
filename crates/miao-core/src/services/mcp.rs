@@ -410,6 +410,7 @@ async fn tool_get_status(state: &Arc<AppState>) -> Result<JsonValue, String> {
         "running": running,
         "ready": ready,
         "phase": state.runtime_phase(),
+        "subscription_refresh": state.subscription_refresh.snapshot(),
         "initializing": state.initializing.load(Ordering::Relaxed),
         "route_mode": route_mode,
         "node_select": config.node_select,

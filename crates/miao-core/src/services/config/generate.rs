@@ -7,7 +7,8 @@ use tracing::{error, info, warn};
 
 use crate::error::AppResult;
 use crate::models::{
-    node_multiplier, Config, DisabledNode, NodeMultiplier, NodeSelect, SubStatus, SubscriptionState,
+    node_multiplier, Config, DisabledNode, NodeMultiplier, NodeSelect, SubStatus,
+    SubscriptionFailureKind, SubscriptionFetchReport, SubscriptionState,
 };
 use crate::services::subscription::{fetch_sub, is_informational_subscription_node};
 use crate::state::{AppState, SkippedRule};
@@ -19,7 +20,10 @@ use super::persist::{read_sub_nodes_snapshot, save_sub_nodes_snapshot, SubNodesS
 #[derive(Clone)]
 pub struct GenConfigOutcome {
     pub bytes: Vec<u8>,
+    /// Availability before user filters, including retained cached nodes.
     pub has_sub_nodes: bool,
+    /// None for local rebuilds; never infer network health from node count.
+    pub subscription_fetch: Option<SubscriptionFetchReport>,
     pub node_select: NodeSelect,
     pub skipped_rules: Vec<SkippedRule>,
     /// 完整可用节点池中识别出的倍率，供面板动态生成自动候选上限选项。
@@ -28,6 +32,18 @@ pub struct GenConfigOutcome {
     /// 校验通过/启动成功后由 record_fresh_snapshot 落盘，供本地语义变更零网络重建。
     pub fresh_sub_nodes: Option<Vec<FetchedNode>>,
     pub node_bindings: NodeTagBindings,
+}
+
+impl GenConfigOutcome {
+    pub fn subscription_fetch_failed(&self) -> bool {
+        self.subscription_fetch
+            .is_some_and(SubscriptionFetchReport::total_failure)
+    }
+
+    pub fn accepted_subscription_response(&self) -> bool {
+        self.subscription_fetch
+            .is_some_and(SubscriptionFetchReport::accepted_response)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -42,8 +58,7 @@ pub struct FetchedNode {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct FetchedSubscriptions {
     pub nodes: Vec<FetchedNode>,
-    pub has_fresh_nodes: bool,
-    pub successful_sources: Vec<String>,
+    pub report: SubscriptionFetchReport,
 }
 
 pub async fn gen_config_from_fetch(
@@ -52,7 +67,7 @@ pub async fn gen_config_from_fetch(
     fetched: FetchedSubscriptions,
 ) -> AppResult<GenConfigOutcome> {
     let mut outcome = build_prepared(config, state, fetched.nodes.clone()).await?;
-    outcome.has_sub_nodes = fetched.has_fresh_nodes;
+    outcome.subscription_fetch = Some(fetched.report);
     // Includes successful empty sources: an old snapshot must not resurrect
     // nodes intentionally removed by a provider on the next local edit.
     outcome.fresh_sub_nodes = Some(fetched.nodes);
@@ -141,7 +156,8 @@ async fn fetch_sub_nodes(
     state: &Arc<AppState>,
     retry: SubFetchRetry,
 ) -> FetchedSubscriptions {
-    fetch_sub_nodes_inner(config, state, retry, None).await
+    let generation = state.sub_refresh_generation.load(Ordering::Relaxed);
+    fetch_sub_nodes_if_current(config, state, retry, generation).await
 }
 
 /// Startup background work uses an optimistic generation while network I/O is
@@ -160,8 +176,14 @@ pub async fn fetch_sub_nodes_if_current(
     if !refresh_generation_is_current(state, Some(expected_generation)) {
         return FetchedSubscriptions::default();
     }
+    let activity = state.subscription_refresh.begin(expected_generation);
     tokio::select! {
-        result = fetch_sub_nodes_inner(config, state, retry, Some(expected_generation)) => result,
+        result = fetch_sub_nodes_inner(config, state, retry, Some(expected_generation)) => {
+            if refresh_generation_is_current(state, Some(expected_generation)) {
+                activity.finish(result.report);
+            }
+            result
+        },
         _ = cancelled => FetchedSubscriptions::default(),
     }
 }
@@ -181,22 +203,29 @@ async fn fetch_sub_nodes_inner(
     let deadline =
         matches!(retry, SubFetchRetry::Startup).then(|| Instant::now() + startup_fetch_budget());
     let mut attempt = 0usize;
+    let mut last_failure = FetchedSubscriptions {
+        report: SubscriptionFetchReport {
+            failed_sources: config.subs.len(),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
     loop {
         if !refresh_generation_is_current(state, expected_generation) {
             return FetchedSubscriptions::default();
         }
         if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
             warn!("Startup subscription refresh budget exhausted");
-            return FetchedSubscriptions::default();
+            return last_failure;
         }
 
         let nodes = fetch_all_subs(config, state, deadline, expected_generation).await;
         if !refresh_generation_is_current(state, expected_generation) {
             return FetchedSubscriptions::default();
         }
-        // 是否值得退避重试：配置了订阅却一个订阅节点都没拿到才算
-        // （全部秒败是网络未就绪的典型瞬态）；部分成功/其他错误更像订阅本身坏了
-        if nodes.has_fresh_nodes || !nodes.successful_sources.is_empty() || config.subs.is_empty() {
+        // Successful empty lists are authoritative, not transient network failures.
+        // Cached availability and user selection filters do not affect retries.
+        if !nodes.report.total_failure() {
             return nodes;
         }
         let Some(delay) = schedule.get(attempt) else {
@@ -211,6 +240,7 @@ async fn fetch_sub_nodes_inner(
             delay_ms = delay.as_millis(),
             attempt, "All subscriptions failed; retrying after backoff"
         );
+        last_failure = nodes;
         tokio::time::sleep(*delay).await;
     }
 }
@@ -314,6 +344,7 @@ async fn fetch_all_subs(
                 node_count: 0,
                 disabled_count: 0,
                 state: SubscriptionState::Pending,
+                failure_kind: None,
                 error: None,
             });
             status.state = SubscriptionState::Refreshing;
@@ -370,7 +401,7 @@ async fn fetch_all_subs(
                     }
                     Ok(Err(e)) => {
                         error!(url = %sub, error = %e, "Failed to fetch subscription");
-                        (sub.clone(), Err(e.to_string()))
+                        (sub.clone(), Err((e.kind, e.to_string())))
                     }
                     Err(_) => {
                         error!(url = %sub, timeout_ms = request_budget.as_millis(), "Subscription fetch timed out");
@@ -379,7 +410,7 @@ async fn fetch_all_subs(
                         } else {
                             "Request timeout"
                         };
-                        (sub.clone(), Err(message.to_string()))
+                        (sub.clone(), Err((SubscriptionFailureKind::Timeout, message.to_string())))
                     }
                 }
             }
@@ -409,7 +440,10 @@ async fn fetch_all_subs(
         // authoritative empty list. Keep its last good nodes just like HTTP errors.
         let result = result.and_then(|fetched| {
             if fetched.node_names.is_empty() && fetched.total_count > fetched.filtered_info_count {
-                Err("All subscription nodes failed to parse; keeping previous nodes".to_string())
+                Err((
+                    SubscriptionFailureKind::Parse,
+                    "All subscription nodes failed to parse; keeping previous nodes".to_string(),
+                ))
             } else {
                 Ok(fetched)
             }
@@ -419,8 +453,8 @@ async fn fetch_all_subs(
                 let count = fetch_result.node_names.len();
                 let filtered_info_count = fetch_result.filtered_info_count;
                 let source_id = subscription_source_id(&url);
-                fetched.successful_sources.push(source_id.clone());
-                fetched.has_fresh_nodes |= count > 0;
+                fetched.report.successful_sources += 1;
+                fetched.report.fresh_nodes += count;
                 fetched.nodes.extend(
                     fetch_result
                         .node_names
@@ -453,22 +487,21 @@ async fn fetch_all_subs(
 
                 SubStatus {
                     url: url.clone(),
-                    success: count > 0,
+                    success: true,
                     node_count: count,
                     disabled_count: 0,
-                    state: if count > 0 {
-                        SubscriptionState::Ready
-                    } else {
-                        SubscriptionState::Failed
-                    },
+                    state: SubscriptionState::Ready,
+                    failure_kind: None,
                     error: error_info,
                 }
             }
-            Err(e) => {
+            Err((kind, message)) => {
+                fetched.report.failed_sources += 1;
                 let old_nodes = cached
                     .remove(&subscription_source_id(&url))
                     .unwrap_or_default();
                 let count = old_nodes.len();
+                fetched.report.cached_nodes += count;
                 fetched.nodes.extend(old_nodes);
                 SubStatus {
                     url: url.clone(),
@@ -476,7 +509,8 @@ async fn fetch_all_subs(
                     node_count: count,
                     disabled_count: 0,
                     state: SubscriptionState::Failed,
-                    error: Some(e),
+                    failure_kind: Some(kind),
+                    error: Some(message),
                 }
             }
         };
@@ -510,9 +544,8 @@ async fn build_prepared(
     // Fetch already filters these entries; repeat at the build boundary so a
     // snapshot written by an older Miao version cannot bring them back.
     let nodes = filter_informational_fetched_nodes(nodes);
-    // has_sub_nodes 是「订阅是否产出可用节点」的健康度语义（用户禁用过滤前）：
-    // 下游用它区分「订阅获取失败」与「有节点」，禁用后为空是用户意图（全禁用），
-    // 不能误报成订阅失败（ALL_SUBS_FAILED / KeptRunningOnTotalFailure）
+    // Availability only: cached nodes count too. Disabled/region/multiplier
+    // filters are user intent and must not change subscription fetch health.
     let has_sub_nodes = !nodes.is_empty();
     let nodes = filter_disabled_nodes(nodes, &config.disabled_nodes);
     let (my_outbounds, my_names) = collect_manual_outbounds(config);
@@ -550,6 +583,7 @@ async fn build_prepared(
     Ok(GenConfigOutcome {
         bytes: serde_json::to_vec(&sing_box_config)?,
         has_sub_nodes,
+        subscription_fetch: None,
         node_select,
         skipped_rules,
         available_multipliers: available_multipliers.into_iter().collect(),

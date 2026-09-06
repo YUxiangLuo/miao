@@ -134,7 +134,7 @@ fn build_sing_box_config_errors_when_no_nodes_available() {
     assert!(err.is_no_usable_nodes());
     assert!(err
         .to_string()
-        .contains("No usable nodes available: subscriptions failed or manual nodes were invalid"));
+        .contains("No usable nodes available after parsing and filtering"));
 }
 
 #[test]

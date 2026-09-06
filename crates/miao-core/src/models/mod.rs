@@ -3,6 +3,11 @@ pub mod config;
 pub mod multiplier;
 pub mod node;
 pub mod proxy;
+pub mod subscriptions;
+pub use subscriptions::{
+    SubscriptionFailureKind, SubscriptionFetchOutcome, SubscriptionFetchReport,
+    SubscriptionRefreshPhase, SubscriptionRefreshStatus,
+};
 pub mod version;
 
 pub use api::{
@@ -67,6 +72,11 @@ mod typescript_contract {
         push_decl::<RouteMode>(&mut output, &config);
         push_decl::<NodeSelect>(&mut output, &config);
         push_decl::<RuntimePhase>(&mut output, &config);
+        push_decl::<SubscriptionFailureKind>(&mut output, &config);
+        push_decl::<SubscriptionFetchOutcome>(&mut output, &config);
+        push_decl::<SubscriptionFetchReport>(&mut output, &config);
+        push_decl::<SubscriptionRefreshPhase>(&mut output, &config);
+        push_decl::<SubscriptionRefreshStatus>(&mut output, &config);
         push_decl::<RuntimeWarningSeverity>(&mut output, &config);
         push_decl::<RuntimeWarning>(&mut output, &config);
         push_decl::<ApiResponse<()>>(&mut output, &config);

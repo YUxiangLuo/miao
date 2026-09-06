@@ -1,4 +1,46 @@
-use crate::error::{AppError, AppResult};
+use crate::error::AppError;
+use crate::models::SubscriptionFailureKind;
+
+#[derive(Debug)]
+pub struct FetchError {
+    pub kind: SubscriptionFailureKind,
+    pub error: AppError,
+}
+
+impl std::fmt::Display for FetchError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.error.fmt(f)
+    }
+}
+
+impl std::error::Error for FetchError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.error)
+    }
+}
+
+impl FetchError {
+    fn request(context: String, error: reqwest::Error) -> Self {
+        let kind = if error.is_timeout() {
+            SubscriptionFailureKind::Timeout
+        } else if error.status().is_some() {
+            SubscriptionFailureKind::Http
+        } else {
+            SubscriptionFailureKind::Network
+        };
+        Self {
+            kind,
+            error: AppError::context(context, error),
+        }
+    }
+
+    fn parse(error: AppError) -> Self {
+        Self {
+            kind: SubscriptionFailureKind::Parse,
+            error,
+        }
+    }
+}
 use crate::services::node_parser::parse_clash_proxies;
 
 /// 订阅获取结果，包含节点和解析错误信息
@@ -114,42 +156,42 @@ fn filter_informational_nodes(
     (nodes, filtered_count)
 }
 
-pub async fn fetch_sub(link: &str, client: &reqwest::Client) -> AppResult<FetchResult> {
+pub async fn fetch_sub(link: &str, client: &reqwest::Client) -> Result<FetchResult, FetchError> {
     let res = client
         .get(link)
         .timeout(std::time::Duration::from_secs(30))
         .header("User-Agent", "clash-meta")
         .send()
         .await
-        .map_err(|e| AppError::context(format!("Failed to fetch subscription from {}", link), e))?
+        .map_err(|e| FetchError::request(format!("Failed to fetch subscription from {}", link), e))?
         .error_for_status()
         .map_err(|e| {
-            AppError::context(
+            FetchError::request(
                 format!("Subscription server returned HTTP error for {}", link),
                 e,
             )
         })?;
 
     let text = res.text().await.map_err(|e| {
-        AppError::context(
+        FetchError::request(
             format!("Failed to read subscription response from {}", link),
             e,
         )
     })?;
 
     let parse_result = parse_clash_proxies(&text).map_err(|e| {
-        AppError::context(
+        FetchError::parse(AppError::context(
             format!("Failed to parse subscription content from {}", link),
             e,
-        )
+        ))
     })?;
 
     // A generic Clash config may omit proxies, but a subscription response
     // must explicitly contain a list. Maintenance text is not an empty pool.
     if !parse_result.has_proxy_list {
-        return Err(AppError::message(
+        return Err(FetchError::parse(AppError::message(
             "Subscription response does not contain a proxies list",
-        ));
+        )));
     }
     let total_count = parse_result.total_count;
     let parse_errors = parse_result.errors;

@@ -14,9 +14,11 @@ pub enum RuntimePhase {
     Initializing = 0,
     Extracting = 1,
     Validating = 2,
+    /// Legacy wire value; new fetch activity uses SubscriptionRefreshStatus.
     FetchingSubscriptions = 3,
     Starting = 4,
     Ready = 5,
+    /// Legacy wire value; background fetching never changes the proxy phase.
     RefreshingSubscriptions = 6,
     ApplyingConfig = 7,
     Reloading = 8,
@@ -90,6 +92,7 @@ pub struct StatusData {
     /// readiness check. A spawned process may be `running` while this is false.
     pub ready: bool,
     pub phase: RuntimePhase,
+    pub subscription_refresh: super::SubscriptionRefreshStatus,
     pub initializing: bool,
     pub route_mode: RouteMode,
     /// 当前运行配置实际生效的选择策略；地区无候选时可能回退 manual。
@@ -315,12 +318,17 @@ impl<'de> Deserialize<'de> for MaxMultiplierRequest {
 #[cfg_attr(test, derive(ts_rs::TS))]
 pub struct SubStatus {
     pub url: String,
+    /// Accepted subscription response, including an authoritative empty list.
+    /// `node_count` may be nonzero on failure when cached nodes were retained.
     pub success: bool,
     pub node_count: usize,
     /// 该订阅被禁用的节点数（易变层 disabled_nodes 中匹配此订阅的条目数）
     #[serde(default)]
     pub disabled_count: usize,
     pub state: SubscriptionState,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
+    pub failure_kind: Option<super::SubscriptionFailureKind>,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[cfg_attr(test, ts(optional))]
     pub error: Option<String>,

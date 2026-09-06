@@ -322,7 +322,7 @@ pub(super) async fn refresh_subscriptions_in_background(config: &Config, state: 
     loop {
         // Also notice a foreground success that committed during our sleep.
         let Some(generation) =
-            resume_after_foreground_refresh(config, state, refresh_generation).await
+            wait_for_background_retry(config, state, refresh_generation, Duration::ZERO).await
         else {
             return;
         };
@@ -351,6 +351,7 @@ pub(super) async fn refresh_subscriptions_in_background(config: &Config, state: 
                 // A newer foreground operation owns its warning and state.
                 if state.sub_refresh_generation.load(Ordering::Relaxed) == refresh_generation
                     && state.service_should_run.load(Ordering::Relaxed)
+                    && !state.subscription_refresh.foreground_in_flight()
                     && (refresh_generation == 0
                         || state.sub_refresh_success_generation.load(Ordering::Relaxed)
                             != refresh_generation)
@@ -363,6 +364,9 @@ pub(super) async fn refresh_subscriptions_in_background(config: &Config, state: 
                 delay
             }
         };
+        state
+            .subscription_refresh
+            .wait_to_retry(refresh_generation, wait);
         info!(
             delay_secs = wait.as_secs(),
             quiet, "Startup subscription refresh will retry in the background"
@@ -393,15 +397,36 @@ async fn wait_for_background_retry(
         let cancelled = state.sub_refresh_cancel.notified();
         tokio::pin!(cancelled);
         cancelled.as_mut().enable();
+        let completed = state.subscription_refresh.changed.notified();
+        tokio::pin!(completed);
+        completed.as_mut().enable();
         generation = resume_after_foreground_refresh(config, state, generation).await?;
-        tokio::select! {
-            _ = tokio::time::sleep_until(deadline) => return Some(generation),
-            _ = cancelled => {}
+        if state.subscription_refresh.foreground_in_flight() {
+            // The original timer may already have elapsed. Let the foreground
+            // request finish and commit before deciding to start another fetch.
+            tokio::select! {
+                _ = completed => {},
+                _ = cancelled => {},
+            }
+        } else {
+            let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+            if !remaining.is_zero() {
+                // A foreground request reset the old task status, not this
+                // deadline. Restore its remaining wait after a failed commit.
+                state
+                    .subscription_refresh
+                    .wait_to_retry(generation, remaining);
+            }
+            tokio::select! {
+                _ = tokio::time::sleep_until(deadline) => return Some(generation),
+                _ = cancelled => {},
+                _ = completed => {},
+            }
         }
     }
 }
 
-/// 在事务锁下检查前台提交结果（不等待锁外 HTTP）。前台已提交订阅节点则
+/// 在事务锁下检查前台提交结果（不等待锁外 HTTP）。前台已提交有效订阅响应（含空列表）则
 /// 后台完成；尚未成功时采用当前 generation，但不重置重试额度或等待期限。
 async fn resume_after_foreground_refresh(
     startup_config: &Config,
@@ -427,7 +452,7 @@ async fn resume_after_foreground_refresh(
     }
 
     if current_generation != previous_generation {
-        info!("Foreground subscription refresh got no usable subscription nodes; resuming startup recovery");
+        info!("Foreground refresh has not committed a successful subscription response; resuming startup recovery");
     }
     Some(current_generation)
 }
@@ -452,17 +477,10 @@ async fn background_subscription_refresh_once(
         return BackgroundRefreshStep::Finished;
     }
 
-    let background_phase = if before_fetch.subs.is_empty() {
-        RuntimePhase::Validating
-    } else {
-        RuntimePhase::RefreshingSubscriptions
-    };
-    // Low-frequency maintenance must not make an already working proxy look
-    // as if it is starting/refreshing again. Real activation still sets phases.
-    if !quiet || !state.runtime_ready.load(Ordering::Relaxed) {
-        state.set_runtime_phase(background_phase);
-    }
+    // Fetch activity is published independently of the proxy lifecycle.
+    // Only validation/activation may change the runtime phase.
     let nodes = fetch_sub_nodes_if_current(&before_fetch, state, retry, refresh_generation).await;
+    let fetch_report = nodes.report;
 
     let _config_update = state.config_update.lock().await;
     if state.sub_refresh_generation.load(Ordering::Relaxed) != refresh_generation {
@@ -533,6 +551,18 @@ async fn background_subscription_refresh_once(
                 }
             }
         },
+        Err(err)
+            if err.is_no_usable_nodes()
+                && fetch_report.accepted_response()
+                && state.runtime_ready.load(Ordering::Relaxed) =>
+        {
+            // The response was authoritative; fetching it again is not a
+            // network-recovery operation. Preserve availability, but do not
+            // publish an unactivated empty snapshot or retry it as a failure.
+            *state.config_warning.lock().await =
+                Some(crate::services::config::SUBS_NO_USABLE_KEEP_CACHE.to_string());
+            BackgroundRefreshStep::Finished
+        }
         Err(err) => {
             warn!(error = %err, "Background subscription refresh failed");
             *state.config_warning.lock().await = Some(REFRESH_FAILED_KEEP_CACHE.to_string());
@@ -546,9 +576,6 @@ async fn background_subscription_refresh_once(
     if quiet && step == BackgroundRefreshStep::Retry && state.runtime_ready.load(Ordering::Relaxed)
     {
         *state.config_warning.lock().await = Some(SUBS_RETRYING_SLOWLY.to_string());
-    }
-    if state.runtime_phase() == background_phase {
-        state.set_runtime_phase(RuntimePhase::Ready);
     }
     step
 }
@@ -586,15 +613,19 @@ pub(crate) async fn recover_data_plane_once(state: &Arc<AppState>) -> bool {
         return true;
     }
 
-    let config = state.config_with_preferences().await;
-    let refresh_generation = state.sub_refresh_generation.load(Ordering::Relaxed);
-    if state.runtime_phase() == RuntimePhase::Failed {
-        state.set_runtime_phase(if config.subs.is_empty() {
-            RuntimePhase::Validating
-        } else {
-            RuntimePhase::FetchingSubscriptions
-        });
-    }
+    let (config, refresh_generation) = {
+        let _config_update = state.config_update.lock().await;
+        // Defer unavailable-data-plane recovery too. Capture configuration and
+        // generation under the transaction lock so a later foreground start
+        // necessarily supersedes this fetch rather than sharing its generation.
+        if state.subscription_refresh.foreground_in_flight() {
+            return false;
+        }
+        (
+            state.config_with_preferences().await,
+            state.sub_refresh_generation.load(Ordering::Relaxed),
+        )
+    };
     let nodes =
         fetch_sub_nodes_if_current(&config, state, SubFetchRetry::Startup, refresh_generation)
             .await;
@@ -676,6 +707,8 @@ pub(crate) async fn recover_data_plane_once(state: &Arc<AppState>) -> bool {
 pub(super) async fn retry_failed_startup(state: &Arc<AppState>) {
     let mut delay = STARTUP_RECOVERY_INITIAL_DELAY;
     loop {
+        let generation = state.sub_refresh_generation.load(Ordering::Relaxed);
+        state.subscription_refresh.wait_to_retry(generation, delay);
         tokio::time::sleep(delay).await;
         if recover_data_plane_once(state).await {
             return;
@@ -683,3 +716,6 @@ pub(super) async fn retry_failed_startup(state: &Arc<AppState>) {
         delay = next_startup_recovery_delay(delay);
     }
 }
+
+#[cfg(test)]
+mod activity_tests;

@@ -46,7 +46,7 @@ impl Display for AppError {
             Self::AlreadyRunning => write!(f, "sing-box is already running"),
             Self::NoUsableNodes => write!(
                 f,
-                "No usable nodes available: subscriptions failed or manual nodes were invalid"
+                "No usable nodes available after parsing and filtering; check subscription contents, disabled nodes, or manual nodes"
             ),
             Self::Io(err) => write!(f, "{err}"),
             Self::Json(err) => write!(f, "{err}"),
