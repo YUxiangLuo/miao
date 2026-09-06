@@ -43,11 +43,11 @@ pub struct RuntimeOptions {
     /// instead of failing. The desktop shell sets this: its single-instance
     /// lock is the mutex, so the port is free to move.
     pub port_fallback: bool,
-    /// Skip path resolution and load this file (missing file → in-memory default).
+    /// Select a config profile (missing file → in-memory default). Relative
+    /// paths are resolved once. None uses default discovery, never host argv.
     pub config_path: Option<PathBuf>,
-    /// Override the volatile-layer file (node_select/max_multiplier/route_mode). `None` uses the
-    /// platform default. Tests must point this at a temp path so they never read
-    /// or write the real runtime dir (`/tmp/miao-sing-box`).
+    /// Override the volatile-layer file. None follows the resolved profile;
+    /// a runtime_dir override also redirects the default volatile file there.
     pub volatile_path: Option<PathBuf>,
     /// Tests can skip extracting the embedded kernel when they will not start it.
     pub skip_extract: bool,
@@ -114,7 +114,7 @@ pub async fn run() -> AppResult<()> {
     // Own the temporary --sub profile until initialization and the managed
     // kernel have shut down; never reuse the installed profile's preferences.
     let prepared = crate::cli::prepare(source)?;
-    let handle = spawn_server(prepared.options).await?;
+    let handle = spawn_prepared(prepared).await?;
 
     wait_os_shutdown().await;
     handle.shutdown().await;
@@ -122,7 +122,28 @@ pub async fn run() -> AppResult<()> {
 }
 
 pub async fn spawn_server(options: RuntimeOptions) -> AppResult<ServerHandle> {
-    let log_path = resolve_log_path(&options);
+    spawn_server_inner(options, None).await
+}
+
+pub(crate) async fn spawn_prepared(
+    prepared: crate::cli::PreparedLaunch,
+) -> AppResult<ServerHandle> {
+    spawn_server_inner(prepared.options, prepared.profile).await
+}
+
+async fn spawn_server_inner(
+    options: RuntimeOptions,
+    temporary: Option<tempfile::TempDir>,
+) -> AppResult<ServerHandle> {
+    let profile = crate::profile::ResolvedProfile::resolve(&options, temporary)?;
+    spawn_resolved(options, profile).await
+}
+
+pub(crate) async fn spawn_resolved(
+    options: RuntimeOptions,
+    profile: crate::profile::ResolvedProfile,
+) -> AppResult<ServerHandle> {
+    let log_path = profile.log.clone();
     if let Some(path) = log_path.as_deref() {
         rotate_oversized_log(path);
     }
@@ -139,21 +160,9 @@ pub async fn spawn_server(options: RuntimeOptions) -> AppResult<ServerHandle> {
     crate::services::version::reconcile_pending_upgrade()?;
 
     info!("Reading configuration...");
-    let config_path = match options.config_path.clone() {
-        Some(path) => {
-            info!(config_path = ?path, source = "explicit", "Resolved configuration path");
-            path
-        }
-        None => {
-            let resolution = crate::paths::resolve_config_path()?;
-            info!(
-                config_path = ?resolution.path,
-                source = ?resolution.source,
-                "Resolved configuration path"
-            );
-            resolution.path
-        }
-    };
+    let config_path = &profile.config.path;
+    info!(config_path = ?config_path, source = ?profile.config.source, profile = ?profile.kind,
+        runtime_dir = ?profile.runtime.runtime_dir, "Resolved configuration profile");
 
     let stable_config: crate::models::StableConfig =
         match tokio::fs::read_to_string(&config_path).await {
@@ -167,36 +176,15 @@ pub async fn spawn_server(options: RuntimeOptions) -> AppResult<ServerHandle> {
             }
             Err(e) => return Err(e.into()),
         };
-    let runtime_dir = options
-        .runtime_dir
-        .clone()
-        .unwrap_or_else(crate::services::singbox::get_sing_box_home);
-    let volatile_path = options.volatile_path.clone().unwrap_or_else(|| {
-        if cfg!(windows) {
-            crate::services::config::volatile_config_path()
-        } else {
-            runtime_dir.join("volatile.yaml")
-        }
-    });
-    let preference_paths = if options.runtime_dir.is_some() {
-        (
-            runtime_dir.join(".last_proxy"),
-            runtime_dir.join(".node_select"),
-            runtime_dir.join(".max_multiplier"),
-        )
-    } else {
-        (
-            crate::services::proxy::platform_last_proxy_path(),
-            crate::services::proxy::platform_node_select_path(),
-            crate::services::proxy::platform_max_multiplier_path(),
-        )
-    };
+    profile.migrate_bindings().await?;
     // route_mode/disabled_nodes 仍由易变层覆盖。node_select 则拆分为 requested
     // preference 与 effective volatile 状态：前者优先，启动期地区筛空回退
     // manual 只改后者，不会擦除跨重启偏好。
-    let volatile_config = load_volatile_config_at(&volatile_path).await;
-    let stored_node_select = load_node_select_preference(&preference_paths.1).await;
-    let stored_max_multiplier = load_max_multiplier_preference(&preference_paths.2).await;
+    let volatile_config = load_volatile_config_at(&profile.volatile).await;
+    let stored_node_select =
+        load_node_select_preference(&profile.runtime.node_select_preference).await;
+    let stored_max_multiplier =
+        load_max_multiplier_preference(&profile.runtime.max_multiplier_preference).await;
     // Old releases only had volatile.yaml. Only a non-manual value is safe to
     // migrate: serialized manual is indistinguishable from a temporary region
     // fallback, so promoting it could permanently mask config.yaml's default.
@@ -244,17 +232,9 @@ pub async fn spawn_server(options: RuntimeOptions) -> AppResult<ServerHandle> {
         "Configuration loaded"
     );
 
-    let runtime_paths = crate::paths::RuntimePaths::new(runtime_dir, &config_path)
-        .with_preferences(preference_paths.0, preference_paths.1, preference_paths.2);
     let app_state = Arc::new(
-        AppState::with_config_layers(
-            stable_config,
-            config.clone(),
-            config_path,
-            volatile_path,
-            runtime_paths,
-        )
-        .map_err(|e| AppError::context("Failed to create HTTP client", e))?,
+        AppState::with_profile(stable_config, config.clone(), profile)
+            .map_err(|e| AppError::context("Failed to create HTTP client", e))?,
     );
     if let Some(node_select) = migrated_node_select {
         if let Err(err) = save_node_select_preference(&app_state, node_select).await {
@@ -391,17 +371,6 @@ async fn wait_os_shutdown() {
         tokio::signal::ctrl_c()
             .await
             .expect("failed to install Ctrl+C handler");
-    }
-}
-
-fn resolve_log_path(options: &RuntimeOptions) -> Option<PathBuf> {
-    if let Some(path) = &options.log_path {
-        return Some(path.clone());
-    }
-    if cfg!(windows) {
-        Some(crate::paths::default_log_path())
-    } else {
-        None
     }
 }
 

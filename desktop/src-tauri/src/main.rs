@@ -6,9 +6,9 @@ use std::time::Instant;
 
 use miao_core::{
     acquire_single_instance, autostart_is_enabled, autostart_repair_if_stale,
-    autostart_set_enabled, default_log_path, double_click_interval, focus_existing_window,
-    is_elevated, peek_single_instance, require_privileges, show_user_error, spawn_server,
-    InstanceAcquire, InstancePeek, RuntimeOptions, ServerHandle, MINIMIZED_ARG,
+    autostart_set_enabled, config_path_from_args, default_log_path, double_click_interval,
+    focus_existing_window, is_elevated, peek_single_instance, require_privileges, show_user_error,
+    spawn_server, InstanceAcquire, InstancePeek, RuntimeOptions, ServerHandle, MINIMIZED_ARG,
 };
 use tauri::menu::{CheckMenuItem, CheckMenuItemBuilder, Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
@@ -30,6 +30,17 @@ fn focus_existing_window_or_error() {
 }
 
 fn main() {
+    let config_path = match config_path_from_args(
+        std::env::args_os()
+            .skip(1)
+            .filter(|arg| arg != MINIMIZED_ARG),
+    ) {
+        Ok(path) => path,
+        Err(error) => {
+            show_user_error("Miao", &error.to_string());
+            return;
+        }
+    };
     match peek_single_instance() {
         InstancePeek::AlreadyRunning => {
             focus_existing_window_or_error();
@@ -63,7 +74,7 @@ fn main() {
     // 自启任务若指向旧 exe（升级/迁移残留），用当前路径重注册
     autostart_repair_if_stale();
 
-    if let Err(err) = run_app() {
+    if let Err(err) = run_app(config_path) {
         show_user_error(
             "Miao",
             &format!(
@@ -75,8 +86,8 @@ fn main() {
     }
 }
 
-fn run_app() -> Result<(), Box<dyn std::error::Error>> {
-    let start_minimized = std::env::args().any(|arg| arg == MINIMIZED_ARG);
+fn run_app(config_path: Option<std::path::PathBuf>) -> Result<(), Box<dyn std::error::Error>> {
+    let start_minimized = std::env::args_os().any(|arg| arg == MINIMIZED_ARG);
     let app = tauri::Builder::default()
         .setup(move |app| {
             let handle = tauri::async_runtime::block_on(spawn_server(RuntimeOptions {
@@ -84,6 +95,7 @@ fn run_app() -> Result<(), Box<dyn std::error::Error>> {
                 install_tracing: true,
                 // 单实例由 mutex 保证，面板端口被占用时让操作系统分配新端口
                 port_fallback: true,
+                config_path,
                 ..RuntimeOptions::default()
             }))?;
 

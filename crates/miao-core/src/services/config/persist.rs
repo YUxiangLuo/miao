@@ -1,6 +1,6 @@
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use tokio::io::AsyncWriteExt;
 use tracing::{error, info, warn};
@@ -9,7 +9,6 @@ use std::sync::Arc;
 
 use crate::error::{AppError, AppResult};
 use crate::models::{Config, NodeMultiplier, NodeSelect, StableConfig, VolatileConfig};
-use crate::services::singbox::get_sing_box_home;
 use crate::state::AppState;
 
 const CACHE_MANIFEST_VERSION: u32 = 1;
@@ -153,16 +152,6 @@ pub async fn mark_legacy_cache_used(state: &AppState) {
 
 pub(super) fn config_cache_path(state: &AppState) -> &Path {
     &state.runtime_paths.config_cache
-}
-
-/// 易变层配置文件位置：unix 放运行时目录（tmpfs，系统重启即回默认）；
-/// Windows 放应用数据目录（持久，桌面用户预期设置粘滞）。
-pub fn volatile_config_path() -> PathBuf {
-    if cfg!(windows) {
-        crate::paths::platform_data_dir().join("volatile.yaml")
-    } else {
-        get_sing_box_home().join("volatile.yaml")
-    }
 }
 
 /// Last explicitly selected strategy. Unlike the effective volatile value,
@@ -588,13 +577,13 @@ async fn read_sub_nodes_snapshot_at(path: &Path) -> Option<SubNodesSnapshot> {
 #[cfg(test)]
 mod tests {
     use super::{
-        get_sing_box_home, load_max_multiplier_preference, load_node_select_preference,
-        load_volatile_config_at, persist_effective_node_select, read_sub_nodes_snapshot_at,
-        restore_config_from_cache_at, restore_runtime_config_bytes_at, save_config_cache_at,
-        save_config_layered, save_max_multiplier_preference, save_node_select_preference,
-        save_sub_nodes_snapshot_at, save_volatile_to, snapshot_runtime_config_at,
-        volatile_config_path, SubNodesSnapshot,
+        load_max_multiplier_preference, load_node_select_preference, load_volatile_config_at,
+        persist_effective_node_select, read_sub_nodes_snapshot_at, restore_config_from_cache_at,
+        restore_runtime_config_bytes_at, save_config_cache_at, save_config_layered,
+        save_max_multiplier_preference, save_node_select_preference, save_sub_nodes_snapshot_at,
+        save_volatile_to, snapshot_runtime_config_at, SubNodesSnapshot,
     };
+    use crate::services::singbox::get_sing_box_home;
 
     #[test]
     fn config_cache_lives_under_sing_box_home() {
@@ -605,24 +594,6 @@ mod tests {
         assert_eq!(
             paths.config_cache,
             get_sing_box_home().join("config.json.cache")
-        );
-    }
-
-    #[cfg(not(windows))]
-    #[test]
-    fn volatile_config_lives_under_sing_box_home_on_unix() {
-        assert_eq!(
-            volatile_config_path(),
-            get_sing_box_home().join("volatile.yaml")
-        );
-    }
-
-    #[cfg(windows)]
-    #[test]
-    fn volatile_config_lives_in_data_dir_on_windows() {
-        assert_eq!(
-            volatile_config_path(),
-            crate::paths::platform_data_dir().join("volatile.yaml")
         );
     }
 

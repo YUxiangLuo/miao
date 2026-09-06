@@ -60,9 +60,28 @@ pub struct AppState {
     pub version_cache: ArcSwap<VersionCache>, // 使用 ArcSwap 实现无锁读取
     #[cfg(not(windows))]
     pub upgrading: AtomicBool, // 防止并发升级
+    // Last field: every request/background task holding Arc<AppState> also
+    // keeps the temporary files alive. Caller-supplied directories are unowned.
+    _temporary_profile: Option<tempfile::TempDir>,
 }
 
 impl AppState {
+    pub(crate) fn with_profile(
+        stable: StableConfig,
+        config: Config,
+        profile: crate::profile::ResolvedProfile,
+    ) -> Result<Self, reqwest::Error> {
+        let mut state = Self::with_config_layers(
+            stable,
+            config,
+            profile.config.path,
+            profile.volatile,
+            profile.runtime,
+        )?;
+        state._temporary_profile = profile.temporary;
+        Ok(state)
+    }
+
     /// 创建新的应用状态实例
     #[cfg(test)]
     pub fn new(config: Config) -> Result<Self, reqwest::Error> {
@@ -144,6 +163,7 @@ impl AppState {
             })),
             #[cfg(not(windows))]
             upgrading: AtomicBool::new(false),
+            _temporary_profile: None,
         })
     }
 

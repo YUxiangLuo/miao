@@ -843,12 +843,21 @@ fn occupy_panel_port() -> (std::net::TcpListener, u16) {
 
 #[test]
 fn resolve_log_path_honors_explicit_override() {
-    let path = PathBuf::from("/tmp/miao-test.log");
+    let root = tempfile::tempdir().unwrap();
+    let base = std::fs::canonicalize(root.path()).unwrap();
+    let path = base.join("miao-test.log");
     let options = RuntimeOptions {
+        config_path: Some(base.join("config.yaml")),
+        runtime_dir: Some(base.join("runtime")),
         log_path: Some(path.clone()),
         ..RuntimeOptions::default()
     };
-    assert_eq!(super::resolve_log_path(&options), Some(path));
+    assert_eq!(
+        crate::profile::ResolvedProfile::resolve(&options, None)
+            .unwrap()
+            .log,
+        Some(path)
+    );
 }
 
 #[tokio::test]

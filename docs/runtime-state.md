@@ -71,6 +71,10 @@ REST `/api/status` 与 MCP `get_status` 使用同一 `subscription_refresh` 快�
 
 地区无候选仍按原规则回退手动，保留 requested strategy；它不改变订阅拉取健康度。
 
+## Profile 所有权
+
+配置及运行文件的路径由 `profile::ResolvedProfile` 在启动时确定；命名配置不再共享默认 Profile 的偏好、易变层和缓存。临时 `--sub` 的目录所有权交给 `AppState`，后台任务释放最后一个引用之前不会清理。默认兼容、绑定迁移、SDK 覆盖及 Windows/OpenWrt 差异见 [Profile 与路径归属](profiles.md)。
+
 ## 业务入口与配置事务
 
 REST handler 只解析 HTTP 参数、调用服务并包装响应。`services/commands/` 承接节点、订阅、规则、启停和 MCP 开关等业务操作，返回不依赖 Axum 的 `CommandReply` / `CommandError`；`responses.rs` 集中映射 HTTP 状态码。MCP 直接调用这些操作（策略/倍率复用同一配置服务），不再构造 `State/Json` 或调用 HTTP handler。两种协议的原有字段、提示、确认闸保持不变。

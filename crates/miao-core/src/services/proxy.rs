@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -7,96 +7,7 @@ use tracing::{error, info, warn};
 
 use crate::error::{AppError, AppResult};
 use crate::models::{LastProxy, SwitchProxyResult};
-use crate::services::singbox::get_sing_box_home;
 use crate::state::AppState;
-
-const LAST_PROXY_FILENAME: &str = ".last_proxy";
-const NODE_SELECT_FILENAME: &str = ".node_select";
-const MAX_MULTIPLIER_FILENAME: &str = ".max_multiplier";
-
-/// Where `.last_proxy` is stored.
-///
-/// Default is the runtime dir under `/tmp` so OpenWrt overlay/flash is never
-/// used, even when `/etc/openwrt_release` is missing. The cwd-relative file is
-/// only used when PID 1 is systemd and the system does not look like OpenWrt.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum LastProxyStore {
-    Runtime,
-    Working,
-    Persistent,
-}
-
-fn last_proxy_store(openwrt_like: bool, pid1_comm: &str) -> LastProxyStore {
-    if cfg!(windows) {
-        return LastProxyStore::Persistent;
-    }
-    if openwrt_like || pid1_comm.trim() != "systemd" {
-        LastProxyStore::Runtime
-    } else {
-        LastProxyStore::Working
-    }
-}
-
-fn last_proxy_path_for(store: LastProxyStore) -> PathBuf {
-    match store {
-        LastProxyStore::Runtime => get_sing_box_home().join(LAST_PROXY_FILENAME),
-        LastProxyStore::Working => PathBuf::from(LAST_PROXY_FILENAME),
-        LastProxyStore::Persistent => crate::paths::platform_data_dir().join(LAST_PROXY_FILENAME),
-    }
-}
-
-fn os_release_looks_like_openwrt(content: &str) -> bool {
-    content.lines().any(|line| {
-        let line = line.trim();
-        let Some((key, value)) = line.split_once('=') else {
-            return false;
-        };
-        let value = value.trim().trim_matches(|c| c == '"' || c == '\'');
-        key.starts_with("OPENWRT_")
-            || (key == "ID"
-                && matches!(value, "openwrt" | "immortalwrt" | "libremesh" | "istoreos"))
-    })
-}
-
-fn openwrt_like_from_paths(exists: impl Fn(&str) -> bool, os_release: Option<&str>) -> bool {
-    exists("/etc/openwrt_release")
-        || exists("/etc/openwrt_version")
-        || exists("/sbin/procd")
-        || os_release.is_some_and(os_release_looks_like_openwrt)
-}
-
-fn is_openwrt_like() -> bool {
-    let os_release = std::fs::read_to_string("/etc/os-release").ok();
-    openwrt_like_from_paths(|path| Path::new(path).exists(), os_release.as_deref())
-}
-
-fn pid1_comm() -> String {
-    std::fs::read_to_string("/proc/1/comm")
-        .map(|s| s.trim().to_string())
-        .unwrap_or_default()
-}
-
-pub fn platform_last_proxy_path() -> PathBuf {
-    last_proxy_path_for(last_proxy_store(is_openwrt_like(), &pid1_comm()))
-}
-
-/// Node-selection strategy follows the same persistence policy as the concrete
-/// selector choice: regular systemd Linux and Windows retain it, while OpenWrt
-/// keeps it in tmpfs to avoid flash writes.
-pub fn platform_node_select_path() -> PathBuf {
-    preference_path(NODE_SELECT_FILENAME)
-}
-
-/// 最高倍率与节点选择使用完全相同的平台持久化策略。
-pub fn platform_max_multiplier_path() -> PathBuf {
-    preference_path(MAX_MULTIPLIER_FILENAME)
-}
-
-fn preference_path(file_name: &str) -> PathBuf {
-    let mut path = platform_last_proxy_path();
-    path.set_file_name(file_name);
-    path
-}
 
 async fn write_last_proxy_file(path: &Path, proxy: &LastProxy) -> AppResult<()> {
     if let Some(parent) = path
@@ -313,134 +224,15 @@ async fn restore_last_proxy_if_current(state: &Arc<AppState>, generation: u64, s
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        get_sing_box_home, last_proxy_path_for, last_proxy_store, openwrt_like_from_paths,
-        os_release_looks_like_openwrt, platform_max_multiplier_path, platform_node_select_path,
-        write_last_proxy_file, LastProxyStore, LAST_PROXY_FILENAME, MAX_MULTIPLIER_FILENAME,
-        NODE_SELECT_FILENAME,
-    };
+    use super::write_last_proxy_file;
     use crate::models::LastProxy;
-
-    #[test]
-    fn node_select_preference_uses_the_platform_state_store() {
-        let path = platform_node_select_path();
-        assert_eq!(
-            path.file_name().and_then(|name| name.to_str()),
-            Some(NODE_SELECT_FILENAME)
-        );
-    }
-
-    #[test]
-    fn max_multiplier_preference_uses_the_platform_state_store() {
-        let path = platform_max_multiplier_path();
-        assert_eq!(
-            path.file_name().and_then(|name| name.to_str()),
-            Some(MAX_MULTIPLIER_FILENAME)
-        );
-    }
-
-    #[test]
-    fn last_proxy_path_uses_tmp_on_openwrt() {
-        assert_eq!(
-            last_proxy_path_for(LastProxyStore::Runtime),
-            get_sing_box_home().join(LAST_PROXY_FILENAME)
-        );
-    }
-
-    #[test]
-    fn last_proxy_path_uses_working_directory_on_regular_linux() {
-        assert_eq!(
-            last_proxy_path_for(LastProxyStore::Working),
-            std::path::PathBuf::from(LAST_PROXY_FILENAME)
-        );
-    }
-
-    #[cfg(not(windows))]
-    #[test]
-    fn last_proxy_store_uses_tmp_when_openwrt_markers_exist() {
-        assert_eq!(last_proxy_store(true, "systemd"), LastProxyStore::Runtime);
-        assert_eq!(last_proxy_store(true, "procd"), LastProxyStore::Runtime);
-    }
-
-    #[cfg(not(windows))]
-    #[test]
-    fn last_proxy_store_uses_tmp_when_pid1_is_not_systemd() {
-        assert_eq!(last_proxy_store(false, "procd"), LastProxyStore::Runtime);
-        assert_eq!(last_proxy_store(false, ""), LastProxyStore::Runtime);
-    }
-
-    #[cfg(not(windows))]
-    #[test]
-    fn last_proxy_store_uses_cwd_only_for_systemd_linux() {
-        assert_eq!(last_proxy_store(false, "systemd"), LastProxyStore::Working);
-    }
-
-    #[cfg(windows)]
-    #[test]
-    fn last_proxy_store_is_persistent_dir_on_windows() {
-        assert_eq!(
-            last_proxy_store(false, "systemd"),
-            LastProxyStore::Persistent
-        );
-        assert_eq!(last_proxy_store(true, "procd"), LastProxyStore::Persistent);
-        assert_eq!(
-            last_proxy_path_for(LastProxyStore::Persistent),
-            crate::paths::platform_data_dir().join(LAST_PROXY_FILENAME)
-        );
-    }
-
-    #[test]
-    fn openwrt_like_detects_release_file() {
-        assert!(openwrt_like_from_paths(
-            |path| path == "/etc/openwrt_release",
-            None
-        ));
-    }
-
-    #[test]
-    fn openwrt_like_detects_version_file() {
-        assert!(openwrt_like_from_paths(
-            |path| path == "/etc/openwrt_version",
-            None
-        ));
-    }
-
-    #[test]
-    fn openwrt_like_detects_procd_without_release_file() {
-        assert!(openwrt_like_from_paths(|path| path == "/sbin/procd", None));
-    }
-
-    #[test]
-    fn openwrt_like_is_false_without_markers() {
-        assert!(!openwrt_like_from_paths(|_| false, None));
-        assert!(!openwrt_like_from_paths(
-            |_| false,
-            Some("ID=arch\nPRETTY_NAME=\"Arch Linux\"\n")
-        ));
-    }
-
-    #[test]
-    fn os_release_detects_openwrt_and_forks() {
-        assert!(os_release_looks_like_openwrt(
-            "ID=openwrt\nOPENWRT_RELEASE=\"OpenWrt 23.05\"\n"
-        ));
-        assert!(os_release_looks_like_openwrt(
-            "ID=\"immortalwrt\"\nNAME=\"ImmortalWrt\"\n"
-        ));
-        assert!(os_release_looks_like_openwrt(
-            "ID=debian\nOPENWRT_BOARD=\"ramips/mt7621\"\n"
-        ));
-        assert!(!os_release_looks_like_openwrt(
-            "ID=ubuntu\nVERSION_ID=24.04\n"
-        ));
-    }
 
     #[tokio::test]
     async fn restore_uses_runtime_paths_and_skips_missing_file_without_clash() {
         let state = crate::test_support::app_state(crate::models::Config::default());
         assert_eq!(
             state.runtime_paths.last_proxy,
-            state.runtime_paths.runtime_dir.join(LAST_PROXY_FILENAME)
+            state.runtime_paths.runtime_dir.join(".last_proxy")
         );
         assert!(!state.runtime_paths.last_proxy.exists());
 
@@ -477,7 +269,7 @@ mod tests {
             "mkdir"
         ));
         let _ = tokio::fs::remove_dir_all(&dir).await;
-        let path = dir.join("nested").join(LAST_PROXY_FILENAME);
+        let path = dir.join("nested").join(".last_proxy");
         let proxy = LastProxy {
             group: "proxy".to_string(),
             name: "node-a".to_string(),

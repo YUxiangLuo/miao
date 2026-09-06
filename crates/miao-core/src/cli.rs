@@ -149,12 +149,26 @@ pub(crate) fn parse(args: impl IntoIterator<Item = OsString>) -> AppResult<Comma
     }))
 }
 
-/// Keep the temporary directory alive through server shutdown. Both normal
-/// shutdown and failed startup clean it up. SIGKILL/power loss may leave it in
-/// the OS temp directory; a subsequent launch never reuses another session.
+/// Shells supporting --config can reuse the CLI parser after removing their
+/// own flags (e.g. --minimized). SDK startup never implicitly reads argv.
+pub fn config_path_from_args(
+    args: impl IntoIterator<Item = OsString>,
+) -> AppResult<Option<PathBuf>> {
+    match parse(args)? {
+        Command::Run(LaunchSource::Default) => Ok(None),
+        Command::Run(LaunchSource::Config(path)) => Ok(Some(crate::paths::absolutize(path)?)),
+        _ => Err(AppError::message(
+            "This shell supports --config PATH; use the CLI for --sub/--help/--version",
+        )),
+    }
+}
+
+/// Own the temporary directory until handed to runtime::spawn_prepared, which
+/// transfers it to AppState. Failed preparation/startup drops it normally;
+/// SIGKILL/power loss can still leave files behind.
 pub(crate) struct PreparedLaunch {
     pub options: RuntimeOptions,
-    _profile: Option<tempfile::TempDir>,
+    pub(crate) profile: Option<tempfile::TempDir>,
 }
 
 pub(crate) fn prepare(source: LaunchSource) -> AppResult<PreparedLaunch> {
@@ -197,10 +211,7 @@ pub(crate) fn prepare(source: LaunchSource) -> AppResult<PreparedLaunch> {
             Some(profile)
         }
     };
-    Ok(PreparedLaunch {
-        options,
-        _profile: profile,
-    })
+    Ok(PreparedLaunch { options, profile })
 }
 
 #[cfg(test)]

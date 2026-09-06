@@ -162,7 +162,9 @@ TUN JSON：`auto_route` + `strict_route`，`interface_name` 仍是 `sing-tun`。
 
 ## 配置与内核管线（后端核心）
 
-CLI 参数在 `cli.rs` 统一校验，先于提权/文件写入；保留 `--config[=]PATH`、`--version/-V`，支持 `--help/-h` 与互斥的 `--sub[=]URL [HK|JP|TW|SG|US]`。`--sub` 用权限 0700 的独立临时 profile，通过现有 `RuntimeOptions.config_path/runtime_dir/volatile_path` 进入同一启动管线，不复用原配置或偏好；临时目录所有权保留到内核关闭后。桌面/SDK 的 `spawn_server` 接口不变。测试成功路径必须注入假内核 + 本地订阅服务器，不能执行真实 TUN。
+CLI 参数在 `cli.rs` 统一校验，先于提权/文件写入；保留 `--config[=]PATH`、`--version/-V`，支持 `--help/-h` 与互斥的 `--sub[=]URL [HK|JP|TW|SG|US]`。`--sub` 用权限 0700 的独立临时 profile，通过现有 `RuntimeOptions.config_path/runtime_dir/volatile_path` 进入同一启动管线，不复用原配置或偏好；临时目录所有权转交 `AppState`，直到服务关闭且后台任务释放最后一个引用才清理。桌面/SDK 的 `spawn_server` 接口不变，SDK 不再隐式读取宿主 argv；桌面显式复用 CLI 参数解析器。测试成功路径必须注入假内核 + 本地订阅服务器，不能执行真实 TUN。
+
+Profile 路径在 `profile.rs` 统一解析（[路径与迁移约定](docs/profiles.md)）：默认解析到的配置保留原位置，显式选中同一个文件也等价；其他配置的运行目录为平台根目录下 `profiles/<id>`，持久偏好为配置同目录 `.miao-profiles/<id>`，OpenWrt/非 systemd 高频偏好仍在运行目录。`id` 来自规范化绝对路径的无损哈希；不继承其他 Profile 的旧共享偏好/缓存。非 `config.yaml` 的旧 bindings 原子复制到独立目录，新文件存在不覆盖。`runtime_dir` 覆盖也会覆盖 Windows 的默认易变层/日志，`volatile_path`、`log_path` 显式值优先；调用方提供的目录不自动删除。
 
 业务入口：`services/commands/` 不依赖 Axum；REST handler 只做参数提取和 `responses.rs` 的统一结果映射，MCP 直接调用业务服务，不得构造 HTTP `State/Json` 或调用 handler。节点/规则/VPS 节点落盘通过 `ConfigEdit` 持有读改写锁；策略/倍率共用偏好事务，失败恢复 requested 内存值及精确原文件字节。`RuntimeCheckpoint` 严格读取 active config + bindings，无法读取则拒绝开始；`commit_generated` 统一配置接受与派生状态发布。详见 [状态模型与提交边界](docs/runtime-state.md)。
 

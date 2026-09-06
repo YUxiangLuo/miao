@@ -7,6 +7,7 @@ mod models;
 mod paths;
 mod platform;
 mod privilege;
+mod profile;
 mod responses;
 mod router;
 mod runtime;
@@ -20,6 +21,7 @@ pub use autostart::{
     is_enabled as autostart_is_enabled, repair_if_stale as autostart_repair_if_stale,
     set_enabled as autostart_set_enabled, MINIMIZED_ARG,
 };
+pub use cli::config_path_from_args;
 pub use error::{AppError, AppResult};
 pub use instance::{
     acquire_single_instance, double_click_interval, focus_existing_window, peek_single_instance,

@@ -1,4 +1,3 @@
-use std::ffi::OsString;
 use std::path::PathBuf;
 use std::sync::OnceLock;
 
@@ -18,8 +17,8 @@ pub const CONFIG_FILENAME: &str = "config.yaml";
 pub const ETC_CONFIG_PATH: &str = "/etc/miao/config.yaml";
 
 /// Generated sing-box artifacts plus user preference files.
-/// Tests keep everything under `runtime_dir`. Production overwrites the
-/// preference paths via [`Self::with_preferences`] (cwd / tmpfs / app data).
+/// `profile::ResolvedProfile` selects their production ownership once. Test
+/// constructors keep preferences under runtime_dir; bindings follow config.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RuntimePaths {
     pub runtime_dir: PathBuf,
@@ -35,12 +34,11 @@ pub struct RuntimePaths {
 
 impl RuntimePaths {
     pub fn new(runtime_dir: PathBuf, config_path: &std::path::Path) -> Self {
-        let node_bindings =
-            if config_path.file_name() == Some(std::ffi::OsStr::new(CONFIG_FILENAME)) {
-                config_path.with_file_name("node-bindings.json")
-            } else {
-                config_path.with_extension("node-bindings.json")
-            };
+        let node_bindings = if is_standard_config(config_path) {
+            config_path.with_file_name("node-bindings.json")
+        } else {
+            profile_state_dir(config_path).join("node-bindings.json")
+        };
         Self {
             active_config: runtime_dir.join("config.json"),
             config_cache: runtime_dir.join("config.json.cache"),
@@ -70,6 +68,47 @@ impl RuntimePaths {
     }
 }
 
+pub(crate) fn is_standard_config(path: &std::path::Path) -> bool {
+    #[cfg(windows)]
+    {
+        path.file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.eq_ignore_ascii_case(CONFIG_FILENAME))
+    }
+    #[cfg(not(windows))]
+    {
+        path.file_name() == Some(std::ffi::OsStr::new(CONFIG_FILENAME))
+    }
+}
+
+/// Stable, lossless identity for a resolved config path. Specify the encoding
+/// explicitly so a Rust upgrade cannot change the persisted directory name.
+pub(crate) fn profile_id(path: &std::path::Path) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hash = Sha256::new();
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStrExt;
+        hash.update(path.as_os_str().as_bytes());
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStrExt;
+        for unit in path.as_os_str().encode_wide() {
+            hash.update(unit.to_le_bytes());
+        }
+    }
+    hex::encode(hash.finalize())
+}
+
+pub(crate) fn profile_state_dir(config_path: &std::path::Path) -> PathBuf {
+    config_path
+        .parent()
+        .unwrap_or_else(|| std::path::Path::new("."))
+        .join(".miao-profiles")
+        .join(profile_id(config_path))
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ConfigPathSource {
     Explicit,
@@ -93,44 +132,13 @@ pub(crate) fn absolutize(path: PathBuf) -> AppResult<PathBuf> {
     }
 }
 
-fn config_arg_from(args: impl IntoIterator<Item = OsString>) -> AppResult<Option<PathBuf>> {
-    let mut args = args.into_iter();
-    while let Some(arg) = args.next() {
-        if arg == "--config" {
-            let value = args
-                .next()
-                .ok_or_else(|| AppError::message("--config requires a path"))?;
-            return Ok(Some(PathBuf::from(value)));
-        }
-
-        if let Some(value) = arg.to_str().and_then(|arg| arg.strip_prefix("--config=")) {
-            if value.is_empty() {
-                return Err(AppError::message("--config requires a path"));
-            }
-            return Ok(Some(PathBuf::from(value)));
-        }
-    }
-
-    Ok(None)
-}
-
-pub fn resolve_config_path() -> AppResult<ConfigPathResolution> {
-    if let Some(path) = config_arg_from(std::env::args_os().skip(1))? {
-        return Ok(ConfigPathResolution {
-            path: absolutize(path)?,
-            source: ConfigPathSource::Explicit,
-        });
-    }
-
+pub fn resolve_default_config_path() -> ConfigPathResolution {
     let exe_dir_config = std::env::current_exe()
         .ok()
         .and_then(|path| path.parent().map(|parent| parent.join(CONFIG_FILENAME)));
     let exe_dir_config_exists = exe_dir_config.as_deref().is_some_and(|path| path.exists());
 
-    Ok(resolve_config_path_from_parts(
-        exe_dir_config_exists,
-        exe_dir_config,
-    ))
+    resolve_config_path_from_parts(exe_dir_config_exists, exe_dir_config)
 }
 
 fn resolve_config_path_from_parts(
@@ -181,10 +189,28 @@ pub fn default_log_path() -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use std::ffi::OsString;
     use std::path::PathBuf;
 
-    use super::{config_arg_from, resolve_config_path_from_parts, ConfigPathSource, RuntimePaths};
+    use super::{resolve_config_path_from_parts, ConfigPathSource, RuntimePaths};
+
+    #[test]
+    fn persisted_profile_id_encoding_is_stable() {
+        #[cfg(unix)]
+        assert_eq!(
+            super::profile_id(std::path::Path::new("/profiles/travel.yaml")),
+            "c63470fcbe3b2d2241bbdf6030603413f3eebc98b8b7287e1f53b32e9ade5545"
+        );
+        #[cfg(windows)]
+        {
+            assert_eq!(
+                super::profile_id(std::path::Path::new(r"C:\profiles\travel.yaml")),
+                "0b8ad46865d2941794a15c90f2f8c780a2897c304b063d5e44e80f0ecbc03f46"
+            );
+            assert!(super::is_standard_config(std::path::Path::new(
+                "CONFIG.YAML"
+            )));
+        }
+    }
 
     #[test]
     fn runtime_bindings_follow_the_resolved_config_profile() {
@@ -203,7 +229,8 @@ mod tests {
         );
         assert_eq!(
             profile.node_bindings,
-            PathBuf::from("/etc/miao/travel.node-bindings.json")
+            super::profile_state_dir(std::path::Path::new("/etc/miao/travel.yaml"))
+                .join("node-bindings.json")
         );
         assert_eq!(
             default.last_proxy,
@@ -234,33 +261,6 @@ mod tests {
             persistent.max_multiplier_preference,
             PathBuf::from("/etc/miao/.max_multiplier")
         );
-    }
-
-    #[test]
-    fn config_arg_parses_separate_value() {
-        let args = vec![OsString::from("--config"), OsString::from("/tmp/miao.yaml")];
-
-        let parsed = config_arg_from(args).unwrap();
-
-        assert_eq!(parsed, Some(PathBuf::from("/tmp/miao.yaml")));
-    }
-
-    #[test]
-    fn config_arg_parses_equals_value() {
-        let args = vec![OsString::from("--config=/tmp/miao.yaml")];
-
-        let parsed = config_arg_from(args).unwrap();
-
-        assert_eq!(parsed, Some(PathBuf::from("/tmp/miao.yaml")));
-    }
-
-    #[test]
-    fn config_arg_rejects_missing_value() {
-        let args = vec![OsString::from("--config")];
-
-        let err = config_arg_from(args).unwrap_err();
-
-        assert_eq!(err.to_string(), "--config requires a path");
     }
 
     #[test]

@@ -31,7 +31,7 @@ fn existing_config_syntax_is_preserved() {
     }
     let prepared = prepare(LaunchSource::Config(PathBuf::from("profile.yaml"))).unwrap();
     assert!(prepared.options.config_path.unwrap().is_absolute());
-    assert!(prepared._profile.is_none());
+    assert!(prepared.profile.is_none());
     assert!(prepared.options.runtime_dir.is_none());
 }
 
@@ -44,6 +44,58 @@ fn separate_config_value_preserves_non_utf8_paths() {
         parse(vec![OsString::from("--config"), path.clone()]).unwrap(),
         Command::Run(LaunchSource::Config(PathBuf::from(path)))
     );
+}
+
+#[test]
+fn desktop_config_arguments_use_the_cli_parser_without_hidden_runtime_argv() {
+    for arguments in [
+        vec!["--minimized", "--config", "travel.yaml"],
+        vec!["--config=travel.yaml", "--minimized"],
+    ] {
+        let path = config_path_from_args(
+            args(&arguments)
+                .into_iter()
+                .filter(|arg| arg != crate::MINIMIZED_ARG),
+        )
+        .unwrap()
+        .unwrap();
+        assert!(path.is_absolute());
+        assert!(path.ends_with("travel.yaml"));
+    }
+    assert!(config_path_from_args(args(&[])).unwrap().is_none());
+    for arguments in [
+        vec!["--config"],
+        vec!["--config=a", "--config=b"],
+        vec!["--sub=https://example.com"],
+    ] {
+        assert!(config_path_from_args(args(&arguments)).is_err());
+    }
+}
+
+#[tokio::test]
+async fn dropping_server_handle_releases_its_temporary_profile_after_shutdown() {
+    let mut prepared = prepare(LaunchSource::Subscription {
+        url: "https://example.com/sub".into(),
+        node_select: NodeSelect::Manual,
+    })
+    .unwrap();
+    let root = prepared.profile.as_ref().unwrap().path().to_path_buf();
+    // Empty input: exercise real server ownership without a network fetch/kernel.
+    std::fs::write(prepared.options.config_path.as_ref().unwrap(), "{}").unwrap();
+    prepared.options.bind_port = Some(0);
+    prepared.options.skip_extract = true;
+    prepared.options.install_tracing = false;
+    prepared.options.open_browser = false;
+    let handle = crate::runtime::spawn_prepared(prepared).await.unwrap();
+    assert!(root.exists());
+    drop(handle);
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        while root.exists() {
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("dropped server must finish cleanup");
 }
 
 #[test]
@@ -146,8 +198,8 @@ fn subscription_profiles_are_private_unique_and_cleaned_up() {
     };
     let first = make();
     let second = make();
-    let root = first._profile.as_ref().unwrap().path().to_path_buf();
-    assert_ne!(root, second._profile.as_ref().unwrap().path());
+    let root = first.profile.as_ref().unwrap().path().to_path_buf();
+    assert_ne!(root, second.profile.as_ref().unwrap().path());
     for path in [
         &first.options.config_path,
         &first.options.volatile_path,
@@ -173,7 +225,7 @@ fn subscription_profiles_are_private_unique_and_cleaned_up() {
     }
     drop(first);
     assert!(!root.exists());
-    assert!(second._profile.as_ref().unwrap().path().exists());
+    assert!(second.profile.as_ref().unwrap().path().exists());
 }
 
 #[cfg(unix)]
@@ -203,7 +255,7 @@ async fn exercise_subscription_startup(body: &'static str, expected_mode: &str) 
         panic!("run command")
     };
     let mut prepared = prepare(source).unwrap();
-    let root = prepared._profile.as_ref().unwrap().path().to_path_buf();
+    let root = prepared.profile.as_ref().unwrap().path().to_path_buf();
     let runtime_dir = prepared.options.runtime_dir.as_ref().unwrap().clone();
     std::fs::create_dir_all(&runtime_dir).unwrap();
     // Real initialization/HTTP/generation, but never a real kernel or TUN.
@@ -214,7 +266,8 @@ async fn exercise_subscription_startup(body: &'static str, expected_mode: &str) 
     prepared.options.skip_extract = true;
     prepared.options.open_browser = false;
     prepared.options.install_tracing = false;
-    let handle = crate::spawn_server(prepared.options.clone()).await.unwrap();
+    let volatile_path = prepared.options.volatile_path.clone().unwrap();
+    let handle = crate::runtime::spawn_prepared(prepared).await.unwrap();
     let client = reqwest::Client::builder().no_proxy().build().unwrap();
     let status = tokio::time::timeout(Duration::from_secs(3), async {
         loop {
@@ -267,12 +320,19 @@ async fn exercise_subscription_startup(body: &'static str, expected_mode: &str) 
     }
     // Only a fallback needs to persist a different effective strategy.
     if expected_mode == "manual" {
-        assert!(prepared.options.volatile_path.as_ref().unwrap().exists());
+        assert!(volatile_path.exists());
     }
     handle.shutdown().await;
     subscription_server.abort();
-    drop(prepared);
-    assert!(!root.exists());
+    // Retired watchdog/restore tasks keep their Arc<AppState> lease until they
+    // observe cancellation. Files must outlive those tasks, not just the CLI.
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while root.exists() {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("temporary profile should be released after shutdown");
 }
 
 #[cfg(unix)]
@@ -288,6 +348,25 @@ async fn sub_jp_without_japanese_nodes_keeps_requested_preference_on_fallback() 
 }
 
 #[tokio::test]
+async fn invalid_temporary_config_releases_profile_before_initialization() {
+    let mut prepared = prepare(LaunchSource::Subscription {
+        url: "https://example.com/sub".into(),
+        node_select: NodeSelect::Manual,
+    })
+    .unwrap();
+    let root = prepared.profile.as_ref().unwrap().path().to_path_buf();
+    std::fs::write(
+        prepared.options.config_path.as_ref().unwrap(),
+        "subs: [invalid",
+    )
+    .unwrap();
+    prepared.options.install_tracing = false;
+    let result = crate::runtime::spawn_prepared(prepared).await;
+    assert!(result.is_err());
+    assert!(!root.exists());
+}
+
+#[tokio::test]
 async fn occupied_panel_port_rejects_sub_launch_before_kernel_extraction() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let mut prepared = prepare(LaunchSource::Subscription {
@@ -299,7 +378,11 @@ async fn occupied_panel_port_rejects_sub_launch_before_kernel_extraction() {
     prepared.options.open_browser = false;
     prepared.options.install_tracing = false;
     // This must return before initialization, even with extraction enabled.
-    let result = crate::spawn_server(prepared.options.clone()).await;
+    let root = prepared.profile.as_ref().unwrap().path().to_path_buf();
+    let result = crate::runtime::spawn_prepared(prepared).await;
     assert!(result.is_err());
-    assert!(!prepared.options.runtime_dir.as_ref().unwrap().exists());
+    assert!(
+        !root.exists(),
+        "failed startup must release the profile owner"
+    );
 }
