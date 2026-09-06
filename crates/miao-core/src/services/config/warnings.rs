@@ -13,5 +13,8 @@ pub const REFRESH_FAILED_KEEP_CACHE: &str =
 pub const STARTUP_VALIDATION_RETRY: &str = "订阅配置校验失败，修复订阅后将自动重试";
 pub const DATA_PLANE_RETRYING: &str = "代理服务仍未就绪，正在后台自动重试";
 pub const SUBS_REFRESHING_MANUAL: &str = "订阅正在后台刷新，暂时使用手动节点";
+// Keep the interval in sync with runtime/startup.rs::SUBS_SLOW_RETRY_INTERVAL.
+pub const SUBS_RETRYING_SLOWLY: &str =
+    "订阅刷新失败，继续使用当前配置；已结束启动重试，每 30 分钟后台重试，也可手动刷新";
 pub const NO_USABLE_MANUAL: &str = "没有可用的手动节点，请检查配置或添加节点";
 pub const NO_USABLE_SUBS: &str = "所有订阅获取失败且没有可用手动节点，请检查订阅或添加节点";

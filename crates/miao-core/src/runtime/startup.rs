@@ -308,17 +308,28 @@ enum BackgroundRefreshStep {
 /// 阶段 2 持锁落地：拉取期间订阅列表被改过（面板编辑已按新配置自行应用）
 /// 或服务被显式停止，则放弃本次刷新。
 ///
-/// 缓存、快照或手动节点已让数据面就绪时，启动刷新失败不能就此停止：开机
-/// 早期 DNS、DHCP 或默认路由可能在 20s 预算后才可用。失败后在保持当前
-/// 配置运行的同时按 5–60s 退避继续单次拉取，直到成功。前台刷新会淘汰
-/// 正在进行的旧请求；若前台仍未取到订阅节点，后台采用新 generation 继续恢复。
+/// 首轮 20s 预算后最多再快速重试 4 次，跨过开机 DNS/DHCP 未就绪窗口。
+/// 数据面已可用却仍取不到订阅时，保留当前配置并转为每 30 分钟静默重试，
+/// 不再无限刷新面板的启动状态。数据面不可用时仍保留原来的恢复退避。
+/// 前台操作不会重置快速重试次数；停服/改订阅会及时取消长时间等待。
 pub(super) async fn refresh_subscriptions_in_background(config: &Config, state: &Arc<AppState>) {
     let mut refresh_generation = state.sub_refresh_generation.load(Ordering::Relaxed);
     let mut retry = SubFetchRetry::Startup;
     let mut delay = STARTUP_RECOVERY_INITIAL_DELAY;
+    let mut fast_retries = 0;
+    let mut quiet = false;
 
     loop {
-        match background_subscription_refresh_once(config, state, refresh_generation, retry).await {
+        // Also notice a foreground success that committed during our sleep.
+        let Some(generation) =
+            resume_after_foreground_refresh(config, state, refresh_generation).await
+        else {
+            return;
+        };
+        refresh_generation = generation;
+        match background_subscription_refresh_once(config, state, refresh_generation, retry, quiet)
+            .await
+        {
             BackgroundRefreshStep::Finished => return,
             BackgroundRefreshStep::Retry => {}
             BackgroundRefreshStep::Superseded => {
@@ -331,28 +342,67 @@ pub(super) async fn refresh_subscriptions_in_background(config: &Config, state: 
             }
         }
 
+        let wait = {
+            let _config_update = state.config_update.lock().await;
+            quiet = fast_retries >= STARTUP_BACKGROUND_FAST_RETRIES
+                && state.runtime_ready.load(Ordering::Relaxed)
+                && is_sing_box_running(state).await;
+            if quiet {
+                // A newer foreground operation owns its warning and state.
+                if state.sub_refresh_generation.load(Ordering::Relaxed) == refresh_generation
+                    && state.service_should_run.load(Ordering::Relaxed)
+                    && (refresh_generation == 0
+                        || state.sub_refresh_success_generation.load(Ordering::Relaxed)
+                            != refresh_generation)
+                {
+                    *state.config_warning.lock().await = Some(SUBS_RETRYING_SLOWLY.to_string());
+                }
+                SUBS_SLOW_RETRY_INTERVAL
+            } else {
+                fast_retries = fast_retries.saturating_add(1);
+                delay
+            }
+        };
         info!(
-            delay_secs = delay.as_secs(),
-            "Startup subscription refresh will retry in the background"
+            delay_secs = wait.as_secs(),
+            quiet, "Startup subscription refresh will retry in the background"
         );
-        tokio::time::sleep(delay).await;
-        if state.sub_refresh_generation.load(Ordering::Relaxed) != refresh_generation {
-            let Some(generation) =
-                resume_after_foreground_refresh(config, state, refresh_generation).await
-            else {
-                return;
-            };
-            refresh_generation = generation;
-        }
+        let Some(generation) =
+            wait_for_background_retry(config, state, refresh_generation, wait).await
+        else {
+            return;
+        };
+        refresh_generation = generation;
         delay = next_startup_recovery_delay(delay);
-        // 后续已有外层持续退避；每轮只请求一次，避免永久坏订阅每分钟触发
-        // 一整组启动预算内重试。
+        // 后续由外层控制快速/低频重试；每轮只请求一次，不再重复首轮预算。
         retry = SubFetchRetry::None;
     }
 }
 
-/// 等待取代后台请求的前台事务结束。前台拿到并提交了订阅节点则后台完成；
-/// 前台请求本身结束但仍无订阅节点时，只淘汰旧请求并采用新 generation 续跑。
+// Subscribe before checking the generation so stop/edit notifications cannot
+// be lost. A foreground fetch starts outside config_update; waking must not
+// launch a competing request or reset the original retry deadline.
+async fn wait_for_background_retry(
+    config: &Config,
+    state: &Arc<AppState>,
+    mut generation: u64,
+    delay: Duration,
+) -> Option<u64> {
+    let deadline = tokio::time::Instant::now() + delay;
+    loop {
+        let cancelled = state.sub_refresh_cancel.notified();
+        tokio::pin!(cancelled);
+        cancelled.as_mut().enable();
+        generation = resume_after_foreground_refresh(config, state, generation).await?;
+        tokio::select! {
+            _ = tokio::time::sleep_until(deadline) => return Some(generation),
+            _ = cancelled => {}
+        }
+    }
+}
+
+/// 在事务锁下检查前台提交结果（不等待锁外 HTTP）。前台已提交订阅节点则
+/// 后台完成；尚未成功时采用当前 generation，但不重置重试额度或等待期限。
 async fn resume_after_foreground_refresh(
     startup_config: &Config,
     state: &Arc<AppState>,
@@ -360,24 +410,25 @@ async fn resume_after_foreground_refresh(
 ) -> Option<u64> {
     let _config_update = state.config_update.lock().await;
     let current_generation = state.sub_refresh_generation.load(Ordering::Relaxed);
-    if current_generation == previous_generation {
-        return Some(current_generation);
-    }
     if !state.service_should_run.load(Ordering::Relaxed) {
         info!("Service stopped while foreground subscription refresh was running");
         return None;
     }
     let current = state.config.read().await;
-    if current.subs != startup_config.subs || current.subs.is_empty() {
+    if current.subs != startup_config.subs {
         info!("Subscriptions changed while foreground refresh superseded startup recovery");
         return None;
     }
-    if state.sub_refresh_success_generation.load(Ordering::Relaxed) == current_generation {
+    if current_generation != 0
+        && state.sub_refresh_success_generation.load(Ordering::Relaxed) == current_generation
+    {
         info!("Foreground subscription refresh succeeded; startup recovery is complete");
         return None;
     }
 
-    info!("Foreground subscription refresh got no usable subscription nodes; resuming startup recovery");
+    if current_generation != previous_generation {
+        info!("Foreground subscription refresh got no usable subscription nodes; resuming startup recovery");
+    }
     Some(current_generation)
 }
 
@@ -386,6 +437,7 @@ async fn background_subscription_refresh_once(
     state: &Arc<AppState>,
     refresh_generation: u64,
     retry: SubFetchRetry,
+    quiet: bool,
 ) -> BackgroundRefreshStep {
     if state.sub_refresh_generation.load(Ordering::Relaxed) != refresh_generation {
         return BackgroundRefreshStep::Superseded;
@@ -405,7 +457,11 @@ async fn background_subscription_refresh_once(
     } else {
         RuntimePhase::RefreshingSubscriptions
     };
-    state.set_runtime_phase(background_phase);
+    // Low-frequency maintenance must not make an already working proxy look
+    // as if it is starting/refreshing again. Real activation still sets phases.
+    if !quiet || !state.runtime_ready.load(Ordering::Relaxed) {
+        state.set_runtime_phase(background_phase);
+    }
     let nodes = fetch_sub_nodes_if_current(&before_fetch, state, retry, refresh_generation).await;
 
     let _config_update = state.config_update.lock().await;
@@ -487,11 +543,21 @@ async fn background_subscription_refresh_once(
             }
         }
     };
+    if quiet && step == BackgroundRefreshStep::Retry && state.runtime_ready.load(Ordering::Relaxed)
+    {
+        *state.config_warning.lock().await = Some(SUBS_RETRYING_SLOWLY.to_string());
+    }
     if state.runtime_phase() == background_phase {
         state.set_runtime_phase(RuntimePhase::Ready);
     }
     step
 }
+
+pub(super) const STARTUP_BACKGROUND_FAST_RETRIES: usize = 4;
+#[cfg(not(test))]
+const SUBS_SLOW_RETRY_INTERVAL: Duration = Duration::from_secs(30 * 60);
+#[cfg(test)]
+pub(super) const SUBS_SLOW_RETRY_INTERVAL: Duration = Duration::from_millis(500);
 
 #[cfg(not(test))]
 const STARTUP_RECOVERY_INITIAL_DELAY: Duration = Duration::from_secs(5);

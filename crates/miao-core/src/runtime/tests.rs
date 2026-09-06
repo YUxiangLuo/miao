@@ -8,6 +8,9 @@ use super::{
 #[cfg(unix)]
 use super::{initialize_runtime_locked, recover_data_plane_once};
 
+#[cfg(unix)]
+mod background_retry;
+
 #[tokio::test]
 async fn incompatible_cache_is_rejected_before_it_replaces_active_config() {
     use crate::{models::Config, services::config::save_config_cache, test_support::app_state};
@@ -292,6 +295,16 @@ async fn legacy_manual_cache_requests_local_background_reconciliation() {
     assert!(state
         .runtime_ready
         .load(std::sync::atomic::Ordering::Relaxed));
+    tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        super::refresh_subscriptions_in_background(&config, &state),
+    )
+    .await
+    .expect("a legacy manual-only cache still needs one local reconciliation");
+    assert_eq!(
+        crate::services::config::cache_compatibility(&state, &config).await,
+        crate::services::config::CacheCompatibility::Verified
+    );
 
     crate::services::singbox::stop_sing_internal(&state).await;
     let _ = tokio::fs::remove_dir_all(root).await;

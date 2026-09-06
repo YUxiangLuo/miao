@@ -20,7 +20,7 @@ use crate::services::{
         save_node_select_preference, CacheCompatibility, GenConfigOutcome, RefreshEffect,
         RefreshPolicy, SubFetchRetry, SubSource, ALL_SUBS_FAILED_KEEP_CACHE, ALL_SUBS_FAILED_RETRY,
         DATA_PLANE_RETRYING, REFRESH_FAILED_KEEP_CACHE, REFRESH_VALIDATION_FAILED, REGION_FALLBACK,
-        STARTUP_VALIDATION_RETRY, SUBS_REFRESHING_MANUAL,
+        STARTUP_VALIDATION_RETRY, SUBS_REFRESHING_MANUAL, SUBS_RETRYING_SLOWLY,
     },
     proxy::spawn_restore_last_proxy,
     singbox::{
