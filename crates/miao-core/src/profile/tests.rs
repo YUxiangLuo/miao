@@ -279,6 +279,26 @@ async fn legacy_bindings_are_copied_once_without_overwriting_new_identity() {
 }
 
 #[test]
+fn missing_paths_require_directory_ancestors_but_existing_files_are_valid() {
+    let (_root, env) = environment();
+    let file = env.cwd.join("existing.yaml");
+    std::fs::write(&file, "{}").unwrap();
+    assert_eq!(resolve_path(&file, &env.cwd).unwrap(), file);
+    for suffix in ["child.yaml", "missing/child.yaml"] {
+        assert!(
+            resolve_path(&file.join(suffix), &env.cwd).is_err(),
+            "{suffix}"
+        );
+    }
+    let missing = env.cwd.join("new/nested/config.yaml");
+    assert_eq!(resolve_path(&missing, &env.cwd).unwrap(), missing);
+    assert!(
+        !env.cwd.join("new").exists(),
+        "resolution must not create directories"
+    );
+}
+
+#[test]
 fn an_unresolvable_unselected_default_does_not_block_an_explicit_profile() {
     let (_root, mut env) = environment();
     let obstruction = env.cwd.join("not-a-directory");

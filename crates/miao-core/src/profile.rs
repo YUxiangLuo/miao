@@ -65,6 +65,14 @@ fn resolve_path(path: &Path, cwd: &Path) -> AppResult<PathBuf> {
     loop {
         match std::fs::canonicalize(ancestor) {
             Ok(mut resolved) => {
+                // Windows may report NotFound (rather than NotADirectory) for
+                // file/child. A canonicalized ancestor is not necessarily a
+                // directory: only directories can own the missing suffix.
+                if !tail.is_empty() && !std::fs::metadata(&resolved)?.is_dir() {
+                    return Err(AppError::message(
+                        "Profile path ancestor is not a directory",
+                    ));
+                }
                 for component in tail.into_iter().rev() {
                     if component == ".." {
                         resolved.pop();
