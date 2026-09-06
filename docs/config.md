@@ -1,6 +1,25 @@
 # 配置参考
 
-不创建任何文件也能用。查找顺序：`--config` → 可执行文件同目录 `config.yaml` → 平台默认路径。
+不创建任何文件也能用。默认配置查找顺序：`--config` → 可执行文件同目录 `config.yaml` → 平台默认路径。
+
+## 命令行启动
+
+```bash
+sudo ./miao --sub 'https://example.com/sub?token=xxx' JP  # 日本最快，临时配置
+sudo ./miao --sub='https://example.com/sub?token=xxx'    # 不指定地区：手动选择
+sudo ./miao --config /path/to/config.yaml              # 或 --config=/path/to/config.yaml
+./miao --help
+./miao --version
+```
+
+- `--sub` 接受一个 HTTP/HTTPS Clash YAML 订阅，**与 `--config` 互斥**；重复参数、未知参数、无效 URL 或地区会在提权/启动内核前报错。
+- 可选地区为 `HK / JP / TW / SG / US`，大小写不限，映射到相应的 `fastest_*` 策略。没有该地区候选时回退到手动选择并提示，但仍保留请求的地区策略。
+- `--sub` 不读取已有配置、手动节点或选择偏好：使用独立临时目录保存本次配置、内核文件、缓存和偏好，默认不限倍率、规则分流。面板可正常使用，但面板修改也只属于本次临时运行。
+- 正常退出（Ctrl+C / SIGTERM）后清理临时目录；强杀、断电或进程替换升级可能留下临时文件，后续运行不会复用它们。Unix 临时目录权限为 `0700`。未带 `--sub` 时原有配置和持久化规则不变。
+- URL 含 `&` 等 shell 字符时须加引号。订阅令牌可能出现在 shell 历史及进程参数中，请注意保密。
+- 临时目录隔离不等于支持多开：TUN 和 Clash API 端口仍是共享资源，不要与已有 miao 实例同时运行。普通面板端口已占用时会在释放/启动内核前拒绝新实例。
+
+## 配置文件
 
 ```yaml
 port: 6161                 # 面板端口

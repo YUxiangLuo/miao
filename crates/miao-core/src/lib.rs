@@ -1,4 +1,5 @@
 mod autostart;
+mod cli;
 mod error;
 mod handlers;
 mod instance;

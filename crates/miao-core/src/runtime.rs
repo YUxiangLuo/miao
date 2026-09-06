@@ -97,19 +97,24 @@ impl Drop for ServerHandle {
 }
 
 pub async fn run() -> AppResult<()> {
-    if std::env::args().any(|a| a == "--version" || a == "-V") {
-        println!("miao v{}", VERSION);
-        return Ok(());
-    }
+    let source = match crate::cli::parse(std::env::args_os().skip(1))? {
+        crate::cli::Command::Help => {
+            println!("{}", crate::cli::HELP);
+            return Ok(());
+        }
+        crate::cli::Command::Version => {
+            println!("miao v{}", VERSION);
+            return Ok(());
+        }
+        crate::cli::Command::Run(source) => source,
+    };
 
     crate::require_privileges();
 
-    let handle = spawn_server(RuntimeOptions {
-        open_browser: true,
-        install_tracing: true,
-        ..RuntimeOptions::default()
-    })
-    .await?;
+    // Own the temporary --sub profile until initialization and the managed
+    // kernel have shut down; never reuse the installed profile's preferences.
+    let prepared = crate::cli::prepare(source)?;
+    let handle = spawn_server(prepared.options).await?;
 
     wait_os_shutdown().await;
     handle.shutdown().await;

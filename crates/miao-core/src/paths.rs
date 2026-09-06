@@ -83,7 +83,7 @@ pub struct ConfigPathResolution {
     pub source: ConfigPathSource,
 }
 
-fn absolutize(path: PathBuf) -> AppResult<PathBuf> {
+pub(crate) fn absolutize(path: PathBuf) -> AppResult<PathBuf> {
     if path.is_absolute() {
         Ok(path)
     } else {

@@ -162,6 +162,8 @@ TUN JSON：`auto_route` + `strict_route`，`interface_name` 仍是 `sing-tun`。
 
 ## 配置与内核管线（后端核心）
 
+CLI 参数在 `cli.rs` 统一校验，先于提权/文件写入；保留 `--config[=]PATH`、`--version/-V`，支持 `--help/-h` 与互斥的 `--sub[=]URL [HK|JP|TW|SG|US]`。`--sub` 用权限 0700 的独立临时 profile，通过现有 `RuntimeOptions.config_path/runtime_dir/volatile_path` 进入同一启动管线，不复用原配置或偏好；临时目录所有权保留到内核关闭后。桌面/SDK 的 `spawn_server` 接口不变。测试成功路径必须注入假内核 + 本地订阅服务器，不能执行真实 TUN。
+
 变更链路：订阅增删/刷新先在锁外拉取，按 `sub_refresh_generation` 淘汰旧请求，再持 `config_update` 锁合并当前设置、生成候选、`sing-box check`、激活和提交。显式停服取消在途订阅刷新；校验子进程限时 10 秒。面板读取 Clash API 反代；节点切换统一走 `POST /api/proxy/switch`，与 MCP 共用串行切换/持久化服务，并使旧恢复任务失效。
 
 生成配置无条件带 `route.find_process: true`（builder.rs）：面板「链接统计」每行副标题的进程名依赖 Clash API 的 `processPath`，而 sing-box 只在有进程类规则或此开关下才跑进程搜索器——删掉它，没有进程规则的用户面板就没有进程列数据。

@@ -22,6 +22,14 @@ wget https://github.com/YUxiangLuo/miao/releases/latest/download/miao-rust-linux
 chmod +x miao && sudo ./miao
 ```
 
+也可以直接指定订阅，以“日本最快”启动（临时运行，不改写已有配置）：
+
+```bash
+sudo ./miao --sub 'https://your-subscription-url' JP
+```
+
+`JP` 可换成 `HK/TW/SG/US`，大小写不限；省略地区时使用手动选择。`--sub` 与 `--config` 互斥，详见[命令行用法](docs/config.md#命令行启动)。不要与已经运行的 miao 服务同时启动。
+
 ```bash
 # 或者一键安装为systemd服务
 curl -fsSL https://raw.githubusercontent.com/YUxiangLuo/miao/master/install.sh | sudo bash
