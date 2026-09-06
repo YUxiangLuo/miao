@@ -78,6 +78,12 @@ else
 fi
 
 cd "$TMP_DIR/sing-box"
+# SIGHUP's in-process check must not publish uninitialized AnyTLS outbounds
+# into the live instance's service registry. See patches/README.md.
+echo "==> Applying sing-box CLI context isolation fix..."
+git apply --check "$ROOT_DIR/scripts/patches/sing-box-isolate-cli-context.patch"
+git apply "$ROOT_DIR/scripts/patches/sing-box-isolate-cli-context.patch"
+
 build_tags="with_quic,with_clash_api,with_utls"
 build_flags=(-trimpath -ldflags "-s -w -buildid=" -tags "$build_tags")
 
@@ -93,6 +99,9 @@ if [[ -z "${GOTOOLCHAIN:-}" || "${GOTOOLCHAIN}" == auto ]]; then
   go_command=(env "GOTOOLCHAIN=go$required_go" go)
   echo "==> Using sing-box Go toolchain go$required_go..."
 fi
+
+echo "==> Testing sing-box CLI context isolation (no TUN or remote connections)..."
+"${go_command[@]}" test -tags "$build_tags" ./cmd/sing-box -run '^TestMiao(Check|Create)IsolatesServiceRegistry$' -count=1
 
 echo "==> Building host sing-box ($host_goarch) for rule compilation..."
 "${go_command[@]}" build "${build_flags[@]}" -o "$EMBEDDED_DIR/sing-box-host" ./cmd/sing-box

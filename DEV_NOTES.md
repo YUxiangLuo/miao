@@ -191,6 +191,7 @@ push/PR 跑 `ci.yml`：Frontend quality（install → audit → lint → **typec
 - `install.sh` / `remove.sh`：提交前 `shellcheck`
 - `build-embedded.sh` 的 `MIAO_TARGET=windows-amd64` 也会编 host 规则编译器 `sing-box-host`，不要拿它去抽本机正在跑的实例
 - `SING_BOX_REF`、`SING_GEOIP_REF`、`DIRECT_RULES_REF` 接受分支/tag/完整 sha；本地默认跟上游分支，release CI 在单独 job 中把三者解析为一次快照并供所有平台共用，版本清单随 Release 发布
+- 内核构建应用 `scripts/patches/sing-box-isolate-cli-context.patch` 并运行其隔离测试：避免 SIGHUP 的配置检查污染运行实例注册表，引发 AnyTLS 空指针崩溃。补丁冲突必须检查上游等效修复，不可跳过；背景与移除条件见 `scripts/patches/README.md`。修补后须重建 embedded + miao 才生效。
 
 ## 前端调试（agent-browser）
 
