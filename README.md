@@ -19,7 +19,7 @@ Miao 把 sing-box 内核、geo 分流规则和 Web 控制面板编进同一个�
 ```bash
 mkdir -p ~/miao && cd ~/miao
 wget https://github.com/YUxiangLuo/miao/releases/latest/download/miao-rust-linux-amd64 -O miao  # arm64 换文件名
-chmod +x miao && sudo ./miao
+chmod +x miao && sudo ./miao #默认面板端口6161
 ```
 
 也可以直接指定订阅，以“日本最快”启动（临时运行，不改写已有配置）：
