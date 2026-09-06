@@ -94,7 +94,7 @@ async fn exhausted_startup_retries_preserve_manual_runtime_and_later_recover_qui
         Some(1)
     );
     assert_eq!(
-        state.runtime_phase(),
+        state.lifecycle.snapshot().phase,
         RuntimePhase::Ready,
         "even the first fetch must not borrow the proxy phase"
     );
@@ -110,8 +110,8 @@ async fn exhausted_startup_retries_preserve_manual_runtime_and_later_recover_qui
         crate::models::SubscriptionRefreshPhase::Waiting
     );
     assert_eq!(calls.load(Ordering::Relaxed), FAST_REQUESTS);
-    assert!(state.runtime_ready.load(Ordering::Relaxed));
-    assert_eq!(state.runtime_phase(), RuntimePhase::Ready);
+    assert!(state.lifecycle.snapshot().ready);
+    assert_eq!(state.lifecycle.snapshot().phase, RuntimePhase::Ready);
     assert_eq!(state.config.read().await.node_select, NodeSelect::Manual);
     assert_eq!(
         *state.node_select_preference.read().await,
@@ -127,7 +127,7 @@ async fn exhausted_startup_retries_preserve_manual_runtime_and_later_recover_qui
         })
         .await
         .expect("low-frequency recovery should still happen");
-        assert_eq!(state.runtime_phase(), RuntimePhase::Ready);
+        assert_eq!(state.lifecycle.snapshot().phase, RuntimePhase::Ready);
         assert_eq!(
             state.config_warning.lock().await.as_deref(),
             Some(SUBS_RETRYING_SLOWLY)
@@ -151,7 +151,7 @@ async fn exhausted_startup_retries_preserve_manual_runtime_and_later_recover_qui
         state.subscription_refresh.snapshot().phase,
         crate::models::SubscriptionRefreshPhase::Completed
     );
-    assert_eq!(state.runtime_phase(), RuntimePhase::Ready);
+    assert_eq!(state.lifecycle.snapshot().phase, RuntimePhase::Ready);
     assert!(state.config_warning.lock().await.is_none());
     assert_eq!(
         state.config.read().await.node_select,
@@ -186,7 +186,7 @@ async fn stopping_service_interrupts_the_slow_retry_wait() {
         .expect("stop must not wait for the low-frequency retry timer")
         .unwrap();
     assert_eq!(calls.load(Ordering::Relaxed), FAST_REQUESTS);
-    assert_eq!(state.runtime_phase(), RuntimePhase::Stopped);
+    assert_eq!(state.lifecycle.snapshot().phase, RuntimePhase::Stopped);
     assert_eq!(
         state.subscription_refresh.snapshot(),
         crate::models::SubscriptionRefreshStatus::default()
@@ -216,7 +216,7 @@ async fn changing_subscriptions_cancels_the_old_slow_retry_task() {
         .expect("editing subscriptions must interrupt the long wait")
         .unwrap();
     assert_eq!(calls.load(Ordering::Relaxed), FAST_REQUESTS);
-    assert!(state.runtime_ready.load(Ordering::Relaxed));
+    assert!(state.lifecycle.snapshot().ready);
     singbox::stop_sing_internal(&state).await;
     let _ = tokio::fs::remove_dir_all(root).await;
 }
@@ -242,7 +242,7 @@ async fn foreground_success_during_slow_wait_prevents_another_background_request
         .unwrap();
     assert_eq!(calls.load(Ordering::Relaxed), FAST_REQUESTS + 1);
     assert!(state.config_warning.lock().await.is_none());
-    assert_eq!(state.runtime_phase(), RuntimePhase::Ready);
+    assert_eq!(state.lifecycle.snapshot().phase, RuntimePhase::Ready);
     singbox::stop_sing_internal(&state).await;
     let _ = tokio::fs::remove_dir_all(root).await;
 }

@@ -15,35 +15,18 @@ pub enum RuntimePhase {
     Extracting = 1,
     Validating = 2,
     /// Legacy wire value; new fetch activity uses SubscriptionRefreshStatus.
+    #[allow(dead_code)]
     FetchingSubscriptions = 3,
     Starting = 4,
     Ready = 5,
     /// Legacy wire value; background fetching never changes the proxy phase.
+    #[allow(dead_code)]
     RefreshingSubscriptions = 6,
     ApplyingConfig = 7,
     Reloading = 8,
     Stopping = 9,
     Stopped = 10,
     Failed = 11,
-}
-
-impl RuntimePhase {
-    pub fn from_u8(value: u8) -> Self {
-        match value {
-            1 => Self::Extracting,
-            2 => Self::Validating,
-            3 => Self::FetchingSubscriptions,
-            4 => Self::Starting,
-            5 => Self::Ready,
-            6 => Self::RefreshingSubscriptions,
-            7 => Self::ApplyingConfig,
-            8 => Self::Reloading,
-            9 => Self::Stopping,
-            10 => Self::Stopped,
-            11 => Self::Failed,
-            _ => Self::Initializing,
-        }
-    }
 }
 
 #[derive(Serialize)]

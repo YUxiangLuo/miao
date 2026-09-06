@@ -95,7 +95,7 @@ async fn successful_empty_subscription_finishes_recovery_and_commits_an_empty_sn
     .await
     .expect("successful empty lists must not be retried as network failures");
     assert_eq!(calls.load(Ordering::Relaxed), 1);
-    assert_eq!(state.runtime_phase(), RuntimePhase::Ready);
+    assert_eq!(state.lifecycle.snapshot().phase, RuntimePhase::Ready);
     assert_eq!(singbox::kernel_status(&state).await.pid, pid);
     let activity = state.subscription_refresh.snapshot();
     assert_eq!(activity.phase, SubscriptionRefreshPhase::Completed);

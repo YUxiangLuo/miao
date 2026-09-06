@@ -8,7 +8,7 @@ use std::{
 use tracing::{error, info, warn};
 
 use crate::error::{AppError, AppResult};
-use crate::models::{Config, NodeMultiplier, NodeSelect, RouteMode, RuntimePhase};
+use crate::models::{Config, NodeMultiplier, NodeSelect, RouteMode};
 use crate::services::{
     proxy::spawn_restore_last_proxy,
     singbox::{
@@ -368,8 +368,7 @@ pub async fn refresh_subscriptions(
     .map_err(|e| AppError::context("Failed to regenerate config", e))?;
     info!("Config regenerated successfully");
 
-    let runtime_ready =
-        state.runtime_ready.load(Ordering::Relaxed) && is_sing_box_running(state).await;
+    let runtime_ready = state.lifecycle.snapshot().ready && is_sing_box_running(state).await;
     if startup && generated.subscription_fetch_failed() {
         if runtime_ready {
             return Ok(RefreshOutcome {
@@ -443,6 +442,8 @@ pub async fn refresh_subscriptions(
 
 mod transaction;
 
+#[cfg(all(test, unix))]
+pub(super) use transaction::regenerate_without_restart_runtime;
 pub use transaction::{
     apply_config_change, apply_disabled_nodes, apply_max_multiplier, apply_node_select,
     apply_route_mode, edit_subscriptions, refresh_subscriptions_foreground, ConfigMutationError,
@@ -450,11 +451,11 @@ pub use transaction::{
 #[cfg(test)]
 pub(super) use transaction::{
     config_apply_mode, no_usable_nodes_warning, persist_config_without_usable_nodes_at,
-    regenerate_without_restart_runtime, ConfigApplyMode,
+    ConfigApplyMode,
 };
 
 #[cfg(all(test, unix))]
 mod transaction_tests;
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 pub use transaction::regenerate_preserving_service_state;

@@ -1,15 +1,10 @@
 use super::*;
 
-/// 崩溃看门狗的巡检间隔。测试里缩短以保持用例快速。
 #[cfg(not(test))]
 const KERNEL_WATCH_INTERVAL: Duration = Duration::from_secs(2);
 #[cfg(test)]
 const KERNEL_WATCH_INTERVAL: Duration = Duration::from_millis(200);
-
-/// 连续自动重启超过此次数后放弃，并在面板上告警。
 const MAX_KERNEL_RESTARTS: u32 = 5;
-
-/// 内核存活超过该时长则认为已稳定，重置重启计数。
 const KERNEL_STABLE_AFTER: Duration = Duration::from_secs(60);
 
 pub(super) const KERNEL_GIVE_UP_WARNING: &str =
@@ -24,101 +19,109 @@ pub(super) fn spawn_crash_watcher(state: Arc<AppState>, generation: u64) {
 }
 
 pub(super) fn start_still_current(state: &AppState, expected_generation: u64) -> bool {
-    state.sing_generation.load(Ordering::Relaxed) == expected_generation
-        && state.service_should_run.load(Ordering::Relaxed)
+    state.lifecycle.is_current(expected_generation)
 }
 
-pub(super) async fn clear_kernel_give_up_warning(state: &Arc<AppState>) {
+pub(super) async fn clear_kernel_give_up_warning(state: &Arc<AppState>, generation: u64) {
     let mut warning = state.config_warning.lock().await;
-    if warning.as_deref() == Some(KERNEL_GIVE_UP_WARNING) {
-        *warning = None;
-    }
+    state.lifecycle.with_current(generation, || {
+        if warning.as_deref() == Some(KERNEL_GIVE_UP_WARNING) {
+            *warning = None;
+        }
+    });
 }
 
-/// 监护一次 sing-box 启动：异常退出时按退避自动拉起（复用当前 config.json，
-/// 不重新生成）。有意停核/重启会递增 generation，看门狗随即退出。
+/// Recheck ownership after obtaining the slot, not just before awaiting it.
+/// Otherwise an old watcher can reap a new instance installed while it waited.
+async fn poll_crash(state: &AppState, generation: u64, restarts: &mut u32) -> Option<bool> {
+    let mut slot = state.sing_process.lock().await;
+    if !start_still_current(state, generation) {
+        return None;
+    }
+    // An empty slot may have been reaped by status polling already.
+    if let Some(process) = slot.as_mut() {
+        match process.child.try_wait() {
+            Ok(None) => {
+                if process.started_at.elapsed() >= KERNEL_STABLE_AFTER {
+                    *restarts = 0;
+                }
+                return Some(false);
+            }
+            Ok(Some(status)) => warn!(exit_code = ?status.code(), "sing-box exited unexpectedly"),
+            Err(err) => warn!(error = %err, "Failed to poll sing-box process state"),
+        }
+    }
+    *slot = None;
+    state.lifecycle.finish(generation, RuntimePhase::Failed);
+    Some(true)
+}
+
+/// Recovery reuses config.json, preserves the retry budget and never owns a
+/// newer start/reload/stop. Lock order: config_update -> process slot -> lifecycle.
 pub(super) async fn watch_sing_box(state: Arc<AppState>, generation: u64) {
     let mut restarts = 0u32;
     loop {
         sleep(KERNEL_WATCH_INTERVAL).await;
-        if state.sing_generation.load(Ordering::Relaxed) != generation {
-            return;
+        match poll_crash(&state, generation, &mut restarts).await {
+            None => return,
+            Some(false) => continue,
+            Some(true) => {}
         }
-
-        let crashed = {
-            let mut lock = state.sing_process.lock().await;
-            match lock.as_mut() {
-                Some(proc) => match proc.child.try_wait() {
-                    Ok(None) => {
-                        if proc.started_at.elapsed() >= KERNEL_STABLE_AFTER {
-                            restarts = 0;
-                        }
-                        false
-                    }
-                    Ok(Some(status)) => {
-                        warn!(exit_code = ?status.code(), "sing-box exited unexpectedly");
-                        *lock = None;
-                        state.runtime_ready.store(false, Ordering::Relaxed);
-                        true
-                    }
-                    Err(err) => {
-                        warn!(error = %err, "Failed to poll sing-box process state");
-                        *lock = None;
-                        state.runtime_ready.store(false, Ordering::Relaxed);
-                        true
-                    }
-                },
-                // 状态轮询等路径可能先收割了已退出的进程：槽位为空且
-                // generation 未变，仍视为一次异常退出。
-                None => true,
-            }
-        };
-        if !crashed {
-            continue;
-        }
-        if state.sing_generation.load(Ordering::Relaxed) != generation
-            || !state.service_should_run.load(Ordering::Relaxed)
-        {
-            return;
-        }
-
         restarts += 1;
-        if restarts > MAX_KERNEL_RESTARTS {
-            error!("sing-box kept crashing; giving up on automatic restarts");
-            state.runtime_ready.store(false, Ordering::Relaxed);
-            state.set_runtime_phase(RuntimePhase::Failed);
-            *state.config_warning.lock().await = Some(KERNEL_GIVE_UP_WARNING.to_string());
-            return;
+        if restarts <= MAX_KERNEL_RESTARTS {
+            if !state.lifecycle.finish(generation, RuntimePhase::Starting) {
+                return;
+            }
+            sleep(restart_backoff(restarts)).await;
         }
 
-        state.set_runtime_phase(RuntimePhase::Starting);
-        sleep(restart_backoff(restarts)).await;
-        if state.sing_generation.load(Ordering::Relaxed) != generation
-            || !state.service_should_run.load(Ordering::Relaxed)
-        {
-            return;
-        }
-
-        // Serialize crash recovery with user-driven config transactions. If a
-        // settings update wins the lock during backoff, its new generation
-        // retires this watcher before it can spawn the old bytes concurrently.
         let _config_update = state.config_update.lock().await;
-        if state.sing_generation.load(Ordering::Relaxed) != generation
-            || !state.service_should_run.load(Ordering::Relaxed)
-        {
+        if !start_still_current(&state, generation) {
             return;
         }
-
-        match spawn_and_probe_sing_box(&state, generation).await {
-            Ok(()) => {
-                state.runtime_ready.store(true, Ordering::Relaxed);
-                state.set_runtime_phase(RuntimePhase::Ready);
-                info!(restarts, "sing-box restarted after an unexpected exit");
+        if restarts > MAX_KERNEL_RESTARTS {
+            let mut warning = state.config_warning.lock().await;
+            if state.lifecycle.with_current(generation, || {
+                *warning = Some(KERNEL_GIVE_UP_WARNING.to_string());
+            }) {
+                error!("sing-box kept crashing; giving up on automatic restarts");
             }
+            state.lifecycle.finish(generation, RuntimePhase::Failed);
+            return;
+        }
+        let result = match spawn_and_probe_sing_box(&state, generation).await {
+            Ok(()) => publish_kernel_ready(&state, generation).await,
+            Err(err) => Err(err),
+        };
+        match result {
+            Ok(()) => info!(restarts, "sing-box restarted after an unexpected exit"),
             Err(err) => {
-                state.runtime_ready.store(false, Ordering::Relaxed);
-                warn!(error = %err, "Failed to restart sing-box after an unexpected exit")
+                if !state.lifecycle.finish(generation, RuntimePhase::Failed) {
+                    return;
+                }
+                warn!(error = %err, "Failed to restart sing-box after an unexpected exit");
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn stale_watcher_rechecks_after_waiting_for_the_process_slot() {
+        let state = crate::test_support::app_state(crate::models::Config::default());
+        let old = state.lifecycle.begin(KernelOperation::Start);
+        let slot = state.sing_process.lock().await;
+        let other = state.clone();
+        let poll = tokio::spawn(async move { poll_crash(&other, old, &mut 0).await });
+        tokio::task::yield_now().await;
+        let new = state.lifecycle.begin(KernelOperation::Start);
+        state.lifecycle.finish(new, RuntimePhase::Ready);
+        let snapshot = state.lifecycle.snapshot();
+        drop(slot);
+        assert_eq!(poll.await.unwrap(), None);
+        assert_eq!(state.lifecycle.snapshot(), snapshot);
     }
 }

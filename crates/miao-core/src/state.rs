@@ -1,16 +1,15 @@
 use arc_swap::ArcSwap;
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::{Mutex, Notify, RwLock};
 
-use crate::models::{
-    Config, GitHubRelease, NodeMultiplier, NodeSelect, RuntimePhase, StableConfig, SubStatus,
-};
+use crate::models::{Config, GitHubRelease, NodeMultiplier, NodeSelect, StableConfig, SubStatus};
 use crate::paths::RuntimePaths;
 
+pub mod lifecycle;
 mod subscriptions;
 use subscriptions::SubscriptionRefresh;
 
@@ -35,9 +34,7 @@ pub struct AppState {
     pub runtime_paths: RuntimePaths,
     pub config_update: Arc<Mutex<()>>,
     pub sing_process: Mutex<Option<SingBoxProcess>>,
-    /// 每次有意启动/停止 sing-box 都会递增。崩溃看门狗以此识别自己监护的
-    /// 那次启动是否已被取代，避免与配置热重载、用户停核等路径打架。
-    pub sing_generation: AtomicU64,
+    pub lifecycle: lifecycle::RuntimeLifecycle,
     pub proxy_selection_generation: AtomicU64,
     /// Every foreground subscription fetch advances this generation. Startup
     /// background/recovery fetches capture it before leaving the config lock
@@ -59,15 +56,6 @@ pub struct AppState {
     /// 最近一次成功生成配置时，从完整节点池识别出的倍率选项。
     pub available_multipliers: RwLock<Vec<NodeMultiplier>>,
     pub initializing: AtomicBool,
-    /// Process presence and data-plane readiness are deliberately separate.
-    /// The child is stored before startup probing begins, so `running` can be
-    /// true while this remains false.
-    pub runtime_ready: AtomicBool,
-    runtime_phase: AtomicU8,
-    /// Desired service state. It remains true during onboarding so the first
-    /// valid configuration starts sing-box, and becomes false after an
-    /// explicit stop request so later config edits do not restart it.
-    pub service_should_run: AtomicBool,
     pub http_client: reqwest::Client,
     pub version_cache: ArcSwap<VersionCache>, // 使用 ArcSwap 实现无锁读取
     #[cfg(not(windows))]
@@ -136,7 +124,7 @@ impl AppState {
             runtime_paths,
             config_update: Arc::new(Mutex::new(())),
             sing_process: Mutex::new(None),
-            sing_generation: AtomicU64::new(0),
+            lifecycle: lifecycle::RuntimeLifecycle::default(),
             proxy_selection_generation: AtomicU64::new(0),
             sub_refresh_generation: AtomicU64::new(0),
             sub_refresh_cancel: Notify::new(),
@@ -149,9 +137,6 @@ impl AppState {
             skipped_rules: Mutex::new(Vec::new()),
             available_multipliers: RwLock::new(Vec::new()),
             initializing: AtomicBool::new(true),
-            runtime_ready: AtomicBool::new(false),
-            runtime_phase: AtomicU8::new(RuntimePhase::Initializing as u8),
-            service_should_run: AtomicBool::new(true),
             http_client,
             version_cache: ArcSwap::new(Arc::new(VersionCache {
                 release: None,
@@ -183,14 +168,6 @@ impl AppState {
         config.node_select = *self.node_select_preference.read().await;
         config.max_multiplier = *self.max_multiplier_preference.read().await;
         config
-    }
-
-    pub fn set_runtime_phase(&self, phase: RuntimePhase) {
-        self.runtime_phase.store(phase as u8, Ordering::Relaxed);
-    }
-
-    pub fn runtime_phase(&self) -> RuntimePhase {
-        RuntimePhase::from_u8(self.runtime_phase.load(Ordering::Relaxed))
     }
 }
 
@@ -239,9 +216,7 @@ mod tests {
         assert!(state
             .initializing
             .load(std::sync::atomic::Ordering::Relaxed));
-        assert!(state
-            .service_should_run
-            .load(std::sync::atomic::Ordering::Relaxed));
+        assert!(state.lifecycle.snapshot().should_run);
 
         // 验证配置被正确存储
         let locked_config = tokio::runtime::Runtime::new()

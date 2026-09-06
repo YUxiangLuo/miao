@@ -136,10 +136,7 @@ async fn switch_proxy_at(
             "当前是地区最快模式或无效分组，请先切换为手动选择模式",
         ));
     }
-    if !state
-        .runtime_ready
-        .load(std::sync::atomic::Ordering::Relaxed)
-    {
+    if !state.lifecycle.snapshot().ready {
         return Err(AppError::message("服务未运行或代理数据面尚未就绪"));
     }
     let url = format!("{base}/proxies/{}", urlencoding::encode(&proxy.group));
@@ -189,13 +186,11 @@ async fn load_last_proxy(path: &Path) -> Option<LastProxy> {
     }
 }
 
-/// 内核启动或配置重载后调用：捕获当前 sing_generation 并派生恢复任务。
+/// 内核启动或配置重载后调用：捕获当前 lifecycle generation 并派生恢复任务。
 /// 连续两次运行配置激活会各派生一个任务；旧任务在落地前发现自己监护的代次
 /// 已被取代即放弃，避免陈旧的 PUT 覆盖更新那次启动的选择。
 pub fn spawn_restore_last_proxy(state: &Arc<AppState>) {
-    let generation = state
-        .sing_generation
-        .load(std::sync::atomic::Ordering::Relaxed);
+    let generation = state.lifecycle.snapshot().generation;
     let selection = state
         .proxy_selection_generation
         .load(std::sync::atomic::Ordering::Relaxed);
@@ -206,10 +201,7 @@ pub fn spawn_restore_last_proxy(state: &Arc<AppState>) {
 }
 
 fn is_superseded(state: &AppState, generation: u64) -> bool {
-    state
-        .sing_generation
-        .load(std::sync::atomic::Ordering::Relaxed)
-        != generation
+    state.lifecycle.snapshot().generation != generation
 }
 
 #[cfg(test)]
@@ -465,9 +457,11 @@ mod tests {
         let state = crate::test_support::app_state(crate::models::Config::default());
         // 任务监护的 generation=0 已被 generation=1 取代：应立即返回，
         // 不睡 1s、不读 .last_proxy、不碰网络
-        state
-            .sing_generation
-            .store(1, std::sync::atomic::Ordering::Relaxed);
+        while state.lifecycle.snapshot().generation < 1 {
+            state
+                .lifecycle
+                .begin(crate::state::lifecycle::KernelOperation::Start);
+        }
 
         let start = std::time::Instant::now();
         super::restore_last_proxy(&state, 0).await;
@@ -513,9 +507,10 @@ mod tests {
         let base = format!("http://{}", listener.local_addr().unwrap());
         let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
         let state = crate::test_support::app_state(crate::models::Config::default());
-        state
-            .runtime_ready
-            .store(true, std::sync::atomic::Ordering::Relaxed);
+        state.lifecycle.finish(
+            state.lifecycle.snapshot().generation,
+            crate::models::RuntimePhase::Ready,
+        );
         let b = LastProxy {
             group: "proxy".to_string(),
             name: "b".to_string(),

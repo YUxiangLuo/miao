@@ -34,8 +34,8 @@ pub async fn get_status(State(state): State<Arc<AppState>>) -> Json<ApiResponse<
         StatusData {
             data_revision: state.data_revision.load(Ordering::Relaxed),
             running,
-            ready: state.runtime_ready.load(Ordering::Relaxed),
-            phase: state.runtime_phase(),
+            ready: kernel.ready,
+            phase: kernel.phase,
             subscription_refresh: state.subscription_refresh.snapshot(),
             initializing,
             route_mode: config.route_mode,
@@ -79,24 +79,27 @@ pub async fn start_service(State(state): State<Arc<AppState>>) -> HandlerResult 
     // Record the user's desired state before launching. If startup fails, a
     // subsequent config fix should retry starting instead of silently keeping
     // the explicitly stopped state.
-    state.service_should_run.store(true, Ordering::Relaxed);
+    state.lifecycle.request_running(true);
 
-    if state.runtime_phase() == RuntimePhase::Failed {
-        state.set_runtime_phase(RuntimePhase::Extracting);
+    if state.lifecycle.snapshot().phase == RuntimePhase::Failed {
+        let generation = state.lifecycle.snapshot().generation;
+        let activity = state
+            .lifecycle
+            .activity(crate::state::lifecycle::RuntimeActivity::Extracting);
         let runtime_dir = state.runtime_paths.runtime_dir.clone();
         let extracted =
             tokio::task::spawn_blocking(move || extract_sing_box_to(&runtime_dir)).await;
         match extracted {
             Ok(Ok(_)) => {}
             Ok(Err(err)) => {
-                state.set_runtime_phase(RuntimePhase::Failed);
+                state.lifecycle.finish(generation, RuntimePhase::Failed);
                 return Err(status_error(
                     StatusCode::INTERNAL_SERVER_ERROR,
                     format!("Failed to prepare embedded runtime: {err}"),
                 ));
             }
             Err(err) => {
-                state.set_runtime_phase(RuntimePhase::Failed);
+                state.lifecycle.finish(generation, RuntimePhase::Failed);
                 return Err(status_error(
                     StatusCode::INTERNAL_SERVER_ERROR,
                     format!("Embedded runtime extraction task failed: {err}"),
@@ -106,10 +109,9 @@ pub async fn start_service(State(state): State<Arc<AppState>>) -> HandlerResult 
 
         // The recovery helper fetches subscriptions without this lock and takes
         // it again only while publishing a current result.
+        drop(activity);
         drop(config_update);
-        state.set_runtime_phase(RuntimePhase::Failed);
-        if crate::runtime::recover_data_plane_once(&state).await
-            && state.runtime_ready.load(Ordering::Relaxed)
+        if crate::runtime::recover_data_plane_once(&state).await && state.lifecycle.snapshot().ready
         {
             crate::services::version::mark_upgrade_healthy();
             return Ok(success_no_data("sing-box recovered successfully"));
@@ -156,7 +158,7 @@ pub async fn stop_service(State(state): State<Arc<AppState>>) -> HandlerResult {
         }
     }
     state.data_revision.fetch_add(1, Ordering::Relaxed);
-    state.service_should_run.store(false, Ordering::Relaxed);
+    state.lifecycle.request_running(false);
     stop_sing_internal(&state).await;
     Ok(success_no_data("sing-box stopped"))
 }
@@ -295,7 +297,7 @@ mod tests {
 
         assert!(stop_service(State(state.clone())).await.is_ok());
 
-        assert!(!state.service_should_run.load(Ordering::Relaxed));
+        assert!(!state.lifecycle.snapshot().should_run);
     }
 
     #[tokio::test]
@@ -313,7 +315,7 @@ mod tests {
             }
         }
         state.data_revision.fetch_add(1, Ordering::Relaxed);
-        state.service_should_run.store(false, Ordering::Relaxed);
+        state.lifecycle.request_running(false);
 
         let status = match start_service(State(state.clone())).await {
             Ok(_) => panic!("empty configuration unexpectedly started"),
@@ -321,7 +323,7 @@ mod tests {
         };
 
         assert_eq!(status, StatusCode::BAD_REQUEST);
-        assert!(!state.service_should_run.load(Ordering::Relaxed));
+        assert!(!state.lifecycle.snapshot().should_run);
     }
 
     #[tokio::test]

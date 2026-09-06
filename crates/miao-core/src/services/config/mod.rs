@@ -37,7 +37,7 @@ pub use warnings::{
     SUBS_RETRYING_SLOWLY,
 };
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 pub use apply::regenerate_preserving_service_state;
 
 pub(crate) use persist::write_file_atomic;

@@ -7,14 +7,29 @@
 | 状态 | 负责人 | 含义 |
 | --- | --- | --- |
 | `running` / `pid` | 内核控制服务 | 子进程是否存在 |
-| `phase` / `ready` | 启动、配置激活、内核生命周期 | 代理当前工作阶段及 readiness |
+| `phase` / `ready` / `should_run` / `generation` | `state/lifecycle.rs` | 同一临界区内的生命周期快照；阶段、健康、运行意图和内核所有权一起读取 |
 | `subscription_refresh` | `state/subscriptions.rs` | HTTP 刷新活动、最近结果、重试等待 |
 | `sub_refresh_success_generation` | 前台配置事务 | 已接受订阅响应且完成提交的代次，不是单纯 HTTP 完成 |
 | 订阅节点快照 | 配置提交管线 | 最近一次被运行配置接受的节点材料 |
 
 REST `/api/status` 与 MCP `get_status` 使用同一 `subscription_refresh` 快照。原有字段保留；`fetching_subscriptions` / `refreshing_subscriptions` 仍保留在旧 `RuntimePhase` 类型中以兼容已有客户端，但新代码不再发布这两个值。
 
-本轮没有重写内核 supervisor，也没有将 `initializing`、服务期望状态和内核健康检查合并成一套大状态机。
+## 内核生命周期与控制权
+
+`RuntimeLifecycle` 取代分散的 `runtime_ready`、`runtime_phase`、`service_should_run`、`sing_generation` 原子字段。`initializing` 仍是首次内嵌资源/本地初始化的入口闸，不承担内核健康判断；订阅刷新也保持独立。
+
+- 启动、重载、停止在进程槽锁内调用 `begin(KernelOperation)`，递增 generation，同时改变阶段并清除 readiness。停止在等待子进程退出**之前**使旧任务失效。
+- 启动/重载探测及 watchdog 回调必须携带最初的 generation；旧回调的成功与失败都不能覆盖新实例或已停止状态。
+- `publish_kernel_ready` 在进程槽锁内再次确认当前代次、运行意图和子进程存活，才发布 `Ready`。REST/MCP 的 `running`、`pid`、`phase`、`ready` 来自这一锁边界内的同一观察，而不是分别读取不同时间的原子字段。
+- 配置校验/应用用 `RuntimeActivity` RAII guard 临时显示阶段，保留已有健康状态；返回、报错或取消时自动恢复原阶段。如果期间出现内核事件，旧 guard 不得恢复旧阶段。配置事务本身不能授予 readiness。
+- 回滚遇到存活但不健康的内核时，必须重新激活和探测；单纯恢复磁盘文件不能把它变成就绪。
+- watchdog 获取进程槽锁后再次检查 generation；退避结束后还要持 `config_update` 检查所有权。旧任务既不能收割新进程，也不能重启旧配置、覆盖或清除新任务的告警。
+
+锁顺序为 `config_update → sing_process → lifecycle`（只取必要的锁，但保持此顺序）。生命周期锁仅用于短同步更新，不跨越任何 await；HTTP 拉取继续在配置锁外。正常服务启停和配置激活遵守配置事务顺序，内核探测/观察者则以 generation 保证晚到结果无效。
+
+普通停止保留重新启动能力；整个服务关闭时，先设置终止标记、取消订阅请求，再等配置事务收尾并停止内核。终止标记拒绝后续启动意图，防止尚在排空的请求或回滚重新拉起内核。Windows 仍使用停止/启动替代 Unix SIGHUP，共用同一生命周期模型。
+
+不改动已有 API 字段、TUN 参数、重启退避与次数上限，也没有引入新的 actor 框架。
 
 ## 拉取结果与可用节点
 
@@ -59,5 +74,7 @@ REST `/api/status` 与 MCP `get_status` 使用同一 `subscription_refresh` 快�
 ## 回归测试
 
 默认成员 Rust 测试覆盖：成功空列表提交、无替代节点时保留内核、缓存与拉取健康分离、HTTP/解析错误分类、首轮及低频拉取不改变代理阶段、陈旧任务取消、前台提交边界与重试等待。
+
+内核回归另外覆盖：启动/重载期间停止、旧 watchdog 等待进程槽锁、退避期间修改配置、不健康进程的回滚必须重新探测、退出进程拒绝 Ready 发布、陈旧告警清理、配置活动不能覆盖崩溃状态，以及关闭期间晚到启动请求。
 
 前端测试覆盖成功空列表与重试提示；浏览器验收使用本地 mock API，不连接生产实例。所有成功启动测试使用临时目录、假内核与 localhost 订阅，不启动真实 TUN。

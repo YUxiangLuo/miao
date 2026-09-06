@@ -310,6 +310,11 @@ pub async fn spawn_server(options: RuntimeOptions) -> AppResult<ServerHandle> {
             .with_graceful_shutdown(async move {
                 let _ = shutdown_rx.await;
                 info!("Shutting down, stopping sing-box...");
+                state_for_shutdown.lifecycle.shutdown();
+                state_for_shutdown.next_sub_refresh();
+                // Let the current config transaction drain, but its rollback
+                // and later HTTP start requests may no longer revive the kernel.
+                let _config_update = state_for_shutdown.config_update.lock().await;
                 stop_sing_internal(&state_for_shutdown).await;
             })
             .await?;
@@ -330,11 +335,12 @@ mod startup;
 
 use startup::initialize_runtime;
 pub(crate) use startup::recover_data_plane_once;
-#[cfg(test)]
+#[cfg(all(test, unix))]
 use startup::{
-    initialize_runtime_locked, prepare_compatible_startup_cache,
-    refresh_subscriptions_in_background, retry_failed_startup, startup_is_settled,
+    initialize_runtime_locked, refresh_subscriptions_in_background, retry_failed_startup,
 };
+#[cfg(test)]
+use startup::{prepare_compatible_startup_cache, startup_is_settled};
 
 async fn request_shutdown(handle: &mut ServerHandle) {
     if let Some(tx) = handle.init_cancel.take() {

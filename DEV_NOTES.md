@@ -135,7 +135,7 @@ systemd 服务：`/usr/local/bin/miao`，配置 `/etc/miao/config.yaml`，运行
 | 停核 | `CREATE_NEW_PROCESS_GROUP` + `CTRL_BREAK`；超时再杀并只清 `sing-tun` |
 | 提权 | 确认无实例后再 `ShellExecuteW runas`；取消则 MessageBox |
 | 端口 | `port_fallback`：6161 被占时改绑随机端口 |
-| 内核看门狗 | 崩溃自动拉起（2s 巡检、1–16s 退避、最多 5 次），放弃时写 `config_warning`；有意启停先递增 `sing_generation` |
+| 内核看门狗 | 崩溃自动拉起（2s 巡检、1–16s 退避、最多 5 次），放弃时写 `config_warning`；有意启停/重载先递增 `lifecycle.generation` |
 | 日志轮转 | `miao.log` 超 8 MB 启动改名 `.old`（单份滚动） |
 | 托盘 | 单击唤出、双击唤出/收回；菜单：显示窗口/打开日志/开机自启/退出 |
 | 开机自启 | 任务计划 `Miao`（ONLOGON + HIGHEST + `--minimized`），勾选状态即任务存在性、不落配置，切换后回读校验；每次启动校验任务指向的 exe 路径与当前进程一致，不一致（升级/迁移后旧任务残留拉起旧版本）自动用当前路径重注册 |
@@ -173,6 +173,8 @@ CLI 参数在 `cli.rs` 统一校验，先于提权/文件写入；保留 `--conf
 失败回滚去网络化：先快照 `config.json` 字节，回滚按 **内存快照 → `config.json.cache` → 本地节点快照/手动节点** 分层；内核已死时先 `sing-box check` 再启动；空 cache 拒绝恢复。持锁回滚不触网；本地材料不足时保留可用运行态并报错，由显式刷新或启动后台恢复负责网络。
 
 订阅刷新只有一条管线 `refresh_subscriptions`，策略 `RefreshPolicy`：`Manual`（用户在场，失败即报）/ `ManualInApply`（事务内，node_select 随外层事务提交）/ `Startup`（全失败保留运行中的缓存）。节点集来源 `SubSource`：本地语义变更用 `sub-nodes.json` 快照零网络重建，增删订阅/手动刷新/启动才真拉取。失败订阅按来源保留最近成功节点，成功空列表覆盖该来源；缓存节点不计入新鲜拉取健康度。快照在内存中共享不可变读模型，按提交替换。快照缺失的本地变更不退化为网络请求：纯手动运行态可本地重建，无法证明订阅材料完整则提示先刷新。
+
+内核生命周期由 `state/lifecycle.rs` 集中管理 `phase/ready/should_run/generation`，原独立原子字段已移除。启停/重载在进程槽锁内分配代次，异步完成按原代次发布；停止先淘汰旧任务再等待进程退出。REST/MCP 从 `kernel_status` 读取同一份进程与生命周期观察。配置准备仅借用阶段（RAII guard），不得自行授予 readiness；回滚存活但未就绪的进程必须重新探测。watchdog 在拿到进程槽锁、退避后拿到配置锁时均检查所有权。服务关闭有不可逆的终止标记，防止排空中的请求再次启核。`initializing` 保留为启动入口闸，Windows 重启与 Unix SIGHUP 共用状态机。
 
 运行状态与订阅刷新是独立维度（[状态模型与提交边界](docs/runtime-state.md)）：后台拉取不修改代理 phase/ready；REST/MCP 使用同一 `subscription_refresh` 快照。`SubscriptionFetchReport` 区分成功、成功空列表、部分失败、全部失败及缓存可用性，`has_sub_nodes` 只描述材料，不描述网络。前台操作 guard 覆盖拉取到提交/回滚，后台等待不能在 HTTP 完成但尚未提交时启动竞争请求。成功空列表有替代节点时正常提交；无替代节点且当前代理可用时保留配置并提示检查内容，不按网络失败重试。
 

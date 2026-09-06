@@ -10,6 +10,7 @@ use super::{initialize_runtime_locked, recover_data_plane_once};
 
 #[cfg(unix)]
 mod background_retry;
+#[cfg(unix)]
 mod subscription_state;
 
 #[tokio::test]
@@ -254,9 +255,7 @@ async fn manual_nodes_start_before_any_subscription_request() {
     .expect("local startup must not wait for the unreachable subscription");
 
     assert!(needs_refresh);
-    assert!(state
-        .runtime_ready
-        .load(std::sync::atomic::Ordering::Relaxed));
+    assert!(state.lifecycle.snapshot().ready);
     assert!(state.sub_status.lock().await.is_empty());
     assert!(state.runtime_paths.config_cache.exists());
 
@@ -293,9 +292,7 @@ async fn legacy_manual_cache_requests_local_background_reconciliation() {
     let needs_reconciliation = initialize_runtime_locked(&config, &state).await;
 
     assert!(needs_reconciliation);
-    assert!(state
-        .runtime_ready
-        .load(std::sync::atomic::Ordering::Relaxed));
+    assert!(state.lifecycle.snapshot().ready);
     tokio::time::timeout(
         std::time::Duration::from_secs(2),
         super::refresh_subscriptions_in_background(&config, &state),
@@ -380,9 +377,7 @@ async fn matching_node_snapshot_starts_before_any_subscription_request() {
     .expect("snapshot startup must not wait for the unreachable subscription");
 
     assert!(needs_refresh);
-    assert!(state
-        .runtime_ready
-        .load(std::sync::atomic::Ordering::Relaxed));
+    assert!(state.lifecycle.snapshot().ready);
     assert!(state.sub_status.lock().await.is_empty());
     let active = tokio::fs::read_to_string(&state.runtime_paths.active_config)
         .await
@@ -419,7 +414,7 @@ async fn manual_node_startup_keeps_retrying_subscriptions_after_the_initial_budg
     assert!(!state.runtime_paths.config_cache.exists());
     assert!(!state.runtime_paths.sub_nodes_snapshot.exists());
     assert!(initialize_runtime_locked(&config, &state).await);
-    assert!(state.runtime_ready.load(Ordering::Relaxed));
+    assert!(state.lifecycle.snapshot().ready);
     assert_eq!(
         state.config.read().await.node_select,
         crate::models::NodeSelect::Manual,
@@ -439,8 +434,11 @@ async fn manual_node_startup_keeps_retrying_subscriptions_after_the_initial_budg
     .expect("manual-node startup refresh must recover after its initial retry budget");
 
     assert!(calls.load(Ordering::Relaxed) >= 4);
-    assert!(state.runtime_ready.load(Ordering::Relaxed));
-    assert_eq!(state.runtime_phase(), crate::models::RuntimePhase::Ready);
+    assert!(state.lifecycle.snapshot().ready);
+    assert_eq!(
+        state.lifecycle.snapshot().phase,
+        crate::models::RuntimePhase::Ready
+    );
     assert_eq!(
         state.config.read().await.node_select,
         crate::models::NodeSelect::Fastest(crate::models::Region::Jp),
@@ -556,9 +554,7 @@ async fn local_startup_does_not_fetch_subscriptions_under_the_config_lock() {
     .expect("locked local startup must return without waiting on subscription HTTP");
 
     assert!(!finished);
-    assert!(!state
-        .runtime_ready
-        .load(std::sync::atomic::Ordering::Relaxed));
+    assert!(!state.lifecycle.snapshot().ready);
     // The hung subscription server was never contacted.
     tokio::time::timeout(std::time::Duration::from_millis(50), accepted.notified())
         .await
@@ -579,7 +575,10 @@ async fn failed_initial_start_keeps_retrying_until_the_data_plane_recovers() {
     };
     let (state, root) = local_startup_test_state(config, "retry-recovery").await;
     state.initializing.store(false, Ordering::Relaxed);
-    state.set_runtime_phase(crate::models::RuntimePhase::Failed);
+    state.lifecycle.finish(
+        state.lifecycle.snapshot().generation,
+        crate::models::RuntimePhase::Failed,
+    );
 
     tokio::time::timeout(
         std::time::Duration::from_secs(3),
@@ -588,8 +587,11 @@ async fn failed_initial_start_keeps_retrying_until_the_data_plane_recovers() {
     .await
     .expect("background startup recovery must succeed");
 
-    assert!(state.runtime_ready.load(Ordering::Relaxed));
-    assert_eq!(state.runtime_phase(), crate::models::RuntimePhase::Ready);
+    assert!(state.lifecycle.snapshot().ready);
+    assert_eq!(
+        state.lifecycle.snapshot().phase,
+        crate::models::RuntimePhase::Ready
+    );
     assert!(state.runtime_paths.config_cache.exists());
     assert_eq!(
         state
@@ -609,8 +611,6 @@ async fn failed_initial_start_keeps_retrying_until_the_data_plane_recovers() {
 #[cfg(unix)]
 #[tokio::test]
 async fn recovery_starts_compatible_cache_when_subscription_fetch_fails() {
-    use std::sync::atomic::Ordering;
-
     let subscription = refusing_sub_url().await;
     let config = crate::models::Config {
         subs: vec![subscription.clone()],
@@ -638,10 +638,12 @@ async fn recovery_starts_compatible_cache_when_subscription_fetch_fails() {
     .unwrap();
 
     assert!(initialize_runtime_locked(&config, &state).await);
-    assert!(state.runtime_ready.load(Ordering::Relaxed));
+    assert!(state.lifecycle.snapshot().ready);
     crate::services::singbox::stop_sing_internal(&state).await;
-    state.runtime_ready.store(false, Ordering::Relaxed);
-    state.set_runtime_phase(crate::models::RuntimePhase::Failed);
+    state.lifecycle.finish(
+        state.lifecycle.snapshot().generation,
+        crate::models::RuntimePhase::Failed,
+    );
     let _ = tokio::fs::remove_file(&state.runtime_paths.sub_nodes_snapshot).await;
 
     let recovered = tokio::time::timeout(
@@ -652,7 +654,7 @@ async fn recovery_starts_compatible_cache_when_subscription_fetch_fails() {
     .expect("cache recovery must finish");
 
     assert!(recovered);
-    assert!(state.runtime_ready.load(Ordering::Relaxed));
+    assert!(state.lifecycle.snapshot().ready);
     let active = tokio::fs::read_to_string(&state.runtime_paths.active_config)
         .await
         .unwrap();
@@ -682,7 +684,10 @@ async fn recovery_activates_manuals_when_fetch_fails_and_nothing_is_running() {
     };
     let (state, root) = local_startup_test_state(config, "recover-manuals").await;
     state.initializing.store(false, Ordering::Relaxed);
-    state.set_runtime_phase(crate::models::RuntimePhase::Failed);
+    state.lifecycle.finish(
+        state.lifecycle.snapshot().generation,
+        crate::models::RuntimePhase::Failed,
+    );
 
     let recovered = tokio::time::timeout(
         std::time::Duration::from_secs(5),
@@ -692,7 +697,7 @@ async fn recovery_activates_manuals_when_fetch_fails_and_nothing_is_running() {
     .expect("manual recovery must finish");
 
     assert!(recovered);
-    assert!(state.runtime_ready.load(Ordering::Relaxed));
+    assert!(state.lifecycle.snapshot().ready);
     let active = tokio::fs::read_to_string(&state.runtime_paths.active_config)
         .await
         .unwrap();
@@ -711,7 +716,10 @@ async fn empty_configuration_is_a_settled_startup_state() {
         ..crate::models::Config::default()
     });
     state.initializing.store(false, Ordering::Relaxed);
-    state.set_runtime_phase(crate::models::RuntimePhase::Failed);
+    state.lifecycle.finish(
+        state.lifecycle.snapshot().generation,
+        crate::models::RuntimePhase::Failed,
+    );
     assert!(!startup_is_settled(&state).await);
 
     state.config.write().await.subs.clear();
@@ -735,8 +743,10 @@ async fn foreground_refresh_supersedes_an_older_startup_fetch() {
     tokio::fs::write(&state.runtime_paths.active_config, active_before)
         .await
         .unwrap();
-    state.runtime_ready.store(true, Ordering::Relaxed);
-    state.set_runtime_phase(crate::models::RuntimePhase::Ready);
+    state.lifecycle.finish(
+        state.lifecycle.snapshot().generation,
+        crate::models::RuntimePhase::Ready,
+    );
 
     let background_state = state.clone();
     let background = tokio::spawn(async move {
@@ -760,7 +770,10 @@ async fn foreground_refresh_supersedes_an_older_startup_fetch() {
             error: None,
         },
     );
-    state.set_runtime_phase(crate::models::RuntimePhase::Ready);
+    state.lifecycle.finish(
+        state.lifecycle.snapshot().generation,
+        crate::models::RuntimePhase::Ready,
+    );
     release.notify_one();
     background.await.unwrap();
 

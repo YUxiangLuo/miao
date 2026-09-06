@@ -29,7 +29,6 @@ fn restart_backoff_grows_exponentially_and_caps() {
 #[cfg(unix)]
 #[tokio::test]
 async fn failed_probe_cleanup_keeps_the_watcher_generation_retryable() {
-    use std::sync::atomic::Ordering;
     use std::time::Instant;
 
     let state = crate::test_support::app_state(crate::models::Config::default());
@@ -42,12 +41,16 @@ async fn failed_probe_cleanup_keeps_the_watcher_generation_retryable() {
         child,
         started_at: Instant::now(),
     });
-    state.sing_generation.store(4, Ordering::Relaxed);
+    while state.lifecycle.snapshot().generation < 4 {
+        state
+            .lifecycle
+            .begin(crate::state::lifecycle::KernelOperation::Start);
+    }
 
     super::terminate_failed_start(&state, 4).await;
 
     assert!(state.sing_process.lock().await.is_none());
-    assert_eq!(state.sing_generation.load(Ordering::Relaxed), 4);
+    assert_eq!(state.lifecycle.snapshot().generation, 4);
     assert!(super::start_still_current(&state, 4));
 }
 
@@ -66,9 +69,11 @@ async fn watcher_exits_when_its_generation_is_stale() {
         child,
         started_at: Instant::now(),
     });
-    state
-        .sing_generation
-        .store(7, std::sync::atomic::Ordering::Relaxed);
+    while state.lifecycle.snapshot().generation < 7 {
+        state
+            .lifecycle
+            .begin(crate::state::lifecycle::KernelOperation::Start);
+    }
 
     tokio::time::timeout(
         Duration::from_secs(5),
@@ -87,12 +92,12 @@ async fn watcher_exits_when_its_generation_is_stale() {
 #[tokio::test]
 async fn watcher_returns_without_restart_when_service_should_not_run() {
     let state = crate::test_support::app_state(crate::models::Config::default());
-    state
-        .service_should_run
-        .store(false, std::sync::atomic::Ordering::Relaxed);
-    state
-        .sing_generation
-        .store(4, std::sync::atomic::Ordering::Relaxed);
+    state.lifecycle.request_running(false);
+    while state.lifecycle.snapshot().generation < 4 {
+        state
+            .lifecycle
+            .begin(crate::state::lifecycle::KernelOperation::Start);
+    }
 
     // 槽位为空且 generation 匹配 → 视为异常退出；但服务已被明确停止，直接退出
     tokio::time::timeout(
@@ -108,7 +113,6 @@ async fn watcher_returns_without_restart_when_service_should_not_run() {
 #[tokio::test]
 async fn reload_keeps_the_existing_process() {
     use crate::models::RuntimePhase;
-    use std::sync::atomic::Ordering;
     use std::time::Instant;
 
     let state = crate::test_support::app_state(crate::models::Config::default());
@@ -122,10 +126,15 @@ async fn reload_keeps_the_existing_process() {
         child,
         started_at: Instant::now(),
     });
-    state
-        .sing_generation
-        .store(7, std::sync::atomic::Ordering::Relaxed);
-    state.runtime_ready.store(true, Ordering::Relaxed);
+    while state.lifecycle.snapshot().generation < 7 {
+        state
+            .lifecycle
+            .begin(crate::state::lifecycle::KernelOperation::Start);
+    }
+    state.lifecycle.finish(
+        state.lifecycle.snapshot().generation,
+        crate::models::RuntimePhase::Ready,
+    );
     // Let the shell install its trap before delivering SIGHUP.
     tokio::time::sleep(Duration::from_millis(50)).await;
 
@@ -138,9 +147,9 @@ async fn reload_keeps_the_existing_process() {
     assert_eq!(process.child.id(), Some(pid));
     assert!(process.child.try_wait().expect("poll child").is_none());
     drop(lock);
-    assert!(state.runtime_ready.load(Ordering::Relaxed));
-    assert_eq!(state.runtime_phase(), RuntimePhase::Ready);
-    assert_eq!(state.sing_generation.load(Ordering::Relaxed), 8);
+    assert!(state.lifecycle.snapshot().ready);
+    assert_eq!(state.lifecycle.snapshot().phase, RuntimePhase::Ready);
+    assert_eq!(state.lifecycle.snapshot().generation, 8);
 
     super::stop_sing_internal(&state).await;
 }
@@ -149,9 +158,11 @@ async fn reload_keeps_the_existing_process() {
 #[tokio::test]
 async fn spawn_and_probe_refuses_stale_generation() {
     let state = crate::test_support::app_state(crate::models::Config::default());
-    state
-        .sing_generation
-        .store(9, std::sync::atomic::Ordering::Relaxed);
+    while state.lifecycle.snapshot().generation < 9 {
+        state
+            .lifecycle
+            .begin(crate::state::lifecycle::KernelOperation::Start);
+    }
 
     let err = super::spawn_and_probe_sing_box(&state, 3)
         .await
@@ -175,9 +186,11 @@ async fn spawn_and_probe_refuses_to_overwrite_a_live_child() {
         child,
         started_at: Instant::now(),
     });
-    state
-        .sing_generation
-        .store(1, std::sync::atomic::Ordering::Relaxed);
+    while state.lifecycle.snapshot().generation < 1 {
+        state
+            .lifecycle
+            .begin(crate::state::lifecycle::KernelOperation::Start);
+    }
 
     let err = super::spawn_and_probe_sing_box(&state, 1)
         .await
@@ -193,11 +206,11 @@ async fn spawn_and_probe_refuses_to_overwrite_a_live_child() {
 async fn successful_start_clears_only_the_give_up_warning() {
     let state = crate::test_support::app_state(crate::models::Config::default());
     *state.config_warning.lock().await = Some(super::KERNEL_GIVE_UP_WARNING.to_string());
-    super::clear_kernel_give_up_warning(&state).await;
+    super::clear_kernel_give_up_warning(&state, state.lifecycle.snapshot().generation).await;
     assert!(state.config_warning.lock().await.is_none());
 
     *state.config_warning.lock().await = Some("所有订阅获取失败，请检查当前订阅".to_string());
-    super::clear_kernel_give_up_warning(&state).await;
+    super::clear_kernel_give_up_warning(&state, state.lifecycle.snapshot().generation).await;
     assert_eq!(
         state.config_warning.lock().await.as_deref(),
         Some("所有订阅获取失败，请检查当前订阅")

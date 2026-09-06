@@ -6,7 +6,10 @@ pub(super) async fn initialize_runtime(
     extract_runtime: bool,
 ) {
     if extract_runtime {
-        state.set_runtime_phase(RuntimePhase::Extracting);
+        let extraction_generation = state.lifecycle.snapshot().generation;
+        let _activity = state
+            .lifecycle
+            .activity(crate::state::lifecycle::RuntimeActivity::Extracting);
         let runtime_dir = state.runtime_paths.runtime_dir.clone();
         let extracted =
             tokio::task::spawn_blocking(move || extract_sing_box_to(&runtime_dir)).await;
@@ -15,10 +18,10 @@ pub(super) async fn initialize_runtime(
             Ok(Err(err)) => {
                 error!(error = %err, "Failed to prepare embedded sing-box runtime");
                 *state.config_warning.lock().await = Some(format!("准备 sing-box 内核失败：{err}"));
+
                 state
-                    .runtime_ready
-                    .store(false, std::sync::atomic::Ordering::Relaxed);
-                state.set_runtime_phase(RuntimePhase::Failed);
+                    .lifecycle
+                    .finish(extraction_generation, RuntimePhase::Failed);
                 state
                     .initializing
                     .store(false, std::sync::atomic::Ordering::Relaxed);
@@ -28,10 +31,10 @@ pub(super) async fn initialize_runtime(
                 error!(error = %err, "Embedded sing-box extraction task failed");
                 *state.config_warning.lock().await =
                     Some(format!("准备 sing-box 内核任务失败：{err}"));
+
                 state
-                    .runtime_ready
-                    .store(false, std::sync::atomic::Ordering::Relaxed);
-                state.set_runtime_phase(RuntimePhase::Failed);
+                    .lifecycle
+                    .finish(extraction_generation, RuntimePhase::Failed);
                 state
                     .initializing
                     .store(false, std::sync::atomic::Ordering::Relaxed);
@@ -40,7 +43,6 @@ pub(super) async fn initialize_runtime(
         }
     }
 
-    state.set_runtime_phase(RuntimePhase::Initializing);
     // config_update 只覆盖本地启核。订阅 HTTP 一律在锁外拉取。
     let needs_background_refresh = {
         let _config_update = state.config_update.lock().await;
@@ -70,9 +72,8 @@ pub(super) async fn initialize_runtime(
 }
 
 pub(super) async fn startup_is_settled(state: &Arc<AppState>) -> bool {
-    if state.runtime_ready.load(Ordering::Relaxed)
-        || !state.service_should_run.load(Ordering::Relaxed)
-    {
+    let runtime = state.lifecycle.snapshot();
+    if runtime.ready || !runtime.should_run {
         return true;
     }
     let config = state.config.read().await;
@@ -80,9 +81,8 @@ pub(super) async fn startup_is_settled(state: &Arc<AppState>) -> bool {
 }
 
 pub(super) async fn should_retry_failed_startup(state: &Arc<AppState>) -> bool {
-    if state.runtime_ready.load(Ordering::Relaxed)
-        || !state.service_should_run.load(Ordering::Relaxed)
-    {
+    let runtime = state.lifecycle.snapshot();
+    if runtime.ready || !runtime.should_run {
         return false;
     }
     let config = state.config.read().await;
@@ -171,7 +171,9 @@ pub(super) async fn start_prepared_local_runtime(
     outcome: &GenConfigOutcome,
     source: &'static str,
 ) -> AppResult<()> {
-    state.set_runtime_phase(RuntimePhase::Validating);
+    let _activity = state
+        .lifecycle
+        .activity(crate::state::lifecycle::RuntimeActivity::Validating);
     install_prepared_runtime(state, outcome).await?;
     if let Err(err) = persist_effective_node_select(state, outcome.node_select).await {
         warn!(error = %err, "Failed to persist effective node_select after local startup rebuild");
@@ -202,10 +204,10 @@ pub(super) async fn start_prepared_local_runtime(
 pub(super) async fn initialize_runtime_locked(config: &Config, state: &Arc<AppState>) -> bool {
     if config.subs.is_empty() && config.nodes.is_empty() {
         info!("No subscriptions or nodes configured, waiting for onboarding");
+
         state
-            .runtime_ready
-            .store(false, std::sync::atomic::Ordering::Relaxed);
-        state.set_runtime_phase(RuntimePhase::Stopped);
+            .lifecycle
+            .finish(state.lifecycle.snapshot().generation, RuntimePhase::Stopped);
         state
             .initializing
             .store(false, std::sync::atomic::Ordering::Relaxed);
@@ -216,7 +218,9 @@ pub(super) async fn initialize_runtime_locked(config: &Config, state: &Arc<AppSt
     // 缓存读取/校验/启动失败则继续本地 snapshot/manuals；本地材料全部失败才
     // 标记 Failed 并返回。HTTP 拉取在锁外 recover_data_plane_once 进行。
     if has_config_cache(state) {
-        state.set_runtime_phase(RuntimePhase::Validating);
+        let _activity = state
+            .lifecycle
+            .activity(crate::state::lifecycle::RuntimeActivity::Validating);
         match prepare_compatible_startup_cache(config, state).await {
             Ok(legacy_cache) => {
                 match start_sing_internal(state).await {
@@ -287,9 +291,8 @@ pub(super) async fn initialize_runtime_locked(config: &Config, state: &Arc<AppSt
     }
 
     state
-        .runtime_ready
-        .store(false, std::sync::atomic::Ordering::Relaxed);
-    state.set_runtime_phase(RuntimePhase::Failed);
+        .lifecycle
+        .finish(state.lifecycle.snapshot().generation, RuntimePhase::Failed);
     state
         .initializing
         .store(false, std::sync::atomic::Ordering::Relaxed);
@@ -345,12 +348,12 @@ pub(super) async fn refresh_subscriptions_in_background(config: &Config, state: 
         let wait = {
             let _config_update = state.config_update.lock().await;
             quiet = fast_retries >= STARTUP_BACKGROUND_FAST_RETRIES
-                && state.runtime_ready.load(Ordering::Relaxed)
+                && state.lifecycle.snapshot().ready
                 && is_sing_box_running(state).await;
             if quiet {
                 // A newer foreground operation owns its warning and state.
                 if state.sub_refresh_generation.load(Ordering::Relaxed) == refresh_generation
-                    && state.service_should_run.load(Ordering::Relaxed)
+                    && state.lifecycle.snapshot().should_run
                     && !state.subscription_refresh.foreground_in_flight()
                     && (refresh_generation == 0
                         || state.sub_refresh_success_generation.load(Ordering::Relaxed)
@@ -435,7 +438,7 @@ async fn resume_after_foreground_refresh(
 ) -> Option<u64> {
     let _config_update = state.config_update.lock().await;
     let current_generation = state.sub_refresh_generation.load(Ordering::Relaxed);
-    if !state.service_should_run.load(Ordering::Relaxed) {
+    if !state.lifecycle.snapshot().should_run {
         info!("Service stopped while foreground subscription refresh was running");
         return None;
     }
@@ -467,7 +470,7 @@ async fn background_subscription_refresh_once(
     if state.sub_refresh_generation.load(Ordering::Relaxed) != refresh_generation {
         return BackgroundRefreshStep::Superseded;
     }
-    if !state.service_should_run.load(Ordering::Relaxed) {
+    if !state.lifecycle.snapshot().should_run {
         info!("Service stopped before background refresh; skipping");
         return BackgroundRefreshStep::Finished;
     }
@@ -493,7 +496,7 @@ async fn background_subscription_refresh_once(
         );
         return BackgroundRefreshStep::Finished;
     }
-    if !state.service_should_run.load(Ordering::Relaxed) {
+    if !state.lifecycle.snapshot().should_run {
         info!("Service stopped during background refresh; skipping");
         return BackgroundRefreshStep::Finished;
     }
@@ -554,7 +557,7 @@ async fn background_subscription_refresh_once(
         Err(err)
             if err.is_no_usable_nodes()
                 && fetch_report.accepted_response()
-                && state.runtime_ready.load(Ordering::Relaxed) =>
+                && state.lifecycle.snapshot().ready =>
         {
             // The response was authoritative; fetching it again is not a
             // network-recovery operation. Preserve availability, but do not
@@ -573,8 +576,7 @@ async fn background_subscription_refresh_once(
             }
         }
     };
-    if quiet && step == BackgroundRefreshStep::Retry && state.runtime_ready.load(Ordering::Relaxed)
-    {
+    if quiet && step == BackgroundRefreshStep::Retry && state.lifecycle.snapshot().ready {
         *state.config_warning.lock().await = Some(SUBS_RETRYING_SLOWLY.to_string());
     }
     step
@@ -608,8 +610,7 @@ pub(crate) async fn recover_data_plane_once(state: &Arc<AppState>) -> bool {
     if !should_retry_failed_startup(state).await {
         return true;
     }
-    if is_sing_box_running(state).await && state.runtime_ready.load(Ordering::Relaxed) {
-        state.set_runtime_phase(RuntimePhase::Ready);
+    if is_sing_box_running(state).await && state.lifecycle.snapshot().ready {
         return true;
     }
 
@@ -631,21 +632,20 @@ pub(crate) async fn recover_data_plane_once(state: &Arc<AppState>) -> bool {
             .await;
 
     let _config_update = state.config_update.lock().await;
-    if !state.service_should_run.load(Ordering::Relaxed) {
+    if !state.lifecycle.snapshot().should_run {
         return true;
     }
     if state.sub_refresh_generation.load(Ordering::Relaxed) != refresh_generation {
         info!("Startup recovery was superseded by a foreground subscription operation");
-        return state.runtime_ready.load(Ordering::Relaxed) && is_sing_box_running(state).await;
+        return state.lifecycle.snapshot().ready && is_sing_box_running(state).await;
     }
 
     let current = state.config_with_preferences().await;
     if current.subs != config.subs {
         info!("Subscriptions changed during startup recovery; discarding stale fetch");
-        return state.runtime_ready.load(Ordering::Relaxed) && is_sing_box_running(state).await;
+        return state.lifecycle.snapshot().ready && is_sing_box_running(state).await;
     }
-    if state.runtime_ready.load(Ordering::Relaxed) && is_sing_box_running(state).await {
-        state.set_runtime_phase(RuntimePhase::Ready);
+    if state.lifecycle.snapshot().ready && is_sing_box_running(state).await {
         return true;
     }
 
@@ -671,9 +671,8 @@ pub(crate) async fn recover_data_plane_once(state: &Arc<AppState>) -> bool {
                 return true;
             }
             RefreshEffect::SkippedUnchanged => {
-                if state.runtime_ready.load(Ordering::Relaxed) && is_sing_box_running(state).await {
+                if state.lifecycle.snapshot().ready && is_sing_box_running(state).await {
                     save_config_cache(state).await;
-                    state.set_runtime_phase(RuntimePhase::Ready);
                     return true;
                 }
                 warn!("Startup recovery produced unchanged bytes without a ready data plane");
@@ -695,8 +694,11 @@ pub(crate) async fn recover_data_plane_once(state: &Arc<AppState>) -> bool {
     if try_start_compatible_cache(&current, state).await {
         return true;
     }
-    if !state.runtime_ready.load(Ordering::Relaxed) {
-        state.set_runtime_phase(RuntimePhase::Failed);
+    let runtime = state.lifecycle.snapshot();
+    if !runtime.ready {
+        state
+            .lifecycle
+            .finish(runtime.generation, RuntimePhase::Failed);
     }
     false
 }

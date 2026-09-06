@@ -19,7 +19,7 @@ use crate::error::AppResult;
 use crate::models::{LastProxy, NodeMultiplier, NodeSelect, RouteMode};
 use crate::services::{
     config::{RuntimeUpdate, REGION_FALLBACK},
-    singbox::{is_sing_box_running, kernel_status, CLASH_API_BASE, CLASH_TRAFFIC_WS},
+    singbox::{kernel_status, CLASH_API_BASE, CLASH_TRAFFIC_WS},
     status::{legacy_warning, runtime_config_status, runtime_warnings},
 };
 use crate::state::AppState;
@@ -373,7 +373,7 @@ fn flat_node_pool(proxies: &JsonValue) -> Vec<String> {
 // ── 工具实现 ─────────────────────────────────────────────────────────────
 
 async fn runtime_is_ready(state: &Arc<AppState>) -> bool {
-    state.runtime_ready.load(Ordering::Relaxed) && is_sing_box_running(state).await
+    kernel_status(state).await.ready
 }
 
 async fn tool_get_status(state: &Arc<AppState>) -> Result<JsonValue, String> {
@@ -381,7 +381,7 @@ async fn tool_get_status(state: &Arc<AppState>) -> Result<JsonValue, String> {
     let (running, uptime_secs) = (kernel.running, kernel.uptime_secs);
     // Same projection as GET /api/status: kernel_status reaps a dead child
     // and clears the flag. Clash queries below still require a live process.
-    let ready = state.runtime_ready.load(Ordering::Relaxed);
+    let ready = kernel.ready;
 
     let config_status = runtime_config_status(state).await;
     let config = config_status.config;
@@ -409,7 +409,7 @@ async fn tool_get_status(state: &Arc<AppState>) -> Result<JsonValue, String> {
     Ok(json!({
         "running": running,
         "ready": ready,
-        "phase": state.runtime_phase(),
+        "phase": kernel.phase,
         "subscription_refresh": state.subscription_refresh.snapshot(),
         "initializing": state.initializing.load(Ordering::Relaxed),
         "route_mode": route_mode,
@@ -448,8 +448,9 @@ async fn tool_list_nodes(state: &Arc<AppState>) -> Result<JsonValue, String> {
         }
     }
 
-    let running = is_sing_box_running(state).await;
-    let ready = running && state.runtime_ready.load(Ordering::Relaxed);
+    let kernel = kernel_status(state).await;
+    let running = kernel.running;
+    let ready = kernel.ready;
     if ready {
         if let Ok(proxies) = fetch_proxies(state).await {
             // 平铺节点池：不随 fastest_* 地区过滤收缩（地区外节点仍是合法 outbound）

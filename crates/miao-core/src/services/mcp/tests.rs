@@ -667,9 +667,7 @@ async fn list_manual_nodes_matches_panel_data_without_secrets() {
 #[tokio::test]
 async fn destructive_tools_require_explicit_confirmation_before_side_effects() {
     let state = state(Config::default());
-    assert!(state
-        .service_should_run
-        .load(std::sync::atomic::Ordering::Relaxed));
+    assert!(state.lifecycle.snapshot().should_run);
     for name in ["stop_service", "set_mcp_enabled", "upgrade_miao"] {
         let response = call(
             &state,
@@ -685,9 +683,7 @@ async fn destructive_tools_require_explicit_confirmation_before_side_effects() {
             .unwrap()
             .contains("明确确认"));
     }
-    assert!(state
-        .service_should_run
-        .load(std::sync::atomic::Ordering::Relaxed));
+    assert!(state.lifecycle.snapshot().should_run);
     assert!(!state.config.read().await.mcp);
 }
 

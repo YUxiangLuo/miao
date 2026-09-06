@@ -86,7 +86,7 @@ pub async fn refresh_subscriptions_foreground(
         .map(|(_, update)| update)
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 pub async fn regenerate_preserving_service_state(
     config: &Config,
     state: &Arc<AppState>,
@@ -110,8 +110,10 @@ async fn regenerate_from_source(
     let config = &preferred_config;
     // This is an explicit foreground refresh. Any startup fetch that began
     // earlier with the same subscription URLs must not publish after it.
-    let should_run = state.service_should_run.load(Ordering::Relaxed);
-    state.set_runtime_phase(RuntimePhase::ApplyingConfig);
+    let should_run = state.lifecycle.snapshot().should_run;
+    let _activity = state
+        .lifecycle
+        .activity(crate::state::lifecycle::RuntimeActivity::ApplyingConfig);
 
     if config_apply_mode(config, should_run) == ConfigApplyMode::Clear {
         stop_sing_internal(state).await;
@@ -149,8 +151,6 @@ async fn regenerate_from_source(
                     refresh.runtime_update
                 } else {
                     update_config_warning(config, state, outcome.subscription_fetch_failed()).await;
-                    state.runtime_ready.store(true, Ordering::Relaxed);
-                    state.set_runtime_phase(RuntimePhase::Ready);
                     RuntimeUpdate::None
                 };
                 (runtime_update, outcome.accepted_subscription_response())
@@ -196,7 +196,6 @@ async fn regenerate_from_source(
                     .await);
                 }
                 update_config_warning(config, state, outcome.subscription_fetch_failed()).await;
-                state.set_runtime_phase(RuntimePhase::Stopped);
                 outcome.accepted_subscription_response()
             }
             Err(err) => {
@@ -497,16 +496,14 @@ async fn apply_config_change_with_source(
     // requested strategy instead of accidentally extending that fallback.
     let preferred_new_config = state.overlay_preferences(new_config).await;
     let new_config = &preferred_new_config;
-    let should_run = state.service_should_run.load(Ordering::Relaxed);
+    let should_run = state.lifecycle.snapshot().should_run;
     let apply_mode = config_apply_mode(new_config, should_run);
-    let previous_phase = state.runtime_phase();
 
     if apply_mode == ConfigApplyMode::Clear {
-        state.set_runtime_phase(RuntimePhase::ApplyingConfig);
-        if let Err(err) = save_config_layered(state, new_config).await {
-            state.set_runtime_phase(previous_phase);
-            return Err(err);
-        }
+        let _activity = state
+            .lifecycle
+            .activity(crate::state::lifecycle::RuntimeActivity::ApplyingConfig);
+        save_config_layered(state, new_config).await?;
         stop_sing_internal(state).await;
         clear_runtime_config(state).await;
         *state.config.write().await = new_config.clone();
@@ -524,7 +521,9 @@ async fn apply_config_change_with_source(
     if matches!(&source, SubSource::Fetch) {
         state.next_sub_refresh();
     }
-    state.set_runtime_phase(RuntimePhase::ApplyingConfig);
+    let _activity = state
+        .lifecycle
+        .activity(crate::state::lifecycle::RuntimeActivity::ApplyingConfig);
 
     let apply_result: AppResult<(GenConfigOutcome, RuntimeUpdate)> = match apply_mode {
         ConfigApplyMode::Restart => {
@@ -574,8 +573,6 @@ async fn apply_config_change_with_source(
                                 outcome.subscription_fetch_failed(),
                             )
                             .await;
-                            state.runtime_ready.store(true, Ordering::Relaxed);
-                            state.set_runtime_phase(RuntimePhase::Ready);
                         }
                     } else {
                         update_config_warning(
@@ -584,7 +581,6 @@ async fn apply_config_change_with_source(
                             outcome.subscription_fetch_failed(),
                         )
                         .await;
-                        state.set_runtime_phase(RuntimePhase::Stopped);
                     }
                     Ok(if should_run {
                         if runtime_update.updated() {
@@ -878,12 +874,10 @@ async fn restore_previous_running_config(
     state: &Arc<AppState>,
     snapshot: Option<&[u8]>,
 ) -> AppResult<()> {
-    if is_sing_box_running(state).await {
+    if crate::services::singbox::kernel_status(state).await.ready {
         // 内核还在跑变更前配置：回滚只是让磁盘重新等于运行中的状态，纯本地操作
         match restore_disk_config(state, snapshot).await {
             Ok(true) => {
-                state.runtime_ready.store(true, Ordering::Relaxed);
-                state.set_runtime_phase(RuntimePhase::Ready);
                 return Ok(());
             }
             Ok(false) => {
@@ -933,7 +927,7 @@ async fn restart_with_previous_config(
 
         match activation {
             Ok(()) => {
-                finalize_started_config(old_config, state, true).await;
+                finalize_started_config(old_config, state, false).await;
                 return Ok(());
             }
             Err(err) => {
@@ -961,23 +955,18 @@ async fn restore_previous_stopped_config(
 ) -> AppResult<()> {
     if !has_configured_sources(old_config) {
         clear_runtime_config(state).await;
-        state.set_runtime_phase(RuntimePhase::Stopped);
         return Ok(());
     }
 
     // 服务本就处于停止态：只需把磁盘修回变更前配置，不起进程；
     // 本地无材料才退化到重新生成（网络）
     match restore_disk_config(state, snapshot).await {
-        Ok(true) => {
-            state.set_runtime_phase(RuntimePhase::Stopped);
-            Ok(())
-        }
+        Ok(true) => Ok(()),
         Ok(false) => {
             let outcome =
                 regenerate_without_restart_runtime(old_config, state, SubSource::SnapshotOrLocal)
                     .await?;
             update_config_warning(old_config, state, outcome.subscription_fetch_failed()).await;
-            state.set_runtime_phase(RuntimePhase::Stopped);
             Ok(())
         }
         Err(err) => Err(err),

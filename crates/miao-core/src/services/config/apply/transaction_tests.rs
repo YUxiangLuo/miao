@@ -105,8 +105,8 @@ async fn running_refresh_commit_failure_reactivates_previous_runtime() {
         br#"{"marker":"old-bindings"}"#
     );
     assert_eq!(state.config.read().await.node_select, config.node_select);
-    assert_eq!(state.runtime_phase(), RuntimePhase::Ready);
-    assert!(state.runtime_ready.load(Ordering::Relaxed));
+    assert_eq!(state.lifecycle.snapshot().phase, RuntimePhase::Ready);
+    assert!(state.lifecycle.snapshot().ready);
     assert!(is_sing_box_running(&state).await);
 
     stop_sing_internal(&state).await;
@@ -116,8 +116,10 @@ async fn running_refresh_commit_failure_reactivates_previous_runtime() {
 #[tokio::test]
 async fn stopped_refresh_commit_failure_restores_runtime_files_and_phase() {
     let (root, state, config) = refresh_commit_failure_fixture("stopped").await;
-    state.service_should_run.store(false, Ordering::Relaxed);
-    state.set_runtime_phase(RuntimePhase::Stopped);
+    state.lifecycle.request_running(false);
+    state
+        .lifecycle
+        .finish(state.lifecycle.snapshot().generation, RuntimePhase::Stopped);
 
     let result = regenerate_preserving_service_state(&config, &state).await;
 
@@ -135,7 +137,7 @@ async fn stopped_refresh_commit_failure_restores_runtime_files_and_phase() {
         br#"{"marker":"old-bindings"}"#
     );
     assert_eq!(state.config.read().await.node_select, config.node_select);
-    assert_eq!(state.runtime_phase(), RuntimePhase::Stopped);
+    assert_eq!(state.lifecycle.snapshot().phase, RuntimePhase::Stopped);
     assert!(!is_sing_box_running(&state).await);
 
     let _ = tokio::fs::remove_dir_all(root).await;
@@ -193,7 +195,7 @@ async fn persistent_save_failure_reactivates_previous_runtime_and_restores_bindi
         .await
         .unwrap();
     start_sing_internal(&state).await.unwrap();
-    assert_eq!(state.sing_generation.load(Ordering::Relaxed), 1);
+    assert_eq!(state.lifecycle.snapshot().generation, 1);
     let original_pid = state
         .sing_process
         .lock()
@@ -231,7 +233,7 @@ async fn persistent_save_failure_reactivates_previous_runtime_and_restores_bindi
         "Unix rollback should reactivate the previous config without replacing the process"
     );
     assert!(
-        state.sing_generation.load(Ordering::Relaxed) >= 3,
+        state.lifecycle.snapshot().generation >= 3,
         "both activation and rollback must retire their previous watchers"
     );
     assert_eq!(*state.config.read().await, old_config);
@@ -291,7 +293,7 @@ async fn unchanged_runtime_bytes_still_start_a_missing_desired_process() {
 
     assert_eq!(runtime_update, RuntimeUpdate::Started);
     assert!(is_sing_box_running(&state).await);
-    assert!(state.runtime_ready.load(Ordering::Relaxed));
+    assert!(state.lifecycle.snapshot().ready);
 
     stop_sing_internal(&state).await;
     let _ = tokio::fs::remove_dir_all(root).await;
@@ -411,7 +413,7 @@ async fn stopping_service_cancels_a_refresh_without_waiting_for_subscription_htt
         refresh.await.unwrap(),
         Err(super::ConfigMutationError::Superseded)
     ));
-    assert!(!state.service_should_run.load(Ordering::Relaxed));
+    assert!(!state.lifecycle.snapshot().should_run);
     assert!(!state.runtime_paths.active_config.exists());
     server.abort();
 }

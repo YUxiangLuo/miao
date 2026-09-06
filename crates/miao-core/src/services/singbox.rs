@@ -1,6 +1,5 @@
 use std::fs;
 use std::path::PathBuf;
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::time::{sleep, Duration};
@@ -8,6 +7,7 @@ use tracing::{error, info, warn};
 
 use crate::error::{AppError, AppResult};
 use crate::models::RuntimePhase;
+use crate::state::lifecycle::KernelOperation;
 use crate::state::{AppState, SingBoxProcess};
 
 #[cfg(all(windows, target_arch = "x86_64"))]
@@ -67,31 +67,45 @@ pub struct KernelStatus {
     pub running: bool,
     pub pid: Option<u32>,
     pub uptime_secs: Option<u64>,
+    pub ready: bool,
+    pub phase: RuntimePhase,
 }
 
 pub async fn kernel_status(state: &AppState) -> KernelStatus {
     let mut lock = state.sing_process.lock().await;
-    let Some(process) = &mut *lock else {
-        return KernelStatus::default();
-    };
-    match process.child.try_wait() {
-        Ok(None) => KernelStatus {
-            running: true,
-            pid: process.child.id(),
-            uptime_secs: Some(process.started_at.elapsed().as_secs()),
-        },
-        Ok(Some(_)) => {
-            *lock = None;
-            state.runtime_ready.store(false, Ordering::Relaxed);
-            state.set_runtime_phase(if state.service_should_run.load(Ordering::Relaxed) {
-                RuntimePhase::Failed
-            } else {
-                RuntimePhase::Stopped
-            });
-            KernelStatus::default()
+    let mut status = KernelStatus::default();
+    if let Some(process) = &mut *lock {
+        match process.child.try_wait() {
+            Ok(None) => {
+                status.running = true;
+                status.pid = process.child.id();
+                status.uptime_secs = Some(process.started_at.elapsed().as_secs());
+            }
+            Ok(Some(_)) => {
+                *lock = None;
+                let runtime = state.lifecycle.snapshot();
+                state.lifecycle.finish(
+                    runtime.generation,
+                    if runtime.should_run {
+                        RuntimePhase::Failed
+                    } else {
+                        RuntimePhase::Stopped
+                    },
+                );
+            }
+            Err(_) => {
+                let runtime = state.lifecycle.snapshot();
+                state
+                    .lifecycle
+                    .finish(runtime.generation, RuntimePhase::Failed);
+            }
         }
-        Err(_) => KernelStatus::default(),
     }
+    // Snapshot health and process presence under the same process-slot lock.
+    let runtime = state.lifecycle.snapshot();
+    status.ready = status.running && runtime.ready;
+    status.phase = runtime.phase;
+    status
 }
 
 pub async fn is_sing_box_running(state: &AppState) -> bool {
@@ -190,14 +204,6 @@ pub async fn validate_sing_box_config(
 }
 
 pub async fn start_sing_internal(state: &Arc<AppState>) -> AppResult<()> {
-    // Every first-start path (cache, snapshot, manuals, recover/activate,
-    // REST start) shares this so a subscription-only OpenWrt boot still
-    // installs kmod-tun / kmod-nft-queue. Non-OpenWrt returns immediately.
-    #[cfg(not(windows))]
-    if let Err(err) = crate::services::openwrt::check_and_install_openwrt_dependencies().await {
-        error!(error = %err, "Failed to check or install OpenWrt dependencies");
-    }
-
     let generation = {
         let mut lock = state.sing_process.lock().await;
         if let Some(ref mut proc) = *lock {
@@ -212,21 +218,24 @@ pub async fn start_sing_internal(state: &Arc<AppState>) -> AppResult<()> {
                 return Err(AppError::AlreadyRunning);
             }
         }
-        state.runtime_ready.store(false, Ordering::Relaxed);
-        state.set_runtime_phase(RuntimePhase::Starting);
-        // Retire any watcher from the previous start before this spawn begins.
-        state.sing_generation.fetch_add(1, Ordering::Relaxed) + 1
+        if !state.lifecycle.snapshot().should_run {
+            return Err(AppError::message("sing-box start was cancelled"));
+        }
+        state.lifecycle.begin(KernelOperation::Start)
     };
 
+    // Capture ownership before dependency I/O too, so Stop cancels this work.
+    #[cfg(not(windows))]
+    if let Err(err) = crate::services::openwrt::check_and_install_openwrt_dependencies().await {
+        error!(error = %err, "Failed to check or install OpenWrt dependencies");
+    }
     if let Err(err) = spawn_and_probe_sing_box(state, generation).await {
-        state.runtime_ready.store(false, Ordering::Relaxed);
-        state.set_runtime_phase(RuntimePhase::Failed);
+        state.lifecycle.finish(generation, RuntimePhase::Failed);
         return Err(err);
     }
-    state.runtime_ready.store(true, Ordering::Relaxed);
-    state.set_runtime_phase(RuntimePhase::Ready);
+    publish_kernel_ready(state, generation).await?;
     spawn_crash_watcher(state.clone(), generation);
-    clear_kernel_give_up_warning(state).await;
+    clear_kernel_give_up_warning(state, generation).await;
     Ok(())
 }
 
@@ -238,19 +247,20 @@ pub async fn reload_sing_internal(state: &Arc<AppState>) -> AppResult<()> {
     use nix::sys::signal::{kill, Signal};
     use nix::unistd::Pid;
 
-    state.runtime_ready.store(false, Ordering::Relaxed);
-    state.set_runtime_phase(RuntimePhase::Reloading);
-
-    let (pid, generation) = {
+    let (pid, generation, signal) = {
         let mut lock = state.sing_process.lock().await;
+        if !state.lifecycle.snapshot().should_run {
+            return Err(AppError::message("sing-box reload was cancelled"));
+        }
+        let generation = state.lifecycle.begin(KernelOperation::Reload);
         let Some(process) = lock.as_mut() else {
-            state.set_runtime_phase(RuntimePhase::Failed);
+            state.lifecycle.finish(generation, RuntimePhase::Failed);
             return Err(AppError::message("sing-box is not running"));
         };
         let exit_status = match process.child.try_wait() {
             Ok(status) => status,
             Err(err) => {
-                state.set_runtime_phase(RuntimePhase::Failed);
+                state.lifecycle.finish(generation, RuntimePhase::Failed);
                 return Err(AppError::context(
                     "Failed to check sing-box before reload",
                     err,
@@ -259,46 +269,42 @@ pub async fn reload_sing_internal(state: &Arc<AppState>) -> AppResult<()> {
         };
         if let Some(status) = exit_status {
             *lock = None;
-            state.set_runtime_phase(RuntimePhase::Failed);
+            state.lifecycle.finish(generation, RuntimePhase::Failed);
             return Err(AppError::message(format!(
                 "sing-box exited before reload with code {}",
                 status.code().unwrap_or(-1)
             )));
         }
         let Some(pid) = process.child.id() else {
-            state.set_runtime_phase(RuntimePhase::Failed);
+            state.lifecycle.finish(generation, RuntimePhase::Failed);
             return Err(AppError::message("sing-box process ID is unavailable"));
         };
-        // Retire the previous watcher while preserving the child itself. A
-        // fresh watcher is attached only after reload health is established.
-        let generation = state.sing_generation.fetch_add(1, Ordering::Relaxed) + 1;
-        (pid, generation)
+        // Signal while owning the slot; Stop cannot replace/reap this PID
+        // between inspection and SIGHUP delivery.
+        (
+            pid,
+            generation,
+            kill(Pid::from_raw(pid as i32), Signal::SIGHUP),
+        )
     };
 
-    if let Err(err) = kill(Pid::from_raw(pid as i32), Signal::SIGHUP) {
-        if is_sing_box_running(state).await {
-            state.runtime_ready.store(true, Ordering::Relaxed);
-            state.set_runtime_phase(RuntimePhase::Ready);
-            spawn_crash_watcher(state.clone(), generation);
-        } else {
-            state.runtime_ready.store(false, Ordering::Relaxed);
-            state.set_runtime_phase(RuntimePhase::Failed);
-        }
+    if let Err(err) = signal {
+        state.lifecycle.finish(generation, RuntimePhase::Failed);
+        // Do not infer health merely from a live process after a signal error.
+        // The owning configuration transaction can restore and probe it.
         return Err(AppError::message(format!(
             "Failed to signal sing-box reload: {err}"
         )));
     }
 
     if let Err(err) = wait_for_sing_box_reload_ready(state, generation, pid).await {
-        state.runtime_ready.store(false, Ordering::Relaxed);
-        state.set_runtime_phase(RuntimePhase::Failed);
+        state.lifecycle.finish(generation, RuntimePhase::Failed);
         return Err(err);
     }
 
-    state.runtime_ready.store(true, Ordering::Relaxed);
-    state.set_runtime_phase(RuntimePhase::Ready);
+    publish_kernel_ready(state, generation).await?;
     spawn_crash_watcher(state.clone(), generation);
-    clear_kernel_give_up_warning(state).await;
+    clear_kernel_give_up_warning(state, generation).await;
     info!(pid, "sing-box configuration reloaded in place");
     Ok(())
 }
@@ -411,6 +417,32 @@ async fn wait_for_sing_box_reload_ready(
             "sing-box exited during reload with code {}",
             status.code().unwrap_or(-1)
         )));
+    }
+    Ok(())
+}
+
+/// Final publication shares the process lock with Stop and status polling.
+/// A successful HTTP probe alone cannot resurrect a reaped/replaced child.
+async fn publish_kernel_ready(state: &AppState, generation: u64) -> AppResult<()> {
+    let mut slot = state.sing_process.lock().await;
+    if !start_still_current(state, generation) {
+        return Err(AppError::message("sing-box operation was cancelled"));
+    }
+    let alive = match slot.as_mut() {
+        Some(process) => process
+            .child
+            .try_wait()
+            .is_ok_and(|status| status.is_none()),
+        None => false,
+    };
+    if !alive {
+        state.lifecycle.finish(generation, RuntimePhase::Failed);
+        return Err(AppError::message(
+            "sing-box exited before readiness publication",
+        ));
+    }
+    if !state.lifecycle.finish(generation, RuntimePhase::Ready) {
+        return Err(AppError::message("sing-box operation was cancelled"));
     }
     Ok(())
 }
@@ -617,7 +649,7 @@ async fn wait_for_sing_box_ready(state: &Arc<AppState>, expected_generation: u64
 #[cfg(any(not(test), unix))]
 async fn terminate_failed_start(state: &Arc<AppState>, expected_generation: u64) {
     let mut lock = state.sing_process.lock().await;
-    if state.sing_generation.load(Ordering::Relaxed) != expected_generation {
+    if state.lifecycle.snapshot().generation != expected_generation {
         return;
     }
     if let Some(proc) = lock.as_mut() {
@@ -632,25 +664,25 @@ async fn terminate_failed_start(state: &Arc<AppState>, expected_generation: u64)
 }
 
 pub async fn stop_sing_internal(state: &Arc<AppState>) {
-    state.runtime_ready.store(false, Ordering::Relaxed);
-    state.set_runtime_phase(RuntimePhase::Stopping);
     let mut lock = state.sing_process.lock().await;
+    // Retire old probes/watchers BEFORE awaiting graceful shutdown.
+    let generation = state.lifecycle.begin(KernelOperation::Stop);
     if let Some(ref mut proc) = *lock {
         if proc.child.try_wait().ok().flatten().is_none() {
             request_graceful_exit(&mut proc.child).await;
         }
     }
     *lock = None;
-    // 让正在监护的崩溃看门狗退出：这是一次有意停止。
-    state.sing_generation.fetch_add(1, Ordering::Relaxed);
-    state.set_runtime_phase(RuntimePhase::Stopped);
+    state.lifecycle.finish(generation, RuntimePhase::Stopped);
 }
 
 mod watcher;
 
+#[cfg(all(test, unix))]
+use watcher::watch_sing_box;
 use watcher::{clear_kernel_give_up_warning, spawn_crash_watcher, start_still_current};
 #[cfg(test)]
-use watcher::{restart_backoff, watch_sing_box, KERNEL_GIVE_UP_WARNING};
+use watcher::{restart_backoff, KERNEL_GIVE_UP_WARNING};
 
 /// unix：运行时目录设为 0700（内含订阅凭证，仅属主可入）。
 /// 其他平台无需处理：Windows 的 %TEMP% 本就是用户私有目录。
@@ -892,3 +924,6 @@ fn cleanup_stale_tun_adapter() {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(all(test, unix))]
+mod lifecycle_tests;
