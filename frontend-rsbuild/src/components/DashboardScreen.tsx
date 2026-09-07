@@ -117,7 +117,7 @@ export function DashboardScreen({ app }: { app: ReturnType<typeof useAppControll
               pendingActions={app.pendingActions}
               onAddSub={app.handleAddSubscription}
               onDeleteSub={app.handleOpenDeleteSubConfirm}
-              onRefreshSubs={app.handleRefreshSubscriptions}
+              onRefreshSubs={app.handleOpenRefreshSubscriptionsConfirm}
               onToggleNodeDisabled={app.handleSetNodeDisabled}
               isInitializing={app.status.initializing}
             />

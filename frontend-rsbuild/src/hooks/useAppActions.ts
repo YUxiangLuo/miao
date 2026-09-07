@@ -267,6 +267,14 @@ export function useAppActions(data: AppData) {
     }
   }, [apiCall, clearDelays, fetchSubs, showToast])
 
+  const handleOpenRefreshSubscriptionsConfirm = useCallback(() => {
+    openConfirm(
+      '刷新订阅',
+      '确定要刷新所有订阅吗？这将重新获取订阅节点并更新配置。',
+      () => handleRefreshSubscriptions()
+    )
+  }, [openConfirm, handleRefreshSubscriptions])
+
   // 禁用/启用订阅节点（易变层变更，后端热应用）；成功后刷新订阅列表更新禁用计数
   const handleSetNodeDisabled = useCallback(async (sub: string, name: string, disabled: boolean): Promise<boolean> => {
     try {
@@ -499,6 +507,7 @@ export function useAppActions(data: AppData) {
     scanClashVerge,
     importClashVergeSubs,
     handleRefreshSubscriptions,
+    handleOpenRefreshSubscriptionsConfirm,
     handleAddNode,
     handleImportNodes,
     handleDeployVps,
