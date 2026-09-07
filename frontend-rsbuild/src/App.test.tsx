@@ -2,6 +2,7 @@ import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, rs } from '@rstest/core'
 import App from './App'
+import { nodeMock, statusMock, subMock } from './testFixtures'
 
 function jsonResponse(payload: unknown, status = 200) {
   return {
@@ -460,30 +461,32 @@ describe('App onboarding integration', () => {
     expect(screen.getByText('节点列表')).toBeInTheDocument()
   })
 
-  it('lets the user retry a failed proxy service', async () => {
+  it.each([
+    { phase: 'failed' as const, source: 'node', label: '重新启动' },
+    { phase: 'stopped' as const, source: 'node', label: '启动代理' },
+    { phase: 'stopped' as const, source: 'subscription', label: '启动代理' },
+  ])('starts a $phase proxy service with a configured $source', async ({ phase, source, label }) => {
     let started = false
     const fetchMock = rs.fn(async (input, options = {}) => {
       const url = String(input)
       if (url === '/api/status') {
         return jsonResponse({
           success: true,
-          data: {
+          data: statusMock({
             running: started,
             ready: started,
-            phase: started ? 'ready' : 'failed',
-            initializing: false,
-            route_mode: 'rule',
-          },
+            phase: started ? 'ready' : phase,
+          }),
         })
       }
       if (url === '/api/nodes') {
         return jsonResponse({
           success: true,
-          data: [{ tag: 'node-a', server: 'example.com', server_port: 443, node_type: 'hysteria2' }],
+          data: source === 'node' ? [nodeMock({ tag: 'node-a' })] : [],
         })
       }
       if (url === '/api/subs' || url === '/api/rules') {
-        return jsonResponse({ success: true, data: [] })
+        return jsonResponse({ success: true, data: url === '/api/subs' && source === 'subscription' ? [subMock()] : [] })
       }
       if (url === '/api/version') {
         return jsonResponse({
@@ -515,13 +518,14 @@ describe('App onboarding integration', () => {
     const user = userEvent.setup()
     render(<App />)
 
-    const retry = await screen.findByRole('button', { name: '重新启动' })
+    const retry = await screen.findByRole('button', { name: label })
+    expect(fetchMock).not.toHaveBeenCalledWith('/api/service/start', expect.anything())
     await user.click(retry)
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith('/api/service/start', expect.objectContaining({ method: 'POST' }))
     })
     expect(await screen.findByText('代理服务已重新启动')).toBeInTheDocument()
-    await waitFor(() => expect(screen.queryByRole('button', { name: '重新启动' })).not.toBeInTheDocument())
+    await waitFor(() => expect(screen.queryByRole('button', { name: label })).not.toBeInTheDocument())
   })
 })

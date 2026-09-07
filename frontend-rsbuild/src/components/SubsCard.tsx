@@ -17,8 +17,8 @@ interface SubRowProps {
 const SubRow = memo(function SubRow({ sub, onDelete, onShowNodes, disabled }: SubRowProps) {
   const state = sub.state || (sub.success ? 'ready' : 'failed')
   const pending = state === 'pending' || state === 'refreshing'
-  // 获取成功的订阅节点数可点击：打开订阅详情弹窗（节点列表 + 禁用开关）
-  const clickable = sub.success && !pending && sub.node_count > 0
+  // 节点管理读取本地快照，不依赖本轮刷新成功；空列表也可能有失配禁用待清理。
+  const showFetchStatus = pending || !sub.success || sub.node_count === 0
   return (
     <div className="list-row">
       <div className={classNames('status-icon-badge', pending ? 'info' : sub.success ? 'success' : 'error')}>
@@ -30,31 +30,30 @@ const SubRow = memo(function SubRow({ sub, onDelete, onShowNodes, disabled }: Su
       </div>
       <div className="list-row-content">
         <div className="list-row-title">{maskSubscription(sub.url)}</div>
-        {clickable
-          ? (
-            <button
-              type="button"
-              className="list-row-meta meta-link"
-              title="查看订阅节点"
-              onClick={() => onShowNodes(sub)}
-            >
-              {sub.node_count} 个节点{sub.disabled_count > 0 ? ` · 禁用 ${sub.disabled_count}` : ''}
-            </button>
-          )
-          : (
-            <div
-              className={classNames('list-row-meta', state === 'failed' && 'error')}
-              title={state === 'failed' ? sub.error : undefined}
-            >
-              {state === 'pending'
-                ? '等待首次获取'
-                : state === 'refreshing'
-                  ? sub.success ? `正在刷新，上次获取 ${sub.node_count} 个节点` : '正在获取订阅'
-                  : sub.success
-                    ? sub.node_count > 0 ? `${sub.node_count} 个节点` : '获取成功，暂无代理节点'
-                    : sub.error || '获取失败'}
-            </div>
-          )}
+        <button
+          type="button"
+          className="list-row-meta meta-link"
+          title="查看订阅节点"
+          onClick={() => onShowNodes(sub)}
+        >
+          {sub.node_count > 0
+            ? `${sub.node_count} 个节点${sub.disabled_count > 0 ? ` · 禁用 ${sub.disabled_count}` : ''}`
+            : '查看节点'}
+        </button>
+        {showFetchStatus && (
+          <div
+            className={classNames('list-row-meta', state === 'failed' && 'error')}
+            title={state === 'failed' ? sub.error : undefined}
+          >
+            {state === 'pending'
+              ? '等待首次获取'
+              : state === 'refreshing'
+                ? sub.success ? `正在刷新，上次获取 ${sub.node_count} 个节点` : '正在获取订阅'
+                : sub.success
+                  ? sub.node_count > 0 ? `${sub.node_count} 个节点` : '获取成功，暂无代理节点'
+                  : sub.error || '获取失败'}
+          </div>
+        )}
       </div>
       <button
         className="icon-button subtle"

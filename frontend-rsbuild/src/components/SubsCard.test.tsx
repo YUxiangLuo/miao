@@ -1,8 +1,8 @@
-import { render, screen, within } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, rs } from '@rstest/core'
 import { SubsCard } from './SubsCard'
-import { statusMock, subMock, subNodeMock } from '../testFixtures'
+import { statusMock, subMock, subNodeMock, subNodesInfoMock } from '../testFixtures'
 
 const subs = [
   subMock({ url: 'https://example.com/subscription-token-abcdef', node_count: 42 }),
@@ -34,7 +34,7 @@ describe('SubsCard subscription detail entry', () => {
       json: async () => ({
         success: true,
         message: 'ok',
-        data: [{ url: subs[0].url, nodes: [subNodeMock({ name: '香港 01' })] }],
+        data: [subNodesInfoMock({ url: subs[0].url, nodes: [subNodeMock({ name: '香港 01' })] })],
       }),
     })))
     renderCard()
@@ -58,13 +58,56 @@ describe('SubsCard subscription detail entry', () => {
     expect(document.querySelector('.status-icon-badge.error')).not.toBeInTheDocument()
   })
 
-  it('keeps the node count non-clickable for failed subscriptions', () => {
-    renderCard({
-      subs: [subMock({ success: false, node_count: 0, state: 'failed', error: 'boom' })],
+  it('lets the user manage cached nodes while showing the refresh failure', async () => {
+    const user = userEvent.setup()
+    const sub = subMock({ success: false, node_count: 2, state: 'failed', error: 'Request timeout' })
+    let disabled = false
+    rs.stubGlobal('fetch', rs.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        success: true,
+        message: 'ok',
+        data: [subNodesInfoMock({ url: sub.url, nodes: [
+          subNodeMock({ name: '缓存节点', disabled }),
+          subNodeMock({ name: '备用节点' }),
+        ] })],
+      }),
+    })))
+    const onToggleNodeDisabled = rs.fn(async (_sub: string, _name: string, next: boolean) => {
+      disabled = next
+      return true
     })
+    renderCard({ subs: [sub], onToggleNodeDisabled })
 
-    expect(screen.queryByRole('button', { name: /个节点/ })).not.toBeInTheDocument()
-    expect(screen.getByText('boom')).toBeInTheDocument()
+    expect(screen.getByText('Request timeout')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '2 个节点' }))
+    await user.click(await screen.findByRole('switch', { name: '禁用节点 缓存节点' }))
+    expect(onToggleNodeDisabled).toHaveBeenCalledWith(sub.url, '缓存节点', true)
+    expect(await screen.findByRole('switch', { name: '启用节点 缓存节点' })).toHaveAttribute('aria-checked', 'false')
+  })
+
+  it('lets the user clear stale disabled entries after a successful empty response', async () => {
+    const user = userEvent.setup()
+    const sub = subMock({ node_count: 0 })
+    let stale = ['已移除节点']
+    rs.stubGlobal('fetch', rs.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        success: true,
+        message: 'ok',
+        data: [subNodesInfoMock({ url: sub.url, stale_disabled: stale })],
+      }),
+    })))
+    const onToggleNodeDisabled = rs.fn(async () => {
+      stale = []
+      return true
+    })
+    renderCard({ subs: [sub], onToggleNodeDisabled })
+
+    await user.click(screen.getByRole('button', { name: '查看节点' }))
+    await user.click(await screen.findByRole('button', { name: '移除失效禁用 已移除节点' }))
+    expect(onToggleNodeDisabled).toHaveBeenCalledWith(sub.url, '已移除节点', false)
+    await waitFor(() => expect(screen.queryByText('已移除节点')).not.toBeInTheDocument())
   })
 })
 

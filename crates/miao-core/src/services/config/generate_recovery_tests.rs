@@ -32,6 +32,10 @@ async fn failed_sources_keep_nodes_but_successful_empty_sources_replace_them() {
                             StatusCode::OK,
                             "Subscription temporarily unavailable".to_string(),
                         ),
+                        5 => (
+                            StatusCode::OK,
+                            "proxies:\n  - name: node-b\n    type: ss\n    server: node-b.example.com\n    port: 443\n    cipher: aes-128-gcm\n    password: fixture\n    plugin: v2ray-plugin\n    plugin-opts: {mode: websocket}\n".to_string(),
+                        ),
                         _ => (StatusCode::OK, yaml("node-b")),
                     }
                 }
@@ -91,7 +95,7 @@ async fn failed_sources_keep_nodes_but_successful_empty_sources_replace_them() {
     assert!(!cached_only.accepted_subscription_response());
     assert_eq!(cached_only.subscription_fetch.unwrap().cached_nodes, 1);
 
-    for failure in [3, 4] {
+    for failure in [3, 4, 5] {
         mode.store(failure, Ordering::Relaxed);
         let malformed = gen_config(&config, &state, SubFetchRetry::None)
             .await

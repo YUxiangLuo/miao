@@ -11,7 +11,7 @@ import {
   NodeModal,
   ToastStack,
 } from './index'
-import { LoaderCircle, RotateCw, TriangleAlert, WifiOff } from 'lucide-react'
+import { LoaderCircle, Play, RotateCw, Square, TriangleAlert, WifiOff } from 'lucide-react'
 import { ICON } from '../tokens'
 import type { useAppController } from '../hooks/useAppController'
 import { Button } from './ui'
@@ -26,6 +26,7 @@ const PHASE_MESSAGE = {
   applying_config: '当前代理继续运行，正在验证新设置…',
   reloading: '正在快速重载代理配置…',
   stopping: '正在停止代理服务…',
+  stopped: '代理服务已停止。',
   failed: '代理服务未能就绪，请查看页面告警或日志。',
 } as const
 
@@ -35,6 +36,9 @@ export function DashboardScreen({ app }: { app: ReturnType<typeof useAppControll
     ? PHASE_MESSAGE[phase as keyof typeof PHASE_MESSAGE]
     : ''
   const phaseFailed = phase === 'failed'
+  const phaseStopped = phase === 'stopped'
+  const canStart = !app.status.initializing && (phaseFailed
+    || (phaseStopped && (app.subs.length > 0 || app.nodes.length > 0)))
 
   return (
     <div className="shell">
@@ -50,17 +54,19 @@ export function DashboardScreen({ app }: { app: ReturnType<typeof useAppControll
           <div className={phaseFailed ? 'runtime-banner failed' : 'runtime-banner'} role="status">
             {phaseFailed
               ? <TriangleAlert size={ICON.sm} />
-              : <LoaderCircle size={ICON.sm} className="spin" />}
+              : phaseStopped
+                ? <Square size={ICON.sm} />
+                : <LoaderCircle size={ICON.sm} className="spin" />}
             <span>{phaseMessage}</span>
-            {phaseFailed && (
+            {canStart && (
               <Button
                 tone="secondary"
                 size="sm"
-                icon={<RotateCw size={ICON.xs} />}
+                icon={phaseStopped ? <Play size={ICON.xs} /> : <RotateCw size={ICON.xs} />}
                 loading={app.pendingActions.has('startService')}
                 onClick={app.handleStartService}
               >
-                重新启动
+                {phaseStopped ? '启动代理' : '重新启动'}
               </Button>
             )}
           </div>

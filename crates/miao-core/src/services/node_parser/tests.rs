@@ -43,6 +43,43 @@ proxies:
 }
 
 #[test]
+fn parse_clash_proxies_rejects_ss_plugins_instead_of_downgrading_to_plain_ss() {
+    for plugin in [
+        "plugin: v2ray-plugin\n    plugin-opts: {mode: websocket, tls: true, host: cdn.example.com, path: /proxy}",
+        "plugin: obfs\n    plugin-opts: {mode: http, host: cdn.example.com}",
+        "plugin-opts: {mode: websocket}",
+        "plugin: {name: v2ray-plugin}",
+    ] {
+        let yaml = format!(
+            "proxies:\n  - name: plugin-node\n    type: ss\n    server: example.com\n    port: 443\n    cipher: aes-128-gcm\n    password: fixture\n    {plugin}\n"
+        );
+        let result = parse_clash_proxies(&yaml).unwrap();
+        assert!(result.nodes.is_empty(), "plugin config was dropped: {plugin}");
+        assert_eq!(result.total_count, 1);
+        assert_eq!(result.errors.len(), 1);
+        assert!(result.errors[0].contains("plugin-node"));
+        assert!(result.errors[0].contains("unsupported Shadowsocks plugin"));
+    }
+}
+
+#[test]
+fn parse_clash_proxies_accepts_plain_ss_with_empty_plugin_fields() {
+    for plugin in [
+        "",
+        "plugin: ''\n    plugin-opts: {}",
+        "plugin: null\n    plugin-opts: null",
+    ] {
+        let yaml = format!(
+            "proxies:\n  - name: plain-ss\n    type: ss\n    server: example.com\n    port: 443\n    cipher: aes-128-gcm\n    password: fixture\n    {plugin}\n"
+        );
+        let result = parse_clash_proxies(&yaml).unwrap();
+        assert!(result.errors.is_empty());
+        assert_eq!(result.nodes.len(), 1);
+        assert_eq!(result.nodes[0].1["type"], "shadowsocks");
+    }
+}
+
+#[test]
 fn parse_clash_proxies_skips_invalid_nodes() {
     let yaml = r#"
 proxies:

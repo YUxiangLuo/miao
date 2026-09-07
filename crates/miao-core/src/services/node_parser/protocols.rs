@@ -44,6 +44,21 @@ pub(super) fn parse_single_node(node: &Value) -> Result<(String, JsonValue), Str
             JsonValue::Object(obj)
         }
         "ss" => {
+            // A plugin changes the wire protocol. Do not accept the node as
+            // plain SS when these options cannot be represented by this parser.
+            let has_plugin = match node.get("plugin") {
+                None | Some(Value::Null) => false,
+                Some(Value::String(plugin)) => !plugin.trim().is_empty(),
+                Some(_) => true,
+            };
+            let has_plugin_opts = match node.get("plugin-opts") {
+                None | Some(Value::Null) => false,
+                Some(Value::Mapping(opts)) => !opts.is_empty(),
+                Some(_) => true,
+            };
+            if has_plugin || has_plugin_opts {
+                return Err("unsupported Shadowsocks plugin/plugin-opts".to_string());
+            }
             let method = get_required_str(node, "cipher")?;
             let password = get_required_str(node, "password")?;
             let mut obj = base_outbound("shadowsocks", name, server, port);
