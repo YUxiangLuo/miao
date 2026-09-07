@@ -166,6 +166,16 @@ export function ProxyCard({
           <div className="section-title-wrap">
             <Waypoints size={ICON.sm} className="section-icon" />
             <span>节点列表</span>
+            <Button
+              tone="secondary"
+              size="sm"
+              icon={<Zap size={ICON.xs} />}
+              loading={testingGroup === primaryGroupName}
+              disabled={!primaryGroup || !status.ready}
+              onClick={() => primaryGroup && onTestGroupDelays(primaryGroupName, primaryGroup.all!)}
+            >
+              测试延迟
+            </Button>
           </div>
           <label className="node-select">
             <span className="node-select-label">最高倍率</span>
@@ -204,16 +214,6 @@ export function ProxyCard({
               ))}
             </select>
           </label>
-          <Button 
-            tone="secondary" 
-            size="sm" 
-            icon={<Zap size={ICON.xs} />} 
-            loading={testingGroup === primaryGroupName} 
-            disabled={!primaryGroup || !status.ready}
-            onClick={() => primaryGroup && onTestGroupDelays(primaryGroupName, primaryGroup.all!)}
-          >
-            测试延迟
-          </Button>
         </div>
       }
     >
