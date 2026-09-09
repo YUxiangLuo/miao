@@ -7,12 +7,11 @@
   </p>
 </div>
 
-Miao 把 sing-box 内核、geo 分流规则和 Web 控制面板编进同一个可执行文件。TUN 接管整机流量，浏览器打开面板即完成配置（深色 / 浅色双主题）。Linux / OpenWrt 上是 `sudo` 即跑的单二进制，Windows 上是带系统托盘的桌面程序。
+Miao 将 sing-box 内核、分流规则和 Web 面板打包在一起，用 TUN 接管整机流量。Linux / OpenWrt 分发单个可执行文件，Windows 提供带托盘的桌面程序；在面板中配置订阅、节点和规则，支持深浅双主题。
 
-内核采用固定版本的 Miao 客户端构建，支持 Shadowsocks、VMess、VLESS、Trojan、AnyTLS、Hysteria2、TUIC 七种节点协议，使用 GoTUN，并按 Zstandard 压缩嵌入、启动时校验释放。构建、裁剪范围和升级方式见[内核维护说明](docs/kernel.md)。
+客户端内核支持 Shadowsocks、VMess、VLESS、Trojan、AnyTLS、Hysteria2、TUIC，裁剪与构建方式见[内核文档](docs/kernel.md)。
 
-<img width="1440" height="1400" alt="image" src="https://github.com/user-attachments/assets/320dd0bb-f1da-4bf9-99ab-6c04c3c2c95b" />
-
+<img width="1440" height="1400" alt="Miao 控制面板" src="https://github.com/user-attachments/assets/320dd0bb-f1da-4bf9-99ab-6c04c3c2c95b" />
 
 ## 安装
 
@@ -20,35 +19,38 @@ Miao 把 sing-box 内核、geo 分流规则和 Web 控制面板编进同一个�
 
 ```bash
 mkdir -p ~/miao && cd ~/miao
-wget https://github.com/YUxiangLuo/miao/releases/latest/download/miao-rust-linux-amd64 -O miao  # arm64 换文件名
-chmod +x miao && sudo ./miao #默认面板端口6161
+wget https://github.com/YUxiangLuo/miao/releases/latest/download/miao-rust-linux-amd64 -O miao
+chmod +x miao
+sudo ./miao
 ```
 
-也可以直接指定订阅，以“日本最快”启动（临时运行，不改写已有配置）：
+打开 `http://localhost:6161`。arm64 将文件名中的 `amd64` 改为 `arm64`；OpenWrt 已是 root 时直接运行 `./miao`。
+
+也可使用临时订阅，以“日本最快”启动：
 
 ```bash
 sudo ./miao --sub 'https://your-subscription-url' JP
 ```
 
-`JP` 可换成 `HK/TW/SG/US`，大小写不限；省略地区时使用手动选择。`--sub` 与 `--config` 互斥，详见[命令行用法](docs/config.md#命令行启动)。不要与已经运行的 miao 服务同时启动。
+支持 `HK/JP/TW/SG/US`，省略地区时手动选择；临时运行不改写已有配置。不要与已有实例同时启动，详见[命令行用法](docs/config.md#命令行启动)。
+
+systemd Linux 可直接安装为服务：
 
 ```bash
-# 或者一键安装为systemd服务
 curl -fsSL https://raw.githubusercontent.com/YUxiangLuo/miao/master/install.sh | sudo bash
-
-# 完全卸载服务和任何痕迹
-curl -fsSL https://raw.githubusercontent.com/YUxiangLuo/miao/master/remove.sh | sudo bash
 ```
 
 ### Windows
 
-从 [Releases](https://github.com/YUxiangLuo/miao/releases/latest) 下载 `miao-windows-amd64-setup.exe`（Win10/11 x64，需 WebView2）。每次启动点一次 UAC；关窗进托盘；托盘勾选「开机自启」免 UAC 自启（每次启动自动校验自启任务指向的 exe 路径，升级后指向旧版会自修复）。
+从 [Releases](https://github.com/YUxiangLuo/miao/releases/latest) 下载 `miao-windows-amd64-setup.exe`（Windows 10/11 x64）。启动时确认 UAC，关窗进入托盘；WebView2、自启、升级和卸载见[平台说明](docs/platforms.md)。
 
 ## 文档
 
-- 官网：<https://miao.vesein.dev>（特性、设计哲学、架构、FAQ）
-- 配置参考与 MCP：[docs/config.md](docs/config.md)
-- 平台对照与运行细节（Windows / OpenWrt / PWA / 卸载）：[docs/platforms.md](docs/platforms.md)
-- 从源码构建：依赖 Bun、Go、Rust、curl，`./build.sh`；fresh clone 只跑 Rust 测试可用 `./scripts/test-rust.sh`（不会启动代理或 TUN）；开发约定见 [DEV_NOTES.md](DEV_NOTES.md)
+| 需要做什么 | 文档 |
+| --- | --- |
+| 配置订阅、节点、规则或 MCP | [配置参考](docs/config.md) |
+| 查看平台差异、PWA、升级与卸载 | [平台说明](docs/platforms.md) |
+| 从源码构建、测试或部署 | [开发指南](DEV_NOTES.md) |
+| 修改面板或定制内核 | [前端开发](frontend-rsbuild/README.md)、[内核维护](docs/kernel.md) |
 
-[MIT License](LICENSE)
+[官网与 FAQ](https://miao.vesein.dev) · [Miao 源码许可](LICENSE) · [内嵌内核来源与许可](docs/kernel.md#来源与许可)

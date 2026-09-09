@@ -1,43 +1,45 @@
 # Profile 与路径归属
 
-`profile::ResolvedProfile` 在启动时统一决定配置、运行文件、易变层、偏好和日志路径；服务只使用 `AppState` 中已解析的路径，不再按当前工作目录或进程参数临时猜测位置。
+[`profile::ResolvedProfile`](../crates/miao-core/src/profile.rs) 在启动时统一解析配置、运行文件、易变层、偏好和日志路径。服务使用 `AppState` 中的结果，不按当前目录或进程参数重新猜测。
 
-## 三种启动来源
+## 启动来源
 
-- **默认 Profile**：可执行文件旁已有的 `config.yaml`，否则平台默认配置。沿用旧运行目录和平台持久化策略；显式 `--config` 指向这个相同文件时与默认启动等价。
-- **命名 Profile**：`--config PATH` 指向其他配置，或 SDK 显式选择其他配置。配置不存在时仍使用内存默认值，不强制创建文件；应用写入时再保存。
-- **临时 Profile**：`--sub URL [地区]`。配置及所有状态都在本次创建的独立临时目录中，不读取默认 Profile 的配置、缓存或偏好。
+| Profile | 来源与行为 |
+| --- | --- |
+| 默认 | 可执行文件旁的 `config.yaml`，否则平台默认配置；显式指定同一文件与默认启动等价 |
+| 命名 | `--config PATH` 或 SDK 选择其他配置；状态独立，文件不存在时先用内存默认值，写入时再保存 |
+| 临时 | `--sub URL [地区]`，配置和所有状态属于独立临时目录，不继承已有配置、缓存或偏好 |
 
-路径先变成绝对路径，并解析已有符号链接；尚未创建的路径解析最近的现存祖先。相对路径、符号链接指向同一配置时使用同一份状态，第一次保存配置不会改变归属。保存写入解析后的目标，不替换配置文件的符号链接。
+路径规范化为绝对路径并解析符号链接；未创建的路径解析最近的现存祖先。保存写入解析后的目标，不替换符号链接；第一次保存不会改变归属。命名 Profile 的 `<id>` 是完整路径的 SHA-256（Unix 原生字节、Windows UTF-16LE），不同扩展名/目录互不混用；移动或改名配置会选择另一个 Profile。
 
-命名 Profile 的 `<id>` 是解析后完整配置路径的 SHA-256：Unix 使用原生路径字节，Windows 使用 UTF-16LE。不会将非 UTF-8 路径损失性转换成显示字符串，也不会只按去掉扩展名的文件名区分。因此 `travel.yaml`、`travel.yml` 和不同目录下的同名文件各自独立。移动/改名配置视为选择另一个 Profile，不按配置内容猜测或合并状态。
+## 文件位置
 
-## 默认位置
+默认配置为 Linux/OpenWrt 的 `/etc/miao/config.yaml`，或 Windows 的 `%LOCALAPPDATA%\io.github.yuxiangluo.miao\config.yaml`；可执行文件旁的配置优先。
 
-`R` 表示平台原有内核运行根目录（Unix 通常为 `/tmp/miao-sing-box`），`P` 表示配置文件所在目录下的 `.miao-profiles/<id>`。
+以下 `R` 表示内核运行根目录（Unix：`/tmp/miao-sing-box`；Windows：`%TEMP%\miao-sing-box`），`A` 为 Windows 应用数据目录，`P` 为配置同目录的 `.miao-profiles/<id>`。
 
 | 文件 | 默认 Profile | 命名 Profile |
 | --- | --- | --- |
-| 内核、active config、运行缓存、订阅节点快照、Clash cache | `R` | `R/profiles/<id>` |
-| 易变层 `volatile.yaml` | Unix：`R`；Windows：应用数据目录 | Unix：该 Profile 的运行目录；Windows：`P` |
-| `.last_proxy` / `.node_select` / `.max_multiplier` | systemd Linux：启动 CWD（安装服务为 `/etc/miao`）；OpenWrt/非 systemd：`R`；Windows：应用数据目录 | systemd Linux / Windows：`P`；OpenWrt/非 systemd：该 Profile 的运行目录 |
-| 节点 tag bindings | `config.yaml` 同目录的 `node-bindings.json` | 文件名为 `config.yaml` 时沿用同目录文件；其他文件名使用 `P/node-bindings.json` |
+| 内核、active config、缓存、订阅快照 | `R` | `R/profiles/<id>` |
+| `volatile.yaml` | Unix：`R`；Windows：`A` | Unix：该 Profile 的运行目录；Windows：`P` |
+| `.last_proxy` / `.node_select` / `.max_multiplier` | systemd Linux：启动 CWD（安装服务为 `/etc/miao`）；OpenWrt/非 systemd：`R`；Windows：`A` | systemd Linux / Windows：`P`；OpenWrt/非 systemd：该 Profile 的运行目录 |
+| `node-bindings.json` | 配置同目录 | 配置名为 `config.yaml` 时沿用同目录文件；其他文件名使用 `P` |
 
-OpenWrt/非 systemd 的高频偏好与易变层仍在 tmpfs，系统重启后消失；稳定配置和节点绑定仍跟随配置文件。默认 Profile 的 CWD 偏好规则为兼容保留，命名 Profile 的归属不依赖启动 CWD。
+OpenWrt/非 systemd 的高频状态在 tmpfs，系统重启后消失；稳定配置和节点绑定跟随配置文件。默认 Profile 的 CWD 偏好规则为兼容保留，命名 Profile 不依赖启动 CWD。
 
-桌面默认日志仍是进程级的应用数据目录 `miao.log`，保持托盘「打开日志」行为；它不是配置偏好。临时 Profile 的 Windows 日志使用自身临时目录，Unix 默认仍输出到终端。
+Windows 默认日志为 `A/miao.log`，供托盘打开；临时 Profile 使用自身目录。Unix 默认输出终端。
 
-## 旧文件与迁移
+## 迁移
 
-默认 Profile 的路径保持不变。命名 Profile **不自动继承旧的共享偏好、易变层或缓存**，因为无法判断这些内容属于哪份配置；旧文件也不会被删除。第一次使用新的隔离路径时按自身 YAML 默认值启动，订阅可能需要重新获取。
+默认路径不变。命名 Profile 不继承旧共享偏好、易变层或缓存，也不删除旧文件，初次使用按自身 YAML 默认值启动。
 
-旧版非 `config.yaml` 配置的绑定文件形如 `travel.node-bindings.json`。新绑定文件不存在时，启动会将旧字节原子复制到该 Profile 的 `P/node-bindings.json`，保留既有 tag 记录；原文件不删除，新文件已存在则不覆盖。即使旧版本因相同文件 stem 共享了绑定文件，之后也分别写入独立目录，不再相互覆盖。
+旧版 `travel.node-bindings.json` 等绑定文件在新文件不存在时原子复制到 `P/node-bindings.json`，保留 tag；旧文件不删，新文件不覆盖。之后不同 Profile 分别写入各自绑定，即使旧版曾因相同文件 stem 共用文件。
 
 ## SDK 与生命周期
 
-- `spawn_server(RuntimeOptions)` 不读取宿主进程 argv。`config_path: None` 只执行默认文件发现；CLI 和桌面壳通过同一个参数解析器显式传入配置路径，保留 `--config PATH` / `--config=PATH`。
-- `runtime_dir` 显式覆盖运行文件及默认偏好目录；所有平台的默认 `volatile.yaml` 也随它走。单独指定 `volatile_path` 优先级更高。Windows 的运行目录覆盖还隔离默认日志；显式 `log_path` 优先。
-- 调用方提供的配置/运行目录不归 runtime 删除。临时 `--sub` 的目录所有权由启动包装交给 `AppState`；请求和后台任务持有 `Arc<AppState>` 时，目录不会被提前删除。启动失败会释放所有权。
-- `ServerHandle::shutdown()` 等待服务和内核关闭；被取消的后台任务释放最后一个状态引用后才删除临时目录。仅 drop handle 会发起异步停服，也不会提前删除仍在使用的目录。强杀、断电、exec 升级不承诺析构清理。
+- `spawn_server(RuntimeOptions)` 不读取宿主 argv；`config_path: None` 只做默认发现。CLI 和桌面共用参数解析器，支持 `--config PATH` / `--config=PATH`。
+- `runtime_dir` 覆盖运行文件和默认偏好目录，各平台默认易变层也随之移动，Windows 默认日志同样隔离；显式 `volatile_path` / `log_path` 优先。
+- 调用方提供的目录不由 runtime 删除。临时 `--sub` 使用 Unix `0700` 目录，所有权交给 `AppState`，最后一个请求/后台任务引用释放后才清理；启动失败同样释放所有权。
+- `ServerHandle::shutdown()` 等待服务和内核关闭；仅 drop handle 则异步停服，均不提前删除仍在使用的目录。强杀、断电和 exec 升级不保证析构清理。
 
-**Profile 隔离不等于多实例支持**：TUN、Clash API 端口及部分进程级设施仍共享。不要因此在生产代理旁启动另一个真实内核。测试使用注入的临时环境、空配置/假内核和 localhost HTTP，不读取或改动生产运行目录。
+**Profile 隔离不支持多开**：TUN、Clash API 端口和部分进程级设施仍共享。测试隔离要求见[开发指南](../DEV_NOTES.md#开发检查)。

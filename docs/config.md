@@ -1,99 +1,84 @@
 # 配置参考
 
-不创建任何文件也能用。默认配置查找顺序：`--config` → 可执行文件同目录 `config.yaml` → 平台默认路径。
+默认查找可执行文件旁的 `config.yaml`，没有则使用平台默认路径；`--config` 可显式指定。配置文件不存在时也能启动并在面板完成配置。目录与隔离规则见 [Profile 与路径归属](profiles.md)。
 
 ## 命令行启动
 
 ```bash
-sudo ./miao --sub 'https://example.com/sub?token=xxx' JP  # 日本最快，临时配置
-sudo ./miao --sub='https://example.com/sub?token=xxx'    # 不指定地区：手动选择
-sudo ./miao --config /path/to/config.yaml              # 或 --config=/path/to/config.yaml
+sudo ./miao --config /path/to/config.yaml
+sudo ./miao --sub 'https://example.com/sub?token=xxx' JP
 ./miao --help
 ./miao --version
 ```
 
-- `--sub` 接受一个 HTTP/HTTPS Clash YAML 订阅，**与 `--config` 互斥**；重复参数、未知参数、无效 URL 或地区会在提权/启动内核前报错。
-- 可选地区为 `HK / JP / TW / SG / US`，大小写不限，映射到相应的 `fastest_*` 策略。没有该地区候选时回退到手动选择并提示，但仍保留请求的地区策略。
-- `--sub` 不读取已有配置、手动节点或选择偏好：使用独立临时目录保存本次配置、内核文件、缓存和偏好，默认不限倍率、规则分流。面板可正常使用，但面板修改也只属于本次临时运行。
-- 正常退出（Ctrl+C / SIGTERM）后清理临时目录；强杀、断电或进程替换升级可能留下临时文件，后续运行不会复用它们。Unix 临时目录权限为 `0700`。默认 Profile 保持原有位置，其他显式配置使用独立状态目录，见 [Profile 与路径归属](profiles.md)。
-- URL 含 `&` 等 shell 字符时须加引号。订阅令牌可能出现在 shell 历史及进程参数中，请注意保密。
-- 临时目录隔离不等于支持多开：TUN 和 Clash API 端口仍是共享资源，不要与已有 miao 实例同时运行。普通面板端口已占用时会在释放/启动内核前拒绝新实例。
+`--config=PATH`、`--sub=URL` 同样有效。`--sub` 接受 HTTP/HTTPS Clash YAML 订阅，与 `--config` 互斥；参数在提权、文件写入和内核启动前校验。
+
+地区可选 `HK / JP / TW / SG / US`，大小写不限；省略时手动选择，无该地区候选时临时回退手动并保留地区偏好。`--sub` 使用独立临时 Profile，默认规则分流、不限倍率，不读取已有配置或偏好；面板修改也仅属于本次运行。正常退出后清理，强杀、断电或进程替换升级可能留下临时目录，但后续运行不会复用。
+
+订阅 URL 须加引号，并留意令牌会进入 shell 历史和进程参数。Profile 隔离不支持多开，TUN 和 Clash API 仍共享，不要与已有实例同时启动。
 
 ## 配置文件
 
 ```yaml
-port: 6161                 # 面板端口
-
-subs:                      # Clash YAML 订阅
+port: 6161
+subs:
   - "https://your-subscription-url"
-
-nodes:                     # 手动节点（sing-box outbound JSON）
+nodes:  # sing-box outbound JSON，支持范围见内核文档
   - '{"type":"hysteria2","tag":"HY2","server":"example.com","server_port":443,"password":"xxx","tls":{"enabled":true}}'
-
-custom_rules:              # 可选：优先于内置分流，全局模式下仍生效
+custom_rules:
   - '{"domain_suffix":"example.com","action":"route","outbound":"direct"}'
-  # 进程级指定出口：让 qbittorrent 的流量固定走「香港节点」（Windows 写 qbittorrent.exe）
   - '{"process_name":"qbittorrent","action":"route","outbound":"香港节点"}'
-  # outbound 除 proxy/direct 外也可填节点 tag；节点消失时该规则被跳过并在面板标记
 
-mcp: true                  # 可选：MCP 端点（POST /mcp），默认关闭
-
-node_select: fastest_jp    # 可选：启动默认节点策略（manual / fastest_hk/jp/tw/sg/us）
-max_multiplier: 2.5       # 可选：节点最高倍率；null 或省略表示不限
-route_mode: global         # 可选：启动默认路由模式（rule 规则分流 / global 全局代理）
+# 以下均可省略；策略/倍率的持久偏好优先于启动默认值
+mcp: false
+node_select: manual  # manual / fastest_hk/jp/tw/sg/us
+max_multiplier: null  # 不限，或正数（例如 2.5）
+route_mode: rule  # rule / global
 ```
 
-**默认 Profile 的落盘位置**（命名 Profile 的隔离、旧绑定迁移及 SDK 覆盖规则见 [Profile 与路径归属](profiles.md)）：
+手动节点支持七种协议，见[内核能力](kernel.md#能力与裁剪)。自定义规则优先于内置分流，全局模式下仍生效；出口可填 `proxy`、`direct` 或节点 tag，引用缺失/禁用节点的规则会跳过并在面板标记。Windows 进程名需带 `.exe`。
 
-| 层 | 文件 | 内容 | 位置 |
-| --- | --- | --- | --- |
-| 稳定层 | `config.yaml` | 订阅/节点/规则等低频配置 | Linux/OpenWrt：`/etc/miao`；Windows：应用数据目录 |
-| 易变层 | `volatile.yaml` | 节点选择策略、最高倍率、路由模式、禁用的订阅节点 | Unix：`/tmp/miao-sing-box`（tmpfs，系统重启后回到 config.yaml 的启动默认值）；Windows：应用数据目录（持久） |
-| 状态层 | `config.json` / `.cache` / 快照 | 运行时配置与缓存 | sing-box 运行目录，可删 |
-| 选择偏好 | `.node_select` / `.max_multiplier` / `.last_proxy` | 用户显式选择的策略 / 最高倍率 / 手动节点 | 普通 Linux：`/etc/miao`；OpenWrt：运行时 tmpfs；Windows：应用数据目录 |
+## 状态保存与节点选择
 
-面板或 MCP 显式选择 `manual` / `fastest_*` 后会更新 `.node_select`，设置最高倍率后会更新 `.max_multiplier`（`unlimited` 表示不限）。普通 Linux 和 Windows 重启后优先恢复这些偏好；启动期间因地区节点暂缺而临时回退到 `manual` 不会覆盖用户偏好，后续订阅刷新会继续尝试原策略。首次升级会迁移旧 `volatile.yaml` 中明确记录的最高倍率和 `fastest_*`；无法与临时回退区分的 `manual` 不会被提升为持久偏好。具体手动节点仍由 `.last_proxy` 独立恢复。
+| 文件 | 保存内容 |
+| --- | --- |
+| `config.yaml` | 订阅、手动节点、规则、端口、MCP 开关及启动默认值 |
+| `volatile.yaml` | 当前策略、倍率、路由模式和禁用的订阅节点 |
+| `.node_select` / `.max_multiplier` / `.last_proxy` | 显式选择的策略、倍率和具体手动节点 |
+| `config.json`、运行缓存、订阅快照 | 派生运行状态，可重新生成 |
 
-最高倍率从节点当前显示名动态识别，例如 `18x`、`6.5X`、`2.4倍`、`倍率：1.3`；未标倍率的节点按 `1x`，明确带倍率标记但数值无效的节点不会进入受限的自动候选。该限制仅在“地区最快”自动选择模式下生效，只缩小 `urltest` 的测速候选；订阅节点、手动节点及其真实 outbound 始终保留，手动选择模式展示完整节点池。面板下拉选项来自当前完整节点池，选择“不限”可恢复全部自动候选；地区筛空而临时回退手动模式时仍可调整倍率。
+具体位置和平台持久化差异集中在[路径表](profiles.md#文件位置)。默认 Unix 易变层在 tmpfs；OpenWrt/非 systemd 的选择偏好也在 tmpfs，进程重启时保留，系统重启后回到 YAML 启动默认值。systemd Linux 和 Windows 会持久保存选择偏好。
 
-OpenWrt 的易变层和选择偏好写 tmpfs：切节点/切模式这类高频操作零闪存磨损。面板/进程重启（如自升级）期间文件仍保留，系统重启后则回到 `config.yaml` 的启动默认值。
+地区无候选而回退 `manual` 不覆盖用户请求的策略，后续刷新继续尝试原地区。首次升级会迁移旧易变层中明确记录的倍率和 `fastest_*`，但不将无法区分来源的 `manual` 提升为持久偏好。具体手动节点由 `.last_proxy` 独立恢复。
+
+最高倍率只影响地区最快模式的自动候选，手动选择仍保留完整节点池。倍率从当前显示名识别（如 `18x`、`6.5X`、`2.4倍`、`倍率：1.3`）；未标记按 1x，明确标记但数值无效的节点不进入受限候选。下拉选项来自完整节点池，选择“不限”可恢复全部自动候选，偏好文件用 `unlimited` 表示不限。
 
 ### 开机订阅刷新失败
 
-有兼容缓存、订阅节点快照或有效手动节点时，先用本地材料启动代理，再后台获取订阅。首次获取最多等待 20 秒，之后最多再快速重试 4 次（间隔 5、10、20、40 秒，另加请求耗时）。
+有兼容缓存、订阅快照或有效手动节点时，先用本地材料启核，再后台刷新。首轮最多 20 秒，随后最多 4 次快速重试，间隔 5、10、20、40 秒（另加请求耗时）。代理已就绪但订阅仍失败时，保留运行配置并告警，改为每 30 分钟静默重试。
 
-如果代理已就绪但订阅仍失败，会保留当前运行配置并提示失败，转为每 30 分钟静默重试，不再反复显示启动刷新状态。随时可在面板手动刷新；手动刷新失败不会重新开启整轮快速重试，成功后结束启动恢复任务。停止服务或修改订阅列表会取消旧任务。代理本身尚未就绪时，仍会继续尝试恢复，不受上述次数限制。
+手动刷新失败不重置快速重试额度，成功则结束启动恢复任务；停服或修改订阅会取消旧任务。代理本身尚未就绪时仍继续恢复，不受上述次数限制。刷新活动与代理状态独立，后台拉取不会把就绪的代理改成“启动中”。
 
-订阅刷新状态与代理运行状态独立：后台获取时，已就绪的代理仍显示就绪，重试等待显示在订阅卡片中。成功返回空列表不算获取失败；有其他可用节点时正常应用并清理旧订阅节点，没有替代节点时保留当前运行配置并提示检查内容/禁用设置，不把空列表当作网络错误反复获取。缓存节点可继续使用，但不算本轮拉取成功。API 字段与提交边界见 [运行状态与订阅刷新](runtime-state.md)。
+成功空列表不算网络失败：有替代节点时正常应用并清理旧订阅节点；没有可用候选且当前代理可用时保留运行态，提示检查订阅或禁用设置，不反复获取空列表。缓存可用不代表本轮拉取成功。API 语义见[状态文档](runtime-state.md#订阅刷新)。
 
 ### 禁用订阅节点
 
-面板「订阅管理」里获取成功的订阅，其「N 个节点」可点开订阅详情弹窗，逐节点禁用/启用。禁用的节点不会出现在生成的 sing-box 配置中（selector/urltest 成员、地区分组同步缩小），自定义规则若引用被禁节点会被跳过并在面板标记。禁用集是易变层配置 `disabled_nodes`：
+在订阅卡片点击节点数量，可逐个禁用/启用。禁用节点不进入生成配置，引用它的规则也会跳过；操作后节点池为空（含手动节点）会返回 400。
+
+禁用集由面板维护在 `volatile.yaml`，按“订阅 URL + 节点名”匹配，同订阅内同名节点一起禁用；改名后旧条目失效。默认 Unix 易变层随系统重启清空。
 
 ```yaml
-# volatile.yaml（由面板维护，不建议手编）
 disabled_nodes:
-  - sub: "https://your-subscription-url"   # 订阅 URL，与 config.yaml 的 subs 条目一致
-    name: "香港 01"                          # 节点名；订阅内同名节点会一起禁用
+  - sub: "https://your-subscription-url"
+    name: "香港 01"
 ```
-
-语义说明：按「订阅 + 节点名」标识，订阅刷新后节点改名则旧条目失配自然失效（节点重新出现）；Unix 上易变层在 tmpfs，系统重启后禁用集清空；不允许禁用后节点池为空（含手动节点），会被 400 拒绝。
 
 ## MCP：让 AI agent 操作代理
 
-配置里加一行 `mcp: true`（默认关闭），端点是 `http://<面板地址>/mcp`。它实现 MCP `2025-11-25` Streamable HTTP：客户端先发送 `initialize`，收到响应后发送 `notifications/initialized`，后续请求携带 `MCP-Protocol-Version`。服务端使用无 session 的 JSON 响应，不提供 SSE，因而 `GET /mcp` 返回 405。面板右下角的浮动控件可以一键开关并复制地址。
+设置 `mcp: true` 或使用面板右下角开关，连接 `http://<面板地址>/mcp`；关闭时返回 404。当前实现 MCP `2025-11-25` Streamable HTTP：先 `initialize`，再 `notifications/initialized`，后续请求携带 `MCP-Protocol-Version`；无 session、无 SSE，启用时 `GET /mcp` 返回 405。
 
-MCP 尽量与面板能力同构，工具按用途分为：
+用 `tools/list` 获取完整工具和参数。工具覆盖状态、流量/连接、启停、节点策略/倍率、切换/测速、订阅、手动节点、规则、MCP 开关、VPS 部署和升级；平台不支持的操作返回明确错误。主题、弹窗、PWA 和分享链接解析属于浏览器本地功能；结构化节点可通过 `add_node` / `import_nodes` 导入。
 
-- 状态与诊断：`get_status`、`get_version_info`、`test_connectivity`、`get_traffic`（实时速率快照）、`list_connections`（支持分页）
-- 服务与路由：`start_service`、`stop_service`、`set_route_mode`、`set_node_select`、`set_max_multiplier`、`switch_node`、`test_delay`
-- 订阅：`list_subscriptions`、`add_subscriptions`、`delete_subscription`、`refresh_subscriptions`、`scan_clash_verge`、`list_subscription_nodes`（按订阅列出节点及禁用状态）、`set_subscription_node_disabled`（禁用/启用订阅节点）
-- 节点：`list_nodes`（订阅 + 手动平铺池）、`list_manual_nodes`、`add_node`、`import_nodes`、`delete_node`
-- 规则：`list_rules`、`add_rule`、`delete_rule`
-- 管理：`set_mcp_enabled`、`deploy_vps`、`upgrade_miao`（平台不支持时返回明确错误）
+停止、删除、部署、关闭 MCP、升级等破坏性工具要求 `confirm: true`，调用者须先获得用户明确确认。订阅 URL、连接记录和 VPS 密码应保密；流量可能正经过本代理，热应用配置可能影响连接。
 
-主题切换、弹窗和 PWA 安装属于浏览器本地 UI 状态，没有服务端语义，因此不暴露为 MCP 工具。分享链接解析也保留在浏览器端；MCP 调用者可自行解析后交给结构化的 `add_node` / `import_nodes`。节点/订阅/规则写操作与 REST 共用 `services/commands` 业务服务，不调用 HTTP handler，也不另造一套配置逻辑；[事务与提交边界](runtime-state.md#业务入口与配置事务)由配置服务统一负责。
-
-连接时服务端通过 `instructions` 告知调用者：流量很可能正经过本代理，配置热应用可能影响连接；订阅 URL、连接记录和 VPS 密码属于敏感信息。停止服务、删除配置、部署 VPS、关闭 MCP、升级 Miao 等破坏性工具既在描述和 `annotations` 中标记，也要求 `confirm: true`；agent 必须先取得用户明确确认，不能自行确认。
-
-> **安全提示**：Linux 下面板绑 `0.0.0.0` 且无鉴权，开启 MCP 后局域网内任何设备都能调用这些工具（包括切节点/切模式），请自行评估网络环境。Windows 版只听 `127.0.0.1`，无此问题。
+**面板和 MCP 无鉴权。** Linux 默认监听 `0.0.0.0`，局域网设备也可调用；Windows 仅监听 `127.0.0.1`。不要直接暴露到不可信网络。
