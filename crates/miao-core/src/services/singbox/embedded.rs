@@ -6,6 +6,8 @@ use ruzstd::decoding::StreamingDecoder;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use tracing::{info, warn};
+#[cfg(windows)]
+use windows_sys::Win32::Foundation::ERROR_ACCESS_DENIED;
 
 use super::{
     is_windows_sharing_violation, map_remove_embedded_error, restrict_to_owner, set_executable,
@@ -144,6 +146,18 @@ fn unpack_kernel(compressed: &[u8], metadata: &str, path: &Path) -> AppResult<()
         .sync_all()
         .map_err(|err| AppError::context("Failed to flush embedded kernel", err))?;
     output.persist(path).map_err(|err| {
+        #[cfg(windows)]
+        if err.error.raw_os_error() == Some(ERROR_ACCESS_DENIED as i32) {
+            // MoveFileExW also reports access denied for an occupied destination.
+            // The same code covers read-only files and insufficient permissions.
+            return AppError::context(
+                format!(
+                    "无法更新内核文件 {}：文件可能被进程占用、设为只读或缺少写入权限。请退出残留的 sing-box，并检查文件属性和目录权限后重试。",
+                    sing_box_file_name()
+                ),
+                err.error,
+            );
+        }
         if is_windows_sharing_violation(&err.error) {
             map_remove_embedded_error(sing_box_file_name(), err.error)
         } else {
@@ -300,9 +314,45 @@ mod tests {
             .unwrap();
         let (compressed, metadata) = fixture(b"replacement kernel");
         let error = unpack_kernel(&compressed, &metadata, &path).unwrap_err();
-        assert!(error.to_string().contains("残留的 sing-box 仍在运行"));
+        let message = error.to_string();
+        assert!(
+            message.contains("无法更新内核文件 sing-box.exe")
+                && message.contains("残留的 sing-box"),
+            "unexpected replacement error: {error}"
+        );
         drop(locked);
         assert_eq!(fs::read(&path).unwrap(), b"previous kernel");
+        assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 1);
+        unpack_kernel(&compressed, &metadata, &path).unwrap();
+        assert_eq!(fs::read(&path).unwrap(), b"replacement kernel");
+        assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 1);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn readonly_windows_kernel_is_preserved_with_a_permissions_hint() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join(sing_box_file_name());
+        fs::write(&path, b"previous kernel").unwrap();
+        let original_permissions = fs::metadata(&path).unwrap().permissions();
+        let mut readonly = original_permissions.clone();
+        readonly.set_readonly(true);
+        fs::set_permissions(&path, readonly).unwrap();
+        let (compressed, metadata) = fixture(b"replacement kernel");
+        let result = unpack_kernel(&compressed, &metadata, &path);
+        // Restore permissions before assertions so the temporary directory can
+        // still be cleaned up if the replacement unexpectedly succeeds.
+        fs::set_permissions(&path, original_permissions).unwrap();
+        let error = result.unwrap_err();
+        let message = error.to_string();
+        assert!(
+            message.contains("只读") && message.contains("权限"),
+            "unexpected replacement error: {error}"
+        );
+        assert_eq!(fs::read(&path).unwrap(), b"previous kernel");
+        assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 1);
+        unpack_kernel(&compressed, &metadata, &path).unwrap();
+        assert_eq!(fs::read(&path).unwrap(), b"replacement kernel");
         assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 1);
     }
 }
