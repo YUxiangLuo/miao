@@ -503,7 +503,13 @@ fn get_config_template() -> serde_json::Value {
         "inbounds": [tun_inbound()],
         "outbounds": [
             {"type": "selector", "tag": "proxy", "outbounds": []},
-            {"type": "direct", "tag": "direct"}
+            {
+                "type": "direct",
+                "tag": "direct",
+                // 尽早发现 CDN/NAT 的闲置连接失效，减少浏览器复用旧连接时的等待。
+                "tcp_keep_alive": "30s",
+                "tcp_keep_alive_interval": "15s"
+            }
         ],
         "route": {
             "final": "proxy",
