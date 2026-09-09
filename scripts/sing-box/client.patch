@@ -1,0 +1,190 @@
+diff --git a/include/quic.go b/include/quic.go
+index 42182c2..1747436 100644
+--- a/include/quic.go
++++ b/include/quic.go
+@@ -8,21 +8,17 @@ import (
+ 	"github.com/sagernet/sing-box/adapter/service"
+ 	"github.com/sagernet/sing-box/dns"
+ 	"github.com/sagernet/sing-box/dns/transport/quic"
+-	"github.com/sagernet/sing-box/protocol/hysteria"
+ 	"github.com/sagernet/sing-box/protocol/hysteria2"
+-	_ "github.com/sagernet/sing-box/protocol/naive/quic"
+ 	"github.com/sagernet/sing-box/protocol/tuic"
+ 	_ "github.com/sagernet/sing-box/transport/v2rayquic"
+ )
+ 
+ func registerQUICInbounds(registry *inbound.Registry) {
+-	hysteria.RegisterInbound(registry)
+ 	tuic.RegisterInbound(registry)
+ 	hysteria2.RegisterInbound(registry)
+ }
+ 
+ func registerQUICOutbounds(registry *outbound.Registry) {
+-	hysteria.RegisterOutbound(registry)
+ 	tuic.RegisterOutbound(registry)
+ 	hysteria2.RegisterOutbound(registry)
+ }
+diff --git a/include/registry.go b/include/registry.go
+index 9bb9220..76a1b30 100644
+--- a/include/registry.go
++++ b/include/registry.go
+@@ -13,35 +13,17 @@ import (
+ 	C "github.com/sagernet/sing-box/constant"
+ 	"github.com/sagernet/sing-box/dns"
+ 	"github.com/sagernet/sing-box/dns/transport"
+-	"github.com/sagernet/sing-box/dns/transport/fakeip"
+-	"github.com/sagernet/sing-box/dns/transport/hosts"
+ 	"github.com/sagernet/sing-box/dns/transport/local"
+-	"github.com/sagernet/sing-box/dns/transport/mdns"
+ 	"github.com/sagernet/sing-box/log"
+ 	"github.com/sagernet/sing-box/option"
+ 	"github.com/sagernet/sing-box/protocol/anytls"
+-	"github.com/sagernet/sing-box/protocol/block"
+-	"github.com/sagernet/sing-box/protocol/bridge"
+ 	"github.com/sagernet/sing-box/protocol/direct"
+ 	"github.com/sagernet/sing-box/protocol/group"
+-	"github.com/sagernet/sing-box/protocol/http"
+-	"github.com/sagernet/sing-box/protocol/mixed"
+-	"github.com/sagernet/sing-box/protocol/naive"
+-	"github.com/sagernet/sing-box/protocol/redirect"
+ 	"github.com/sagernet/sing-box/protocol/shadowsocks"
+-	"github.com/sagernet/sing-box/protocol/shadowtls"
+-	"github.com/sagernet/sing-box/protocol/snell"
+-	"github.com/sagernet/sing-box/protocol/socks"
+-	"github.com/sagernet/sing-box/protocol/ssh"
+-	"github.com/sagernet/sing-box/protocol/tor"
+ 	"github.com/sagernet/sing-box/protocol/trojan"
+ 	"github.com/sagernet/sing-box/protocol/tun"
+ 	"github.com/sagernet/sing-box/protocol/vless"
+ 	"github.com/sagernet/sing-box/protocol/vmess"
+-	"github.com/sagernet/sing-box/service/api"
+-	originca "github.com/sagernet/sing-box/service/origin_ca"
+-	"github.com/sagernet/sing-box/service/resolved"
+-	"github.com/sagernet/sing-box/service/ssmapi"
+ 	E "github.com/sagernet/sing/common/exceptions"
+ )
+ 
+@@ -51,29 +33,7 @@ func Context(ctx context.Context) context.Context {
+ 
+ func InboundRegistry() *inbound.Registry {
+ 	registry := inbound.NewRegistry()
+-
+ 	tun.RegisterInbound(registry)
+-	redirect.RegisterRedirect(registry)
+-	redirect.RegisterTProxy(registry)
+-	direct.RegisterInbound(registry)
+-
+-	socks.RegisterInbound(registry)
+-	http.RegisterInbound(registry)
+-	mixed.RegisterInbound(registry)
+-
+-	shadowsocks.RegisterInbound(registry)
+-	snell.RegisterInbound(registry)
+-	vmess.RegisterInbound(registry)
+-	trojan.RegisterInbound(registry)
+-	naive.RegisterInbound(registry)
+-	shadowtls.RegisterInbound(registry)
+-	vless.RegisterInbound(registry)
+-	anytls.RegisterInbound(registry)
+-
+-	registerQUICInbounds(registry)
+-	registerCloudflaredInbound(registry)
+-	registerStubForRemovedInbounds(registry)
+-
+ 	return registry
+ }
+ 
+@@ -81,90 +41,39 @@ func OutboundRegistry() *outbound.Registry {
+ 	registry := outbound.NewRegistry()
+ 
+ 	direct.RegisterOutbound(registry)
+-	bridge.RegisterOutbound(registry)
+-
+-	block.RegisterOutbound(registry)
+ 
+ 	group.RegisterSelector(registry)
+ 	group.RegisterURLTest(registry)
+ 
+-	socks.RegisterOutbound(registry)
+-	http.RegisterOutbound(registry)
+ 	shadowsocks.RegisterOutbound(registry)
+-	snell.RegisterOutbound(registry)
+ 	vmess.RegisterOutbound(registry)
+ 	trojan.RegisterOutbound(registry)
+-	registerNaiveOutbound(registry)
+-	tor.RegisterOutbound(registry)
+-	ssh.RegisterOutbound(registry)
+-	shadowtls.RegisterOutbound(registry)
+ 	vless.RegisterOutbound(registry)
+ 	anytls.RegisterOutbound(registry)
+ 
+ 	registerQUICOutbounds(registry)
+-	registerStubForRemovedOutbounds(registry)
+ 
+ 	return registry
+ }
+ 
+ func EndpointRegistry() *endpoint.Registry {
+-	registry := endpoint.NewRegistry()
+-
+-	registerWireGuardEndpoint(registry)
+-	registerOpenConnectEndpoint(registry)
+-	registerOpenVPNEndpoints(registry)
+-	registerTailscaleEndpoint(registry)
+-
+-	return registry
++	return endpoint.NewRegistry()
+ }
+ 
+ func DNSTransportRegistry() *dns.TransportRegistry {
+ 	registry := dns.NewTransportRegistry()
+-
+-	transport.RegisterTCP(registry)
+ 	transport.RegisterUDP(registry)
+-	transport.RegisterTLS(registry)
+ 	transport.RegisterHTTPS(registry)
+-	hosts.RegisterTransport(registry)
+ 	local.RegisterTransport(registry)
+-	mdns.RegisterTransport(registry)
+-	fakeip.RegisterTransport(registry)
+-	resolved.RegisterTransport(registry)
+-
+-	registerQUICTransports(registry)
+-	registerDHCPTransport(registry)
+-	registerTailscaleTransport(registry)
+-	registerOpenConnectDNSTransport(registry)
+-	registerOpenVPNDNSTransport(registry)
+-
+ 	return registry
+ }
+ 
+ func ServiceRegistry() *service.Registry {
+-	registry := service.NewRegistry()
+-
+-	api.RegisterService(registry)
+-	resolved.RegisterService(registry)
+-	ssmapi.RegisterService(registry)
+-
+-	registerQUICServices(registry)
+-	registerDERPService(registry)
+-	registerCCMService(registry)
+-	registerOCMService(registry)
+-	registerOOMKillerService(registry)
+-	registerUSBIPServices(registry)
+-
+-	return registry
++	return service.NewRegistry()
+ }
+ 
+ func CertificateProviderRegistry() *certificate.Registry {
+-	registry := certificate.NewRegistry()
+-
+-	registerACMECertificateProvider(registry)
+-	registerTailscaleCertificateProvider(registry)
+-	originca.RegisterCertificateProvider(registry)
+-
+-	return registry
++	return certificate.NewRegistry()
+ }
+ 
+ func registerStubForRemovedInbounds(registry *inbound.Registry) {

@@ -21,6 +21,12 @@ jobs:
       sing_geoip_ref: ${{ steps.refs.outputs.sing_geoip_ref }}
       direct_rules_ref: ${{ steps.refs.outputs.direct_rules_ref }}
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+
       - name: Resolve upstream commits
         id: refs
         shell: bash
@@ -38,7 +44,7 @@ jobs:
             printf '%s\n' "$sha"
           }
 
-          sing_box_ref="$(resolve_ref https://github.com/SagerNet/sing-box.git HEAD)"
+          sing_box_ref="$(bun scripts/sing-box/source.mjs revision)"
           sing_geoip_ref="$(resolve_ref https://github.com/SagerNet/sing-geoip.git refs/heads/rule-set)"
           direct_rules_ref="$(resolve_ref https://github.com/Loyalsoldier/v2ray-rules-dat.git refs/heads/release)"
 
@@ -50,15 +56,19 @@ jobs:
 
           {
             printf 'sing-box %s\n' "$sing_box_ref"
+            printf 'kernel-version %s\n' "$(bun scripts/sing-box/source.mjs version)"
+            printf 'kernel-profile %s\n' "$(bun scripts/sing-box/source.mjs profile)"
+            printf 'go %s\n' "$(bun scripts/sing-box/source.mjs go_version)"
+            printf 'build-tags %s\n' "$(bun scripts/sing-box/source.mjs build_tags)"
             printf 'sing-geoip %s\n' "$sing_geoip_ref"
             printf 'v2ray-rules-dat %s\n' "$direct_rules_ref"
           } > miao-embedded-sources.txt
 
           {
             printf '### Embedded upstream commits\n'
-            printf -- '- sing-box: `%s`\n' "$sing_box_ref"
-            printf -- '- sing-geoip/rule-set: `%s`\n' "$sing_geoip_ref"
-            printf -- '- v2ray-rules-dat/release: `%s`\n' "$direct_rules_ref"
+            printf -- '- sing-box: %s\n' "$sing_box_ref"
+            printf -- '- sing-geoip/rule-set: %s\n' "$sing_geoip_ref"
+            printf -- '- v2ray-rules-dat/release: %s\n' "$direct_rules_ref"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload source manifest
@@ -115,23 +125,20 @@ jobs:
         with:
           targets: ${{ matrix.rust_target }}
 
-      - name: Detect sing-box Go version
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Read pinned Go version
         shell: bash
         run: |
-          # 内核版本由 resolve_embedded 对整次发布统一快照，Go 版本跟随其 go.mod 声明——
-          # 不跟 stable 频道（1.27 曾改 std 内嵌 http2 导致 linkname 断链）
-          GO_VER=$(curl -fsSL "https://raw.githubusercontent.com/SagerNet/sing-box/${SING_BOX_REF}/go.mod" \
-            | grep -E '^go [0-9]+\.[0-9]+' | head -1 | awk '{print $2}')
-          echo "sing-box go.mod requires go $GO_VER"
+          GO_VER=$(bun scripts/sing-box/source.mjs go_version)
           echo "GO_VER=$GO_VER" >> "$GITHUB_ENV"
 
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VER }}
-
-      - name: Set up Bun
-        uses: oven-sh/setup-bun@v2
+          cache-dependency-path: scripts/sing-box/source.json
 
       - name: Install Zig for cross-compilation
         uses: mlugg/setup-zig@v2
@@ -153,6 +160,7 @@ jobs:
           sha256sum "$ASSET" | tee "${ASSET}.sha256"
           printf 'RELEASE_ASSET=%s\n' "$ASSET" >> "$GITHUB_ENV"
           printf 'RELEASE_SHA256=%s.sha256\n' "$ASSET" >> "$GITHUB_ENV"
+          cp embedded/sing-box-${{ matrix.target }}.meta.json miao-kernel-${{ matrix.target }}.json
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -161,6 +169,7 @@ jobs:
           path: |
             ${{ env.RELEASE_ASSET }}
             ${{ env.RELEASE_SHA256 }}
+            miao-kernel-${{ matrix.target }}.json
 
   build-windows:
     runs-on: windows-latest
@@ -182,21 +191,20 @@ jobs:
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Detect sing-box Go version
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Read pinned Go version
         shell: bash
         run: |
-          GO_VER=$(curl -fsSL "https://raw.githubusercontent.com/SagerNet/sing-box/${SING_BOX_REF}/go.mod" \
-            | grep -E '^go [0-9]+\.[0-9]+' | head -1 | awk '{print $2}')
-          echo "sing-box go.mod requires go $GO_VER"
+          GO_VER=$(bun scripts/sing-box/source.mjs go_version)
           echo "GO_VER=$GO_VER" >> "$GITHUB_ENV"
 
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VER }}
-
-      - name: Set up Bun
-        uses: oven-sh/setup-bun@v2
+          cache-dependency-path: scripts/sing-box/source.json
 
       - name: Build Windows sing-box and geo files
         shell: bash
@@ -219,6 +227,7 @@ jobs:
           test -n "$installer"
           cp "$installer" miao-windows-amd64-setup.exe
           sha256sum miao-windows-amd64-setup.exe | tee miao-windows-amd64-setup.exe.sha256
+          cp embedded/sing-box-windows-amd64.exe.meta.json miao-kernel-windows-amd64.json
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -227,6 +236,7 @@ jobs:
           path: |
             miao-windows-amd64-setup.exe
             miao-windows-amd64-setup.exe.sha256
+            miao-kernel-windows-amd64.json
 
   release:
     runs-on: ubuntu-latest
@@ -250,3 +260,4 @@ jobs:
             miao-windows-amd64-setup.exe
             miao-windows-amd64-setup.exe.sha256
             miao-embedded-sources.txt
+            miao-kernel-*.json

@@ -1,3 +1,4 @@
+#[cfg(unix)]
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -10,38 +11,8 @@ use crate::models::RuntimePhase;
 use crate::state::lifecycle::KernelOperation;
 use crate::state::{AppState, SingBoxProcess};
 
-#[cfg(all(windows, target_arch = "x86_64"))]
-const SING_BOX_BINARY: &[u8] = include_bytes!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../../embedded/sing-box-windows-amd64.exe"
-));
-
-#[cfg(all(windows, target_arch = "aarch64"))]
-compile_error!("Windows arm64 is not supported yet");
-
-#[cfg(all(not(windows), target_arch = "x86_64"))]
-const SING_BOX_BINARY: &[u8] = include_bytes!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../../embedded/sing-box-amd64"
-));
-
-#[cfg(all(not(windows), target_arch = "aarch64"))]
-const SING_BOX_BINARY: &[u8] = include_bytes!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../../embedded/sing-box-arm64"
-));
-
-#[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
-compile_error!("Unsupported architecture: only x86_64 and aarch64 are supported. Please add support for your target architecture in embedded/ directory.");
-
-const IP_RULE_BINARY: &[u8] = include_bytes!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../../embedded/geoip-cn.srs"
-));
-const SITE_RULE_BINARY: &[u8] = include_bytes!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../../embedded/geosite-geolocation-cn.srs"
-));
+mod embedded;
+pub use embedded::extract_sing_box_to;
 
 pub const CLASH_API_HOST: &str = "127.0.0.1:6262";
 pub const CLASH_API_BASE: &str = "http://127.0.0.1:6262";
@@ -121,53 +92,6 @@ fn sing_box_file_name() -> &'static str {
     {
         "sing-box"
     }
-}
-
-pub fn extract_sing_box_to(sing_box_home: &std::path::Path) -> AppResult<PathBuf> {
-    if !sing_box_home.exists() {
-        fs::create_dir_all(sing_box_home)
-            .map_err(|e| AppError::context("Failed to create sing-box home directory", e))?;
-    }
-    // 运行时目录含订阅凭证（config.json / sub-nodes.json / cache.db）：仅属主可进，
-    // 避免同机其他用户读取。每次启动都执行，顺带修正旧版本留下的宽松权限；
-    // 失败只告警——可用性优先，不给异常文件系统添启动故障
-    if let Err(err) = restrict_to_owner(sing_box_home) {
-        warn!(error = %err, path = ?sing_box_home, "Failed to restrict sing-box home permissions");
-    }
-
-    let sing_box_path = sing_box_home.join(sing_box_file_name());
-
-    // 每次启动都删除并重新释放内嵌文件,保证与当前运行的二进制一致:
-    // install.sh 升级、手动替换二进制等路径不经过面板自升级的清理逻辑。
-    // 先删再写而非覆盖写:若有上次崩溃残留的 sing-box 进程仍在运行,覆盖写会得到 ETXTBSY。
-    // 其余运行时文件(cache.db / config.json.cache)有意保留。
-    let embedded_files: [(&str, &[u8]); 3] = [
-        (sing_box_file_name(), SING_BOX_BINARY),
-        ("chinaip.srs", IP_RULE_BINARY),
-        ("chinasite.srs", SITE_RULE_BINARY),
-    ];
-
-    for (name, bytes) in embedded_files {
-        let path = sing_box_home.join(name);
-        if path.exists() {
-            fs::remove_file(&path).map_err(|e| map_remove_embedded_error(name, e))?;
-        }
-        info!("Extracting embedded file to {:?}", path);
-        fs::write(&path, bytes)
-            .map_err(|e| AppError::context(format!("Failed to write embedded file {name}"), e))?;
-    }
-    // 去广告功能已移除：清掉旧版本释放的广告规则集，避免孤儿文件常驻运行时目录
-    let _ = fs::remove_file(sing_box_home.join("adblock_reject.srs"));
-    set_executable(&sing_box_path)
-        .map_err(|e| AppError::context("Failed to set permissions on sing-box binary", e))?;
-
-    let dashboard_dir = sing_box_home.join("dashboard");
-    if !dashboard_dir.exists() {
-        fs::create_dir_all(&dashboard_dir)
-            .map_err(|e| AppError::context("Failed to create sing-box dashboard directory", e))?;
-    }
-
-    Ok(sing_box_home.to_path_buf())
 }
 
 /// 在停止运行中的实例前验证 sing-box 配置，避免不必要的服务中断。

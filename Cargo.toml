@@ -8,3 +8,11 @@ default-members = ["crates/miao-core", "crates/miao-cli"]
 version = "0.46.2"
 edition = "2021"
 license = "MIT"
+
+# The Rust process serves the control plane; packet forwarding runs in Go.
+# Keep unwinding for existing panic/error handling while reducing release size.
+[profile.release]
+opt-level = "s"
+lto = "thin"
+codegen-units = 1
+strip = "symbols"

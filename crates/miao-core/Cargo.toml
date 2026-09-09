@@ -24,6 +24,7 @@ arc-swap = "1.7"
 bytes = "1.0"
 tokio-tungstenite = "0.29"
 tempfile = "3"
+ruzstd = "0.9"
 
 [target.'cfg(unix)'.dependencies]
 nix = { version = "0.29", features = ["signal", "user"] }

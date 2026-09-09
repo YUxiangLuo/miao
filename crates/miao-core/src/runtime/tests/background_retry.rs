@@ -255,17 +255,35 @@ async fn failed_foreground_refresh_does_not_reset_the_fast_retry_budget() {
     assert!(initialize_runtime_locked(&config, &state).await);
     let background_state = state.clone();
     let background = tokio::spawn(async move {
-        super::super::refresh_subscriptions_in_background(&config, &background_state).await;
+        // Keep the normal slow retry outside the observation window. The
+        // default 500 ms test interval can expire during foreground I/O on CI.
+        crate::runtime::startup::refresh_subscriptions_with_slow_retry_interval(
+            &config,
+            &background_state,
+            std::time::Duration::from_secs(60),
+        )
+        .await;
     });
     wait_for_slow_retry(&state).await;
     crate::services::config::refresh_subscriptions_foreground(&state)
         .await
         .unwrap();
-    tokio::time::sleep(std::time::Duration::from_millis(150)).await;
-    assert_eq!(
-        state.subscription_refresh.snapshot().phase,
-        crate::models::SubscriptionRefreshPhase::Waiting,
-        "a foreground failure must restore the original background wait projection"
+    let restored_wait = tokio::time::timeout(std::time::Duration::from_secs(3), async {
+        loop {
+            let status = state.subscription_refresh.snapshot();
+            if status.phase == crate::models::SubscriptionRefreshPhase::Waiting {
+                break status;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("a foreground failure must restore the original background wait projection");
+    assert!(
+        restored_wait
+            .retry_in_secs
+            .is_some_and(|remaining| remaining > 30),
+        "the resumed background task must keep its slow retry deadline: {restored_wait:?}"
     );
     assert_eq!(
         calls.load(Ordering::Relaxed),

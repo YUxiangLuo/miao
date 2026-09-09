@@ -2,38 +2,43 @@
 
 ## 平台对照
 
-| | Linux / OpenWrt | Windows |
+| 项目 | Linux / OpenWrt | Windows |
 | --- | --- | --- |
-| 分发 | 单个 musl 二进制 | NSIS 安装包（需 WebView2） |
-| 提权 | `sudo` | 每次启动一次 UAC |
-| 面板 | 浏览器打开 `localhost:6161`，默认听 `0.0.0.0` | 自带窗口，听 `127.0.0.1` |
-| 配置 | `/etc/miao/config.yaml` | `%LOCALAPPDATA%\io.github.yuxiangluo.miao\config.yaml` |
-| 内核运行时 | `/tmp/miao-sing-box` | `%TEMP%\miao-sing-box` |
-| 易变配置 | `/tmp/miao-sing-box/volatile.yaml`（tmpfs） | 应用数据目录（持久） |
-| 节点偏好 | Linux：`/etc/miao/.node_select` + `.max_multiplier` + `.last_proxy`（持久）；OpenWrt：运行时 tmpfs | 应用数据目录（持久） |
-| 一键升级 / VPS 部署 | 有 | 不编进桌面进程 |
-| 开机自启 | `install.sh` → systemd | 托盘勾选（任务计划，登录免 UAC 直进托盘） |
+| 分发 | 单个 musl 二进制，amd64 / arm64 | NSIS 安装包，Windows 10/11 x64，需 WebView2 |
+| 启动 | 以 root 权限运行；普通用户使用 `sudo` | 每次启动一次 UAC，关窗进入托盘 |
+| 面板 | 浏览器打开 `http://localhost:6161`，默认监听 `0.0.0.0` | 自带窗口，仅监听 `127.0.0.1` |
+| 开机自启 | `install.sh` 注册 systemd 服务（OpenWrt 不适用） | 托盘勾选登录任务，登录后免 UAC 进入托盘 |
+| 面板升级 / VPS 部署 | 支持 | 不提供，升级使用新安装包 |
+
+配置、内核、易变层和偏好的位置见 [Profile 路径表](profiles.md#文件位置)。面板无鉴权，Linux 局域网访问应限制在可信网络。
 
 ## Windows 桌面版
 
-Win10/11 x64，从 [Releases](https://github.com/YUxiangLuo/miao/releases/latest) 下载 `miao-windows-amd64-setup.exe`：
+从 [Releases](https://github.com/YUxiangLuo/miao/releases/latest) 安装 `miao-windows-amd64-setup.exe`。安装到当前用户，安装本身无需管理员；缺少 WebView2 时会引导下载，运行内核时仍须 UAC 提权。
 
-1. 安装到当前用户，安装本身不需要管理员（缺 WebView2 时安装包会引导下载）
-2. 每次启动点一次 UAC（TUN/Wintun 需要管理员）；托盘菜单勾选「开机自启」可免 UAC 自启（任务计划实现，登录后直进托盘）
-3. 关窗口进托盘，单击唤出、双击唤出/收回，托盘「退出」才停内核
-4. 更新 = 先退出，再装新安装包（面板内无 Windows 一键升级）
-5. 日志在 `%LOCALAPPDATA%\io.github.yuxiangluo.miao\miao.log`（超 8 MB 自动轮转），托盘「打开日志」直达
+- 关窗进入托盘；单击唤出，双击唤出/收回，托盘“退出”才停止内核。
+- “开机自启”使用登录任务而非服务；每次启动检查任务中的 exe 路径，升级后失配会重新注册。
+- 更新前先从托盘退出，再安装新版；运行中的 exe 会阻止安装/卸载。
+- 托盘“打开日志”指向 `%LOCALAPPDATA%\io.github.yuxiangluo.miao\miao.log`，超过 8 MB 轮转为一份 `.old`。
 
 ## OpenWrt
 
-启动时自动检测并安装内核依赖（支持 x86_64 与 aarch64）。运行时文件和选择偏好全部在 `/tmp/miao-sing-box`（tmpfs），不写路由器 flash；面板/进程重启会保留，系统重启后路由模式、节点策略与具体手动节点回到 `config.yaml` / 生成配置的默认值（fail-safe）。
+支持 x86_64 / aarch64，启动时自动检测并安装内核依赖；以 root 运行，无需额外 `sudo`。`install.sh` 仅支持 systemd，不用于 OpenWrt。
 
-## 干净卸载
+运行文件、易变配置和选择偏好默认放在 tmpfs，减少高频操作的闪存写入；进程重启时保留，系统重启后回到 YAML/生成配置的默认值。稳定配置和节点绑定仍持久保存。
 
-`sudo bash remove.sh`：服务、二进制、`/etc/miao`、`/tmp/miao-sing-box`、残留 sing-box 进程与 `sing-tun` 网卡全部清理（`-y` 跳过确认）。Windows 从系统设置卸载，卸载前先从托盘退出。
+## 卸载
 
-## 把面板安装成桌面应用（PWA）
+Linux 卸载会删除服务、程序、`/etc/miao`、运行目录、残留内核进程及 `sing-tun`，**先备份配置**：
 
-面板是 PWA。Chrome/Edge 打开 `localhost:6161` 后地址栏右侧会出现「安装」图标（或菜单 → 安装 Miao），装完有独立窗口和启动器图标，没有浏览器边框。安装入口只在本机 `localhost` 下可用——局域网 IP 访问不是安全上下文，浏览器不允许安装。不想安装的话浏览器书签照旧用。
+```bash
+curl -fsSL https://raw.githubusercontent.com/YUxiangLuo/miao/master/remove.sh | sudo bash
+```
 
-如果启动器里 PWA 图标不显示（Hyprland 的 hyprlauncher 等）：浏览器安装 PWA 时只往 `~/.local/share/icons/hicolor/<size>/apps/` 丢 PNG，不创建 `index.theme`，而部分启动器会跳过没有 `index.theme` 的图标主题目录。给 `~/.local/share/icons/hicolor/` 补一个声明了各 size 目录的 `index.theme` 即可（修复后所有浏览器 PWA 图标都会出现），重启启动器生效。
+源码目录中也可执行 `sudo bash remove.sh`，加 `-y` 跳过确认。Windows 先从托盘退出，再从系统设置卸载。
+
+## PWA
+
+Chrome/Edge 打开 `http://localhost:6161` 后可用浏览器的安装入口获得独立窗口和启动器图标。直接通过局域网 HTTP IP 访问不属于安全上下文，不能使用该安装入口。
+
+部分启动器（如 Hyprland 的 hyprlauncher）不显示浏览器 PWA 图标时，检查 `~/.local/share/icons/hicolor/index.theme` 是否存在并声明各尺寸目录；浏览器可能只写入 PNG。补齐后重启启动器。

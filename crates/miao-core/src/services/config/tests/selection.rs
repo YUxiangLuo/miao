@@ -4,6 +4,13 @@ use crate::services::config::{apply_max_multiplier, apply_node_select};
 #[test]
 fn tun_inbound_enables_auto_redirect_only_on_linux() {
     let inbound = tun_inbound();
+    let profile: serde_json::Value = serde_json::from_str(include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../scripts/sing-box/source.json"
+    )))
+    .unwrap();
+    assert_eq!(inbound["stack"], "go");
+    assert_eq!(inbound["stack"], profile["tun_stack"]);
     assert_eq!(inbound["type"], "tun");
     assert_eq!(inbound["auto_route"], true);
     assert_eq!(inbound["strict_route"], true);

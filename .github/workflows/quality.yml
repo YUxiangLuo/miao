@@ -32,6 +32,9 @@ jobs:
       - name: Test
         run: bun run --cwd frontend-rsbuild test
 
+      - name: Test kernel packaging tools
+        run: bun test scripts
+
       - name: Build
         run: bun run --cwd frontend-rsbuild build
 
@@ -41,10 +44,70 @@ jobs:
           name: quality-frontend
           path: public/
 
+  kernel:
+    name: Kernel (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: amd64
+          - os: ubuntu-latest
+            target: arm64
+          - os: windows-latest
+            target: windows-amd64
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Read pinned Go version
+        shell: bash
+        run: echo "GO_VER=$(bun scripts/sing-box/source.mjs go_version)" >> "$GITHUB_ENV"
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VER }}
+          cache-dependency-path: scripts/sing-box/source.json
+
+      - name: Check Go test formatting
+        shell: bash
+        run: test -z "$(gofmt -l scripts/sing-box/tests/*.go)"
+
+      - name: Test and build pinned client kernel
+        shell: bash
+        env:
+          MIAO_TARGET: ${{ matrix.target }}
+        run: ./scripts/build-embedded.sh --kernel-only
+
+      - name: Smoke test native kernel
+        if: matrix.target != 'arm64'
+        shell: bash
+        run: |
+          if [[ "${{ matrix.target }}" == windows-amd64 ]]; then
+            ./embedded/sing-box-windows-amd64.exe version
+          else
+            ./embedded/sing-box-amd64 version
+          fi
+
+      - name: Upload packed native kernel for Rust extraction tests
+        if: matrix.target != 'arm64'
+        uses: actions/upload-artifact@v4
+        with:
+          name: quality-kernel-${{ matrix.target }}
+          path: |
+            embedded/*.zst
+            embedded/*.meta.json
+          retention-days: 1
+          if-no-files-found: error
+
   rust:
     name: Rust quality
     runs-on: ubuntu-latest
-    needs: frontend
+    needs: [frontend, kernel]
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -55,6 +118,12 @@ jobs:
           name: quality-frontend
           path: public/
 
+      - name: Download real Linux kernel for extraction tests
+        uses: actions/download-artifact@v4
+        with:
+          name: quality-kernel-amd64
+          path: embedded/
+
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -63,14 +132,11 @@ jobs:
       - name: Install cargo-audit
         uses: taiki-e/install-action@cargo-audit
 
-      - name: Prepare inert test assets
-        run: |
-          mkdir -p embedded
-          printf '#!/bin/sh\nexit 1\n' > embedded/sing-box-amd64
-          chmod 755 embedded/sing-box-amd64
-          : > embedded/sing-box-windows-amd64.exe
-          : > embedded/geoip-cn.srs
-          : > embedded/geosite-geolocation-cn.srs
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Prepare missing cross-target and rule test assets
+        run: bun scripts/prepare-test-assets.mjs
 
       - name: Check formatting
         run: cargo fmt --all -- --check
@@ -98,7 +164,7 @@ jobs:
   windows:
     name: Windows health check
     runs-on: windows-latest
-    needs: frontend
+    needs: [frontend, kernel]
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -109,17 +175,21 @@ jobs:
           name: quality-frontend
           path: public/
 
+      - name: Download real Windows kernel for extraction tests
+        uses: actions/download-artifact@v4
+        with:
+          name: quality-kernel-windows-amd64
+          path: embedded/
+
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Prepare inert embedded assets
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Prepare missing cross-target and rule test assets
         shell: bash
-        run: |
-          mkdir -p embedded
-          : > embedded/sing-box-windows-amd64.exe
-          : > embedded/sing-box-amd64
-          : > embedded/geoip-cn.srs
-          : > embedded/geosite-geolocation-cn.srs
+        run: bun scripts/prepare-test-assets.mjs
 
       - name: Test miao-core
         run: cargo test -p miao-core --locked --all-targets
