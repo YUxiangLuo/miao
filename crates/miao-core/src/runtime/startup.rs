@@ -316,6 +316,14 @@ enum BackgroundRefreshStep {
 /// 不再无限刷新面板的启动状态。数据面不可用时仍保留原来的恢复退避。
 /// 前台操作不会重置快速重试次数；停服/改订阅会及时取消长时间等待。
 pub(super) async fn refresh_subscriptions_in_background(config: &Config, state: &Arc<AppState>) {
+    refresh_subscriptions_with_slow_retry_interval(config, state, SUBS_SLOW_RETRY_INTERVAL).await;
+}
+
+pub(super) async fn refresh_subscriptions_with_slow_retry_interval(
+    config: &Config,
+    state: &Arc<AppState>,
+    slow_retry_interval: Duration,
+) {
     let mut refresh_generation = state.sub_refresh_generation.load(Ordering::Relaxed);
     let mut retry = SubFetchRetry::Startup;
     let mut delay = STARTUP_RECOVERY_INITIAL_DELAY;
@@ -361,7 +369,7 @@ pub(super) async fn refresh_subscriptions_in_background(config: &Config, state: 
                 {
                     *state.config_warning.lock().await = Some(SUBS_RETRYING_SLOWLY.to_string());
                 }
-                SUBS_SLOW_RETRY_INTERVAL
+                slow_retry_interval
             } else {
                 fast_retries = fast_retries.saturating_add(1);
                 delay
