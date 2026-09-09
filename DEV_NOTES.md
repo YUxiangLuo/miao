@@ -13,7 +13,7 @@ Linux 版是：下载一个文件，`sudo` 跑，浏览器打开，TUN 接管流
 | TUN 透明代理 | 系统代理（WinINET）当主路径 |
 | Tauri 只当自带浏览器，打开 `http://127.0.0.1:<port>` | Linux / OpenWrt 也改成 Tauri |
 | 一次 UAC 对标一次 `sudo`；自启须用户显式勾选（任务计划，不是服务） | 服务模式 / 默认免 UAC |
-| Wintun 已在 sing-box 里；内核跟默认分支走 | 旁边再塞一份 `wintun.dll` |
+| Wintun 已在内核里；内核与 Go 按 source.json 固定 | 旁边再塞一份 `wintun.dll` |
 | Windows 构建不编 VPS、不编换进程升级 | 把 Linux 的 `exec` 热更搬过去覆盖正在跑的 exe |
 
 **Arch 上正在跑的 systemd miao 不要停、不要重启**——出网被它的 TUN 管着，一停 GitHub 就没了。
@@ -26,7 +26,8 @@ crates/miao-cli       Linux/OpenWrt 入口，二进制名 miao-rust
 desktop/src-tauri     Tauri 2 壳（workspace 成员但不是 default-member）
 frontend-rsbuild/     唯一一份面板（React 19 + TypeScript strict + Rsbuild）
 public/               rsbuild 构建产物（gitignore），被 include_str! 嵌进 core
-embedded/             sing-box + srs，不入库
+embedded/             内核原文件 / .zst / .meta.json + srs，不入库；Rust 只嵌入压缩内核
+scripts/sing-box/      固定上游版本、客户端裁剪补丁、Go 回归测试
 ```
 
 `cargo test` / `cargo clippy`（不加 `--workspace`）只打 core + cli；**不要 `cargo test --workspace`**（会去编桌面壳、拉 webkit）。
@@ -78,7 +79,7 @@ cargo run -p miao-cli
 
 **PWA**：`frontend-rsbuild/public/` 的 manifest/sw.js/图标经 rsbuild 拷进 `public/` 再嵌进二进制——新增静态资源必须同时在 `router.rs` 注册路由。SW 只是 Chrome 安装门槛的门票：只给导航请求做 network-first 兜底，**永远别缓存 `/api`**。
 
-**fresh clone**：跑 Rust 测试直接用 `./scripts/test-rust.sh`，它会构建前端、只为缺失资源临时创建 inert stub，并在测试结束时清理；不会启动代理或 TUN，也不会覆盖已有真实内核。构建可运行产物仍用 `./scripts/build-embedded.sh` 或 `./build.sh`。Windows 交叉 check 需要真实或显式准备的 `embedded/sing-box-windows-amd64.exe`。
+**fresh clone**：跑 Rust 测试直接用 `./scripts/test-rust.sh`，它会构建前端、只为缺失资源临时创建压缩 inert stub 与校验清单，并在测试结束时清理；不会启动代理或 TUN，也不会覆盖已有真实内核。构建可运行产物仍用 `./scripts/build-embedded.sh` 或 `./build.sh`。单独做 Windows 交叉 check 可先用 `bun scripts/prepare-test-assets.mjs` 准备缺失的 `.zst` / `.meta.json`（该命令不会自动清理）。
 
 ## 在 Arch 上怎么「做」Windows
 
@@ -120,7 +121,7 @@ systemd 服务：`/usr/local/bin/miao`，配置 `/etc/miao/config.yaml`，运行
 
 - 查进程用 `sudo pgrep -x miao` 或 `sudo ss -tlnp 'sport = :6161'`（进程名来自安装路径 `/usr/local/bin/miao`，不是构建产物名 `miao-rust`；`pgrep -f` 会误匹配 nohup 包装进程；root 进程普通用户看不到）。服务整体状态直接 `systemctl status miao`
 - `api/status` 的 `data.pid` 是 **sing-box 子进程**，不是后端
-- 每次启动重释放内嵌文件到运行时目录；`cache.db` / `config.json.cache` 有意保留
+- 每次启动流式解压内核到同目录临时文件，验证大小和 SHA-256 后原子替换；失败保留旧内核。`cache.db` / `config.json.cache` 有意保留
 - `remove.sh` 会删 `/etc/miao`，动之前先备份
 - git push 用 SSH（HTTPS + gh token 缺 `workflow` scope，推不动 workflow 文件）
 
@@ -192,16 +193,17 @@ Profile 路径在 `profile.rs` 统一解析（[路径与迁移约定](docs/profi
 
 ## CI
 
-push/PR 跑 `ci.yml`：Frontend quality（install → audit → lint → **typecheck** → test → build）→ Rust quality（default-members + windows-gnu check）→ Windows 健康检查（`cargo test -p miao-core` + `cargo check -p miao-desktop`，内核用 stub，**不跑 exe、不开 TUN**）。
+push/PR 跑 `ci.yml`：Frontend quality（install → audit → lint → **typecheck** → test → build，附带 `bun test scripts`）与三目标 Kernel job（固定 Go、上游隔离测试、客户端能力对照与配置测试、编译）→ Rust quality（default-members + windows-gnu check）与 Windows 健康检查（`cargo test -p miao-core` + `cargo check -p miao-desktop`）。Rust 解压测试使用本轮真实压缩内核，缺失的交叉目标和规则用 stub。Linux amd64 / Windows 内核会运行 `version`，**不启动 TUN**。
 
 打 `v*` tag 或手动跑 **Build Release**：quality → frontend → 并行编 Linux musl 矩阵（zigbuild）与 Windows 桌面（真内核 + NSIS）→ tag 触发时产物传 GitHub Release，手动跑只留 artifacts。发布产物以 CI 为准。
 
 ## 脚本
 
 - `install.sh` / `remove.sh`：提交前 `shellcheck`
-- `build-embedded.sh` 的 `MIAO_TARGET=windows-amd64` 也会编 host 规则编译器 `sing-box-host`，不要拿它去抽本机正在跑的实例
-- `SING_BOX_REF`、`SING_GEOIP_REF`、`DIRECT_RULES_REF` 接受分支/tag/完整 sha；本地默认跟上游分支，release CI 在单独 job 中把三者解析为一次快照并供所有平台共用，版本清单随 Release 发布
-- 内核构建应用 `scripts/patches/sing-box-isolate-cli-context.patch` 并运行其隔离测试：避免 SIGHUP 的配置检查污染运行实例注册表，引发 AnyTLS 空指针崩溃。补丁冲突必须检查上游等效修复，不可跳过；背景与移除条件见 `scripts/patches/README.md`。修补后须重建 embedded + miao 才生效。
+- `build-embedded.sh` 的 `MIAO_TARGET=windows-amd64` 也会编未裁剪的 host 规则编译器 `sing-box-host`；目标内核只有 run/check/version 与 namespace 辅助入口。`--kernel-only` 用于不更新规则的内核验证。
+- 内核 SHA / Go / 版本 / tags 固定在 `scripts/sing-box/source.json`。`SING_BOX_REF` 若与固定 SHA 不同直接失败；升级须修改清单并审查裁剪补丁。`SING_GEOIP_REF`、`DIRECT_RULES_REF` 仍接受分支/tag/完整 SHA，release CI 统一解析规则快照。
+- `scripts/sing-box/client.patch` 只裁剪多余入站、服务与证书签发；出站、DNS、endpoint 注册必须与同标签的未修改上游一致。原 CLI context 修复已进入固定基线，旧功能补丁已移除，两项隔离测试独立保留。补丁冲突必须审查，不可跳过。
+- Rust 嵌入 `sing-box-*.zst` 与 `.meta.json`；清单含源码 SHA、Go、tags、定制文件哈希及压缩前后大小/校验和，随 Release 发布。修改内核后须重建 embedded + miao 才生效。维护流程与验收范围见 `docs/kernel.md`。
 
 ## 前端调试（agent-browser）
 

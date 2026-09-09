@@ -9,6 +9,8 @@
 
 Miao 把 sing-box 内核、geo 分流规则和 Web 控制面板编进同一个可执行文件。TUN 接管整机流量，浏览器打开面板即完成配置（深色 / 浅色双主题）。Linux / OpenWrt 上是 `sudo` 即跑的单二进制，Windows 上是带系统托盘的桌面程序。
 
+内核采用固定版本的 Miao 客户端构建，保留现有出站协议，按 Zstandard 压缩嵌入并在启动时校验释放。构建和升级方式见[内核维护说明](docs/kernel.md)。
+
 <img width="1440" height="1400" alt="image" src="https://github.com/user-attachments/assets/320dd0bb-f1da-4bf9-99ab-6c04c3c2c95b" />
 
 

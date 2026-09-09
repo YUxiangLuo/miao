@@ -3,8 +3,16 @@ set -euo pipefail
 
 ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 EMBEDDED_DIR="$ROOT_DIR/embedded"
+KERNEL_DIR="$ROOT_DIR/scripts/sing-box"
 TMP_DIR=$(mktemp -d)
 trap 'rm -rf "$TMP_DIR"' EXIT
+
+if (( $# > 1 )) || [[ -n "${1:-}" && "$1" != --kernel-only ]]; then
+  echo "Usage: $0 [--kernel-only]" >&2
+  exit 1
+fi
+build_rules=true
+if [[ "${1:-}" == --kernel-only ]]; then build_rules=false; fi
 
 host_goarch=$(go env GOARCH)
 case "$host_goarch" in
@@ -15,8 +23,17 @@ case "$host_goarch" in
     ;;
 esac
 
-# Defaults follow the upstream branches for local builds. Release CI resolves
-# all three refs once and passes immutable commit SHAs to every target build.
+# Kernel upgrades are reviewed changes to source.json, independent of Miao
+# releases. Rule data still follows upstream; release CI snapshots both refs.
+sing_box_ref=$(bun "$KERNEL_DIR/source.mjs" revision)
+sing_box_repo=$(bun "$KERNEL_DIR/source.mjs" repository)
+go_version=$(bun "$KERNEL_DIR/source.mjs" go_version)
+core_version=$(bun "$KERNEL_DIR/source.mjs" version)
+build_tags=$(bun "$KERNEL_DIR/source.mjs" build_tags)
+if [[ -n "${SING_BOX_REF:-}" && "$SING_BOX_REF" != "$sing_box_ref" ]]; then
+  echo "SING_BOX_REF differs from the pinned kernel; update scripts/sing-box/source.json and review the client patch first" >&2
+  exit 1
+fi
 sing_geoip_ref="${SING_GEOIP_REF:-rule-set}"
 direct_rules_ref="${DIRECT_RULES_REF:-release}"
 
@@ -54,80 +71,83 @@ case "$target" in
     ;;
 esac
 
-mkdir -p "$EMBEDDED_DIR"
-
-if [[ -n "${SING_BOX_REF:-}" ]]; then
-  echo "==> Cloning sing-box source ($SING_BOX_REF)..."
-  if [[ "$SING_BOX_REF" =~ ^[0-9a-f]{40}$ ]]; then
-    # git clone --branch 只接受分支/tag 名；完整 commit sha 需直接 fetch
-    # （Build Release 流水线用它把三个目标钉到同一个内核提交）
-    mkdir -p "$TMP_DIR/sing-box"
-    git -C "$TMP_DIR/sing-box" init -q
-    git -C "$TMP_DIR/sing-box" remote add origin \
-      https://github.com/SagerNet/sing-box.git
-    git -C "$TMP_DIR/sing-box" fetch -q --depth=1 origin "$SING_BOX_REF"
-    git -C "$TMP_DIR/sing-box" checkout -q FETCH_HEAD
-  else
-    git clone --depth=1 --branch "$SING_BOX_REF" \
-      https://github.com/SagerNet/sing-box.git "$TMP_DIR/sing-box"
+mkdir -p "$TMP_DIR/artifacts" "$EMBEDDED_DIR"
+artifacts="$TMP_DIR/artifacts"
+echo "==> Fetching pinned sing-box source ($sing_box_ref)..."
+git -C "$TMP_DIR" init -q sing-box
+git -C "$TMP_DIR/sing-box" remote add origin "$sing_box_repo"
+for attempt in 1 2 3; do
+  if git -C "$TMP_DIR/sing-box" fetch -q --depth=1 origin "$sing_box_ref"; then
+    break
   fi
-else
-  echo "==> Cloning sing-box source (default branch)..."
-  git clone --depth=1 \
-    https://github.com/SagerNet/sing-box.git "$TMP_DIR/sing-box"
-fi
+  if (( attempt == 3 )); then exit 1; fi
+  echo "Retrying pinned source fetch ($attempt/3)..." >&2
+  sleep "$attempt"
+done
+git -C "$TMP_DIR/sing-box" checkout -q FETCH_HEAD
 
 cd "$TMP_DIR/sing-box"
-# SIGHUP's in-process check must not publish uninitialized AnyTLS outbounds
-# into the live instance's service registry. See patches/README.md.
-echo "==> Applying sing-box CLI context isolation fix..."
-git apply --check "$ROOT_DIR/scripts/patches/sing-box-isolate-cli-context.patch"
-git apply "$ROOT_DIR/scripts/patches/sing-box-isolate-cli-context.patch"
-
-build_tags="with_quic,with_clash_api,with_utls"
-build_flags=(-trimpath -ldflags "-s -w -buildid=" -tags "$build_tags")
-
-# Match the toolchain used by release CI. Newer Go versions can change x/net
-# implementation details before sing-box has adapted to them.
-go_command=(go)
-if [[ -z "${GOTOOLCHAIN:-}" || "${GOTOOLCHAIN}" == auto ]]; then
-  required_go=$(awk '$1 == "go" { print $2; exit }' go.mod)
-  if [[ -z "$required_go" ]]; then
-    echo "Unable to determine the required Go version from sing-box/go.mod" >&2
-    exit 1
-  fi
-  go_command=(env "GOTOOLCHAIN=go$required_go" go)
-  echo "==> Using sing-box Go toolchain go$required_go..."
+# Always select the reviewed toolchain, even when the host Go is newer.
+go_command=(env "GOTOOLCHAIN=go$go_version" CGO_ENABLED=0 go)
+actual_go=$("${go_command[@]}" env GOVERSION)
+if [[ "$actual_go" != "go$go_version" ]]; then
+  echo "Expected go$go_version, got $actual_go" >&2
+  exit 1
 fi
+build_flags=(-mod=readonly -trimpath -ldflags "-s -w -buildid= -X github.com/sagernet/sing-box/constant.Version=$core_version" -tags "$build_tags")
 
-echo "==> Testing sing-box CLI context isolation (no TUN or remote connections)..."
-"${go_command[@]}" test -tags "$build_tags" ./cmd/sing-box -run '^TestMiao(Check|Create)IsolatesServiceRegistry$' -count=1
+# The upstream isolation fix is now part of the pin. Keep its behavioral
+# tests separately, and capture upstream support before applying our profile.
+registry_snapshot="$TMP_DIR/registries.json"
+# Environment values are consumed by native Go on Windows; do not depend on
+# Git Bash translating this custom variable's POSIX temporary path.
+if [[ "$("${go_command[@]}" env GOOS)" == windows ]]; then
+  registry_snapshot=$(cygpath -m "$registry_snapshot")
+fi
+cp "$KERNEL_DIR/tests/miao_context_test.go" "$KERNEL_DIR/tests/miao_registry_test.go" cmd/sing-box/
+echo "==> Testing upstream isolation and recording client capabilities..."
+MIAO_REGISTRY_SNAPSHOT="$registry_snapshot" MIAO_CAPTURE_REGISTRIES=1 \
+  "${go_command[@]}" test -mod=readonly -tags "$build_tags" ./cmd/sing-box -run '^TestMiao' -count=20
 
 echo "==> Building host sing-box ($host_goarch) for rule compilation..."
-"${go_command[@]}" build "${build_flags[@]}" -o "$EMBEDDED_DIR/sing-box-host" ./cmd/sing-box
+"${go_command[@]}" build "${build_flags[@]}" -o "$artifacts/sing-box-host" ./cmd/sing-box
+
+echo "==> Applying Miao client profile..."
+git apply --check "$KERNEL_DIR/client.patch"
+git apply "$KERNEL_DIR/client.patch"
+bun "$KERNEL_DIR/prepare-command.mjs" "$TMP_DIR/sing-box"
+MIAO_REGISTRY_SNAPSHOT="$registry_snapshot" MIAO_CAPTURE_REGISTRIES=0 \
+  "${go_command[@]}" test -mod=readonly -tags "$build_tags" ./cmd/miao-kernel -run '^TestMiao' -count=20
 
 echo "==> Building target sing-box ($target: $goos/$goarch)..."
 GOARCH="$goarch" GOOS="$goos" CGO_ENABLED=0 \
-  "${go_command[@]}" build "${build_flags[@]}" -o "$EMBEDDED_DIR/$outfile" ./cmd/sing-box
+  "${go_command[@]}" build "${build_flags[@]}" -o "$artifacts/$outfile" ./cmd/miao-kernel
 
-chmod 755 "$EMBEDDED_DIR/sing-box-host" "$EMBEDDED_DIR/$outfile"
+chmod 755 "$artifacts/sing-box-host" "$artifacts/$outfile"
+bun "$ROOT_DIR/scripts/pack-kernel.mjs" "$artifacts/$outfile" "$target"
 
-echo "==> Downloading and compiling geo rule files..."
-curl --fail --location --retry 3 \
-  -o "$EMBEDDED_DIR/geoip-cn.srs" \
-  "https://raw.githubusercontent.com/SagerNet/sing-geoip/${sing_geoip_ref}/geoip-cn.srs"
+if [[ "$build_rules" == true ]]; then
+  echo "==> Downloading and compiling geo rule files..."
+  curl --fail --location --retry 3 \
+    -o "$artifacts/geoip-cn.srs" \
+    "https://raw.githubusercontent.com/SagerNet/sing-geoip/${sing_geoip_ref}/geoip-cn.srs"
 
-direct_list="$TMP_DIR/direct-list.txt"
-direct_json="$TMP_DIR/direct-list.json"
-curl --fail --location --retry 3 \
-  -o "$direct_list" \
-  "https://raw.githubusercontent.com/Loyalsoldier/v2ray-rules-dat/${direct_rules_ref}/direct-list.txt"
+  direct_list="$TMP_DIR/direct-list.txt"
+  direct_json="$TMP_DIR/direct-list.json"
+  curl --fail --location --retry 3 \
+    -o "$direct_list" \
+    "https://raw.githubusercontent.com/Loyalsoldier/v2ray-rules-dat/${direct_rules_ref}/direct-list.txt"
 
-bun "$ROOT_DIR/scripts/compile-direct-rules.mjs" "$direct_list" "$direct_json"
-"$EMBEDDED_DIR/sing-box-host" rule-set compile "$direct_json" \
-  -o "$EMBEDDED_DIR/geosite-geolocation-cn.srs"
+  bun "$ROOT_DIR/scripts/compile-direct-rules.mjs" "$direct_list" "$direct_json"
+  "$artifacts/sing-box-host" rule-set compile "$direct_json" \
+    -o "$artifacts/geosite-geolocation-cn.srs"
+fi
+
+# Publish only after both the kernel and rules have built successfully.
+cp "$artifacts/"* "$EMBEDDED_DIR/"
 
 echo "==> Embedded resources ready for $target"
-ls -lh "$EMBEDDED_DIR/$outfile" \
-  "$EMBEDDED_DIR/geoip-cn.srs" \
-  "$EMBEDDED_DIR/geosite-geolocation-cn.srs"
+ls -lh "$EMBEDDED_DIR/$outfile" "$EMBEDDED_DIR/$outfile.zst"
+if [[ "$build_rules" == true ]]; then
+  ls -lh "$EMBEDDED_DIR/geoip-cn.srs" "$EMBEDDED_DIR/geosite-geolocation-cn.srs"
+fi

@@ -1,0 +1,3 @@
+* text eol=lf
+# Unified diffs contain context prefixes before tabs and on blank lines.
+*.patch whitespace=-blank-at-eol,-space-before-tab
