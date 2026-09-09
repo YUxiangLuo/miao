@@ -202,6 +202,7 @@ push/PR 跑 `ci.yml`：Frontend quality（install → audit → lint → **typec
 - `install.sh` / `remove.sh`：提交前 `shellcheck`
 - `build-embedded.sh` 的 `MIAO_TARGET=windows-amd64` 也会编未裁剪的 host 规则编译器 `sing-box-host`；目标内核只有 run/check/version 与 namespace 辅助入口。`--kernel-only` 用于不更新规则的内核验证。
 - 内核 SHA / Go / 版本 / tags / 七种节点协议 / DNS transports / TUN stack 固定在 `scripts/sing-box/source.json`。Rust 手动 JSON 校验与 Go 注册测试读取同一能力清单。`SING_BOX_REF` 若与固定 SHA 不同直接失败；升级须修改清单并审查裁剪补丁。`SING_GEOIP_REF`、`DIRECT_RULES_REF` 仍接受分支/tag/完整 SHA，release CI 统一解析规则快照。
+- 当前工具链为 Go 1.27.1，源码固定 `7ceb77a3`，内核标记 `miao.4`；源码升级与工具链升级分开审查。testing 的历史重写不触发自动换 SHA；遇到旧对象不可用时从已验证源码备份恢复，不可改成抓 HEAD。2026-09-09 的重写、升级与隔离 GoTUN 验证记录见 `docs/kernel.md`。
 - `scripts/sing-box/client.patch` 的 v2 profile 仅保留 TUN 入站、七种节点出站及 direct/selector/urltest、UDP/HTTPS/local DNS；endpoint、额外服务与证书签发注册为空。Go 测试核对精确能力集合及其与未修改上游的子集关系。其他手动 JSON 协议不再支持：配置生成时跳过并记录告警，保留用户原始配置。原 CLI context 修复已进入固定基线，旧功能补丁已移除，两项隔离测试独立保留。补丁冲突必须审查，不可跳过。
 - Rust 嵌入 `sing-box-*.zst` 与 `.meta.json`；清单含源码 SHA、Go、tags、定制文件哈希及压缩前后大小/校验和，随 Release 发布。修改内核后须重建 embedded + miao 才生效。维护流程与验收范围见 `docs/kernel.md`。
 - release 使用 `opt-level = "s"`、thin LTO、单 codegen unit 和符号剥离，保留 panic unwind。内核 Zstandard level 19 会增加构建压缩时间；本轮产物的解压窗口为 8 MiB（v1 为 4 MiB），需要在 OpenWrt 上验收启动峰值内存。

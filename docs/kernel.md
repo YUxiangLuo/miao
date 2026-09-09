@@ -4,7 +4,7 @@ Miao 使用固定上游提交的客户端构建，定制源码由本仓库追踪
 
 ## 固定基线与裁剪范围
 
-[`scripts/sing-box/source.json`](../scripts/sing-box/source.json) 是内核版本和能力清单的唯一入口，记录上游仓库、完整 SHA、Go 版本、Miao 内核版本、profile、构建标签、节点协议、DNS transports 和 TUN stack。当前 `miao-client-v2` 基于 `9ed2254c71edbef2020c23680d77e5d32aaa238b`、Go 1.25.5，保留 `with_quic,with_clash_api,with_utls`。即使本机 Go 较新，也使用固定工具链。
+[`scripts/sing-box/source.json`](../scripts/sing-box/source.json) 是内核版本和能力清单的唯一入口，记录上游仓库、完整 SHA、Go 版本、Miao 内核版本、profile、构建标签、节点协议、DNS transports 和 TUN stack。当前 `miao-client-v2` 基于 `7ceb77a34dd7123ae7bdab10002364b031bcf509`、Go 1.27.1，内核版本为 `1.15.0-alpha.2+miao.4.7ceb77a3`，保留 `with_quic,with_clash_api,with_utls`。即使本机 Go 较新，也使用固定工具链。
 
 [`client.patch`](../scripts/sing-box/client.patch) 仅调整组件注册：
 
@@ -52,7 +52,7 @@ Rust 只嵌入对应目标的 `.zst` 和清单。host 内核与原始目标文�
 
 ## v2 体积记录
 
-2026-09-09 在 Arch Linux amd64 上实测；MiB = 1,048,576 字节。v1 与 v2 使用相同上游 SHA、规则和前端，Miao 为本机原生 release 构建。
+2026-09-09 初次裁剪时在 Arch Linux amd64 上实测；MiB = 1,048,576 字节。此表的 v1 与 v2 均使用 Go 1.25.5、相同上游 SHA、规则和前端，Miao 为本机原生 release 构建；后续工具链升级另行记录。
 
 | 产物 | v1 | v2 |
 | --- | ---: | ---: |
@@ -64,7 +64,7 @@ Rust 只嵌入对应目标的 `.zst` 和清单。host 内核与原始目标文�
 
 ## 升级步骤
 
-1. 选择上游提交，审查配置、协议、TUN、DNS、Clash API 和工具链变更，修改 `source.json` 的 SHA、Go 和内核版本。
+1. 选择上游提交，审查配置、协议、TUN、DNS、Clash API 和工具链变更，修改 `source.json` 的 SHA、Go 和内核版本。源码和工具链可分别升级；`go.mod` 的 `go` 行是最低要求，不能替代对所选工具链的构建验证。
 2. 审查并更新 `client.patch`；冲突直接处理，禁止静默跳过。上游已有等效修复时删除功能补丁，保留回归测试。
 3. 执行三目标构建，运行 Rust 和脚本检查。构建会先对未修改上游运行两项隔离测试并记录出站/DNS/endpoint 支持，再验证客户端注册精确符合能力清单、属于上游支持范围且仅暴露 TUN 入站，并校验 11 组客户端配置与 8 种已移除出站的拒绝行为；每轮测试重复 20 次。
 4. 在隔离环境验证 Linux/OpenWrt TUN 与 DNS 分流、Clash 面板功能和 AnyTLS 连续重载；在 Windows 真机验证 UAC、TUN、停止/退出和升级。现有生产代理不能作为随意启停的测试实例。
@@ -81,6 +81,40 @@ cargo check -p miao-core --locked --target x86_64-pc-windows-gnu
 ```
 
 CI 的 Rust 测试使用本轮构建的 Linux / Windows 真实压缩内核验证释放与校验，不执行输出文件；缺失的交叉目标和规则资源用 inert stub 补齐。fresh clone 的本地测试也可只使用 stub。内核 job 在 Linux/Windows 上运行 Go 回归测试与 `version`，arm64 做交叉编译。配置测试无 inbound/TUN、无真实代理连接。上述 CI 不能替代目标平台上的实际网络验收。
+
+## testing 历史重写与 Go 1.27
+
+2026-09-09 核对时，testing 指向 `7ceb77a34dd7123ae7bdab10002364b031bcf509`，与升级前固定点 `9ed2254c` 的共同祖先是 `6d1fc214c16bd4c45510012a898b7fa82f045862`；两侧分别有 19、20 个独有提交。`range-diff` 显示大部分提交只是重排或重写，最终源码树有 9 个文件差异，其中更新了 sing 与 sing-tun 依赖。sing-tun 自身还包含 24 个文件的变更，涉及 GoTUN、队列及网络监视器。
+
+旧 SHA 当时仍可从 GitHub 全新获取。先单独将工具链从 Go 1.25.5 升级到 [Go 1.27.1](https://go.dev/doc/devel/release#go1.27.0)，内核版本标记为 `miao.3`，该阶段源码仍固定 `9ed2254c`。旧、新两个源码点都通过了 Go 1.27.1 的 Miao 隔离与客户端配置回归；上游该时点的测试矩阵仍是 Go 1.25/1.26，不能据此宣称它已完成 Go 1.27 的官方验收。
+
+仅升级工具链的 `miao.3` 产物如下；源码、v2 profile、压缩等级、规则、前端与 Rust release 配置沿用前述基线：
+
+| 目标 | 原始内核 | 压缩内核 |
+| --- | ---: | ---: |
+| Linux amd64 | 24,449,148 B | 7,660,380 B |
+| Linux arm64 | 22,544,508 B | 6,805,797 B |
+| Windows amd64 | 24,027,648 B | 7,542,996 B |
+
+该阶段 Linux amd64 完整 Miao 为 16,149,976 B / 15.40 MiB，比 Go 1.25.5 版本增加 274,432 B（1.73%）。三个压缩内核的解码窗口仍为 8 MiB。已核对各目标 Go 构建信息、清单、压缩前后 SHA-256 与解压内容，并确认完整 Miao 嵌入新内核。三目标构建、Go 隔离/能力/配置回归及 TLS/HTTP 客户端测试通过；Rust 462 项测试通过、1 项忽略，Clippy、Windows core 交叉检查及脚本检查通过。该阶段未进行实际 TUN 流量验证。
+
+完整 SHA 能固定内容，不能保证上游永久保留对象。升级审查时应保留能独立验证的源码副本；本次已在开发机保存新、旧两个固定点的完整 Git bundle 并通过 `git bundle verify`。bundle 只备份上游 Git 源码与历史，不包含 Go 模块依赖；CI 目前仍从固定上游地址获取源码。若以后对象被删除，应先从备份恢复到可访问的镜像，再修改清单中的 repository，禁止静默回退到 testing HEAD。
+
+### 升级到 7ceb77a3
+
+随后将源码固定到 `7ceb77a34dd7123ae7bdab10002364b031bcf509`，版本标记为 `miao.4`，保留 Go 1.27.1、Clash API 和 v2 能力清单。现有客户端补丁可直接应用，CLI context 隔离回归仍通过。上游新增的 `multi_queue` 默认关闭，Miao 沿用单队列配置；此次也引入 UDP socket 缓冲设置和网络监视器溢出恢复修复。
+
+| 目标 | 原始内核 | 压缩内核 |
+| --- | ---: | ---: |
+| Linux amd64 | 24,457,340 B | 7,662,343 B |
+| Linux arm64 | 22,610,044 B | 6,807,154 B |
+| Windows amd64 | 24,055,808 B | 7,551,615 B |
+
+Linux amd64 完整 Miao 为 16,149,976 B / 15.40 MiB，与 `miao.3` 构建的文件大小相同；已验证它包含本轮新压缩内核和版本清单。三目标构建、Go 回归、TLS/HTTP 客户端测试、Rust 462 项测试（1 项忽略）、Clippy、Windows core 交叉检查和脚本检查通过，三平台压缩窗口仍为 8 MiB。
+
+Linux 额外使用独立网络命名空间与本地 TCP/UDP/DNS 服务验证：`auto_redirect: true` 的当前配置及关闭 auto_redirect 后的纯 GoTUN 路径均通过。每种配置在 MTU 9000、单队列下执行 4 轮、每轮 4 并发的 2 MiB TCP 下载及上传回显、1–8000 B UDP 回显和 DNS 劫持，核对 Clash 流量计数，并完成 3 次 SIGHUP 重载与正常退出后的 TUN 清理。新增的网络监视器接收溢出测试也在独立命名空间通过。
+
+这些测试使用本地直连出口，不覆盖真实远端代理协议、长期运行、性能、多队列、Windows 真机或 OpenWrt 验收。
 
 ## 来源与许可
 
