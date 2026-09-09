@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/sagernet/sing-box/common/srs"
@@ -22,8 +23,6 @@ func TestMiaoClientConfigurations(t *testing.T) {
 		"anytls":        `{"type":"anytls","password":"test","tls":{"enabled":true}}`,
 		"hysteria2":     `{"type":"hysteria2","password":"test","tls":{"enabled":true},"obfs":{"type":"gecko","password":"test"}}`,
 		"tuic":          `{"type":"tuic","uuid":"00000000-0000-4000-8000-000000000001","password":"test","tls":{"enabled":true}}`,
-		"manual-socks":  `{"type":"socks"}`,
-		"manual-http":   `{"type":"http"}`,
 		"vless-ws":      `{"type":"vless","uuid":"00000000-0000-4000-8000-000000000001","tls":{"enabled":true},"transport":{"type":"ws"}}`,
 		"vless-grpc":    `{"type":"vless","uuid":"00000000-0000-4000-8000-000000000001","tls":{"enabled":true},"transport":{"type":"grpc"}}`,
 		"vless-http":    `{"type":"vless","uuid":"00000000-0000-4000-8000-000000000001","tls":{"enabled":true},"transport":{"type":"http"}}`,
@@ -98,5 +97,20 @@ func TestMiaoClientCommands(t *testing.T) {
 		default:
 			t.Errorf("unexpected runtime command: %s", command.Name())
 		}
+	}
+}
+
+func TestMiaoRemovedOutboundsFailBeforeStart(t *testing.T) {
+	for _, protocol := range []string{"socks", "http", "ssh", "tor", "snell", "shadowtls", "hysteria", "wireguard"} {
+		t.Run(protocol, func(t *testing.T) {
+			miaoContextFixture(t)
+			config := `{"outbounds":[{"type":"` + protocol + `","tag":"removed","server":"127.0.0.1","server_port":1}]}`
+			if err := os.WriteFile(configPaths[0], []byte(config), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if err := check(); err == nil || !strings.Contains(err.Error(), "unknown outbound type") {
+				t.Fatalf("expected unsupported outbound error for %s, got %v", protocol, err)
+			}
+		})
 	}
 }

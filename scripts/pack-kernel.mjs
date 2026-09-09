@@ -2,7 +2,8 @@ import { createHash } from 'node:crypto'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { customizationHash, readSource } from './sing-box/source.mjs'
 
-const compressionLevel = 10
+// Level 19 saves about 10% over 10; the decoder's window grows from 4 to 8 MiB.
+const compressionLevel = 19
 const sha256 = bytes => createHash('sha256').update(bytes).digest('hex')
 
 export function packKernel(bytes, build) {

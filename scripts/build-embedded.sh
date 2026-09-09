@@ -99,10 +99,12 @@ build_flags=(-mod=readonly -trimpath -ldflags "-s -w -buildid= -X github.com/sag
 # The upstream isolation fix is now part of the pin. Keep its behavioral
 # tests separately, and capture upstream support before applying our profile.
 registry_snapshot="$TMP_DIR/registries.json"
+profile_manifest="$KERNEL_DIR/source.json"
 # Environment values are consumed by native Go on Windows; do not depend on
 # Git Bash translating this custom variable's POSIX temporary path.
 if [[ "$("${go_command[@]}" env GOOS)" == windows ]]; then
   registry_snapshot=$(cygpath -m "$registry_snapshot")
+  profile_manifest=$(cygpath -m "$profile_manifest")
 fi
 cp "$KERNEL_DIR/tests/miao_context_test.go" "$KERNEL_DIR/tests/miao_registry_test.go" cmd/sing-box/
 echo "==> Testing upstream isolation and recording client capabilities..."
@@ -116,7 +118,7 @@ echo "==> Applying Miao client profile..."
 git apply --check "$KERNEL_DIR/client.patch"
 git apply "$KERNEL_DIR/client.patch"
 bun "$KERNEL_DIR/prepare-command.mjs" "$TMP_DIR/sing-box"
-MIAO_REGISTRY_SNAPSHOT="$registry_snapshot" MIAO_CAPTURE_REGISTRIES=0 \
+MIAO_REGISTRY_SNAPSHOT="$registry_snapshot" MIAO_CAPTURE_REGISTRIES=0 MIAO_PROFILE_MANIFEST="$profile_manifest" \
   "${go_command[@]}" test -mod=readonly -tags "$build_tags" ./cmd/miao-kernel -run '^TestMiao' -count=20
 
 echo "==> Building target sing-box ($target: $goos/$goarch)..."

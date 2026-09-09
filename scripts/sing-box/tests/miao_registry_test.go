@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/json"
 	"os"
-	"reflect"
 	"slices"
 	"testing"
 
@@ -16,9 +15,8 @@ type miaoRegistrySnapshot struct {
 	DNS       []string
 }
 
-// Compare the client profile against the unmodified pinned upstream build,
-// including disabled-feature stubs and manual JSON node types. Removing an
-// outbound by accident must not be masked by tests of just the YAML parser.
+// The exact supported set comes from the shared profile. Also verify that
+// every retained type exists in the unmodified pinned upstream build.
 func TestMiaoRegistryCompatibility(t *testing.T) {
 	got := miaoRegistrySnapshot{
 		Outbounds: include.OutboundRegistry().OptionTypes(),
@@ -47,8 +45,32 @@ func TestMiaoRegistryCompatibility(t *testing.T) {
 	if err := json.Unmarshal(data, &want); err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("client changed upstream outbound/DNS/endpoint support:\nwant %+v\ngot  %+v", want, got)
+	profileData, err := os.ReadFile(os.Getenv("MIAO_PROFILE_MANIFEST"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var profile struct {
+		NodeProtocols []string `json:"node_protocols"`
+		DNSTransports []string `json:"dns_transports"`
+	}
+	if err := json.Unmarshal(profileData, &profile); err != nil {
+		t.Fatal(err)
+	}
+	expectedOutbounds := append(slices.Clone(profile.NodeProtocols), "direct", "selector", "urltest")
+	slices.Sort(expectedOutbounds)
+	slices.Sort(profile.DNSTransports)
+	if !slices.Equal(got.Outbounds, expectedOutbounds) || !slices.Equal(got.DNS, profile.DNSTransports) || len(got.Endpoints) != 0 {
+		t.Fatalf("client registries differ from the profile: got %+v, expected outbounds=%v DNS=%v and no endpoints", got, expectedOutbounds, profile.DNSTransports)
+	}
+	for _, retained := range got.Outbounds {
+		if !slices.Contains(want.Outbounds, retained) {
+			t.Fatalf("retained outbound %s is absent upstream", retained)
+		}
+	}
+	for _, retained := range got.DNS {
+		if !slices.Contains(want.DNS, retained) {
+			t.Fatalf("retained DNS transport %s is absent upstream", retained)
+		}
 	}
 	if got := include.InboundRegistry().OptionTypes(); !slices.Equal(got, []string{"tun"}) {
 		t.Fatalf("client must expose only TUN inbound, got %v", got)

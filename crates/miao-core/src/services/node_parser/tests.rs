@@ -166,6 +166,49 @@ fn parse_node_json_extracts_valid_node() {
 }
 
 #[test]
+fn manual_json_rejects_removed_protocols_with_a_clear_error() {
+    for protocol in [
+        "socks",
+        "http",
+        "ssh",
+        "tor",
+        "snell",
+        "shadowtls",
+        "hysteria",
+        "wireguard",
+        "unknown",
+    ] {
+        let node = serde_json::json!({
+            "type": protocol, "tag": "removed", "server": "127.0.0.1", "server_port": 443
+        });
+        let error = parse_node_json(&node.to_string()).unwrap_err();
+        assert!(error.contains("当前内核不支持节点协议"));
+        assert!(error.contains(protocol));
+    }
+}
+
+#[test]
+fn manual_json_preserves_all_seven_protocols_and_their_extra_options() {
+    for protocol in [
+        "shadowsocks",
+        "vmess",
+        "vless",
+        "trojan",
+        "anytls",
+        "hysteria2",
+        "tuic",
+    ] {
+        let node = serde_json::json!({
+            "type": protocol, "tag": "retained", "server": "127.0.0.1", "server_port": 443,
+            "tls": {"enabled": true, "server_name": "example.com"}, "multiplex": {"enabled": true}
+        });
+        let (info, parsed) = parse_node_json(&node.to_string()).unwrap();
+        assert_eq!(info.node_type, protocol);
+        assert_eq!(parsed, node);
+    }
+}
+
+#[test]
 fn parse_node_json_rejects_empty_tag() {
     let json = r#"{"type":"hysteria2","tag":"","server":"example.com","server_port":443,"password":"secret"}"#;
 

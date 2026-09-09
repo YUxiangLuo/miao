@@ -1,3 +1,18 @@
+use std::sync::LazyLock;
+
+#[derive(serde::Deserialize)]
+struct KernelProfile {
+    node_protocols: Vec<String>,
+}
+
+static KERNEL_PROFILE: LazyLock<KernelProfile> = LazyLock::new(|| {
+    serde_json::from_str(include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../scripts/sing-box/source.json"
+    )))
+    .expect("kernel source manifest must contain node_protocols")
+});
+
 /// 节点显示信息结构
 #[derive(Debug, Clone)]
 pub struct NodeDisplayInfo {
@@ -44,6 +59,14 @@ pub fn parse_node_json(node_str: &str) -> Result<(NodeDisplayInfo, serde_json::V
         .and_then(|t| t.as_str())
         .unwrap_or("unknown")
         .to_string();
+
+    if !KERNEL_PROFILE.node_protocols.contains(&node_type) {
+        return Err(format!(
+            "当前内核不支持节点协议 {}，支持的协议：{}",
+            node_type,
+            KERNEL_PROFILE.node_protocols.join(", ")
+        ));
+    }
 
     let sni = v
         .get("tls")

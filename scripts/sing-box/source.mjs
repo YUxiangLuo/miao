@@ -7,6 +7,9 @@ const directory = dirname(fileURLToPath(import.meta.url))
 
 export function readSource() {
   const source = JSON.parse(readFileSync(join(directory, 'source.json'), 'utf8'))
+  const validNames = values => Array.isArray(values) && values.length > 0
+    && new Set(values).size === values.length
+    && values.every(value => typeof value === 'string' && /^[a-z0-9_]+$/.test(value))
   if (!/^https:\/\/github\.com\/[^\s]+\.git$/.test(source.repository)
     || !/^[0-9a-f]{40}$/.test(source.revision)
     || !/^1\.\d+\.\d+$/.test(source.go_version)
@@ -14,7 +17,10 @@ export function readSource() {
     || !/^[a-z0-9-]+$/.test(source.profile)
     || !Array.isArray(source.build_tags)
     || source.build_tags.length === 0
-    || source.build_tags.some(tag => !/^[a-z0-9_]+$/.test(tag))) {
+    || source.build_tags.some(tag => !/^[a-z0-9_]+$/.test(tag))
+    || !validNames(source.node_protocols)
+    || !validNames(source.dns_transports)
+    || source.tun_stack !== 'go') {
     throw new Error('Invalid pinned kernel source in scripts/sing-box/source.json')
   }
   return source
