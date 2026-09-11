@@ -1,11 +1,12 @@
 import { memo, useEffect, useId, useState } from 'react'
-import { Check, CircleX, RefreshCw, Rss, Plus, Trash2, X } from 'lucide-react'
+import { Check, CircleX, Clock, RefreshCw, Rss, Plus, Trash2, X } from 'lucide-react'
 import { ICON } from '../tokens'
 import { Button, SectionCard } from './ui'
 import { useDialog } from '../hooks/useDialog'
 import { classNames, maskSubscription } from '../utils'
 import { SubDetailModal } from './SubDetailModal'
-import type { SubStatus, SubscriptionRefreshStatus } from '../types/api'
+import { ScheduleModal } from './ScheduleModal'
+import type { ScheduledRefreshRequest, SubStatus, SubscriptionRefreshStatus } from '../types/api'
 
 interface SubRowProps {
   sub: SubStatus
@@ -149,11 +150,14 @@ export interface SubsCardProps {
   onDeleteSub: (url: string) => void
   onRefreshSubs: () => void
   onToggleNodeDisabled: (sub: string, name: string, disabled: boolean) => Promise<boolean>
+  /** 保存定时刷新设置；返回是否保存成功 */
+  onSaveSchedule: (request: ScheduledRefreshRequest) => Promise<boolean>
   isInitializing: boolean
 }
 
-export function SubsCard({ subs, refreshStatus, pendingActions, onAddSub, onDeleteSub, onRefreshSubs, onToggleNodeDisabled, isInitializing }: SubsCardProps) {
+export function SubsCard({ subs, refreshStatus, pendingActions, onAddSub, onDeleteSub, onRefreshSubs, onToggleNodeDisabled, onSaveSchedule, isInitializing }: SubsCardProps) {
   const [showAdd, setShowAdd] = useState(false)
+  const [showSchedule, setShowSchedule] = useState(false)
   const [detailSub, setDetailSub] = useState<SubStatus | null>(null)
   const refreshing = pendingActions.has('refreshSubs')
 
@@ -175,15 +179,26 @@ export function SubsCard({ subs, refreshStatus, pendingActions, onAddSub, onDele
               <RefreshCw size={ICON.xs} className={refreshing ? 'spin' : undefined} />
             </button>
           </div>
-          <Button
-            tone="secondary"
-            size="sm"
-            icon={<Plus size={ICON.xs} />}
-            disabled={isInitializing}
-            onClick={() => setShowAdd(true)}
-          >
-            添加
-          </Button>
+          <div className="section-actions">
+            <Button
+              tone="secondary"
+              size="sm"
+              icon={<Clock size={ICON.xs} />}
+              disabled={isInitializing}
+              onClick={() => setShowSchedule(true)}
+            >
+              定时刷新
+            </Button>
+            <Button
+              tone="secondary"
+              size="sm"
+              icon={<Plus size={ICON.xs} />}
+              disabled={isInitializing}
+              onClick={() => setShowAdd(true)}
+            >
+              添加
+            </Button>
+          </div>
         </div>
       }
     >
@@ -218,6 +233,12 @@ export function SubsCard({ subs, refreshStatus, pendingActions, onAddSub, onDele
         loading={pendingActions.has('addSub')}
         onClose={() => setShowAdd(false)}
         onSubmit={onAddSub}
+      />
+      <ScheduleModal
+        open={showSchedule}
+        saving={pendingActions.has('scheduledRefresh')}
+        onClose={() => setShowSchedule(false)}
+        onSave={onSaveSchedule}
       />
     </SectionCard>
   )

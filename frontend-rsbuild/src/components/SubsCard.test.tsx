@@ -2,7 +2,9 @@ import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, rs } from '@rstest/core'
 import { SubsCard } from './SubsCard'
-import { statusMock, subMock, subNodeMock, subNodesInfoMock } from '../testFixtures'
+import {
+  scheduledRefreshStatusMock, statusMock, subMock, subNodeMock, subNodesInfoMock,
+} from '../testFixtures'
 
 const subs = [
   subMock({ url: 'https://example.com/subscription-token-abcdef', node_count: 42 }),
@@ -16,6 +18,7 @@ function renderCard(overrides = {}) {
     onDeleteSub: rs.fn(),
     onRefreshSubs: rs.fn(),
     onToggleNodeDisabled: rs.fn().mockResolvedValue(true),
+    onSaveSchedule: rs.fn().mockResolvedValue(true),
     isInitializing: false,
     ...overrides,
   }
@@ -179,5 +182,36 @@ describe('SubsCard add modal', () => {
     const dialog = screen.getByRole('dialog', { name: '添加订阅' })
     const submit = within(dialog).getAllByRole('button').find((b) => b.textContent === '添加')!
     expect(submit).toBeDisabled()
+  })
+})
+
+describe('SubsCard schedule modal', () => {
+  afterEach(() => {
+    rs.unstubAllGlobals()
+  })
+
+  it('opens the schedule modal from the header button and saves settings', async () => {
+    const user = userEvent.setup()
+    rs.stubGlobal('fetch', rs.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        success: true,
+        message: 'ok',
+        data: scheduledRefreshStatusMock({ enabled: true, times: ['04:05'] }),
+      }),
+    })))
+    const { props } = renderCard({ onSaveSchedule: rs.fn().mockResolvedValue(true) })
+
+    await user.click(screen.getByRole('button', { name: '定时刷新' }))
+
+    const dialog = await screen.findByRole('dialog', { name: '定时刷新' })
+    expect(await within(dialog).findByDisplayValue('04:05')).toBeInTheDocument()
+
+    await user.click(within(dialog).getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(props.onSaveSchedule).toHaveBeenCalledWith({
+      enabled: true,
+      times: ['04:05'],
+    }))
+    expect(screen.queryByRole('dialog', { name: '定时刷新' })).not.toBeInTheDocument()
   })
 })

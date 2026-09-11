@@ -125,6 +125,7 @@ export function DashboardScreen({ app }: { app: ReturnType<typeof useAppControll
               onDeleteSub={app.handleOpenDeleteSubConfirm}
               onRefreshSubs={app.handleOpenRefreshSubscriptionsConfirm}
               onToggleNodeDisabled={app.handleSetNodeDisabled}
+              onSaveSchedule={app.handleSaveScheduledRefresh}
               isInitializing={app.status.initializing}
             />
 

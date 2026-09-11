@@ -308,6 +308,8 @@ async fn handle_tool_call(
         "list_connections" => tool_list_connections(state, args).await,
         "test_connectivity" => panel::test_connectivity(state, args).await,
         "set_mcp_enabled" => panel::set_mcp_enabled(state, args).await,
+        "get_scheduled_refresh" => panel::get_scheduled_refresh(state).await,
+        "set_scheduled_refresh" => panel::set_scheduled_refresh(state, args).await,
         "deploy_vps" => panel::deploy_vps(state, args).await,
         "upgrade_miao" => panel::upgrade_miao(state, args).await,
         other => Err(format!("Unknown tool: {other}")),

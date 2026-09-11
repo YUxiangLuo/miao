@@ -5,6 +5,7 @@ pub mod node_parser;
 #[cfg(not(windows))]
 pub mod openwrt;
 pub mod proxy;
+pub mod schedule;
 pub mod singbox;
 pub mod status;
 pub mod subscription;

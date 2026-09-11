@@ -7,7 +7,7 @@ use serde_json::{json, Value as JsonValue};
 use crate::models::VpsDeployRequest;
 use crate::models::{
     BatchNodeRequest, DeleteNodeRequest, DeleteRuleRequest, McpRequest, NodeRequest, RuleRequest,
-    SetNodeDisabledRequest, SubBatchRequest, SubRequest,
+    ScheduledRefreshRequest, SetNodeDisabledRequest, SubBatchRequest, SubRequest,
 };
 use crate::services::commands::{self, CommandReply, CommandResult};
 use crate::state::AppState;
@@ -216,6 +216,20 @@ pub(super) async fn set_mcp_enabled(
         payload["note"] = json!("MCP 已关闭；本次响应后 /mcp 将返回 404");
     }
     Ok(payload)
+}
+
+pub(super) async fn get_scheduled_refresh(state: &Arc<AppState>) -> Result<JsonValue, String> {
+    let response = commands::settings::get_scheduled_refresh(state.clone()).await;
+    response_data(response)
+}
+
+pub(super) async fn set_scheduled_refresh(
+    state: &Arc<AppState>,
+    args: &JsonValue,
+) -> Result<JsonValue, String> {
+    let request: ScheduledRefreshRequest =
+        serde_json::from_value(args.clone()).map_err(|err| format!("Invalid params: {err}"))?;
+    command_payload(commands::settings::set_scheduled_refresh(state.clone(), request).await)
 }
 
 pub(super) async fn deploy_vps(

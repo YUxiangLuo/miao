@@ -367,6 +367,30 @@ pub(super) fn tools_catalog() -> JsonValue {
             "annotations": destructive(),
         },
         {
+            "name": "get_scheduled_refresh",
+            "description": "读取订阅定时刷新设置：是否启用、每天的执行时刻（按后端系统本地时区）、系统时区名/偏移与下次执行时间。无副作用。",
+            "inputSchema": empty_schema(),
+            "annotations": read_only(),
+        },
+        {
+            "name": "set_scheduled_refresh",
+            "description": "持久化订阅定时刷新设置（config.yaml），热生效，不重启 sing-box。时刻按后端系统本地时区解释，格式 HH:MM，最多 24 个；启用时至少需要一个有效时刻。",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "enabled": { "type": "boolean", "description": "是否启用定时刷新" },
+                    "times": {
+                        "type": "array",
+                        "items": { "type": "string", "description": "本地时区 HH:MM，如 04:30" },
+                        "description": "每天的执行时刻，未启用时可为空数组"
+                    }
+                },
+                "required": ["enabled"],
+                "additionalProperties": false
+            },
+            "annotations": mutating(),
+        },
+        {
             "name": "deploy_vps",
             "description": "仅支持具备 ssh/askpass 的非 Windows 平台：使用用户提供的 root 密码通过 SSH 在远端 VPS 部署或复用 Miao 管理的 Hysteria2，并把节点加入配置。会修改远端主机，最长约 5 分钟；密码不持久化，也不要在回答中复述。仅在用户明确确认后调用。",
             "inputSchema": {

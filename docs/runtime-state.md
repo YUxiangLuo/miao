@@ -36,6 +36,7 @@ REST handler 只解析参数、调用 `services/commands/` 并由 `responses.rs`
 | 订阅编辑/刷新 | 锁内登记代次 → 锁外拉取 → 锁内检查代次并合并最新输入，不覆盖并发的策略/倍率/规则编辑 |
 | 策略/倍率 | `apply_preference` 先快照文件，保存 requested 值后应用候选；失败恢复内存及原文件字节（原先不存在则删除），锁覆盖回滚与 effective 返回值读取 |
 | MCP 开关 | 只提交稳定配置及内存，不进入内核激活 |
+| 定时刷新设置 | 只提交稳定层 `config.yaml` 及内存，不进入内核激活；Notify 唤醒调度循环重算下一次执行 |
 
 节点切换统一经 `services/proxy` 串行校验 selector、调用 Clash PUT、保存 `.last_proxy` 并淘汰旧恢复任务，面板与 MCP 不另建切换路径。地区筛空的 effective `manual` 不覆盖 requested strategy；地区和倍率判断使用当前显示元数据，不从可能保留旧名称的稳定 tag 推导。
 
@@ -54,7 +55,7 @@ REST handler 只解析参数、调用 `services/commands/` 并由 `responses.rs`
 
 ## 订阅刷新
 
-所有刷新共用 `refresh_subscriptions`。`SubscriptionFetchReport` 分开统计成功/失败来源、新鲜节点和缓存节点；计数在禁用、地区、倍率筛选前完成。
+所有刷新共用 `refresh_subscriptions`。定时刷新到点后走与面板手动刷新相同的前台路径；调度循环只负责计时、唤醒和失败退避（1/5/15 分钟有界预算，不写入订阅刷新状态），不另建拉取或提交逻辑。退避也不会重置或加速启动恢复的重试预算。`SubscriptionFetchReport` 分开统计成功/失败来源、新鲜节点和缓存节点；计数在禁用、地区、倍率筛选前完成。
 
 | `outcome` | 含义 |
 | --- | --- |

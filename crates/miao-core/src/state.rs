@@ -41,6 +41,8 @@ pub struct AppState {
     /// and must discard their result when a newer user operation supersedes it.
     pub sub_refresh_generation: AtomicU64,
     pub sub_refresh_cancel: Notify,
+    /// 定时刷新配置/开关变化或服务关闭时唤醒调度循环重算（见 `runtime::scheduler`）。
+    pub scheduled_refresh_wake: Notify,
     pub subscription_refresh: SubscriptionRefresh,
     /// Latest foreground refresh generation that accepted a subscription
     /// response (including an empty list) and committed it. A foreground request can complete using only
@@ -147,6 +149,7 @@ impl AppState {
             proxy_selection_generation: AtomicU64::new(0),
             sub_refresh_generation: AtomicU64::new(0),
             sub_refresh_cancel: Notify::new(),
+            scheduled_refresh_wake: Notify::new(),
             subscription_refresh: SubscriptionRefresh::default(),
             sub_refresh_success_generation: AtomicU64::new(0),
             sub_status: Mutex::new(HashMap::new()),

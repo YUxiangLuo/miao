@@ -8,7 +8,9 @@ use tracing::{error, info, warn};
 use std::sync::Arc;
 
 use crate::error::{AppError, AppResult};
-use crate::models::{Config, NodeMultiplier, NodeSelect, StableConfig, VolatileConfig};
+use crate::models::{
+    Config, NodeMultiplier, NodeSelect, ScheduledRefresh, StableConfig, VolatileConfig,
+};
 use crate::state::AppState;
 
 const CACHE_MANIFEST_VERSION: u32 = 1;
@@ -334,6 +336,21 @@ pub async fn save_stable_fields(state: &Arc<AppState>, config: &Config) -> AppRe
         .read()
         .await
         .with_stable_fields_from(config);
+    save_stable_to(&state.config_path, &stable).await?;
+    *state.stable_config.write().await = stable;
+    Ok(())
+}
+
+/// 保存定时刷新设置（稳定层 config.yaml）。调用方须持有 `config_update`。
+pub async fn save_scheduled_refresh(
+    state: &Arc<AppState>,
+    scheduled_refresh: ScheduledRefresh,
+) -> AppResult<()> {
+    let stable = state
+        .stable_config
+        .read()
+        .await
+        .with_scheduled_refresh(scheduled_refresh);
     save_stable_to(&state.config_path, &stable).await?;
     *state.stable_config.write().await = stable;
     Ok(())

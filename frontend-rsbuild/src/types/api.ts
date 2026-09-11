@@ -116,6 +116,22 @@ export type DeleteRuleRequest = { index: number, raw: string, };
 
 export type McpRequest = { enabled: boolean, };
 
+export type ScheduledRefreshRequest = { enabled: boolean, times: Array<string>, };
+
+export type ScheduledRefreshStatus = { enabled: boolean, times: Array<string>, timezone?: string,
+/**
+ * 当前系统时区相对 UTC 的偏移，如 "+09:00"。
+ */
+utc_offset: string,
+/**
+ * 后端当前本地时间（RFC3339，带系统时区偏移）。
+ */
+now: string,
+/**
+ * 下次执行时间（RFC3339，带系统时区偏移）；未启用或没有有效时刻时为 None。
+ */
+next_run_at?: string, };
+
 export type RouteModeRequest = { route_mode: RouteMode, };
 
 export type NodeSelectRequest = { node_select: NodeSelect, };

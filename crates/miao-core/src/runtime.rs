@@ -273,6 +273,9 @@ pub(crate) async fn spawn_resolved(
         });
     }
 
+    // 定时刷新调度循环与服务同生命周期；关闭时通过 wake Notify 退出。
+    scheduler::spawn(app_state.clone());
+
     let (init_cancel, init_rx) = oneshot::channel();
     let init_task = tokio::spawn(async move {
         tokio::select! {
@@ -292,6 +295,7 @@ pub(crate) async fn spawn_resolved(
                 info!("Shutting down, stopping sing-box...");
                 state_for_shutdown.lifecycle.shutdown();
                 state_for_shutdown.next_sub_refresh();
+                state_for_shutdown.scheduled_refresh_wake.notify_waiters();
                 // Let the current config transaction drain, but its rollback
                 // and later HTTP start requests may no longer revive the kernel.
                 let _config_update = state_for_shutdown.config_update.lock().await;
@@ -311,6 +315,7 @@ pub(crate) async fn spawn_resolved(
     })
 }
 
+mod scheduler;
 mod startup;
 
 use startup::initialize_runtime;

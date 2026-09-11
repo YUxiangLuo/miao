@@ -221,6 +221,37 @@ pub struct McpRequest {
     pub enabled: bool,
 }
 
+/// 定时刷新设置请求（面板/MCP 共用）。
+/// `times` 是每天的执行时刻 "HH:MM"，按运行主机的系统本地时区解释；
+/// 启用时至少需要一个有效时刻。
+#[derive(Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+pub struct ScheduledRefreshRequest {
+    pub enabled: bool,
+    #[serde(default)]
+    pub times: Vec<String>,
+}
+
+/// 定时刷新状态：时刻始终按后端系统本地时区显示，
+/// `timezone`/`utc_offset` 供面板标注时区，`next_run_at` 由后端重算。
+#[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+pub struct ScheduledRefreshStatus {
+    pub enabled: bool,
+    pub times: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
+    pub timezone: Option<String>,
+    /// 当前系统时区相对 UTC 的偏移，如 "+09:00"。
+    pub utc_offset: String,
+    /// 后端当前本地时间（RFC3339，带系统时区偏移）。
+    pub now: String,
+    /// 下次执行时间（RFC3339，带系统时区偏移）；未启用或没有有效时刻时为 None。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
+    pub next_run_at: Option<String>,
+}
+
 #[cfg(not(windows))]
 #[derive(Deserialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]

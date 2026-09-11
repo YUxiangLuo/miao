@@ -226,3 +226,119 @@ fn application_operations_do_not_depend_on_http_handlers_or_axum() {
         assert!(!source.contains("crate::responses"));
     }
 }
+
+#[tokio::test]
+async fn scheduled_refresh_is_a_shared_persistence_only_command() {
+    let (_command_root, command_state) = isolated_stopped_state(Config::default());
+    let (_rest_root, rest_state) = isolated_stopped_state(Config::default());
+    let (_mcp_root, mcp_state) = isolated_stopped_state(Config::default());
+    let revision = command_state.data_revision.load(Ordering::Relaxed);
+
+    let request = || ScheduledRefreshRequest {
+        enabled: true,
+        times: vec!["20:00".into(), "4:05".into(), "20:00".into()],
+    };
+    let command = settings::set_scheduled_refresh(command_state.clone(), request())
+        .await
+        .unwrap();
+    let Json(rest) =
+        crate::handlers::service::set_scheduled_refresh(State(rest_state.clone()), Json(request()))
+            .await
+            .ok()
+            .unwrap();
+    let mcp = tool(
+        &mcp_state,
+        "set_scheduled_refresh",
+        json!({"enabled": true, "times": ["20:00", "4:05", "20:00"]}),
+    )
+    .await;
+
+    assert!(rest.success);
+    assert_eq!(rest.message, command.message);
+    assert_eq!(mcp["result"]["isError"], false);
+    assert_eq!(
+        mcp["result"]["structuredContent"]["message"],
+        command.message
+    );
+    // 三入口写入的稳定层完全一致：排序去重后的时刻 + 持久化 YAML
+    for state in [&command_state, &rest_state, &mcp_state] {
+        let stable = state.stable_config.read().await.scheduled_refresh.clone();
+        assert!(stable.enabled);
+        assert_eq!(stable.times, vec!["04:05", "20:00"]);
+        let persisted: StableConfig =
+            yaml_serde::from_slice(&tokio::fs::read(&state.config_path).await.unwrap()).unwrap();
+        assert_eq!(persisted.scheduled_refresh, stable);
+        assert!(!state.runtime_paths.active_config.exists());
+        assert!(state.sing_process.lock().await.is_none());
+    }
+    assert_eq!(
+        command_state.data_revision.load(Ordering::Relaxed),
+        revision + 1
+    );
+
+    // 读取路径同样三入口一致，且带下次执行时间与时区信息
+    let command_get = settings::get_scheduled_refresh(command_state.clone()).await;
+    let Json(rest_get) =
+        crate::handlers::service::get_scheduled_refresh(State(rest_state.clone())).await;
+    let mcp_get = tool(&mcp_state, "get_scheduled_refresh", json!({})).await;
+    let status = command_get.data.as_ref().unwrap();
+    assert_eq!(status.times, vec!["04:05", "20:00"]);
+    assert!(status.next_run_at.is_some());
+    assert!(!status.utc_offset.is_empty());
+    // `now` 每次调用都不同，逐字段比较两个入口的读数投影。
+    let rest_status = rest_get.data.as_ref().unwrap();
+    assert_eq!(rest_status.times, status.times);
+    assert_eq!(rest_status.utc_offset, status.utc_offset);
+    assert_eq!(rest_status.timezone, status.timezone);
+    assert_eq!(rest_status.enabled, status.enabled);
+    assert_eq!(
+        mcp_get["result"]["structuredContent"]["times"],
+        serde_json::to_value(&status.times).unwrap()
+    );
+    assert_eq!(
+        mcp_get["result"]["structuredContent"]["utc_offset"],
+        status.utc_offset
+    );
+
+    // 其它稳定层保存（如 MCP 开关）不能抹掉定时刷新设置
+    settings::set_mcp(rest_state.clone(), McpRequest { enabled: true })
+        .await
+        .unwrap();
+    let persisted: StableConfig =
+        yaml_serde::from_slice(&tokio::fs::read(&rest_state.config_path).await.unwrap()).unwrap();
+    assert!(persisted.scheduled_refresh.enabled);
+    assert_eq!(persisted.scheduled_refresh.times, vec!["04:05", "20:00"]);
+
+    // 校验失败：启用但没有时刻、非法格式；失败不得覆盖已保存设置
+    let (_empty_status, Json(empty)) = crate::handlers::service::set_scheduled_refresh(
+        State(rest_state.clone()),
+        Json(ScheduledRefreshRequest {
+            enabled: true,
+            times: vec![],
+        }),
+    )
+    .await
+    .err()
+    .unwrap();
+    assert_eq!(empty.message, "启用定时刷新时至少需要一个时间点");
+    let (status_code, Json(invalid)) = crate::handlers::service::set_scheduled_refresh(
+        State(rest_state.clone()),
+        Json(ScheduledRefreshRequest {
+            enabled: false,
+            times: vec!["25:00".into()],
+        }),
+    )
+    .await
+    .err()
+    .unwrap();
+    assert_eq!(status_code, StatusCode::BAD_REQUEST);
+    assert!(invalid.message.contains("无效的时间"));
+    assert!(
+        rest_state
+            .stable_config
+            .read()
+            .await
+            .scheduled_refresh
+            .enabled
+    );
+}

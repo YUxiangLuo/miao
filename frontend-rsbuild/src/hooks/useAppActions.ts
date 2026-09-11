@@ -11,6 +11,7 @@ import type {
   RouteMode,
   RuleInfo,
   RuleRequest,
+  ScheduledRefreshRequest,
   SubBatchResult,
   VergeImportResult,
   VpsDeployRequest,
@@ -493,6 +494,20 @@ export function useAppActions(data: AppData) {
     }
   }, [apiCall, fetchStatus, showToast])
 
+  const handleSaveScheduledRefresh = useCallback(async (request: ScheduledRefreshRequest) => {
+    try {
+      await apiCall('scheduled-refresh', {
+        method: 'POST',
+        body: JSON.stringify(request),
+      }, 'scheduledRefresh')
+      showToast(request.enabled ? '定时刷新已启用' : '定时刷新已关闭', 'success')
+      return true
+    } catch (error) {
+      showToast(errorMessage(error), 'error')
+      return false
+    }
+  }, [apiCall, showToast])
+
   return {
     openConfirm,
     closeConfirm,
@@ -522,5 +537,6 @@ export function useAppActions(data: AppData) {
     handleAddRule,
     handleOpenDeleteRuleConfirm,
     handleToggleMcp,
+    handleSaveScheduledRefresh,
   }
 }

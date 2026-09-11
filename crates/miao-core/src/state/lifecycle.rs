@@ -95,6 +95,11 @@ impl RuntimeLifecycle {
         inner.snapshot.generation
     }
 
+    /// 服务是否已进入不可逆关闭流程；后台任务据此退出等待。
+    pub fn is_shutting_down(&self) -> bool {
+        self.inner.lock().unwrap().shutting_down
+    }
+
     pub fn is_current(&self, generation: u64) -> bool {
         let snapshot = self.snapshot();
         snapshot.generation == generation && snapshot.should_run

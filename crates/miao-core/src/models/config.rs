@@ -110,6 +110,24 @@ impl<'de> Deserialize<'de> for NodeSelect {
     }
 }
 
+/// 定时刷新订阅的持久配置（稳定字段，随 `config.yaml` 保存）。
+/// `times` 是每天的执行时刻 `"HH:MM"`，按运行主机的系统本地时区解释。
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+pub struct ScheduledRefresh {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub times: Vec<String>,
+}
+
+impl ScheduledRefresh {
+    /// YAML 省略条件：未启用且没有时刻。
+    pub fn is_default(&self) -> bool {
+        !self.enabled && self.times.is_empty()
+    }
+}
+
 /// Runtime-effective configuration.  This is deliberately separate from
 /// [`StableConfig`]: `node_select` and `route_mode` may have been overlaid by
 /// volatile preferences and must never overwrite their boot defaults in
@@ -173,6 +191,8 @@ pub struct StableConfig {
     pub custom_rules: Vec<String>,
     #[serde(default)]
     pub mcp: bool,
+    #[serde(default, skip_serializing_if = "ScheduledRefresh::is_default")]
+    pub scheduled_refresh: ScheduledRefresh,
     #[serde(default, skip_serializing_if = "NodeSelect::serde_is_manual")]
     pub node_select: NodeSelect,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -218,6 +238,8 @@ impl From<&Config> for StableConfig {
             nodes: config.nodes.clone(),
             custom_rules: config.custom_rules.clone(),
             mcp: config.mcp,
+            // 定时刷新只存在于稳定层（没有易变覆盖），不属于从 Config 投影的字段。
+            scheduled_refresh: ScheduledRefresh::default(),
             node_select: config.node_select,
             max_multiplier: config.max_multiplier,
             route_mode: config.route_mode,
@@ -250,6 +272,7 @@ impl StableConfig {
 
     /// Apply low-frequency fields from the effective configuration while
     /// retaining the boot defaults that came from `config.yaml`.
+    /// `scheduled_refresh` 没有易变覆盖，直接保留稳定层现值。
     pub fn with_stable_fields_from(&self, config: &Config) -> Self {
         Self {
             port: config.port,
@@ -257,9 +280,18 @@ impl StableConfig {
             nodes: config.nodes.clone(),
             custom_rules: config.custom_rules.clone(),
             mcp: config.mcp,
+            scheduled_refresh: self.scheduled_refresh.clone(),
             node_select: self.node_select,
             max_multiplier: self.max_multiplier,
             route_mode: self.route_mode,
+        }
+    }
+
+    /// 替换定时刷新设置，其余稳定字段不变。
+    pub fn with_scheduled_refresh(&self, scheduled_refresh: ScheduledRefresh) -> Self {
+        Self {
+            scheduled_refresh,
+            ..self.clone()
         }
     }
 }

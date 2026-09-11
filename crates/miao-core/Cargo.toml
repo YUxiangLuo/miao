@@ -22,6 +22,9 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 arc-swap = "1.7"
 bytes = "1.0"
+# 定时刷新按系统本地时区解释 "HH:MM"；iana-time-zone 只用于展示时区名（chrono 已间接依赖）。
+chrono = { version = "0.4.45", default-features = false, features = ["clock"] }
+iana-time-zone = "0.1"
 tokio-tungstenite = "0.29"
 tempfile = "3"
 ruzstd = "0.9"

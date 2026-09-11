@@ -13,14 +13,15 @@ pub mod version;
 pub use api::{
     ApiResponse, ConnectivityResult, DeleteRuleRequest, MaxMultiplierRequest, McpRequest,
     NodeSelectRequest, RouteModeRequest, RuleInfo, RuleRequest, RuntimePhase, RuntimeWarning,
-    RuntimeWarningSeverity, SetNodeDisabledRequest, StatusData, SubBatchRequest, SubBatchResult,
-    SubNodeInfo, SubNodesInfo, SubRequest, SubStatus, SubscriptionState, VergeImportItem,
-    VergeImportResult,
+    RuntimeWarningSeverity, ScheduledRefreshRequest, ScheduledRefreshStatus,
+    SetNodeDisabledRequest, StatusData, SubBatchRequest, SubBatchResult, SubNodeInfo, SubNodesInfo,
+    SubRequest, SubStatus, SubscriptionState, VergeImportItem, VergeImportResult,
 };
 #[cfg(not(windows))]
 pub use api::{VpsDeployRequest, VpsDeployResponse};
 pub use config::{
-    Config, DisabledNode, NodeSelect, Region, RouteMode, StableConfig, VolatileConfig, DEFAULT_PORT,
+    Config, DisabledNode, NodeSelect, Region, RouteMode, ScheduledRefresh, StableConfig,
+    VolatileConfig, DEFAULT_PORT,
 };
 pub use multiplier::{node_multiplier, NodeMultiplier};
 pub use node::{
@@ -98,6 +99,8 @@ mod typescript_contract {
         push_decl::<RuleRequest>(&mut output, &config);
         push_decl::<DeleteRuleRequest>(&mut output, &config);
         push_decl::<McpRequest>(&mut output, &config);
+        push_decl::<ScheduledRefreshRequest>(&mut output, &config);
+        push_decl::<ScheduledRefreshStatus>(&mut output, &config);
         push_decl::<RouteModeRequest>(&mut output, &config);
         push_decl::<NodeSelectRequest>(&mut output, &config);
         push_decl::<MaxMultiplierRequest>(&mut output, &config);

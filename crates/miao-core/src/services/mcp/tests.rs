@@ -200,6 +200,8 @@ async fn tools_list_covers_panel_capabilities() {
         "list_connections",
         "test_connectivity",
         "set_mcp_enabled",
+        "get_scheduled_refresh",
+        "set_scheduled_refresh",
         "deploy_vps",
         "upgrade_miao",
     ];

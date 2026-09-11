@@ -132,6 +132,13 @@
     color: var(--accent);
     flex: 0 0 auto;
 }
+/* 头部右侧控件组（如订阅管理的「定时刷新 + 添加」） */
+.section-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    flex: 0 0 auto;
+}
 /* 徽标基元由 .badge 提供，这里只保留计数色与居中几何 */
 .counter-pill {
     justify-content: center;
@@ -508,6 +515,60 @@
     display: flex;
     justify-content: flex-end;
     gap: var(--space-2);
+}
+/* 定时刷新弹窗：开关 + 时刻列表 + 时区/下次执行说明 */
+.schedule-modal .toggle-switch {
+    /* .toggle-switch 默认 margin-left:auto（卡片头部右对齐），弹窗内左对齐 */
+    margin-left: 0;
+}
+.schedule-section-label {
+    margin: var(--space-3) 0 var(--space-1);
+    color: var(--text-muted);
+    font-size: var(--fs-md);
+}
+.schedule-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    margin-bottom: var(--space-1);
+    max-height: 40vh;
+    overflow-y: auto;
+}
+.schedule-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
+}
+.schedule-row input[type="time"] {
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: var(--control-h-input);
+    padding: var(--space-1) var(--space-2);
+    border-radius: var(--r-sm);
+    border: 1px solid var(--border);
+    background: var(--surface-soft);
+    color: var(--text);
+    outline: none;
+}
+.schedule-row input[type="time"]:focus {
+    border-color: var(--accent);
+}
+.schedule-empty {
+    padding: var(--space-1) 0;
+    color: var(--text-muted);
+    font-size: var(--fs-md);
+}
+.schedule-note {
+    margin: var(--space-3) 0;
+    padding: var(--space-2);
+    border-radius: var(--r-sm);
+    background: var(--surface-soft);
+    color: var(--text-muted);
+    font-size: var(--fs-sm);
+    line-height: var(--lh-relaxed);
+}
+.schedule-error {
+    color: var(--danger);
 }
 /* 后端不可达时的顶部断线横幅（DashboardScreen），恢复后随状态自动消失 */
 .offline-banner {

@@ -1,6 +1,6 @@
 use crate::models::{
     ApiResponse, ConnectivityResult, MaxMultiplierRequest, NodeSelectRequest, RouteModeRequest,
-    StatusData,
+    ScheduledRefreshRequest, ScheduledRefreshStatus, StatusData,
 };
 use crate::responses::{command_reply, command_result, HandlerResult};
 use crate::services::commands;
@@ -40,6 +40,26 @@ pub async fn set_node_select(
     Json(req): Json<NodeSelectRequest>,
 ) -> HandlerResult {
     command_result(commands::service::set_node_select(state, req).await)
+}
+
+pub async fn get_scheduled_refresh(
+    State(state): State<Arc<AppState>>,
+) -> Json<ApiResponse<ScheduledRefreshStatus>> {
+    command_reply(commands::settings::get_scheduled_refresh(state).await)
+}
+
+pub async fn set_scheduled_refresh(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<ScheduledRefreshRequest>,
+) -> HandlerResult {
+    // 与其它设置类端点一致：REST 只回消息，完整状态由 GET 读取（MCP 仍返回 data）。
+    let result = commands::settings::set_scheduled_refresh(state, req)
+        .await
+        .map(|reply| crate::services::commands::CommandReply::<()> {
+            message: reply.message,
+            data: None,
+        });
+    command_result(result)
 }
 
 pub async fn test_connectivity(

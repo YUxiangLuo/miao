@@ -27,7 +27,7 @@ pub use persist::{
     load_node_select_preference, load_volatile_config_at, mark_legacy_cache_used,
     persist_effective_node_select, read_sub_nodes_snapshot, restore_config_from_cache,
     save_config_cache, save_max_multiplier_preference, save_node_select_preference,
-    save_stable_fields, CacheCompatibility, SubNodesReadModel,
+    save_scheduled_refresh, save_stable_fields, CacheCompatibility, SubNodesReadModel,
 };
 #[cfg(test)]
 pub use persist::{save_sub_nodes_snapshot, SubNodesSnapshot};
