@@ -123,14 +123,15 @@ describe('SubsCard header actions', () => {
     expect(screen.getByRole('button', { name: '刷新订阅' })).toBeEnabled()
   })
 
-  it('places the refresh button next to the title and add at the far right', async () => {
+  it('places the refresh and schedule icon buttons next to the title and add at the far right', async () => {
     const user = userEvent.setup()
     const { props } = renderCard()
 
     const header = document.querySelector('.section-header') as HTMLElement
     const titleWrap = header.querySelector('.section-title-wrap') as HTMLElement
-    // 刷新按钮紧跟标题（在 title-wrap 内），添加按钮在标题栏最右（title-wrap 外）
+    // 刷新与定时刷新都是标题旁的 icon 按钮（在 title-wrap 内），添加按钮在标题栏最右（title-wrap 外）
     expect(within(titleWrap).getByRole('button', { name: '刷新订阅' })).toBeInTheDocument()
+    expect(within(titleWrap).getByRole('button', { name: '定时刷新' })).toBeInTheDocument()
     expect(within(titleWrap).queryByRole('button', { name: '添加' })).not.toBeInTheDocument()
     expect(within(header).getByRole('button', { name: '添加' })).toBeInTheDocument()
 

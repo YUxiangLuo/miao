@@ -178,27 +178,25 @@ export function SubsCard({ subs, refreshStatus, pendingActions, onAddSub, onDele
             >
               <RefreshCw size={ICON.xs} className={refreshing ? 'spin' : undefined} />
             </button>
-          </div>
-          <div className="section-actions">
-            <Button
-              tone="secondary"
-              size="sm"
-              icon={<Clock size={ICON.xs} />}
-              disabled={isInitializing}
+            <button
+              className="icon-button subtle"
               onClick={() => setShowSchedule(true)}
-            >
-              定时刷新
-            </Button>
-            <Button
-              tone="secondary"
-              size="sm"
-              icon={<Plus size={ICON.xs} />}
               disabled={isInitializing}
-              onClick={() => setShowAdd(true)}
+              aria-label="定时刷新"
+              title="定时刷新"
             >
-              添加
-            </Button>
+              <Clock size={ICON.xs} />
+            </button>
           </div>
+          <Button
+            tone="secondary"
+            size="sm"
+            icon={<Plus size={ICON.xs} />}
+            disabled={isInitializing}
+            onClick={() => setShowAdd(true)}
+          >
+            添加
+          </Button>
         </div>
       }
     >
