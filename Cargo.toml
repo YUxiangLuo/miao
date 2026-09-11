@@ -5,7 +5,7 @@ members = ["crates/miao-core", "crates/miao-cli", "desktop/src-tauri"]
 default-members = ["crates/miao-core", "crates/miao-cli"]
 
 [workspace.package]
-version = "0.47.0"
+version = "0.47.1"
 edition = "2021"
 license = "MIT"
 
