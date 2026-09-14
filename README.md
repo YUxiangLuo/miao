@@ -7,7 +7,7 @@
   </p>
 </div>
 
-Miao 将 sing-box 内核、分流规则和 Web 面板打包在一起，用 TUN 接管整机流量。Linux / OpenWrt 分发单个可执行文件，Windows 提供带托盘的桌面程序；在面板中配置订阅、节点和规则，支持深浅双主题。
+Miao 将 sing-box 内核、分流规则和 Web 面板打包在一起，用 TUN 接管整机流量。Linux / OpenWrt 分发单个可执行文件，Windows 提供带托盘的桌面程序。
 
 客户端内核支持 Shadowsocks、VMess、VLESS、Trojan、AnyTLS、Hysteria2、TUIC，裁剪与构建方式见[内核文档](docs/kernel.md)。
 
@@ -18,13 +18,10 @@ Miao 将 sing-box 内核、分流规则和 Web 面板打包在一起，用 TUN �
 ### Linux / OpenWrt
 
 ```bash
-mkdir -p ~/miao && cd ~/miao
 wget https://github.com/YUxiangLuo/miao/releases/latest/download/miao-rust-linux-amd64 -O miao
 chmod +x miao
 sudo ./miao
 ```
-
-打开 `http://localhost:6161`。arm64 将文件名中的 `amd64` 改为 `arm64`；OpenWrt 已是 root 时直接运行 `./miao`。
 
 也可使用临时订阅，以“日本最快”启动：
 
