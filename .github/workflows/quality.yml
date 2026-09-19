@@ -21,7 +21,7 @@ jobs:
         run: bun install --cwd frontend-rsbuild --frozen-lockfile
 
       - name: Audit dependencies
-        run: bun audit --cwd frontend-rsbuild
+        run: bash scripts/audit-frontend.sh
 
       - name: Lint
         run: bun run --cwd frontend-rsbuild lint
