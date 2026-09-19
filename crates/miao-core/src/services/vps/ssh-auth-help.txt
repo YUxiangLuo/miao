@@ -1,0 +1,36 @@
+解决办法：请通过服务商控制台或已有 SSH 会话，在目标 VPS 上以 root 执行；不是在运行 Miao 的设备上执行。
+
+1. 查看实际生效的配置。主配置写了 yes 不代表实际生效；期望两项都为 yes。
+```sh
+sshd -t && sshd -T | grep -E '^(permitrootlogin|passwordauthentication) '
+```
+
+2. 如果仍为 no（或 prohibit-password），检查 Include、Match 和配置片段。Rocky 等云镜像可能在 50-cloud-init.conf 中设置 PasswordAuthentication no；多数选项采用先读到的值，主配置后面的 yes 不会覆盖它。
+```sh
+grep -RniE '^[[:space:]]*(Include|Match|PermitRootLogin|PasswordAuthentication|AuthenticationMethods|AllowUsers|DenyUsers)' /etc/ssh/sshd_config /etc/ssh/sshd_config.d/
+```
+
+3. 仅当已确认 sshd_config 提前 Include 了 /etc/ssh/sshd_config.d/*.conf，且后面的 cloud-init 片段禁用了密码认证时，可新增更早加载的本地配置。下面的操作会开启 root 密码远程登录；仅在你希望允许这种登录方式时执行，并保留当前控制台会话。若已有同名文件，先查看内容再决定如何修改。
+```sh
+(set -C; printf '%s\n' 'PermitRootLogin yes' 'PasswordAuthentication yes' > /etc/ssh/sshd_config.d/00-miao-password-auth.conf)
+```
+
+配置不存在上述 Include 时，请修改实际生效的配置；有 Match 条件时，还需针对 root 和 Miao 的实际来源地址检查，不能只看不带连接条件的 sshd -T 输出。
+
+4. 检查语法、重新加载并再次核对。两项均为 yes 后，再回到 Miao 重试部署。语法检查失败时不要重启服务，先修正报错。
+```sh
+sshd -t && {
+  if [ -d /run/systemd/system ]; then
+    systemctl reload sshd || systemctl reload ssh
+  else
+    rc-service sshd reload
+  fi
+}
+sshd -T | grep -E '^(permitrootlogin|passwordauthentication) '
+```
+
+5. 两项均为 yes 但仍失败：确认输入的是 root 密码，而非普通用户密码；检查 AuthenticationMethods、AllowUsers/DenyUsers、Match 条件、账户锁定和认证日志。客户端无法仅凭 Permission denied 判断具体是哪一项。
+在 systemd VPS 上重试一次后查看日志；Alpine/OpenRC 则查看系统配置的认证日志（如 /var/log/messages 或 /var/log/auth.log）。
+```sh
+journalctl -u sshd -u ssh --since '3 minutes ago' --no-pager -n 60
+```

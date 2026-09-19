@@ -97,6 +97,10 @@ pub(super) fn failure(output: &SshOutput, stage: &str, secrets: &[&str]) -> AppE
         details = details.replace(secret, "[已隐藏]");
     }
     let lower = details.to_ascii_lowercase();
+    let authentication_failed = output.status.code() == Some(255)
+        && (lower.contains("permission denied")
+            || lower.contains("authentication failed")
+            || lower.contains("no supported authentication methods"));
     let hint = if output.status.code() != Some(255) {
         details
             .lines()
@@ -107,11 +111,7 @@ pub(super) fn failure(output: &SshOutput, stage: &str, secrets: &[&str]) -> AppE
         || lower.contains("host key verification failed")
     {
         "SSH 主机密钥校验失败。若 VPS 曾重装，请先通过服务商控制台核对主机指纹，再更新运行 Miao 账户的 known_hosts；不要直接关闭主机校验。"
-    } else if output.status.code() == Some(255)
-        && (lower.contains("permission denied")
-            || lower.contains("authentication failed")
-            || lower.contains("no supported authentication methods"))
-    {
+    } else if authentication_failed {
         "SSH 认证被拒绝。当前部署使用 root 密码登录：请确认密码正确，且 VPS 允许 root 登录和密码认证。客户端无法区分密码错误与服务端禁用登录；请通过服务商控制台检查 sshd 的 PermitRootLogin、PasswordAuthentication、Include/Match 配置及认证日志。若仅允许密钥登录，当前密码部署方式不适用。"
     } else if lower.contains("connection refused") {
         "SSH 连接被拒绝。请确认 VPS 的 SSH 服务已启动并监听 22 端口；当前部署使用固定的 22 端口。"
@@ -145,8 +145,13 @@ pub(super) fn failure(output: &SshOutput, stage: &str, secrets: &[&str]) -> AppE
         .into_iter()
         .rev()
         .collect();
+    let help = if authentication_failed {
+        format!("\n\n{}", include_str!("ssh-auth-help.txt").trim())
+    } else {
+        String::new()
+    };
     AppError::message(format!(
-        "{stage}失败：{hint}\n\n错误详情（退出状态 {}）：\n{}",
+        "{stage}失败：{hint}{help}\n\n错误详情（退出状态 {}）：\n{}",
         output.status,
         if detail.trim().is_empty() {
             "SSH 未返回错误信息"
@@ -204,6 +209,35 @@ mod tests {
         assert!(error.contains("安装依赖失败，请检查软件源。"));
         assert!(!error.contains("secret-root"));
         assert!(!error.contains("secret-node"));
+    }
+
+    #[test]
+    fn auth_failures_include_conditional_cloud_init_recovery_steps() {
+        let error = failure(
+            &output("Permission denied (publickey).", 255),
+            "检查 VPS 环境",
+            &[],
+        )
+        .to_string();
+        assert!(error.contains("目标 VPS 上以 root 执行"));
+        assert!(error.contains("sshd -t && sshd -T"));
+        assert!(error.contains("50-cloud-init.conf"));
+        assert!(error.contains("仅当已确认"));
+        assert!(error.contains("(set -C; printf"));
+        assert!(error.contains("systemctl reload sshd || systemctl reload ssh"));
+        assert!(error.contains("rc-service sshd reload"));
+        assert!(error.contains("journalctl -u sshd -u ssh"));
+        let raw = error.find("错误详情（退出状态").unwrap();
+        assert!(error.find("解决办法：").unwrap() < raw);
+        for (stderr, code) in [
+            ("Connection refused", 255),
+            ("Permission denied", 1),
+            ("Host key verification failed", 255),
+        ] {
+            assert!(!failure(&output(stderr, code), "检查 VPS 环境", &[])
+                .to_string()
+                .contains("00-miao-password-auth.conf"));
+        }
     }
 
     #[tokio::test]

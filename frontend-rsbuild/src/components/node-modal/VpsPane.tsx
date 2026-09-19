@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Rocket, X } from 'lucide-react'
 import { ICON } from '../../tokens'
 import { Button } from '../ui'
+import { VpsErrorDetails } from './VpsErrorDetails'
 import type { VpsDeployRequest } from '../../types/api'
 
 export interface VpsPaneProps {
@@ -76,8 +77,8 @@ export function VpsPane({ onDeploy, loading }: VpsPaneProps) {
           <div className="vps-deploy-error-message">{errorSummary}</div>
           {errorDetails.length > 0 ? (
             <details className="vps-deploy-error-details">
-              <summary>查看错误详情</summary>
-              <div className="vps-deploy-error-message">{errorDetails.join('\n\n')}</div>
+              <summary>{errorDetails.some((part) => part.startsWith('解决办法：')) ? '查看解决办法与错误详情' : '查看错误详情'}</summary>
+              <VpsErrorDetails text={errorDetails.join('\n\n')} />
             </details>
           ) : null}
         </div>

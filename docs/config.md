@@ -54,6 +54,8 @@ scheduled_refresh:
 
 `Permission denied` 不能单独证明密码错误：服务端禁用 root 登录或密码认证也可能返回相同错误。请通过服务商控制台检查密码、sshd 的 `PermitRootLogin` / `PasswordAuthentication`、`Include` / `Match` 覆盖项及认证日志；仅允许密钥的 VPS 暂不适用当前部署方式。主机密钥变化时，先核对服务商提供的指纹，再更新运行 Miao 账户的 `known_hosts`。
 
+认证失败时，面板「查看解决办法与错误详情」提供逐步说明和可复制命令：先用 `sshd -T` 检查实际生效值，再定位配置片段。若确认 `50-cloud-init.conf` 提前设置了 `PasswordAuthentication no`，可按提示新增更早加载的本地配置，经 `sshd -t` 校验后重新加载服务。修复命令不会覆盖已有同名文件；存在 `Match` 条件时需按实际连接进一步核对。Miao 不会自动执行这些命令。
+
 ## 状态保存与节点选择
 
 | 文件 | 保存内容 |
