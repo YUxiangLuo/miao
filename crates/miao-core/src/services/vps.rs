@@ -1,9 +1,7 @@
 use std::io::Read;
 use std::path::Path;
-use std::process::Stdio;
 
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::time::{timeout, Duration};
+use tokio::time::Duration;
 use tracing::{info, warn};
 
 use crate::error::{AppError, AppResult};
@@ -11,10 +9,12 @@ use crate::models::{Config, Hysteria2, Hysteria2Obfs, Tls};
 use crate::services::node_parser::parse_node_json;
 use crate::validation::Validator;
 
+mod ssh;
+
 const HYSTERIA_PORT: u16 = 543;
 const HYSTERIA_OBFS_TYPE: &str = "gecko";
 const SSH_CONNECT_TIMEOUT_SECS: &str = "10";
-const SSH_PROBE_TIMEOUT: Duration = Duration::from_secs(30);
+const SSH_PROBE_TIMEOUT: Duration = Duration::from_secs(180);
 const SSH_PROVISION_TIMEOUT: Duration = Duration::from_secs(300);
 
 fn set_file_mode(path: &Path, mode: u32) -> std::io::Result<()> {
@@ -111,7 +111,19 @@ fn build_ssh_command(
         .env("SSH_ASKPASS_REQUIRE", "force")
         // ssh 只在认定无 tty 且设置了 DISPLAY 时才走 askpass
         .env("DISPLAY", "localhost:0")
+        .env("LC_ALL", "C")
         .args([
+            "-T",
+            "-o",
+            "PreferredAuthentications=password,keyboard-interactive",
+            "-o",
+            "PubkeyAuthentication=no",
+            "-o",
+            "NumberOfPasswordPrompts=1",
+            "-o",
+            "ServerAliveInterval=10",
+            "-o",
+            "ServerAliveCountMax=2",
             "-o",
             "StrictHostKeyChecking=accept-new",
             "-o",
@@ -269,63 +281,21 @@ async fn probe_remote_hysteria_credentials(
     root_password: &str,
 ) -> AppResult<RemoteHysteriaState> {
     let askpass = AskpassFiles::new(root_password)?;
-    let mut child = build_ssh_command(vps_ip, &askpass, &["bash", "-s"])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| AppError::context("Failed to start ssh for VPS config probe", e))?;
-
-    if let Some(mut stdin) = child.stdin.take() {
-        let script = with_shell_vars(
-            remote_hysteria_probe_script(),
-            &[("FALLBACK_OBFS_PASSWORD", fallback_obfs_password)],
-        );
-        stdin
-            .write_all(script.as_bytes())
-            .await
-            .map_err(|e| AppError::context("Failed to send VPS config probe script over ssh", e))?;
+    let script = with_shell_vars(
+        &remote_hysteria_probe_script(),
+        &[("FALLBACK_OBFS_PASSWORD", fallback_obfs_password)],
+    );
+    let output = ssh::run_script(
+        build_ssh_command(vps_ip, &askpass, &["sh", "-s"]),
+        &script,
+        SSH_PROBE_TIMEOUT,
+        "检查 VPS 环境",
+    )
+    .await?;
+    if output.status.success() {
+        return parse_probe_credentials(&output.stdout).map(RemoteHysteriaState::Reusable);
     }
-
-    let mut stdout = child
-        .stdout
-        .take()
-        .ok_or_else(|| AppError::message("Failed to capture ssh probe stdout"))?;
-    let mut stderr = child
-        .stderr
-        .take()
-        .ok_or_else(|| AppError::message("Failed to capture ssh probe stderr"))?;
-
-    let status = match timeout(SSH_PROBE_TIMEOUT, child.wait()).await {
-        Ok(result) => {
-            result.map_err(|e| AppError::context("Failed to wait for ssh config probe", e))?
-        }
-        Err(_) => {
-            let _ = child.start_kill();
-            let _ = child.wait().await;
-            return Err(AppError::message(
-                "Timed out while probing VPS Hysteria2 config over ssh",
-            ));
-        }
-    };
-
-    let mut stdout_buf = Vec::new();
-    stdout
-        .read_to_end(&mut stdout_buf)
-        .await
-        .map_err(|e| AppError::context("Failed to read ssh probe stdout", e))?;
-    let mut stderr_buf = Vec::new();
-    stderr
-        .read_to_end(&mut stderr_buf)
-        .await
-        .map_err(|e| AppError::context("Failed to read ssh probe stderr", e))?;
-
-    if status.success() {
-        return parse_probe_credentials(&stdout_buf).map(RemoteHysteriaState::Reusable);
-    }
-
-    let stderr_text = String::from_utf8_lossy(&stderr_buf);
-    match status.code() {
+    match output.status.code() {
         Some(10) => {
             info!(vps_ip = %vps_ip, "No reusable remote Hysteria2 config found");
             Ok(RemoteHysteriaState::NotFound)
@@ -333,25 +303,15 @@ async fn probe_remote_hysteria_credentials(
         Some(30) => {
             info!(
                 vps_ip = %vps_ip,
-                reason = %stderr_text.trim(),
                 "Remote Hysteria2 service is not deployed by Miao; it will be cleaned up and re-provisioned"
             );
             Ok(RemoteHysteriaState::NeedsCleanup)
         }
-        _ => {
-            let message = stderr_text.trim();
-            if message.is_empty() {
-                Err(AppError::message(format!(
-                    "VPS Hysteria2 config probe failed with status {}",
-                    status
-                )))
-            } else {
-                Err(AppError::message(format!(
-                    "VPS Hysteria2 config probe failed with status {}: {}",
-                    status, message
-                )))
-            }
-        }
+        _ => Err(ssh::failure(
+            &output,
+            "检查 VPS 环境",
+            &[root_password, fallback_obfs_password],
+        )),
     }
 }
 
@@ -392,56 +352,48 @@ async fn provision_remote_hysteria(
     root_password: &str,
 ) -> AppResult<()> {
     let askpass = AskpassFiles::new(root_password)?;
-    let mut child = build_ssh_command(vps_ip, &askpass, &["bash", "-s"])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit())
-        .spawn()
-        .map_err(|e| AppError::context("Failed to start ssh for VPS provisioning", e))?;
-
-    if let Some(mut stdin) = child.stdin.take() {
-        let script = with_shell_vars(
-            remote_hysteria_script(),
+    let script = with_shell_vars(
+        &remote_hysteria_script(),
+        &[
+            ("PASSWORD", &credentials.password),
+            ("OBFS_PASSWORD", &credentials.obfs_password),
+        ],
+    );
+    let output = ssh::run_script(
+        build_ssh_command(vps_ip, &askpass, &["sh", "-s"]),
+        &script,
+        SSH_PROVISION_TIMEOUT,
+        "安装 Hysteria2",
+    )
+    .await?;
+    if !output.status.success() {
+        return Err(ssh::failure(
+            &output,
+            "安装 Hysteria2",
             &[
-                ("PASSWORD", &credentials.password),
-                ("OBFS_PASSWORD", &credentials.obfs_password),
+                root_password,
+                &credentials.password,
+                &credentials.obfs_password,
             ],
-        );
-        stdin
-            .write_all(script.as_bytes())
-            .await
-            .map_err(|e| AppError::context("Failed to send VPS provisioning script over ssh", e))?;
+        ));
     }
-
-    let status = match timeout(SSH_PROVISION_TIMEOUT, child.wait()).await {
-        Ok(result) => {
-            result.map_err(|e| AppError::context("Failed to wait for ssh provisioning", e))?
-        }
-        Err(_) => {
-            let _ = child.start_kill();
-            let _ = child.wait().await;
-            return Err(AppError::message(
-                "Timed out while provisioning VPS over ssh",
-            ));
-        }
-    };
-
-    if !status.success() {
-        return Err(AppError::message(format!(
-            "VPS provisioning over ssh failed with status {}",
-            status
-        )));
-    }
-
     Ok(())
 }
 
-fn remote_hysteria_probe_script() -> &'static str {
-    include_str!("vps/probe.sh")
+fn remote_hysteria_probe_script() -> String {
+    format!(
+        "{}\n{}",
+        include_str!("vps/common.sh"),
+        include_str!("vps/probe.sh")
+    )
 }
 
-fn remote_hysteria_script() -> &'static str {
-    include_str!("vps/provision.sh")
+fn remote_hysteria_script() -> String {
+    format!(
+        "{}\n{}",
+        include_str!("vps/common.sh"),
+        include_str!("vps/provision.sh")
+    )
 }
 
 #[cfg(test)]
@@ -463,7 +415,7 @@ mod tests {
     fn password_auth_uses_askpass_and_keeps_password_out_of_argv() {
         let password = "s3cret-root-password";
         let askpass = AskpassFiles::new(password).unwrap();
-        let cmd = build_ssh_command("203.0.113.10", &askpass, &["bash", "-s"]);
+        let cmd = build_ssh_command("203.0.113.10", &askpass, &["sh", "-s"]);
         let std_cmd = cmd.as_std();
 
         assert!(command_has_env(std_cmd, "SSH_ASKPASS_REQUIRE", "force"));
@@ -473,6 +425,8 @@ mod tests {
             .any(|(k, v)| k == "SSH_ASKPASS" && v.is_some()));
         // 密码不出现在进程参数里
         assert!(!std_cmd.get_args().any(|a| a == password));
+        assert!(std_cmd.get_args().any(|a| a == "PubkeyAuthentication=no"));
+        assert!(std_cmd.get_args().any(|a| a == "NumberOfPasswordPrompts=1"));
 
         // askpass 脚本内容是读取密码文件,而不是内嵌密码
         let script = std::fs::read_to_string(&askpass.script_path).unwrap();
@@ -576,11 +530,14 @@ mod tests {
     fn provision_script_cleans_up_before_reprovisioning() {
         let script = remote_hysteria_script();
 
-        assert!(script.contains("systemctl stop \"$SERVICE\""));
-        assert!(script.contains("systemctl disable \"$SERVICE\""));
+        assert!(script.contains("miao_stop >/dev/null"));
+        assert!(script.contains("miao_disable >/dev/null"));
         assert!(script.contains("pkill -x hysteria"));
         assert!(script.contains("rm -rf /etc/hysteria"));
-        assert!(script.contains("rm -f /usr/local/bin/hysteria"));
+        assert!(
+            script.find("checksum mismatch").unwrap()
+                < script.find("rm -rf /etc/hysteria").unwrap()
+        );
         assert!(script.contains("-subj \"/CN=miao-hysteria\""));
     }
 

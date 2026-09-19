@@ -1,23 +1,8 @@
-set -euo pipefail
-# FALLBACK_OBFS_PASSWORD 由调用方以变量前缀形式经 stdin 注入(不进远端 argv)
+# common.sh has checked root, init system and prerequisites.
 CONFIG="/etc/hysteria/config.yaml"
-SERVICE="hysteria-server.service"
-
-if [ "$(id -u)" -ne 0 ]; then
-  echo "Miao VPS config probe requires root SSH access" >&2
-  exit 20
-fi
-
 if [ ! -f "$CONFIG" ]; then
   exit 10
 fi
-
-for cmd in awk grep openssl systemctl; do
-  if ! command -v "$cmd" >/dev/null 2>&1; then
-    echo "Missing required command: $cmd" >&2
-    exit 11
-  fi
-done
 
 # 仅当证书是 miao 部署时生成的(CN=miao-hysteria)才复用配置,否则视为
 # 第三方部署,需要清理后重新部署。
@@ -123,8 +108,6 @@ EOF
   chmod 600 "$CONFIG"
 fi
 
-systemctl enable "$SERVICE" >/dev/null 2>&1 || true
-systemctl restart "$SERVICE"
-systemctl is-active --quiet "$SERVICE"
+miao_start_checked
 printf '%s\n' "$PASSWORD"
 printf '%s\n' "$GECKO_PASSWORD"

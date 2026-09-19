@@ -342,21 +342,16 @@ export function useAppActions(data: AppData) {
   }, [apiCall, clearDelays, closeNodeModal, fetchNodes, showToast])
 
   const handleDeployVps = useCallback(async ({ ip, password }: VpsDeployRequest): Promise<boolean> => {
-    try {
-      const payload = await apiCall<VpsDeployResponse>(
-        'vps/deploy',
-        { method: 'POST', body: JSON.stringify({ ip, password }) },
-        'deployVps',
-      )
-      closeNodeModal()
-      await fetchNodes()
-      clearDelays()
-      showToast(payload.message, 'success')
-      return true
-    } catch (error) {
-      showToast(errorMessage(error), 'error')
-      return false
-    }
+    const payload = await apiCall<VpsDeployResponse>(
+      'vps/deploy',
+      { method: 'POST', body: JSON.stringify({ ip, password }) },
+      'deployVps',
+    )
+    closeNodeModal()
+    await fetchNodes()
+    clearDelays()
+    showToast(payload.message, 'success')
+    return true
   }, [apiCall, clearDelays, closeNodeModal, fetchNodes, showToast])
 
   const handleDeleteNode = useCallback(async (tag: string) => {

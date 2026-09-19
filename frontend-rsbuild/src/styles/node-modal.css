@@ -154,3 +154,34 @@
     font-size: var(--fs-sm);
     line-height: var(--lh-normal);
 }
+.vps-deploy-error {
+    min-height: 0;
+    flex: 0 1 auto;
+    overflow-y: auto;
+    padding: var(--space-2);
+    border: var(--bw) solid color-mix(in srgb, var(--danger) 45%, transparent);
+    border-radius: var(--r-md);
+    background: var(--surface-red);
+    color: var(--text);
+    font-size: var(--fs-sm);
+    line-height: var(--lh-normal);
+}
+.vps-deploy-error-heading {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: var(--space-2);
+    color: var(--danger);
+}
+.vps-deploy-error-message {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    user-select: text;
+}
+.vps-deploy-error-details {
+    margin-top: var(--space-2);
+}
+.vps-deploy-error-details summary {
+    cursor: pointer;
+    color: var(--text-muted);
+}

@@ -43,6 +43,17 @@ scheduled_refresh:
 
 手动节点支持七种协议，见[内核能力](kernel.md#能力与裁剪)。自定义规则优先于内置分流，全局模式下仍生效；出口可填 `proxy`、`direct` 或节点 tag，引用缺失/禁用节点的规则会跳过并在面板标记。Windows 进程名需带 `.exe`。
 
+## VPS 一键部署
+
+面板「添加节点 → VPS 部署」通过 SSH 安装 Hysteria2，也可恢复已有 Miao 部署的节点。运行 Miao 的设备须有 OpenSSH 客户端；Windows 面板不提供此功能。
+
+- 目标为 Linux x86_64/arm64 VPS，使用 systemd 或 OpenRC。依赖安装适配 Debian/Ubuntu（apt）、Fedora/RHEL 系（dnf/yum）、Alpine（apk）、Arch（pacman）和 openSUSE（zypper）；没有对应包管理器时须预装所需工具。远端仅需 POSIX sh，不依赖 bash。
+- 当前使用 **root 密码登录、SSH 22 端口**，不支持密钥或非 root sudo 登录。密码只用于本次连接；不会写入 Miao 配置。
+- 使用固定版本及官方校验清单，下载校验成功后才替换已有服务。Hysteria2 监听 **543/UDP**，须在服务商安全组及 VPS 防火墙中放行。
+- 失败原因保留在部署窗口，可展开、选取错误详情，手动关闭或重试后清除。错误区分认证拒绝、连接拒绝/超时、DNS/路由问题、主机密钥变化、依赖安装及服务启动失败。
+
+`Permission denied` 不能单独证明密码错误：服务端禁用 root 登录或密码认证也可能返回相同错误。请通过服务商控制台检查密码、sshd 的 `PermitRootLogin` / `PasswordAuthentication`、`Include` / `Match` 覆盖项及认证日志；仅允许密钥的 VPS 暂不适用当前部署方式。主机密钥变化时，先核对服务商提供的指纹，再更新运行 Miao 账户的 `known_hosts`。
+
 ## 状态保存与节点选择
 
 | 文件 | 保存内容 |
