@@ -9,8 +9,8 @@ fn tun_inbound_enables_auto_redirect_only_on_linux() {
         "/../../scripts/sing-box/source.json"
     )))
     .unwrap();
-    assert_eq!(inbound["stack"], "go");
-    assert_eq!(inbound["stack"], profile["tun_stack"]);
+    assert!(inbound.get("stack").is_none());
+    assert_eq!(profile["tun_stack"], "go");
     assert_eq!(inbound["type"], "tun");
     assert_eq!(inbound["auto_route"], true);
     assert_eq!(inbound["strict_route"], true);

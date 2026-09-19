@@ -458,9 +458,9 @@ fn apply_route_mode(
 }
 
 pub(super) fn tun_inbound() -> serde_json::Value {
+    // Since sing-box 1.15, omitting the deprecated stack option selects GoTUN.
     let mut inbound = serde_json::json!({
         "type": "tun",
-        "stack": "go",
         "tag": "tun-in",
         "interface_name": "sing-tun",
         "address": ["172.18.0.1/30"],

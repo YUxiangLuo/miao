@@ -39,6 +39,7 @@ func TestMiaoClientConfigurations(t *testing.T) {
 			var config map[string]any
 			if err := json.Unmarshal([]byte(`{
 				"log":{"disabled":true},
+				"inbounds":[{"type":"tun","tag":"tun-in","interface_name":"sing-tun","address":["172.18.0.1/30"],"mtu":9000,"auto_route":true,"strict_route":true}],
 				"experimental":{"clash_api":{"external_controller":"127.0.0.1:0"}},
 				"dns":{"final":"remote","strategy":"ipv4_only","reverse_mapping":true,"cache_capacity":4096,
 					"optimistic":{"enabled":true,"timeout":"8h"},
@@ -101,7 +102,7 @@ func TestMiaoClientCommands(t *testing.T) {
 }
 
 func TestMiaoRemovedOutboundsFailBeforeStart(t *testing.T) {
-	for _, protocol := range []string{"socks", "http", "ssh", "tor", "snell", "shadowtls", "hysteria", "wireguard"} {
+	for _, protocol := range []string{"socks", "http", "ssh", "tor", "snell", "shadowtls", "hysteria", "wireguard", "tailcat"} {
 		t.Run(protocol, func(t *testing.T) {
 			miaoContextFixture(t)
 			config := `{"outbounds":[{"type":"` + protocol + `","tag":"removed","server":"127.0.0.1","server_port":1}]}`

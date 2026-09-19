@@ -8,7 +8,7 @@
 
 | 类别 | 保留能力 |
 | --- | --- |
-| 入站 | TUN，Miao 显式使用 `stack: "go"`；保留 system 栈供诊断回退，不自动切换 |
+| 入站 | TUN，省略已弃用的 `stack` 字段，使用上游默认 GoTUN；保留 system 栈供诊断回退，不自动切换 |
 | 节点出站 | Shadowsocks、VMess、VLESS、Trojan、AnyTLS、Hysteria2、TUIC，以及这些协议的传输、TLS/uTLS、Reality、复用和 Shadowsocks 插件 |
 | 内部出站 | direct、selector、urltest |
 | DNS | UDP、HTTPS、local（隐式兜底） |
@@ -49,7 +49,7 @@ MIAO_TARGET=windows-amd64 ./scripts/build-embedded.sh --kernel-only
 
 1. 审查协议、TUN、DNS、Clash API 及依赖变化，修改 `source.json`，递增内核版本。源码与 Go 可分别升级；`go.mod` 的最低版本不等于所选工具链已获验证。
 2. 审查客户端补丁。冲突必须处理；上游合入等效修复后删除功能补丁，保留行为回归。
-3. 执行上面的三目标构建及[开发检查](../DEV_NOTES.md#开发检查)。构建会将隔离、能力和配置回归重复 20 次：精确能力集合须为上游子集，仅暴露 TUN 入站，并验证 11 组客户端配置与 8 种已移除出站的拒绝行为。
+3. 执行上面的三目标构建及[开发检查](../DEV_NOTES.md#开发检查)。构建会将隔离、能力和配置回归重复 20 次：精确能力集合须为上游子集，仅暴露 TUN 入站，并验证 11 组含 TUN 的客户端配置与 9 种已移除出站（含 Tailcat）的拒绝行为。
 4. 在隔离环境验收 TUN/DNS 分流、Clash 面板和连续重载；Windows/OpenWrt 还需真机验证。CI 的原生 `version`、交叉编译及 Rust 真实内核解压测试不替代网络验收。
 5. 发布时保留对应源码和产物清单。Release 附带 `miao-embedded-sources.txt` 与各平台 `miao-kernel-*.json`。
 
@@ -57,17 +57,22 @@ testing 曾重写历史，固定 SHA 只能保证内容，不能保证对象永�
 
 ## 当前基线验证记录
 
-2026-09-11，`f6ce1d5be042436d2b498d216cef718ea87a1ca8` / Go 1.27.1 / `1.15.0-alpha.2+miao.4.f6ce1d5b`，单队列（`multi_queue` 默认关闭）。相对上一固定点的上游源码只有 10 个文件：连接管理器加锁与注册顺序、ICMP `reject` 继续匹配、`endpoint_independent_nat` 文档废弃（Miao 未使用）和依赖更新；`include/` 未变。sing-tun v0.9.3→v0.9.4 已单独审查：Linux auto-redirect/NFQUEUE 重写（nftables output 链改 `route`、双向 mark 与 reply 方向跳过、iptables 规则重排、非 TCP 改 `NF_REPEAT`）、GoTUN TCP 持久定时器/FRTO/SACK 修复、GoTUN UDP NAT 分片与 GSO MTU 重分段；`with_gvisor` 文件不在本构建内。
+2026-09-20，固定上游 `testing` 的最新提交 [`eb57d4f5293fbec9417be18237a81d30824b8285`](https://github.com/SagerNet/sing-box/commit/eb57d4f5293fbec9417be18237a81d30824b8285) / Go 1.27.1 / `1.15.0-alpha.6+miao.5.eb57d4f5`，单队列（`multi_queue` 默认关闭）。相对上一固定点 `f6ce1d5b` 共 51 个提交、159 个文件变化，重点核对：
+
+- DNS 查询去重、DNS 嗅探误判修复、隐式 DNS/出站初始化、连接取消与空闲连接管理，以及 Windows 进程查询变化。
+- sing-tun 升至 `v0.9.6-0.20260919141142-a39eab51450b`，涉及 GoTUN TCP/UDP、内存设备、Windows I/O、Linux/Android 自动重定向；sing 和 sing-mux 同步跟随上游依赖。
+- 上游弃用 `stack`；Miao 新生成配置省略该字段。已确认 sing-tun 的空值和 `go` 均选择 `NewGo`，已有 `stack: "go"` 缓存在本版本仍可读取。
+- 上游新增 Tailcat 入站/出站注册，裁剪补丁已同步移除，保持 `miao-client-v2` 的七种节点协议。CLI context 隔离修复仍由上游提供。
 
 | 目标 | 原始内核 | 压缩内核 |
 | --- | ---: | ---: |
-| Linux amd64 | 24,457,340 B | 7,665,261 B |
-| Linux arm64 | 22,610,044 B | 6,812,995 B |
-| Windows amd64 | 24,057,344 B | 7,554,220 B |
+| Linux amd64 | 24,858,748 B | 7,786,017 B |
+| Linux arm64 | 23,003,260 B | 6,921,912 B |
+| Windows amd64 | 24,436,224 B | 7,668,239 B |
 
-Arch 原生完整 Miao 为 **16,343,296 B / 15.59 MiB**（1 MiB = 1,048,576 B）。三目标构建、未裁剪上游隔离与能力回归 ×20、裁剪后客户端配置/出站拒绝回归 ×20、原生 `version` 冒烟、embedded 解压校验、Rust 476 项测试（1 项忽略）、前端 typecheck/lint/245 项测试、Clippy、fmt、Windows core 交叉检查、Bun 脚本测试和 `cargo audit`（无新增告警）通过，已核对各产物及完整 Miao 中的内核清单与数据。
+Arch 原生完整 Miao 为 **16,465,904 B / 15.70 MiB**（1 MiB = 1,048,576 B）。三目标构建、未裁剪上游隔离与能力回归 ×20、裁剪后客户端配置/出站拒绝回归 ×20、Linux 原生 `version` 冒烟、embedded 解压校验、Rust 476 项测试（1 项忽略）、Clippy、fmt、Windows core 交叉检查、Bun 脚本测试及前端构建通过。已核对三个产物的源码版本、定制文件哈希和压缩前后 SHA-256，并验证完整 Miao 嵌入了新内核。
 
-隔离网络验收（TUN/DNS 分流、MTU 9000 TCP/UDP、Clash 流量计数、连续 SIGHUP 重载与退出清理）**尚未对本次固定点执行**。本次升级改动了 `auto_redirect: true` 与纯 GoTUN 路径，发布前必须在独立网络命名空间或专用机器补做，Windows/OpenWrt 仍需真机验证。
+Linux 隔离网络验收通过：两个独立网络命名空间连接本地 DNS、TCP/UDP echo 和 Shadowsocks 服务端，分别验证 `auto_redirect: true` 和关闭自动重定向的纯 GoTUN 路径；两种模式均覆盖 DNS 劫持、直连/代理分流、MTU 9000 下 TCP 256 KiB 与 UDP 64/8192/16000 B 往返、Clash 连接链及流量计数、连续 5 次 SIGHUP 后重复验收，以及退出时 TUN/nftables/策略路由清理。测试没有连接外部代理或改动本机生产服务；Windows/OpenWrt 仍需真机验证，Linux 结果也不替代其他六种节点协议的真实网络互通测试。
 
 ## 来源与许可
 
