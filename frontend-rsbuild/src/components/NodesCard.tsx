@@ -56,6 +56,7 @@ export interface NodesCardProps {
   onRetry?: () => Promise<unknown>
   isInitializing: boolean
   isReady: boolean
+  deleting?: boolean
   delays: Record<string, number>
   delayMeasuredAt?: Record<string, number>
   testingNodes: Record<string, boolean>
@@ -64,7 +65,7 @@ export interface NodesCardProps {
   onOpenAddNode: () => void
 }
 
-export function NodesCard({ nodes, loadError, onRetry, isInitializing, isReady, delays, delayMeasuredAt = {}, testingNodes, onTestDelay, onDeleteNode, onOpenAddNode }: NodesCardProps) {
+export function NodesCard({ nodes, loadError, onRetry, isInitializing, isReady, deleting = false, delays, delayMeasuredAt = {}, testingNodes, onTestDelay, onDeleteNode, onOpenAddNode }: NodesCardProps) {
   return (
     <SectionCard
       bodyClassName="panel-body-tight"
@@ -88,6 +89,7 @@ export function NodesCard({ nodes, loadError, onRetry, isInitializing, isReady, 
       }
     >
       <div className="list-stack">
+        {deleting && <div className="list-row-meta" role="status">正在删除节点并同步列表，请稍候…</div>}
         {loadError && <ResourceError label="手动节点" error={loadError} hasData={nodes.length > 0} onRetry={onRetry} />}
         {nodes.length === 0 
           ? !loadError && <div className="empty-block">暂无手动节点</div>
@@ -96,7 +98,7 @@ export function NodesCard({ nodes, loadError, onRetry, isInitializing, isReady, 
               key={node.tag}
               node={node}
               onDelete={onDeleteNode}
-              disabled={isInitializing}
+              disabled={isInitializing || deleting}
               delay={delays[node.tag]}
               measuredAt={delayMeasuredAt[node.tag]}
               isTesting={Boolean(testingNodes[node.tag])}

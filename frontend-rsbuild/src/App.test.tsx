@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, rs } from '@rstest/core'
 import App from './App'
 import { RequestInterruptedError } from './hooks/request'
-import { nodeMock, statusMock, subMock, subscriptionRefreshMock } from './testFixtures'
+import { nodeMock, ruleMock, statusMock, subMock, subscriptionRefreshMock } from './testFixtures'
 
 function jsonResponse(payload: unknown, status = 200) {
   return {
@@ -27,6 +27,76 @@ describe('App onboarding integration', () => {
   afterEach(() => {
     rs.useRealTimers()
     rs.unstubAllGlobals()
+  })
+
+  it.each([
+    ['nodes', '节点'], ['subs', '订阅'], ['rules', '规则'],
+  ])('keeps %s deletion locked through readback and distinguishes deletion from readback failure', async (resource, label) => {
+    const endpoint = `/api/${resource}`
+    let finishDelete!: (response: ReturnType<typeof jsonResponse>) => void
+    let finishRead!: (response: ReturnType<typeof jsonResponse>) => void
+    let deleting = false
+    const fetch = rs.fn(async (input, init?: RequestInit) => {
+      const url = String(input)
+      if (url === endpoint && init?.method === 'DELETE') {
+        deleting = true
+        return new Promise<ReturnType<typeof jsonResponse>>(resolve => { finishDelete = resolve })
+      }
+      if (url === endpoint && deleting) return new Promise<ReturnType<typeof jsonResponse>>(resolve => { finishRead = resolve })
+      if (url === '/api/status') return jsonResponse({ success: true, data: statusMock() })
+      if (url === '/api/nodes') return jsonResponse({ success: true, data: [nodeMock()] })
+      if (url === '/api/subs') return jsonResponse({ success: true, data: [subMock()] })
+      if (url === '/api/rules') return jsonResponse({ success: true, data: [ruleMock({ raw: '{"domain":"example.com","outbound":"direct"}' })] })
+      if (url === '/api/version') return jsonResponse({ success: true, data: { current: '0.48.1', latest: null, has_update: false } })
+      throw new Error(`Unexpected request: ${url}`)
+    })
+    rs.stubGlobal('fetch', fetch)
+    stubMatchMedia()
+    const user = userEvent.setup()
+    render(<App />)
+    const button = await screen.findByRole('button', { name: new RegExp(`^删除${label} `) })
+    await user.click(button)
+    await user.click(screen.getByRole('button', { name: '确认' }))
+    expect(button).toBeDisabled()
+    expect(screen.getByText(`正在删除${label}并同步列表，请稍候…`)).toBeInTheDocument()
+    await user.click(button)
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    await act(async () => { finishDelete(jsonResponse({ success: true })) })
+    await waitFor(() => expect(finishRead).toBeDefined())
+    expect(button).toBeDisabled()
+    await act(async () => { finishRead(jsonResponse({ success: false, message: '读取超时' }, 503)) })
+    expect(await screen.findByText(`${label}已删除；列表尚未同步，请重新读取列表，勿重复删除。`)).toBeInTheDocument()
+    expect(button).toBeEnabled()
+    expect(fetch.mock.calls.filter(([, init]) => init?.method === 'DELETE')).toHaveLength(1)
+  })
+
+  it('unlocks deletion after a rejected request and allows an explicit retry', async () => {
+    let attempts = 0
+    rs.stubGlobal('fetch', rs.fn(async (input, init?: RequestInit) => {
+      const url = String(input)
+      if (url === '/api/nodes' && init?.method === 'DELETE') {
+        attempts++
+        return attempts === 1 ? jsonResponse({ success: false, message: '删除失败，请重试' }, 500) : jsonResponse({ success: true })
+      }
+      if (url === '/api/status') return jsonResponse({ success: true, data: statusMock() })
+      if (url === '/api/nodes') return jsonResponse({ success: true, data: attempts < 2 ? [nodeMock()] : [] })
+      if (url === '/api/subs') return jsonResponse({ success: true, data: [subMock()] })
+      if (url === '/api/rules') return jsonResponse({ success: true, data: [] })
+      if (url === '/api/version') return jsonResponse({ success: true, data: { current: '0.48.1', latest: null, has_update: false } })
+      throw new Error(`Unexpected request: ${url}`)
+    }))
+    stubMatchMedia()
+    const user = userEvent.setup()
+    render(<App />)
+    await user.click(await screen.findByRole('button', { name: /^删除节点 / }))
+    await user.click(screen.getByRole('button', { name: '确认' }))
+    expect(await screen.findByText('删除失败，请重试')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /^删除节点 / })).toBeEnabled()
+    await user.click(screen.getByRole('button', { name: /^删除节点 / }))
+    await user.click(screen.getByRole('button', { name: '确认' }))
+    expect(await screen.findByText('节点已删除')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^删除节点 / })).not.toBeInTheDocument()
+    expect(attempts).toBe(2)
   })
 
   it.each([

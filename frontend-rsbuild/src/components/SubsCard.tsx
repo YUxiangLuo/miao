@@ -185,6 +185,7 @@ export function SubsCard({ subs, loadError, onRetry, refreshStatus, pendingActio
   const [showSchedule, setShowSchedule] = useState(false)
   const [detailSub, setDetailSub] = useState<SubStatus | null>(null)
   const refreshing = pendingActions.has('refreshSubs')
+  const deleting = pendingActions.has('deleteSub')
 
   return (
     <SectionCard
@@ -226,6 +227,7 @@ export function SubsCard({ subs, loadError, onRetry, refreshStatus, pendingActio
       }
     >
       <div className="list-stack">
+        {deleting && <div className="list-row-meta" role="status">正在删除订阅并同步列表，请稍候…</div>}
         {loadError && <ResourceError label="订阅列表" error={loadError} hasData={subs.length > 0} onRetry={onRetry} />}
         {subs.length > 0 && (refreshing || refreshStatus?.phase === 'fetching') && (
           <div className="list-row" role="status">
@@ -255,7 +257,7 @@ export function SubsCard({ subs, loadError, onRetry, refreshStatus, pendingActio
               sub={sub}
               onDelete={onDeleteSub}
               onShowNodes={setDetailSub}
-              disabled={isInitializing}
+              disabled={isInitializing || deleting}
             />
           ))}
       </div>

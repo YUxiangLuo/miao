@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import { CONNECTIONS_MODAL_MIN_WIDTH } from '../tokens'
 import { validateSubscriptionUrl } from '../utils'
 import { buildNodeRequest } from '../nodeForm'
@@ -40,6 +40,8 @@ function errorMessage(error: unknown): string {
 export function useAppActions(data: AppData) {
   const { vpsTasks, vpsDeploying, handleDeployVps } = useVpsDeployment(data)
   const [upgradeMessage, setUpgradeMessage] = useState('')
+  const deleting = useRef(new Set<string>())
+  const [pendingDeletes, setPendingDeletes] = useState<ReadonlySet<string>>(new Set())
   const {
     status,
     apiCall,
@@ -250,16 +252,24 @@ export function useAppActions(data: AppData) {
     }
   }, [apiCall, clearDelays, fetchSubs, showToast])
 
-  const handleDeleteSubscription = useCallback(async (url: string) => {
+  const deleteResource = useCallback(async (endpoint: string, body: SubRequest | DeleteNodeRequest | DeleteRuleRequest, action: string, refresh: () => Promise<unknown>, label: string) => {
+    if (deleting.current.has(action)) return
+    deleting.current.add(action)
+    setPendingDeletes(new Set(deleting.current))
     try {
-      await apiCall('subs', { method: 'DELETE', body: JSON.stringify({ url } satisfies SubRequest) }, 'deleteSub')
-      await fetchSubs()
-      clearDelays()
-      showToast('订阅已删除', 'success')
+      await apiCall(endpoint, { method: 'DELETE', body: JSON.stringify(body) }, action)
+      const result = await refresh()
+      if (endpoint !== 'rules') clearDelays()
+      showToast(`${label}已删除${result === null ? '；列表尚未同步，请重新读取列表，勿重复删除。' : ''}`, result === null ? 'info' : 'success')
     } catch (error) {
       showToast(errorMessage(error), 'error')
+    } finally {
+      deleting.current.delete(action)
+      setPendingDeletes(new Set(deleting.current))
     }
-  }, [apiCall, clearDelays, fetchSubs, showToast])
+  }, [apiCall, clearDelays, showToast])
+
+  const handleDeleteSubscription = useCallback((url: string) => deleteResource('subs', { url }, 'deleteSub', fetchSubs, '订阅'), [deleteResource, fetchSubs])
 
   const handleRefreshSubscriptions = useCallback(async () => {
     try {
@@ -356,16 +366,7 @@ export function useAppActions(data: AppData) {
     }
   }, [apiCall, clearDelays, fetchNodes, showToast])
 
-  const handleDeleteNode = useCallback(async (tag: string) => {
-    try {
-      await apiCall('nodes', { method: 'DELETE', body: JSON.stringify({ tag } satisfies DeleteNodeRequest) }, 'deleteNode')
-      await fetchNodes()
-      clearDelays()
-      showToast('节点已删除', 'success')
-    } catch (error) {
-      showToast(errorMessage(error), 'error')
-    }
-  }, [apiCall, clearDelays, fetchNodes, showToast])
+  const handleDeleteNode = useCallback((tag: string) => deleteResource('nodes', { tag }, 'deleteNode', fetchNodes, '节点'), [deleteResource, fetchNodes])
 
   const handleTestDelay = useCallback((nodeName: string) => {
     testDelay(clashApiBase, nodeName)
@@ -464,15 +465,7 @@ export function useAppActions(data: AppData) {
     }
   }, [apiCall, fetchRules, showToast])
 
-  const handleDeleteRule = useCallback(async (rule: RuleInfo) => {
-    try {
-      await apiCall('rules', { method: 'DELETE', body: JSON.stringify({ index: rule.index, raw: rule.raw } satisfies DeleteRuleRequest) }, 'deleteRule')
-      await fetchRules()
-      showToast('规则已删除', 'success')
-    } catch (error) {
-      showToast(errorMessage(error), 'error')
-    }
-  }, [apiCall, fetchRules, showToast])
+  const handleDeleteRule = useCallback((rule: RuleInfo) => deleteResource('rules', { index: rule.index, raw: rule.raw }, 'deleteRule', fetchRules, '规则'), [deleteResource, fetchRules])
 
   const handleOpenDeleteRuleConfirm = useCallback((rule: RuleInfo) => {
     const label = rule?.field && rule?.value ? `${rule.field}: ${rule.value}` : (rule?.raw || '')
@@ -504,6 +497,7 @@ export function useAppActions(data: AppData) {
   }, [apiCall, showToast])
 
   return {
+    pendingActions: new Set([...data.pendingActions, ...pendingDeletes]),
     openConfirm,
     closeConfirm,
     openNodeModal,

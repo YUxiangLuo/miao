@@ -130,6 +130,7 @@ export function DashboardScreen({ app }: { app: ReturnType<typeof useAppControll
               onRetry={app.fetchNodes}
               isInitializing={app.status.initializing}
               isReady={app.status.ready}
+              deleting={app.pendingActions.has('deleteNode')}
               delays={app.delays}
               delayMeasuredAt={app.delayMeasuredAt}
               testingNodes={app.testingNodes}
