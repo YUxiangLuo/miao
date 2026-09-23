@@ -623,6 +623,9 @@
     font-size: var(--fs-sm);
     line-height: var(--lh-relaxed);
 }
+.schedule-save-status {
+    color: var(--text);
+}
 .schedule-error {
     color: var(--danger);
 }

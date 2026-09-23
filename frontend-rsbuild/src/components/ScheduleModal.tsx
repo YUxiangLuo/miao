@@ -34,6 +34,9 @@ export function ScheduleModal({ open, saving, onClose, onSave }: ScheduleModalPr
   const [enabled, setEnabled] = useState(false)
   const [times, setTimes] = useState<string[]>([])
   const generationRef = useRef(0)
+  const [submitting, setSubmitting] = useState(false)
+  const inFlight = useRef(false)
+  const busy = saving || submitting
 
   const load = useCallback(async () => {
     const generation = ++generationRef.current
@@ -71,7 +74,7 @@ export function ScheduleModal({ open, saving, onClose, onSave }: ScheduleModalPr
   if (!open) return null
 
   const draft = normalizedTimes(times)
-  const canSave = !saving && status !== null && (!enabled || draft.length > 0)
+  const canSave = !busy && status !== null && (!enabled || draft.length > 0)
   const dirty = status !== null
     && (enabled !== status.enabled || draft.join(',') !== [...status.times].sort().join(','))
 
@@ -80,8 +83,16 @@ export function ScheduleModal({ open, saving, onClose, onSave }: ScheduleModalPr
   }
 
   const submit = async () => {
-    if (!canSave) return
-    if (await onSave({ enabled, times: draft })) onClose()
+    if (!canSave || inFlight.current) return
+    inFlight.current = true
+    setSubmitting(true)
+    const generation = generationRef.current
+    try {
+      if (await onSave({ enabled, times: draft }) && generation === generationRef.current) onClose()
+    } finally {
+      inFlight.current = false
+      setSubmitting(false)
+    }
   }
 
   return (
@@ -105,6 +116,7 @@ export function ScheduleModal({ open, saving, onClose, onSave }: ScheduleModalPr
           </button>
         </div>
 
+        {busy && <p className="schedule-note schedule-save-status" role="status">正在保存设置，请稍候。关闭窗口不会取消请求，请勿重复保存。</p>}
         {loadError ? (
           <div className="empty-block schedule-error">{loadError}</div>
         ) : status === null ? (
@@ -117,7 +129,7 @@ export function ScheduleModal({ open, saving, onClose, onSave }: ScheduleModalPr
               aria-checked={enabled}
               aria-label="启用定时刷新"
               className={classNames('toggle-switch', enabled && 'on')}
-              disabled={saving}
+              disabled={busy}
               data-autofocus
               onClick={() => setEnabled((value) => !value)}
             >
@@ -138,6 +150,7 @@ export function ScheduleModal({ open, saving, onClose, onSave }: ScheduleModalPr
                       value={time}
                       step={60}
                       aria-label={`第 ${index + 1} 个执行时间`}
+                      disabled={busy}
                       onChange={(event) => updateTime(index, event.target.value)}
                     />
                     <button
@@ -145,6 +158,7 @@ export function ScheduleModal({ open, saving, onClose, onSave }: ScheduleModalPr
                       className="icon-button subtle"
                       aria-label={`删除第 ${index + 1} 个执行时间`}
                       title="删除该时间点"
+                      disabled={busy}
                       onClick={() => setTimes((previous) => previous.filter((_, i) => i !== index))}
                     >
                       <Trash2 size={ICON.xs} />
@@ -156,7 +170,7 @@ export function ScheduleModal({ open, saving, onClose, onSave }: ScheduleModalPr
               tone="ghost"
               size="sm"
               icon={<Plus size={ICON.xs} />}
-              disabled={saving || times.length >= MAX_TIMES}
+              disabled={busy || times.length >= MAX_TIMES}
               onClick={() => setTimes((previous) => [...previous, ''])}
             >
               添加时间
@@ -180,11 +194,11 @@ export function ScheduleModal({ open, saving, onClose, onSave }: ScheduleModalPr
         )}
 
         <div className="modal-actions">
-          <Button tone="ghost" size="sm" onClick={onClose}>取消</Button>
+          <Button tone="ghost" size="sm" onClick={onClose}>{busy ? '关闭窗口' : '取消'}</Button>
           <Button
             tone="primary"
             size="sm"
-            loading={saving}
+            loading={busy}
             disabled={!canSave}
             onClick={submit}
           >

@@ -234,6 +234,48 @@ describe('SubsCard schedule modal', () => {
     rs.unstubAllGlobals()
   })
 
+  it('locks the submitted schedule, prevents duplicate saves, and leaves a reopened window open', async () => {
+    const user = userEvent.setup()
+    rs.stubGlobal('fetch', rs.fn(async () => ({ ok: true, json: async () => ({ success: true, data: scheduledRefreshStatusMock({ enabled: true, times: ['04:05'] }) }) })))
+    let finish!: (saved: boolean) => void
+    const onSaveSchedule = rs.fn(() => new Promise<boolean>(resolve => { finish = resolve }))
+    renderCard({ onSaveSchedule })
+    await user.click(screen.getByRole('button', { name: '定时刷新' }))
+    const time = await screen.findByLabelText('第 1 个执行时间')
+    fireEvent.change(time, { target: { value: '17:23' } })
+    const save = screen.getByRole('button', { name: '保存' })
+    act(() => { fireEvent.click(save); fireEvent.click(save) })
+    expect(onSaveSchedule).toHaveBeenCalledExactlyOnceWith({ enabled: true, times: ['17:23'] })
+    expect(time).toBeDisabled()
+    expect(screen.getByRole('switch', { name: '启用定时刷新' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '添加时间' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '删除第 1 个执行时间' })).toBeDisabled()
+    expect(screen.getByRole('status')).toHaveTextContent('关闭窗口不会取消请求')
+    await user.click(screen.getByRole('button', { name: '关闭窗口' }))
+    await user.click(screen.getByRole('button', { name: '定时刷新' }))
+    expect(await screen.findByDisplayValue('04:05')).toBeInTheDocument()
+    await act(async () => { finish(true) })
+    expect(screen.getByRole('dialog', { name: '定时刷新' })).toBeInTheDocument()
+    expect(screen.getByLabelText('第 1 个执行时间')).toBeEnabled()
+    expect(screen.getByLabelText('第 1 个执行时间')).toHaveValue('04:05')
+  })
+
+  it('retains a failed schedule draft and allows retry', async () => {
+    const user = userEvent.setup()
+    rs.stubGlobal('fetch', rs.fn(async () => ({ ok: true, json: async () => ({ success: true, data: scheduledRefreshStatusMock({ enabled: true, times: ['04:05'] }) }) })))
+    const onSaveSchedule = rs.fn().mockResolvedValueOnce(false).mockResolvedValueOnce(true)
+    renderCard({ onSaveSchedule })
+    await user.click(screen.getByRole('button', { name: '定时刷新' }))
+    fireEvent.change(await screen.findByLabelText('第 1 个执行时间'), { target: { value: '17:23' } })
+    await user.click(screen.getByRole('button', { name: '保存' }))
+    expect(screen.getByLabelText('第 1 个执行时间')).toHaveValue('17:23')
+    expect(screen.getByLabelText('第 1 个执行时间')).toBeEnabled()
+    expect(screen.getByRole('button', { name: '保存' })).toBeEnabled()
+    await user.click(screen.getByRole('button', { name: '保存' }))
+    expect(onSaveSchedule).toHaveBeenNthCalledWith(2, { enabled: true, times: ['17:23'] })
+    expect(screen.queryByRole('dialog', { name: '定时刷新' })).not.toBeInTheDocument()
+  })
+
   it('opens the schedule modal from the header button and saves settings', async () => {
     const user = userEvent.setup()
     rs.stubGlobal('fetch', rs.fn(async () => ({
