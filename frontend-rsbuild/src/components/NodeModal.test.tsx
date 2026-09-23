@@ -25,6 +25,41 @@ function renderModal(props = {}) {
 }
 
 describe('manual node submission', () => {
+  it.each([0, -1, 1.5, 65536])('blocks invalid port %s with an inline error before submitting', async (port) => {
+    const user = userEvent.setup()
+    const onSubmit = rs.fn()
+    renderModal({ onSubmit, form: { ...EMPTY_NODE_FORM, tag: '测试节点', server: 'example.com', password: 'test-password', server_port: port } })
+    await user.click(screen.getByRole('button', { name: '手动填写' }))
+    expect(screen.getByRole('alert')).toHaveTextContent(port > 65535 ? '端口号超出范围' : '端口号必须为正整数')
+    const submit = screen.getByRole('button', { name: '添加 Hysteria2 节点' })
+    expect(submit).toBeDisabled()
+    await user.click(submit)
+    expect(onSubmit).not.toHaveBeenCalled()
+  })
+
+  it.each([1, 65535])('accepts valid port boundary %s', async (port) => {
+    const user = userEvent.setup()
+    renderModal({ form: { ...EMPTY_NODE_FORM, tag: '测试节点', server: 'example.com', password: 'test-password', server_port: port } })
+    await user.click(screen.getByRole('button', { name: '手动填写' }))
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '添加 Hysteria2 节点' })).toBeEnabled()
+  })
+
+  it('clears the submission validator error when corrected', async () => {
+    const user = userEvent.setup()
+    function Harness() {
+      const [form, setForm] = useState({ ...EMPTY_NODE_FORM, tag: '测试节点', server: 'example.com', password: 'short' })
+      return <NodeModal open nodeType="hysteria2" setNodeType={rs.fn()} form={form} setForm={setForm} loading={false}
+        onClose={rs.fn()} onSubmit={rs.fn()} onImport={rs.fn()} onDeployVps={rs.fn()} />
+    }
+    render(<Harness />)
+    await user.click(screen.getByRole('button', { name: '手动填写' }))
+    expect(screen.getByRole('alert')).toHaveTextContent('密码太短（至少 8 个字符）')
+    await user.type(screen.getByLabelText('密码'), '-long-enough')
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '添加 Hysteria2 节点' })).toBeEnabled()
+  })
+
   it('locks the draft, prevents duplicate clicks, and does not close a reopened dialog', async () => {
     const user = userEvent.setup()
     let finish!: (added: boolean) => void

@@ -17,6 +17,12 @@
     padding: 0;
     min-inline-size: 0;
 }
+.manual-node-error {
+    margin: 0;
+    color: var(--danger);
+    font-size: var(--fs-sm);
+    line-height: var(--lh-normal);
+}
 .node-submit-status {
     margin: 0 0 var(--space-2);
     color: var(--text);

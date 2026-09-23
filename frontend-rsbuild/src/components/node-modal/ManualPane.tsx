@@ -2,6 +2,7 @@ import { Plus } from 'lucide-react'
 import type { ChangeEvent, Dispatch, InputHTMLAttributes, SelectHTMLAttributes, SetStateAction } from 'react'
 import { ICON } from '../../tokens'
 import { Button } from '../ui'
+import { buildNodeRequest } from '../../nodeForm'
 import {
   CIPHER_OPTIONS,
   CLIENT_FINGERPRINT_OPTIONS,
@@ -106,12 +107,20 @@ export function ManualPane({ nodeType, setNodeType, form, setForm, loading, onSu
     onChange: (event: ChangeEvent<HTMLInputElement>) => setForm((prev) => ({ ...prev, [field]: event.target.checked })),
   })
 
-  const canSubmit = form.tag.trim()
+  const hasRequiredFields = form.tag.trim()
     && form.server.trim()
-    && form.server_port
+    && String(form.server_port).length > 0
     && (!requiresPassword || form.password.trim())
     && (!requiresUuid || form.uuid.trim())
     && (nodeType !== 'hysteria2' || !form.obfs_type || form.obfs_password.trim())
+
+  let validationError = ''
+  if (hasRequiredFields) {
+    try { buildNodeRequest(nodeType, form) } catch (error) {
+      validationError = error instanceof Error ? error.message : String(error)
+    }
+  }
+  const canSubmit = hasRequiredFields && !validationError
 
   return (
     <div className="node-pane">
@@ -294,6 +303,7 @@ export function ManualPane({ nodeType, setNodeType, form, setForm, loading, onSu
       </details>
       </fieldset>
 
+      {validationError && <p className="manual-node-error" role="alert">{validationError}</p>}
       <Button
         tone="primary"
         loading={loading}

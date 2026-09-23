@@ -32,13 +32,14 @@ export interface ProxyTileProps {
   isTesting: boolean
   isSwitching: boolean
   switchDisabled: boolean
+  testDisabled: boolean
   index: number
   onSwitchProxy: (group: string, nodeName: string) => void
   onTestDelay: (nodeName: string) => void
   group: string
 }
 
-const ProxyTile = memo(function ProxyTile({ nodeName, protocol, delay, measuredAt, isActive, isArriving, isTesting, isSwitching, switchDisabled, index, onSwitchProxy, onTestDelay, group }: ProxyTileProps) {
+const ProxyTile = memo(function ProxyTile({ nodeName, protocol, delay, measuredAt, isActive, isArriving, isTesting, isSwitching, switchDisabled, testDisabled, index, onSwitchProxy, onTestDelay, group }: ProxyTileProps) {
   return (
     <div
       className={classNames('proxy-tile', isActive && 'active', isArriving && 'arrive')}
@@ -67,7 +68,8 @@ const ProxyTile = memo(function ProxyTile({ nodeName, protocol, delay, measuredA
         type="button"
         className={classNames('proxy-test-btn', getDelayTone(delay))}
         onClick={() => onTestDelay(nodeName)}
-        disabled={isTesting}
+        disabled={isTesting || testDisabled}
+        title={testDisabled ? '代理就绪后可测试延迟' : '测试到检测站点的延迟，不是下载速度'}
         aria-label={`测试 ${nodeName} 延迟`}
       >
         {isTesting
@@ -118,6 +120,7 @@ export function ProxyCard({
   onSetNodeSelect,
   onOpenAddNode
 }: ProxyCardProps) {
+  const runtimeUnavailable = !status.ready || status.initializing
   const nodeSelect = status.node_select || 'manual'
   // 地区筛空时 effective node_select 会回退 manual，但用户仍需能调高/取消倍率
   // 来恢复自动模式，因此启用状态必须看 requested strategy。
@@ -176,7 +179,7 @@ export function ProxyCard({
               size="sm"
               icon={<Zap size={ICON.xs} />}
               loading={testingGroup === primaryGroupName}
-              disabled={!primaryGroup || !status.ready}
+              disabled={!primaryGroup || runtimeUnavailable}
               onClick={() => primaryGroup && onTestGroupDelays(primaryGroupName, primaryGroup.all!)}
             >
               测试延迟
@@ -223,6 +226,7 @@ export function ProxyCard({
       }
     >
       <p className="delay-explanation">延迟反映到检测站点的响应时间，不代表下载速度；时间按当前设备时区显示。</p>
+      {primaryGroup && runtimeUnavailable && <p className="delay-explanation" role="status">代理尚未就绪，暂时无法切换节点或测试延迟。下方保留上次读取的节点列表。</p>}
       <div className="proxy-grid-wrap">
         {primaryGroup ? (
           <div className="proxy-grid">
@@ -238,7 +242,8 @@ export function ProxyCard({
                 isArriving={arrivedNode === nodeName}
                 isTesting={Boolean(testingNodes[nodeName])}
                 isSwitching={switchingNode === nodeName}
-                switchDisabled={Boolean(switchingNode) || isFastest}
+                switchDisabled={Boolean(switchingNode) || isFastest || runtimeUnavailable}
+                testDisabled={runtimeUnavailable}
                 index={index}
                 group={primaryGroupName}
                 onSwitchProxy={onSwitchProxy}

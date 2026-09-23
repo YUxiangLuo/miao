@@ -12,6 +12,36 @@ function statusMock(node_select: StatusData['node_select']): StatusData {
 }
 
 describe('ProxyCard accessibility', () => {
+  it.each([
+    { running: false, ready: false },
+    { running: true, ready: false },
+    { running: true, ready: true, initializing: true },
+  ])('blocks runtime actions on retained nodes until ready: %j', async (state) => {
+    const user = userEvent.setup()
+    const props = {
+      primaryGroup: { type: 'Selector', now: 'node-a', all: ['node-a', 'node-b'] },
+      primaryGroupName: 'proxy', switchingNode: '', nodeSelectPending: false,
+      delays: {}, testingNodes: {}, testingGroup: '',
+      onTestDelay: rs.fn(), onTestGroupDelays: rs.fn(), onSwitchProxy: rs.fn(), onOpenAddNode: rs.fn(),
+    }
+    const { rerender } = render(<ProxyCard {...props} status={makeStatus(state)} />)
+    expect(screen.getByRole('status')).toHaveTextContent('保留上次读取的节点列表')
+    for (const name of ['切换到 node-b', '测试 node-b 延迟', '测试延迟']) {
+      const button = screen.getByRole('button', { name })
+      expect(button).toBeDisabled()
+      await user.click(button)
+    }
+    expect(props.onSwitchProxy).not.toHaveBeenCalled()
+    expect(props.onTestDelay).not.toHaveBeenCalled()
+    expect(props.onTestGroupDelays).not.toHaveBeenCalled()
+    rerender(<ProxyCard {...props} status={makeStatus({ running: true, ready: true })} />)
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '切换到 node-b' }))
+    await user.click(screen.getByRole('button', { name: '测试 node-b 延迟' }))
+    expect(props.onSwitchProxy).toHaveBeenCalledExactlyOnceWith('proxy', 'node-b')
+    expect(props.onTestDelay).toHaveBeenCalledExactlyOnceWith('node-b')
+  })
+
   it('renders switching and delay testing as sibling buttons', async () => {
     const user = userEvent.setup()
     const onSwitchProxy = rs.fn()

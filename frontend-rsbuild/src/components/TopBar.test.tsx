@@ -74,6 +74,16 @@ describe('TopBar merged layout', () => {
     expect(screen.getByText('未选择')).toBeInTheDocument()
   })
 
+  it.each([{ ready: false }, { ready: true, initializing: true }])('disables current node testing until runtime is ready: %j', async (state) => {
+    const user = userEvent.setup()
+    const { props } = renderTopBar({ status: statusMock({ running: true, ...state }) })
+    const chip = screen.getByRole('button', { name: '测试当前节点 node-a 延迟' })
+    expect(chip).toBeDisabled()
+    expect(chip).toHaveAttribute('title', '代理就绪后可测试延迟')
+    await user.click(chip)
+    expect(props.onTestDelay).not.toHaveBeenCalled()
+  })
+
   it('does not offer in-app upgrade when the platform cannot replace the binary', () => {
     const onUpgradeClick = rs.fn()
     const { container } = renderTopBar({

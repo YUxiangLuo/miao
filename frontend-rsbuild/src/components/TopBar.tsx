@@ -101,8 +101,8 @@ export function TopBar({
         type="button"
         className="current-node-chip"
         onClick={() => currentNode && onTestDelay?.(currentNode)}
-        disabled={!currentNode || isTestingCurrent}
-        title={currentNode ? '点击测试当前节点延迟' : '当前节点'}
+        disabled={!currentNode || isTestingCurrent || !status.ready || status.initializing}
+        title={!status.ready || status.initializing ? '代理就绪后可测试延迟' : currentNode ? '点击测试当前节点延迟' : '当前节点'}
         aria-label={currentNode ? `测试当前节点 ${currentNode} 延迟` : '当前节点'}
       >
         <strong className="current-node-chip-name" title={currentNode || undefined}>
