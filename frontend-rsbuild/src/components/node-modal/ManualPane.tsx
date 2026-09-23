@@ -115,7 +115,7 @@ export function ManualPane({ nodeType, setNodeType, form, setForm, loading, onSu
 
   return (
     <div className="node-pane">
-      <div className="node-pane-scroll">
+      <fieldset className="node-pane-scroll manual-node-fields" disabled={loading}>
         <div className="form-grid single">
           <SelectField label="协议" options={NODE_TYPE_OPTIONS} value={nodeType} onChange={handleNodeTypeChange} />
         </div>
@@ -292,7 +292,7 @@ export function ManualPane({ nodeType, setNodeType, form, setForm, loading, onSu
           )}
         </div>
       </details>
-      </div>
+      </fieldset>
 
       <Button
         tone="primary"

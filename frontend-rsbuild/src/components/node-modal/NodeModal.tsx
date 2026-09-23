@@ -1,4 +1,4 @@
-import { useEffect, useId, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import type { Dispatch, SetStateAction } from 'react'
 import { Plus, X } from 'lucide-react'
 import { ICON } from '../../tokens'
@@ -19,7 +19,7 @@ export interface NodeModalProps {
   setForm: Dispatch<SetStateAction<NodeForm>>
   loading: boolean
   onClose: () => void
-  onSubmit: () => void
+  onSubmit: () => Promise<boolean>
   onImport: (payloads: NodeRequest[]) => Promise<void>
   onDeployVps: (req: VpsDeployRequest) => Promise<boolean>
   vpsSupported?: boolean
@@ -29,10 +29,17 @@ export function NodeModal({ open, nodeType, setNodeType, form, setForm, loading,
   const titleId = useId()
   const dialogRef = useDialog(open, onClose)
   const [mode, setMode] = useState<NodeModalMode>('link')
+  const [submitting, setSubmitting] = useState(false)
+  const inFlight = useRef(false)
+  const generation = useRef(0)
+  const busy = loading || submitting
 
   // 关闭后重新打开时回到默认的链接导入模式
   useEffect(() => {
-    if (!open) setMode('link')
+    if (!open) {
+      setMode('link')
+      generation.current++
+    }
   }, [open])
 
   useEffect(() => {
@@ -40,6 +47,19 @@ export function NodeModal({ open, nodeType, setNodeType, form, setForm, loading,
   }, [vpsSupported, mode])
 
   if (!open) return null
+
+  const submitManual = async () => {
+    if (busy || inFlight.current) return
+    inFlight.current = true
+    setSubmitting(true)
+    const submittedGeneration = generation.current
+    try {
+      if (await onSubmit() && submittedGeneration === generation.current) onClose()
+    } finally {
+      inFlight.current = false
+      setSubmitting(false)
+    }
+  }
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -62,9 +82,11 @@ export function NodeModal({ open, nodeType, setNodeType, form, setForm, loading,
           </button>
         </div>
 
+        {submitting && <p className="node-submit-status" role="status">正在添加节点，请稍候。关闭窗口不会取消请求，请勿重复添加。</p>}
         <div className="connections-pills node-modal-tabs" role="group" aria-label="添加方式">
           <button
             type="button"
+            disabled={submitting}
             className={classNames('connections-pill', mode === 'link' && 'active')}
             aria-pressed={mode === 'link'}
             onClick={() => setMode('link')}
@@ -75,6 +97,7 @@ export function NodeModal({ open, nodeType, setNodeType, form, setForm, loading,
             type="button"
             className={classNames('connections-pill', mode === 'manual' && 'active')}
             aria-pressed={mode === 'manual'}
+            disabled={submitting}
             onClick={() => setMode('manual')}
           >
             手动填写
@@ -84,6 +107,7 @@ export function NodeModal({ open, nodeType, setNodeType, form, setForm, loading,
               type="button"
               className={classNames('connections-pill', mode === 'vps' && 'active')}
               aria-pressed={mode === 'vps'}
+              disabled={submitting}
               onClick={() => setMode('vps')}
             >
               VPS 部署
@@ -92,17 +116,17 @@ export function NodeModal({ open, nodeType, setNodeType, form, setForm, loading,
         </div>
 
         {mode === 'link' ? (
-          <LinkImportPane onImport={onImport} loading={loading} />
+          <LinkImportPane onImport={onImport} loading={busy} />
         ) : mode === 'vps' ? (
-          <VpsPane onDeploy={onDeployVps} loading={loading} />
+          <VpsPane onDeploy={onDeployVps} loading={busy} />
         ) : (
           <ManualPane
             nodeType={nodeType}
             setNodeType={setNodeType}
             form={form}
             setForm={setForm}
-            loading={loading}
-            onSubmit={onSubmit}
+            loading={busy}
+            onSubmit={submitManual}
           />
         )}
       </div>

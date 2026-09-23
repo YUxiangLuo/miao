@@ -1,4 +1,5 @@
-import { render, screen } from '@testing-library/react'
+import { useState } from 'react'
+import { act, fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, rs } from '@rstest/core'
 import { NodeModal } from './NodeModal'
@@ -21,6 +22,58 @@ function renderModal(props = {}) {
     />,
   )
 }
+
+describe('manual node submission', () => {
+  it('locks the draft, prevents duplicate clicks, and does not close a reopened dialog', async () => {
+    const user = userEvent.setup()
+    let finish!: (added: boolean) => void
+    const onSubmit = rs.fn(() => new Promise<boolean>(resolve => { finish = resolve }))
+    function Harness() {
+      const [open, setOpen] = useState(true)
+      const [form, setForm] = useState({ ...EMPTY_NODE_FORM, tag: '原节点', server: 'example.com', password: 'test-password' })
+      return <>
+        <button onClick={() => setOpen(true)}>重新打开</button>
+        <NodeModal open={open} nodeType="hysteria2" setNodeType={rs.fn()} form={form} setForm={setForm} loading={false}
+          onClose={() => { setOpen(false); setForm({ ...EMPTY_NODE_FORM }) }} onSubmit={onSubmit} onImport={rs.fn()} onDeployVps={rs.fn()} />
+      </>
+    }
+    render(<Harness />)
+    await user.click(screen.getByRole('button', { name: '手动填写' }))
+    const submit = screen.getByRole('button', { name: '添加 Hysteria2 节点' })
+    act(() => { fireEvent.click(submit); fireEvent.click(submit) })
+    expect(onSubmit).toHaveBeenCalledTimes(1)
+    expect(screen.getByLabelText('节点名称')).toBeDisabled()
+    expect(screen.getByLabelText('协议')).toBeDisabled()
+    expect(screen.getByLabelText('密码')).toBeDisabled()
+    expect(screen.getByLabelText(/SNI/)).toBeDisabled()
+    expect(screen.getByRole('button', { name: '粘贴链接' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'VPS 部署' })).toBeDisabled()
+    expect(screen.getByRole('status')).toHaveTextContent('关闭窗口不会取消请求')
+    await user.click(screen.getByRole('button', { name: '关闭节点对话框' }))
+    await user.click(screen.getByRole('button', { name: '重新打开' }))
+    await user.type(screen.getByRole('textbox', { name: '节点分享链接' }), '新的草稿')
+    await act(async () => { finish(true) })
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: '节点分享链接' })).toHaveValue('新的草稿')
+    expect(screen.getByRole('button', { name: '手动填写' })).toBeEnabled()
+  })
+
+  it('preserves the failed draft for retry and closes after success', async () => {
+    const user = userEvent.setup()
+    const onSubmit = rs.fn().mockResolvedValueOnce(false).mockResolvedValueOnce(true)
+    const onClose = rs.fn()
+    renderModal({ onSubmit, onClose, form: { ...EMPTY_NODE_FORM, tag: '重试节点', server: 'example.net', password: 'test-password' } })
+    await user.click(screen.getByRole('button', { name: '手动填写' }))
+    await user.click(screen.getByRole('button', { name: '添加 Hysteria2 节点' }))
+    expect(onClose).not.toHaveBeenCalled()
+    expect(screen.getByLabelText('节点名称')).toHaveValue('重试节点')
+    expect(screen.getByLabelText('节点名称')).toBeEnabled()
+    expect(screen.getByRole('button', { name: '添加 Hysteria2 节点' })).toBeEnabled()
+    await user.click(screen.getByRole('button', { name: '添加 Hysteria2 节点' }))
+    expect(onSubmit).toHaveBeenCalledTimes(2)
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
+})
 
 describe('NodeModal link import', () => {
   it('parses pasted links into preview cards and imports them', async () => {

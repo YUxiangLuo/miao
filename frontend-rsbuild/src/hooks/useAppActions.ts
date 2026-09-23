@@ -314,19 +314,20 @@ export function useAppActions(data: AppData) {
       payload = buildNodeRequest(nodeType, nodeForm)
     } catch (error) {
       showToast(errorMessage(error), 'error')
-      return
+      return false
     }
 
     try {
       await apiCall('nodes', { method: 'POST', body: JSON.stringify(payload) }, 'addNode')
-      closeNodeModal()
       await fetchNodes()
       clearDelays()
       showToast('节点已添加', 'success')
+      return true
     } catch (error) {
       showToast(errorMessage(error), 'error')
+      return false
     }
-  }, [nodeForm, nodeType, apiCall, clearDelays, closeNodeModal, fetchNodes, showToast])
+  }, [nodeForm, nodeType, apiCall, clearDelays, fetchNodes, showToast])
 
   const handleImportNodes = useCallback(async (payloads: NodeRequest[]) => {
     if (!payloads?.length) return
