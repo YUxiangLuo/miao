@@ -3,6 +3,7 @@ import { Rss, X } from 'lucide-react'
 import { ICON } from '../tokens'
 import { useDialog } from '../hooks/useDialog'
 import { fetchJson } from '../hooks/request'
+import { Button } from './ui'
 import { classNames, maskSubscription, protocolTone } from '../utils'
 import type { ApiResponse, SubNodeInfo, SubNodesInfo, SubStatus } from '../types/api'
 
@@ -21,6 +22,8 @@ export function SubDetailModal({ sub, onClose, onToggleNode }: SubDetailModalPro
   const [nodes, setNodes] = useState<SubNodeInfo[] | null>(null)
   const [staleDisabled, setStaleDisabled] = useState<string[]>([])
   const [loadError, setLoadError] = useState('')
+  const [loading, setLoading] = useState(false)
+  const loadingRef = useRef(false)
   // 正在切换的节点名：行级 busy，防止重复点击
   const [pendingNames, setPendingNames] = useState<ReadonlySet<string>>(new Set())
   const loadGenerationRef = useRef(0)
@@ -28,19 +31,30 @@ export function SubDetailModal({ sub, onClose, onToggleNode }: SubDetailModalPro
 
   const load = useCallback(async (url: string) => {
     const generation = ++loadGenerationRef.current
+    loadingRef.current = true
+    setLoading(true)
     try {
       const payload = await fetchJson<ApiResponse<SubNodesInfo[]>>('/api/subs/nodes')
       if (generation !== loadGenerationRef.current) return
       if (payload.success && payload.data) {
         const group = payload.data.find((item) => item.url === url)
-        setNodes(group?.nodes ?? [])
-        setStaleDisabled(group?.stale_disabled ?? [])
+        if (!group) {
+          setLoadError('当前节点列表中已找不到此订阅，请重新读取或关闭窗口后检查订阅列表。')
+          return
+        }
+        setNodes(group.nodes)
+        setStaleDisabled(group.stale_disabled ?? [])
         setLoadError('')
       } else {
         setLoadError(payload.message || '加载节点列表失败')
       }
-    } catch {
-      if (generation === loadGenerationRef.current) setLoadError('加载节点列表失败')
+    } catch (error) {
+      if (generation === loadGenerationRef.current) setLoadError(error instanceof Error ? error.message : String(error))
+    } finally {
+      if (generation === loadGenerationRef.current) {
+        loadingRef.current = false
+        setLoading(false)
+      }
     }
   }, [])
 
@@ -49,6 +63,8 @@ export function SubDetailModal({ sub, onClose, onToggleNode }: SubDetailModalPro
     subGenerationRef.current += 1
     if (!sub) {
       loadGenerationRef.current += 1
+      loadingRef.current = false
+      setLoading(false)
       setNodes(null)
       setStaleDisabled([])
       setLoadError('')
@@ -118,14 +134,23 @@ export function SubDetailModal({ sub, onClose, onToggleNode }: SubDetailModalPro
           </button>
         </div>
         <div className="sub-detail-meta">
-          {nodes === null
-            ? '加载中…'
+          {loadError
+            ? '节点列表尚未确认'
+            : nodes === null
+            ? '正在读取节点列表…'
             : `共 ${nodes.length} 个节点${disabledCount > 0 ? ` · 禁用 ${disabledCount}` : ''}`}
           {sub.state === 'failed' && sub.error ? ` · 上次获取失败：${sub.error}` : ''}
         </div>
         <div className="sub-detail-list list-stack">
           {loadError
-            ? <div className="empty-block">{loadError}</div>
+            ? <div className="resource-error" role="alert">
+                <strong>订阅节点读取失败</strong>
+                <p>暂无法确认节点及禁用状态，不代表订阅没有节点。重新读取不会重新获取订阅或修改配置。</p>
+                <Button tone="secondary" size="sm" loading={loading} onClick={() => {
+                  if (!loadingRef.current) void load(sub.url)
+                }}>重新读取节点</Button>
+                <details><summary>错误详情</summary><p>{loadError}</p></details>
+              </div>
             : sortedNodes === null
               ? null
               : sortedNodes.length === 0
@@ -155,7 +180,7 @@ export function SubDetailModal({ sub, onClose, onToggleNode }: SubDetailModalPro
                   </div>
                 ))}
         </div>
-        {staleDisabled.length > 0 && (
+        {!loadError && staleDisabled.length > 0 && (
           <div className="sub-stale-block">
             <div className="sub-detail-meta">已失效的禁用（订阅刷新后节点已改名/消失）：</div>
             {staleDisabled.map((name) => (

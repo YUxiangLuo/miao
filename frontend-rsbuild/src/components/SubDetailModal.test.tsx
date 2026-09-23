@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, rs } from '@rstest/core'
 import { SubDetailModal } from './SubDetailModal'
@@ -91,10 +91,51 @@ describe('SubDetailModal', () => {
   })
 
   it('shows an error block when loading fails', async () => {
-    rs.stubGlobal('fetch', rs.fn(async () => { throw new Error('network down') }))
-    renderModal()
+    const user = userEvent.setup()
+    let finish!: (response: unknown) => void
+    const fetch = rs.fn().mockRejectedValueOnce(new Error('network down'))
+      .mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    rs.stubGlobal('fetch', fetch)
+    const onToggleNode = rs.fn()
+    renderModal({ onToggleNode })
+    expect(await screen.findByRole('alert')).toHaveTextContent('不代表订阅没有节点')
+    expect(screen.getByText('节点列表尚未确认')).toBeInTheDocument()
+    expect(screen.queryByText('正在读取节点列表…')).not.toBeInTheDocument()
+    await user.click(screen.getByText('错误详情'))
+    expect(screen.getByText('network down')).toBeVisible()
+    const retry = screen.getByRole('button', { name: '重新读取节点' })
+    act(() => { fireEvent.click(retry); fireEvent.click(retry) })
+    expect(retry).toBeDisabled()
+    expect(fetch).toHaveBeenCalledTimes(2)
+    await act(async () => { finish({ ok: true, json: async () => subNodesPayload([subNodesInfoMock({ url: SUB_URL, nodes: [subNodeMock({ name: '恢复节点', disabled: true })] })]) }) })
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(screen.getByRole('switch', { name: '启用节点 恢复节点' })).toHaveAttribute('aria-checked', 'false')
+    expect(onToggleNode).not.toHaveBeenCalled()
+    for (const [url, options] of fetch.mock.calls) {
+      expect(url).toBe('/api/subs/nodes')
+      expect(options?.method).toBeUndefined()
+    }
+  })
 
-    expect(await screen.findByText('加载节点列表失败')).toBeInTheDocument()
+  it('does not present a missing subscription as an empty node list', async () => {
+    stubSubNodesFetch([subNodesInfoMock({ url: 'https://example.com/other' })])
+    renderModal()
+    expect(await screen.findByRole('alert')).toHaveTextContent('已找不到此订阅')
+    expect(screen.queryByText(/暂无节点/)).not.toBeInTheDocument()
+  })
+
+  it('hides stale mutation controls when readback fails after a successful change', async () => {
+    const user = userEvent.setup()
+    rs.stubGlobal('fetch', rs.fn().mockResolvedValueOnce({ ok: true, json: async () => subNodesPayload([
+      subNodesInfoMock({ url: SUB_URL, nodes: [subNodeMock({ name: '香港 01' })], stale_disabled: ['旧节点'] }),
+    ]) }).mockRejectedValueOnce(new Error('读取超时')))
+    const onToggleNode = rs.fn().mockResolvedValue(true)
+    renderModal({ onToggleNode })
+    await user.click(await screen.findByRole('switch', { name: '禁用节点 香港 01' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('读取超时')
+    expect(screen.queryByRole('switch')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '移除失效禁用 旧节点' })).not.toBeInTheDocument()
+    expect(onToggleNode).toHaveBeenCalledExactlyOnceWith(SUB_URL, '香港 01', true)
   })
 
   it('shows an empty block when the subscription has no fetched nodes', async () => {
