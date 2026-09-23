@@ -225,6 +225,37 @@ GOTOOLCHAIN=go1.27.1 go test -mod=readonly ./log \
 
 构建脚本将日志兼容性与同步背压回归重复执行 20 次；另在隔离源码副本中对日志和 DNS 回归执行 `-race -count=20`。三目标构建通过，但未部署或重启正在提供网络的实例；Windows/OpenWrt 真机及端到端吞吐仍未验证。
 
+### GoTUN 多队列验证：保持默认关闭
+
+固定 `sing-tun` 版本 [`041629c89d77`](https://github.com/SagerNet/sing-tun/commit/041629c89d77da4857121245dc897738ba9f3c24) 的 Linux Go 栈在 `multi_queue: true` 时按 `GOMAXPROCS` 创建队列/engine；不支持的接口可能回退到单队列。Linux `auto_redirect` 的 TCP 重定向走原生 TCP listener，不经过 GoTUN 数据路径，不能把这条路径的 TCP 吞吐变化归因于多队列。UDP 仍经过 TUN。Miao 当前不改变 `multi_queue` 默认值，也不将 Linux 专用选项写入 Windows 配置。
+
+[`benchmark-tun.sh`](../scripts/benchmark-tun.sh) 提供可复现的隔离初筛：独立 PID/mount/network namespace，另一个 network namespace 运行本地 Shadowsocks 与 iperf3 服务端。只改变测试命名空间的路由/接口/防火墙，不连接生产 API 或数据库；PID namespace 退出清理所有测试子进程。使用临时测试凭据，不需要实际节点。结果目录必须为空，避免覆盖旧数据。
+
+```bash
+# Linux amd64，需要 sudo、iproute2、iperf3、jq、util-linux，以及已构建的
+# embedded/sing-box-amd64 和完整上游 embedded/sing-box-host。
+bash scripts/benchmark-tun.sh
+```
+
+本机 Ryzen 5 5600、Linux 7.2.5、miao.12、iperf3 3.21。两端 Go 进程均为 `GOMAXPROCS=4`，MTU 9000，IPv4 / Shadowsocks AES-128-GCM；客户端 trace 日志写入测试文件。每项 2 秒，单/8 流、正/反向，UDP payload 1200 B，总发送目标 200 Mbps / 2 Gbps（不是每流该速率）。共 3 轮、144 项，轮次间反转单/多队列顺序；以下接收端吞吐与丢包率各取中位数。
+
+| 路径与负载 | 单队列 | 4 队列 | UDP 丢包率：单 → 多 |
+| --- | ---: | ---: | ---: |
+| 自动重定向，8 TCP 正向（非 GoTUN 数据路径） | 28.13 Gbps | 29.04 Gbps | — |
+| 纯 GoTUN，8 TCP 正向 | 29.15 Gbps | 23.75 Gbps | — |
+| 纯 GoTUN，8 TCP 反向 | 22.98 Gbps | 19.19 Gbps | — |
+| 自动重定向，8 UDP 正向，200 Mbps | 199.97 Mbps | 199.97 Mbps | 0% → 0% |
+| 自动重定向，8 UDP 正向，2 Gbps | 1.858 Gbps | 1.800 Gbps | 7.07% → 9.51% |
+| 自动重定向，8 UDP 反向，2 Gbps | 1.848 Gbps | 1.816 Gbps | 7.58% → 9.16% |
+| 纯 GoTUN，8 UDP 正向，2 Gbps | 1.837 Gbps | 1.902 Gbps | 8.11% → 4.88% |
+| 纯 GoTUN，8 UDP 反向，2 Gbps | 1.956 Gbps | 1.990 Gbps | 2.18% → 0.47% |
+
+自动重定向的 200 Mbps / 8 UDP 正向负载中，内核进程 CPU 中位数从 37.48% 到 47.47%（100% 为一核），没有吞吐收益。纯 GoTUN 高负载 UDP 有局部收益，但并行 TCP 退化，本轮证据不足以支持默认开启。**不是证明多队列普遍更差，也不是给所有设备推荐固定队列数。**
+
+脚本逐次核对 `/proc/<pid>/fdinfo` 中的实际 TUN 队列数为 1/4，并验证退出后 TUN 消失；保存 iperf JSON、TUN 字节计数及进程 CPU/RSS 原始数据。144 项数据的接口计数交叉检查通过：自动重定向 TCP 未走 TUN 大流量路径，其余项均经过 TUN。ShellCheck 通过。
+
+这只是本机短时初筛：未固定 CPU affinity，客户端、服务端和压测器共享 CPU，没有置信区间；RSS 是测试后快照，不是稳态或峰值。未覆盖 IPv6、UDP 分片、尾延迟、WAN 丢包、其他节点协议或 OpenWrt 真机，未模拟 Miao 的 DuckDB 采集压力。正式启用前仍需针对目标设备补测，不依据本表修改生产默认值。
+
 ## 来源与许可
 
 上游 sing-box 使用 GPL-3.0-or-later，README 另有派生作品命名限制。定制内核使用独立名称并保留出处；对应源码由固定 SHA、本仓库补丁和构建文件共同确定。分发时保留上游许可及对应源码获取方式。
