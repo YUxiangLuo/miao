@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, rs } from '@rstest/core'
 import { RulesCard } from './RulesCard'
@@ -34,6 +34,32 @@ async function openNodeTargets(user: ReturnType<typeof userEvent.setup>) {
 }
 
 describe('RulesCard', () => {
+  it('locks the submitted draft, prevents duplicate Enter requests, and leaves a reopened dialog open', async () => {
+    const user = userEvent.setup()
+    let finish!: (added: boolean) => void
+    const onAddRule = rs.fn(() => new Promise<boolean>(resolve => { finish = resolve }))
+    renderCard({ onAddRule })
+    await openRuleModal(user)
+    await user.type(screen.getByLabelText('规则值'), 'example.com')
+    await user.click(screen.getByRole('radio', { name: /^直接连接/ }))
+    act(() => {
+      fireEvent.keyDown(screen.getByLabelText('规则值'), { key: 'Enter' })
+      fireEvent.keyDown(screen.getByLabelText('规则值'), { key: 'Enter' })
+    })
+    expect(onAddRule).toHaveBeenCalledExactlyOnceWith({ field: 'domain_suffix', value: 'example.com', target: 'direct' })
+    expect(screen.getByLabelText('规则值')).toBeDisabled()
+    expect(screen.getByLabelText('匹配方式')).toBeDisabled()
+    expect(screen.getByRole('radio', { name: /^走代理/ })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'google.com' })).toBeDisabled()
+    expect(screen.getByRole('status')).toHaveTextContent('关闭窗口不会取消请求')
+    await user.click(screen.getByRole('button', { name: '关闭窗口' }))
+    await openRuleModal(user)
+    await act(async () => { finish(true) })
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+    expect(screen.getByLabelText('规则值')).toHaveValue('')
+    expect(screen.getByLabelText('规则值')).toBeEnabled()
+  })
+
   it('renders structured rules with labels and target badges', () => {
     renderCard()
 
@@ -135,6 +161,8 @@ describe('RulesCard', () => {
     expect(onAddRule).toHaveBeenCalled()
     expect(screen.getByRole('dialog')).toBeInTheDocument()
     expect(input).toHaveValue('example.com')
+    expect(input).toBeEnabled()
+    expect(screen.getByRole('button', { name: '添加规则' })).toBeEnabled()
   })
 
   it('resets the modal form after it is closed and reopened', async () => {

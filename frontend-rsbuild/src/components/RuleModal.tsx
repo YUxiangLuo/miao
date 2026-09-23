@@ -1,4 +1,4 @@
-import { useEffect, useId, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { Ban, ChevronDown, Globe, ListFilter, Plus, Search, TriangleAlert, X, Zap } from 'lucide-react'
 import { ICON } from '../tokens'
 import { useDialog } from '../hooks/useDialog'
@@ -93,9 +93,14 @@ export function RuleModal({ open, loading, onClose, onSubmit, nodeNames = [], pl
   const [nodeQuery, setNodeQuery] = useState('')
   const [nodeTargetsOpen, setNodeTargetsOpen] = useState(false)
   const [nodeTestStarted, setNodeTestStarted] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
+  const inFlight = useRef(false)
+  const generation = useRef(0)
+  const busy = loading || submitting
 
   useEffect(() => {
     if (!open) {
+      generation.current++
       setField('domain_suffix')
       setTarget('proxy')
       setValue('')
@@ -135,9 +140,17 @@ export function RuleModal({ open, loading, onClose, onSubmit, nodeNames = [], pl
   }
 
   const submit = async () => {
-    if (!canSubmit || loading) return
-    const added = await onSubmit({ field, value: value.trim(), target })
-    if (added) onClose()
+    if (!canSubmit || busy || inFlight.current) return
+    inFlight.current = true
+    setSubmitting(true)
+    const submittedGeneration = generation.current
+    try {
+      const added = await onSubmit({ field, value: value.trim(), target })
+      if (added && submittedGeneration === generation.current) onClose()
+    } finally {
+      inFlight.current = false
+      setSubmitting(false)
+    }
   }
 
   return (
@@ -151,7 +164,8 @@ export function RuleModal({ open, loading, onClose, onSubmit, nodeNames = [], pl
           <button className="icon-button" onClick={onClose} title="关闭 (Esc)" aria-label="关闭规则对话框"><X size={ICON.md} /></button>
         </header>
 
-        <div className="rule-modal-body">
+        <fieldset className="rule-modal-body" disabled={busy}>
+          {busy && <p className="rule-submit-status" role="status">正在提交规则，请稍候。关闭窗口不会取消请求，请勿重复添加。</p>}
           <section className="rule-form-section" aria-labelledby="rule-match-title">
             <h4 id="rule-match-title">你想为谁设置规则？</h4>
             <div className="rule-kind-grid" role="radiogroup" aria-label="匹配对象">
@@ -233,11 +247,11 @@ export function RuleModal({ open, loading, onClose, onSubmit, nodeNames = [], pl
 
           <div className="rule-effect" aria-live="polite"><span>规则效果</span><p>{preview || '填写上方内容后，这里会显示规则的效果。'}</p></div>
           <p className="rule-priority-note">自定义规则优先于默认分流，在全局模式下也会生效。</p>
-        </div>
+        </fieldset>
 
         <footer className="rule-modal-footer">
-          <Button tone="ghost" size="sm" onClick={onClose}>取消</Button>
-          <Button tone="primary" size="sm" icon={<Plus size={ICON.xs} />} loading={loading} disabled={!canSubmit} onClick={submit}>添加规则</Button>
+          <Button tone="ghost" size="sm" onClick={onClose}>{busy ? '关闭窗口' : '取消'}</Button>
+          <Button tone="primary" size="sm" icon={<Plus size={ICON.xs} />} loading={busy} disabled={!canSubmit || busy} onClick={submit}>添加规则</Button>
         </footer>
       </div>
     </div>
