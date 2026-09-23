@@ -153,6 +153,50 @@ func newConnectionObject(c *trafficcontrol.TrackerMetadata) connectionObject {
 
 本地验证：Linux amd64、Linux arm64、Windows amd64 三目标完整内核构建通过，每次构建均执行 Go 回归 ×20；Clash 回归额外通过 `-race -count=20`。Linux 原生 `version`、Rust 嵌入资源测试 3 项、Bun 脚本测试 30 项及 ShellCheck 通过。未部署或重启正在提供网络的实例；跨平台编译不替代 Windows/OpenWrt 真机验证。
 
+### Linux 进程扫描合并（miao.11）
+
+[`process-scan.patch`](../scripts/sing-box/process-scan.patch) 按 UID 合并同时进行的 `/proc` 扫描，只共享包含目标 inode 的结果。共享结果未命中或报错时，等待者执行自己的查询，再沿用原有的全用户扫描回退；否则，扫描开始后创建的 socket 可能被旧快照漏掉。不延长一秒缓存、不增加负缓存、不禁用进程识别，也不修改 netlink 与路由层的连接元组缓存。不同 UID 的扫描不互相串行等待。
+
+[`miao_process_linux_test.go`](../scripts/sing-box/tests/miao_process_linux_test.go) 用 `testing/synctest` 精确控制共享扫描的发布时机，结合真实 loopback UDP socket 与 `/proc/self/exe` 验证进程归属。覆盖 32 个等待者共享成功结果、扫描期间创建 socket、全用户回退、共享错误后的重查、缓存过期和清空。故意删除重查时，三个新 socket 测试均失败。Linux 构建主机重复运行这些回归 20 次；Windows 主机不执行 Linux 测试。
+
+本机固定负载基准：Linux amd64 / Ryzen 5 5600 / Go 1.27.1 / GOMAXPROCS=12，独立 PID、mount 和网络命名空间，64 个 `sleep` 进程各保留 64 个 `/dev/null` FD。每项 `500ms × 5`，取中位数。测试在同一二进制内对比固定上游实现与补丁后的实际查询函数；32 路命中使用不同的真实 socket，每次检查返回路径，不只检查无报错。未命中使用不存在的 inode 0，强制走 UID 和全用户扫描。
+
+| 负载 | 上游耗时/次 | 优化后耗时/次 | 上游分配/次 | 优化后分配/次 |
+| --- | ---: | ---: | ---: | ---: |
+| 已缓存的单次查询 | 63.61 ns | 63.78 ns | 0 B | 0 B |
+| 单次冷查 | 11.782 ms | 11.723 ms | 612,986 B | 612,696 B |
+| 32 路同时冷查，全部命中 | 59.778 ms | 12.596 ms | 20,285,072 B | 626,511 B |
+| 32 路同时冷查，全部未命中 | 110.542 ms | 118.105 ms | 40,110,097 B | 40,255,491 B |
+
+**取舍：**并发命中时耗时约降 79%、分配约降 97%；缓存命中与单次冷查基本不变。全部未命中时仍要各自扫描，先等待共享结果使该负载约慢 7%，不能宣称所有场景都更快。两轮宿主机 `/proc` 测量也观察到并发命中的明显收益与全未命中的退化，但进程/FD 数量变化较大，不用于固定负载对照。以上不包含 netlink 查询时间，不等于整个连接建立或代理吞吐的改进。
+
+复测时，在应用该补丁的独立固定源码副本中，将测试文件复制到 `common/process/`。普通基准命令为：
+
+```bash
+GOTOOLCHAIN=go1.27.1 CGO_ENABLED=0 go test -mod=readonly ./common/process \
+  -run '^$' -bench '^BenchmarkMiaoProcessPaths$' -benchmem -benchtime=500ms -count=5
+```
+
+固定负载对照使用如下隔离方式（需要 Linux、sudo、unshare、ip；不操作宿主网络，命名空间退出会清理其子进程）：
+
+```bash
+binary=$(mktemp)
+GOTOOLCHAIN=go1.27.1 CGO_ENABLED=0 go test -mod=readonly -c -o "$binary" ./common/process
+sudo unshare --pid --fork --mount --mount-proc --net bash -c '
+  set -e
+  ip link set lo up
+  for ((i=0;i<64;i++)); do
+    bash -c '\''for ((j=0;j<64;j++)); do exec {fd}</dev/null; done; exec sleep 300'\'' &
+  done
+  until [[ $(grep -l "^sleep$" /proc/[0-9]*/comm 2>/dev/null | wc -l) == 64 ]]; do sleep 0.05; done
+  exec "$1" -test.run="^$" -test.bench="^BenchmarkMiaoProcessPaths$" \
+    -test.benchmem -test.benchtime=500ms -test.count=5
+' _ "$binary"
+rm -f "$binary"
+```
+
+本地验证：三目标完整内核构建与各次 Go 回归 ×20 通过；进程回归额外通过 `-race -count=20`，以及 `-race -count=10 -cpu=1,2,12`。资源清单、定制哈希、压缩/解压哈希、Linux 原生版本、3 项 Rust 嵌入资源测试、30 项 Bun 脚本测试及 ShellCheck 均通过。未部署生产；未在 OpenWrt/Windows 真机验收，Windows 的进程查询实现未修改。
+
 ## 来源与许可
 
 上游 sing-box 使用 GPL-3.0-or-later，README 另有派生作品命名限制。定制内核使用独立名称并保留出处；对应源码由固定 SHA、本仓库补丁和构建文件共同确定。分发时保留上游许可及对应源码获取方式。

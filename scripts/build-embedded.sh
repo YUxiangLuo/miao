@@ -142,6 +142,15 @@ git apply --check "$KERNEL_DIR/clash-snapshot.patch"
 git apply "$KERNEL_DIR/clash-snapshot.patch"
 cp "$KERNEL_DIR/tests/miao_connections_test.go" experimental/clashapi/
 "${go_command[@]}" test -mod=readonly -tags "$build_tags" ./experimental/clashapi -run '^TestMiaoConnection' -count=20
+echo "==> Applying Linux process scan coalescing..."
+git apply --check "$KERNEL_DIR/process-scan.patch"
+git apply "$KERNEL_DIR/process-scan.patch"
+cp "$KERNEL_DIR/tests/miao_process_linux_test.go" common/process/
+# These tests inspect the host /proc and create only loopback sockets. A Windows
+# build host cannot execute them; Linux hosts run them for every target build.
+if [[ "$("${go_command[@]}" env GOOS)" == linux ]]; then
+  "${go_command[@]}" test -mod=readonly -tags "$build_tags" ./common/process -run '^TestMiaoProcess' -count=20
+fi
 bun "$KERNEL_DIR/prepare-command.mjs" "$TMP_DIR/sing-box"
 MIAO_REGISTRY_SNAPSHOT="$registry_snapshot" MIAO_CAPTURE_REGISTRIES=0 MIAO_PROFILE_MANIFEST="$profile_manifest" \
   "${go_command[@]}" test -mod=readonly -tags "$build_tags" ./cmd/miao-kernel -run '^TestMiao' -count=20

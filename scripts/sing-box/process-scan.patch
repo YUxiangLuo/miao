@@ -1,0 +1,71 @@
+diff --git a/common/process/searcher_linux.go b/common/process/searcher_linux.go
+index 604041a..709be5a 100644
+--- a/common/process/searcher_linux.go
++++ b/common/process/searcher_linux.go
+@@ -9,6 +9,7 @@ import (
+ 	"os"
+ 	"path/filepath"
+ 	"slices"
++	"strconv"
+ 	"strings"
+ 	"syscall"
+ 	"time"
+@@ -21,6 +22,8 @@ import (
+ 	E "github.com/sagernet/sing/common/exceptions"
+ 	"github.com/sagernet/sing/contrab/freelru"
+ 	"github.com/sagernet/sing/contrab/maphash"
++
++	"golang.org/x/sync/singleflight"
+ )
+ 
+ const (
+@@ -36,6 +39,7 @@ type linuxSearcher struct {
+ 	packageManager   tun.PackageManager
+ 	diagConns        [4]*socketDiagConn
+ 	processPathCache *freelru.Cache[uint32, *uidProcessPaths]
++	processPathScans singleflight.Group
+ }
+ 
+ type uidProcessPaths struct {
+@@ -138,12 +142,38 @@ func (s *linuxSearcher) findProcessPaths(targetInode, uid uint32) ([]string, err
+ 				return processPaths, nil
+ 			}
+ 		}
+-		processPaths, err := buildProcessPaths(scanUID)
++		loadedByCaller := false
++		load := func() (any, error) {
++			loadedByCaller = true
++			// Another scan may have completed since the first cache lookup.
++			if cached, ok := s.processPathCache.Get(scanUID); ok {
++				if _, found := cached.entries[targetInode]; found {
++					return cached.entries, nil
++				}
++			}
++			paths, err := buildProcessPaths(scanUID)
++			if err == nil {
++				s.processPathCache.Add(scanUID, &uidProcessPaths{entries: paths})
++			}
++			return paths, err
++		}
++		value, err, _ := s.processPathScans.Do(strconv.FormatUint(uint64(scanUID), 10), load)
++		if !loadedByCaller {
++			var found bool
++			if err == nil {
++				_, found = value.(map[uint32][]string)[targetInode]
++			}
++			if !found {
++				// Only share positive attribution. This caller's socket may have
++				// appeared after the shared scan passed its process. Retry privately
++				// before falling back to all users; do not cache shared failures.
++				value, err = load()
++			}
++		}
+ 		if err != nil {
+ 			return nil, err
+ 		}
+-		s.processPathCache.Add(scanUID, &uidProcessPaths{entries: processPaths})
+-		inodePaths, found := processPaths[targetInode]
++		inodePaths, found := value.(map[uint32][]string)[targetInode]
+ 		if found {
+ 			return inodePaths, nil
+ 		}
