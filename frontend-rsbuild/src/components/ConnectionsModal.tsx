@@ -6,7 +6,7 @@ import { ConnectionsToolbar } from './ConnectionsToolbar'
 import { VirtualConnections } from './VirtualConnections'
 import { ConnectionStats } from './ConnectionStats'
 import { AnalyticsLogsPane, AnalyticsSummaryPane } from './ConnectionAnalytics'
-import type { LogSelection } from './ConnectionAnalytics'
+import type { AnalysisSection, Hours, LogSelection } from './ConnectionAnalytics'
 import {
   filterConnectionsByPath,
   pathCountsForConnections,
@@ -39,6 +39,8 @@ export function ConnectionsModal({
   const [path, setPath] = useState('all')
   const [tab, setTab] = useState<'live' | 'analysis' | 'logs'>('live')
   const [logSelection, setLogSelection] = useState<LogSelection>({})
+  const [analysisHours, setAnalysisHours] = useState<Hours>(24)
+  const [analysisSection, setAnalysisSection] = useState<AnalysisSection>('overview')
 
   const connections = useMemo(() => {
     return Array.isArray(data?.connections) ? data.connections : []
@@ -81,7 +83,7 @@ export function ConnectionsModal({
             <button key={key} role="tab" aria-selected={tab === key} className={tab === key ? 'active' : ''} onClick={() => { setLogSelection({}); setTab(key as typeof tab) }}>{label}</button>)}
         </nav>
 
-        {tab === 'analysis' ? <AnalyticsSummaryPane visible={open} onExplore={selection => { setLogSelection(selection); setTab('logs') }} /> : tab === 'logs' ? <AnalyticsLogsPane visible={open} initial={logSelection} /> : !status.ready ? (
+        {tab === 'analysis' ? <AnalyticsSummaryPane visible={open} hours={analysisHours} onHoursChange={setAnalysisHours} section={analysisSection} onSectionChange={setAnalysisSection} onExplore={selection => { setLogSelection(selection); setTab('logs') }} /> : tab === 'logs' ? <AnalyticsLogsPane visible={open} initial={logSelection} /> : !status.ready ? (
           <div className="connections-empty">代理数据面尚未就绪，暂无链接统计。</div>
         ) : (
           <div className="connections-body">

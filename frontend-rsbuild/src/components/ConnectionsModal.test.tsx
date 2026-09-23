@@ -108,6 +108,37 @@ describe('ConnectionsModal connection list', () => {
     rs.restoreAllMocks()
   })
 
+  it('scales sub-millisecond DNS values, renders isolated points and distinguishes dates', async () => {
+    const user = userEvent.setup()
+    const start = new Date(2026, 8, 23, 23, 55).getTime()
+    const timestamps = [start, start + 300_000, start + 600_000]
+    const bucket = (timestamp: number) => ({ timestamp, log_count: 1, error_count: 0, upload: 0, download: 0 })
+    const dnsBucket = (timestamp: number, p95_ms: number) => ({ timestamp, queries: 1, failures: 0, p95_ms, max_ms: p95_ms })
+    const data = analyticsMock({ since: start - 24 * 3_600_000, until: start + 600_000,
+      timeline: timestamps.map(bucket),
+      dns: { ...analyticsMock().dns, queries: 2, timeline: [dnsBucket(start, 0.05), dnsBucket(start + 600_000, 0.2)] },
+    })
+    rs.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify({ success: true, data })))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ success: true, data: {
+        ...data, timeline: [bucket(start)], dns: { ...data.dns, timeline: [dnsBucket(start, 0.3)] },
+      } })))
+    render(<AnalyticsSummaryPane visible onExplore={rs.fn()} />)
+    await screen.findByText('日志活动')
+    const chart = screen.getByRole('img', { name: 'DNS P95 延迟，单位 ms' })
+    expect(chart.querySelector('.chart-line')).toHaveAttribute('d', 'M0,85  M1000,10')
+    expect(chart.querySelectorAll('.chart-point')).toHaveLength(2)
+    expect(chart.querySelector('.chart-fill')).toBeNull()
+    const labels = chart.closest('section')!.querySelectorAll('footer span')
+    expect(labels[0].textContent).not.toBe(labels[2].textContent)
+    expect(labels[0].textContent).toContain('23')
+    expect(labels[2].textContent).toContain('24')
+    await user.click(screen.getByRole('button', { name: '刷新' }))
+    await screen.findByText('峰值 0.3 ms')
+    expect(chart.querySelector('.chart-point')).toHaveAttribute('cx', '500')
+    expect(chart.querySelector('.chart-point')).toHaveAttribute('cy', '10')
+    expect(chart.querySelector('.chart-fill')).toBeNull()
+  })
+
   it('renders meaningful sampled totals and reports API failures', async () => {
     const user = userEvent.setup()
     const fetchMock = rs.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify({
@@ -151,6 +182,7 @@ describe('ConnectionsModal connection list', () => {
     const fetch = rs.spyOn(globalThis, 'fetch').mockImplementation(async input => new Response(JSON.stringify({ success: true, data: String(input).includes('summary') ? summary : { entries: [analyticsLogMock({ id: 73, message: '<script>escaped log</script>', context: 'kernel-1/42' })], next_before: null } })))
     renderModal([])
     await user.click(screen.getByRole('tab', { name: '24 小时分析' }))
+    await user.click(screen.getByRole('button', { name: '1 小时' }))
     await user.click(screen.getByRole('button', { name: 'DNS 行为' }))
     expect(await screen.findByRole('button', { name: 'slow.test' })).toBeInTheDocument()
     expect(screen.getByText('dns-remote')).toBeInTheDocument()
@@ -160,6 +192,11 @@ describe('ConnectionsModal connection list', () => {
     expect(fetch.mock.calls.some(([url]) => String(url).includes('id=73'))).toBe(true)
     await user.click(screen.getByRole('button', { name: '同上下文' }))
     expect(fetch.mock.calls.some(([url]) => String(url).includes('context=kernel-1%2F42') && !String(url).includes('id=73'))).toBe(true)
+    await user.click(screen.getByRole('tab', { name: '24 小时分析' }))
+    expect(await screen.findByRole('button', { name: 'slow.test' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '1 小时' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('button', { name: 'DNS 行为' })).toHaveAttribute('aria-current', 'page')
+    expect(fetch.mock.calls.at(-1)?.[0]).toBe('/api/analytics/summary?hours=1')
   })
 
   it('ignores an older request after changing the log filter and can repeat a search', async () => {

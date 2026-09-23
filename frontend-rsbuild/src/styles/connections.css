@@ -179,8 +179,9 @@
 .chart-grid { stroke: var(--border-soft); stroke-width: var(--bw); }
 .chart-fill { fill: color-mix(in srgb, var(--chart-color) 12%, transparent); }
 .chart-line { fill: none; stroke: var(--chart-color); stroke-width: 2px; vector-effect: non-scaling-stroke; } /* 2px optical chart line */
+.chart-point { fill: var(--chart-color); }
 .chart-cursor { stroke: var(--text-muted); stroke-width: var(--bw); }
-.analytics-timeline footer { display: flex; justify-content: space-between; font-size: var(--fs-xs); color: var(--text-muted); }
+.analytics-timeline footer { display: flex; flex-wrap: wrap; gap: var(--space-1); justify-content: space-between; font-size: var(--fs-xs); color: var(--text-muted); }
 .analytics-facets { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-1); }
 .analytics-facets button { position: relative; display: flex; width: 100%; justify-content: space-between; gap: var(--space-2); padding: var(--space-2); background: transparent; color: var(--text); border: 0; text-align: left; border-radius: var(--r-sm); overflow: hidden; }
 .analytics-facets button > span:not(.facet-bar) { position: relative; overflow-wrap: anywhere; min-width: 0; }

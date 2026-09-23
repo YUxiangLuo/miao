@@ -401,3 +401,56 @@ fn dns_rankings_include_rare_slow_and_failed_domains_outside_popular_top_twenty(
     assert_eq!((failed.queries, failed.failures), (2, 1));
     assert!((failed.p95_ms - 380.5).abs() < 0.0001);
 }
+
+#[test]
+fn timeline_starts_at_first_record_in_window_including_idle_samples() {
+    let store = Analytics::initialize(Connection::open_in_memory().unwrap()).unwrap();
+    let mut db = store.db.lock().unwrap();
+    let since = 900_000;
+    let until = 2_100_000;
+    Analytics::insert_logs(
+        &mut db,
+        &[log(since - 1, "INFO old"), log(until + 1, "INFO future")],
+    )
+    .unwrap();
+    assert!(Analytics::summary(&db, since, until)
+        .unwrap()
+        .timeline
+        .is_empty());
+
+    Analytics::insert_sample(&mut db, 1_500_001, &[]).unwrap();
+    let idle = Analytics::summary(&db, since, until).unwrap();
+    assert_eq!((idle.since, idle.until), (since, until));
+    assert_eq!(
+        idle.timeline
+            .iter()
+            .map(|b| b.timestamp)
+            .collect::<Vec<_>>(),
+        [1_500_000, 1_800_000, 2_100_000]
+    );
+    assert!(idle
+        .timeline
+        .iter()
+        .all(|b| b.upload == 0 && b.download == 0 && b.log_count == 0));
+
+    Analytics::insert_logs(
+        &mut db,
+        &[log(1_200_001, "INFO first"), log(1_800_010, "ERROR later")],
+    )
+    .unwrap();
+    let recorded = Analytics::summary(&db, since, until).unwrap();
+    assert_eq!(
+        recorded
+            .timeline
+            .iter()
+            .map(|b| (b.timestamp, b.log_count))
+            .collect::<Vec<_>>(),
+        [
+            (1_200_000, 1),
+            (1_500_000, 0),
+            (1_800_000, 1),
+            (2_100_000, 0)
+        ]
+    );
+    assert_eq!(recorded.timeline[2].error_count, 1);
+}

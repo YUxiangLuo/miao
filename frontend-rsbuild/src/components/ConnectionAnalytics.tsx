@@ -30,7 +30,9 @@ function HoursPicker({ value, onChange }: { value: Hours; onChange: (hours: Hour
 
 const duration = (value: number | null) => value == null ? '—' : `${value.toFixed(value < 10 ? 2 : 1)} ms`
 const time = (value: number) => new Date(value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+const chartTime = (value: number) => new Date(value).toLocaleString([], { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
 const SECTIONS = [['overview', '活动概览'], ['dns', 'DNS 行为'], ['routes', '分流与出口'], ['issues', '错误与告警'], ['traffic', '流量采样'], ['coverage', '日志覆盖']] as const
+export type AnalysisSection = (typeof SECTIONS)[number][0]
 const EVENT_LABELS: Record<string, string> = {
   'dns.complete': 'DNS 完成', 'dns.query': 'DNS 交换开始', 'dns.lookup': '域名解析开始',
   'dns.cached_record': '缓存答案记录', 'dns.optimistic_record': '乐观缓存记录',
@@ -46,23 +48,27 @@ function Timeline({ title, values, timestamps, unit, active, onActive, tone = 'i
   onActive: (value: number | null) => void; tone?: string;
 }) {
   const peak = Math.max(0, ...values.filter((v): v is number => v != null))
-  const max = Math.max(1, peak)
-  const point = (value: number, index: number) => `${index * 1000 / Math.max(1, values.length - 1)},${110 - value / max * 100}`
+  const max = peak > 0 ? peak : 1
+  const x = (index: number) => values.length === 1 ? 500 : index * 1000 / Math.max(1, values.length - 1)
+  const y = (value: number) => 110 - value / max * 100
+  const point = (value: number, index: number) => `${x(index)},${y(value)}`
+  const number = (value: number) => value.toLocaleString([], unit === 'ms' ? { maximumSignificantDigits: 4 } : undefined)
   const points = values.map((value, index) => value == null ? '' : point(value, index)).join(' ')
   const line = values.map((value, index) => value == null ? '' : `${index === 0 || values[index - 1] == null ? 'M' : 'L'}${point(value, index)}`).join(' ')
   return <section className={`analytics-section analytics-timeline tone-${tone}`}>
-    <div className="analytics-section-head"><h4>{title}</h4><span>{active == null ? `峰值 ${values.some(v => v != null) ? peak.toLocaleString() : '—'} ${unit}` : `${values[active]?.toLocaleString() ?? '—'} ${unit} · ${time(timestamps[active])}`}</span></div>
+    <div className="analytics-section-head"><h4>{title}</h4><span>{active == null ? `峰值 ${values.some(v => v != null) ? number(peak) : '—'} ${unit}` : `${values[active] == null ? '—' : number(values[active])} ${unit} · ${chartTime(timestamps[active])}`}</span></div>
     <svg viewBox="0 0 1000 120" preserveAspectRatio="none" role="img" aria-label={`${title}，单位 ${unit}`} onPointerLeave={() => onActive(null)} onPointerMove={event => {
       const rect = event.currentTarget.getBoundingClientRect()
       if (!values.length) return
       onActive(Math.max(0, Math.min(values.length - 1, Math.round((event.clientX - rect.left) / rect.width * (values.length - 1)))))
     }}>
       <path className="chart-grid" d="M0 10H1000 M0 60H1000 M0 110H1000" />
-      {!values.includes(null) && <polygon className="chart-fill" points={`0,110 ${points} 1000,110`} />}
+      {values.length > 1 && !values.includes(null) && <polygon className="chart-fill" points={`0,110 ${points} 1000,110`} />}
       <path className="chart-line" d={line} />
-      {active != null && <line className="chart-cursor" x1={active * 1000 / Math.max(1, values.length - 1)} x2={active * 1000 / Math.max(1, values.length - 1)} y1="0" y2="120" />}
+      {values.map((value, index) => value != null && values[index - 1] == null && values[index + 1] == null ? <circle key={timestamps[index]} className="chart-point" cx={x(index)} cy={y(value)} r="3" /> : null)}
+      {active != null && <line className="chart-cursor" x1={x(active)} x2={x(active)} y1="0" y2="120" />}
     </svg>
-    <footer><span>{timestamps.length ? time(timestamps[0]) : ''}</span><span>每格 5 分钟</span><span>{timestamps.length ? time(timestamps[timestamps.length - 1]) : ''}</span></footer>
+    <footer><span>{timestamps.length ? chartTime(timestamps[0]) : '暂无记录'}</span><span>每格 5 分钟</span><span>{timestamps.length ? chartTime(timestamps[timestamps.length - 1]) : ''}</span></footer>
   </section>
 }
 
@@ -78,12 +84,20 @@ function Facets({ title, facets, dimension, onExplore }: { title: string; facets
   </section>
 }
 
-export function AnalyticsSummaryPane({ visible, onExplore }: { visible: boolean; onExplore: (selection: LogSelection) => void }) {
+export function AnalyticsSummaryPane({ visible, onExplore, hours: selectedHours, onHoursChange, section: selectedSection, onSectionChange }: {
+  visible: boolean; onExplore: (selection: LogSelection) => void;
+  hours?: Hours; onHoursChange?: (hours: Hours) => void;
+  section?: AnalysisSection; onSectionChange?: (section: AnalysisSection) => void;
+}) {
   const pane = useRef<HTMLDivElement>(null)
-  const [hours, setHours] = useState<Hours>(24)
+  const [localHours, setLocalHours] = useState<Hours>(24)
+  const hours = selectedHours ?? localHours
+  const setHours = onHoursChange ?? setLocalHours
   const [summary, setSummary] = useState<AnalyticsSummary | null>(null)
   const [dimension, setDimension] = useState<(typeof DIMENSIONS)[number][0]>('domain')
-  const [section, setSection] = useState<(typeof SECTIONS)[number][0]>('overview')
+  const [localSection, setLocalSection] = useState<AnalysisSection>('overview')
+  const section = selectedSection ?? localSection
+  const setSection = onSectionChange ?? setLocalSection
   const [dnsDimension, setDnsDimension] = useState('domain')
   const [dnsRanking, setDnsRanking] = useState('queries')
   const [active, setActive] = useState<number | null>(null)
@@ -126,6 +140,7 @@ export function AnalyticsSummaryPane({ visible, onExplore }: { visible: boolean;
     {error && <div className="connections-error" role="alert">{error}</div>}
     {loading && !summary ? <div className="connections-empty inline">分析加载中…</div> : summary ? <>
       {summary.collection_error && <div className="connections-error">采集提示：{summary.collection_error}</div>}
+      <p className="analytics-note">查询最近 {hours} 小时；{timestamps.length ? <>图表范围 {chartTime(timestamps[0])} — {chartTime(summary.until)}，从首条日志或采样所在分桶开始。首尾分桶可能不足 5 分钟。</> : '该时段尚无日志或采样记录。'}</p>
       {section === 'overview' && <>
         <div className="analytics-metrics">
           <article><span>日志活动</span><strong>{summary.log_count.toLocaleString()}</strong><small>已分类事件 {summary.activity.classified_count.toLocaleString()} 条</small></article>

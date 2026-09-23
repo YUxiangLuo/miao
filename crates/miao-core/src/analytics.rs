@@ -293,17 +293,26 @@ impl Analytics {
         }
         let mut timeline = std::collections::BTreeMap::new();
         const BUCKET: i64 = 300_000;
-        for timestamp in ((since / BUCKET * BUCKET)..=until).step_by(BUCKET as usize) {
-            timeline.insert(
-                timestamp,
-                AnalyticsBucket {
+        // The selected window is a maximum lookback, not proof we observed
+        // the entire period. Include zero-traffic samples as real observations.
+        let first_record: Option<i64> = db.query_row(
+            "SELECT min(timestamp) FROM (SELECT timestamp FROM logs WHERE timestamp BETWEEN ? AND ? UNION ALL SELECT timestamp FROM samples WHERE timestamp BETWEEN ? AND ?)",
+            params![since, until, since, until],
+            |r| r.get(0),
+        )?;
+        if let Some(first_record) = first_record {
+            for timestamp in ((first_record / BUCKET * BUCKET)..=until).step_by(BUCKET as usize) {
+                timeline.insert(
                     timestamp,
-                    upload: 0,
-                    download: 0,
-                    log_count: 0,
-                    error_count: 0,
-                },
-            );
+                    AnalyticsBucket {
+                        timestamp,
+                        upload: 0,
+                        download: 0,
+                        log_count: 0,
+                        error_count: 0,
+                    },
+                );
+            }
         }
         for bucket in db.prepare("SELECT (timestamp // 300000) * 300000, sum(upload)::BIGINT, sum(download)::BIGINT FROM traffic WHERE timestamp BETWEEN ? AND ? GROUP BY 1")?
             .query_map(params![since, until], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?, r.get::<_, i64>(2)?)))? {
