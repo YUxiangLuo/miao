@@ -234,6 +234,52 @@ describe('SubsCard schedule modal', () => {
     rs.unstubAllGlobals()
   })
 
+  it('preserves read failure details and retries without writing or showing default settings', async () => {
+    const user = userEvent.setup()
+    let finish!: (response: unknown) => void
+    const fetch = rs.fn().mockRejectedValueOnce(new Error('连接超时：测试原因'))
+      .mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    rs.stubGlobal('fetch', fetch)
+    const { props } = renderCard()
+    await user.click(screen.getByRole('button', { name: '定时刷新' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('不代表定时刷新已关闭')
+    expect(screen.getByRole('button', { name: '保存' })).toBeDisabled()
+    expect(screen.queryByRole('switch', { name: '启用定时刷新' })).not.toBeInTheDocument()
+    await user.click(screen.getByText('错误详情'))
+    expect(screen.getByText('连接超时：测试原因')).toBeVisible()
+    const retry = screen.getByRole('button', { name: '重新读取设置' })
+    act(() => { fireEvent.click(retry); fireEvent.click(retry) })
+    expect(fetch).toHaveBeenCalledTimes(2)
+    expect(screen.getByRole('status')).toHaveTextContent('正在读取定时刷新设置')
+    expect(screen.getByRole('button', { name: '保存' })).toBeDisabled()
+    await act(async () => { finish({ ok: true, json: async () => ({ success: true, data: scheduledRefreshStatusMock({ enabled: true, times: ['18:37'] }) }) }) })
+    expect(screen.getByLabelText('第 1 个执行时间')).toHaveValue('18:37')
+    expect(screen.getByRole('switch', { name: '启用定时刷新' })).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByRole('button', { name: '保存' })).toBeEnabled()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(props.onSaveSchedule).not.toHaveBeenCalled()
+    for (const [url, options] of fetch.mock.calls) {
+      expect(url).toBe('/api/scheduled-refresh')
+      expect(options?.method).toBeUndefined()
+    }
+  })
+
+  it('ignores an old retry result after closing and reopening', async () => {
+    const user = userEvent.setup()
+    let finish!: (response: unknown) => void
+    rs.stubGlobal('fetch', rs.fn().mockRejectedValueOnce(new Error('读取失败'))
+      .mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ success: true, data: scheduledRefreshStatusMock({ times: ['19:41'] }) }) }))
+    renderCard()
+    await user.click(screen.getByRole('button', { name: '定时刷新' }))
+    await user.click(await screen.findByRole('button', { name: '重新读取设置' }))
+    await user.click(screen.getByRole('button', { name: '关闭定时刷新对话框' }))
+    await user.click(screen.getByRole('button', { name: '定时刷新' }))
+    expect(await screen.findByDisplayValue('19:41')).toBeInTheDocument()
+    await act(async () => { finish({ ok: true, json: async () => ({ success: true, data: scheduledRefreshStatusMock({ times: ['03:12'] }) }) }) })
+    expect(screen.getByLabelText('第 1 个执行时间')).toHaveValue('19:41')
+  })
+
   it('locks the submitted schedule, prevents duplicate saves, and leaves a reopened window open', async () => {
     const user = userEvent.setup()
     rs.stubGlobal('fetch', rs.fn(async () => ({ ok: true, json: async () => ({ success: true, data: scheduledRefreshStatusMock({ enabled: true, times: ['04:05'] }) }) })))

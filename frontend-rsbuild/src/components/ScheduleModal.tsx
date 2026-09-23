@@ -34,12 +34,16 @@ export function ScheduleModal({ open, saving, onClose, onSave }: ScheduleModalPr
   const [enabled, setEnabled] = useState(false)
   const [times, setTimes] = useState<string[]>([])
   const generationRef = useRef(0)
+  const loadingRef = useRef(false)
   const [submitting, setSubmitting] = useState(false)
   const inFlight = useRef(false)
   const busy = saving || submitting
 
   const load = useCallback(async () => {
+    if (loadingRef.current) return
+    loadingRef.current = true
     const generation = ++generationRef.current
+    setLoadError('')
     try {
       const payload = await fetchJson<ApiResponse<ScheduledRefreshStatus>>('/api/scheduled-refresh')
       if (generation !== generationRef.current) return
@@ -51,14 +55,17 @@ export function ScheduleModal({ open, saving, onClose, onSave }: ScheduleModalPr
       } else {
         setLoadError(payload.message || '加载定时刷新设置失败')
       }
-    } catch {
-      if (generation === generationRef.current) setLoadError('加载定时刷新设置失败')
+    } catch (error) {
+      if (generation === generationRef.current) setLoadError(error instanceof Error ? error.message : String(error))
+    } finally {
+      if (generation === generationRef.current) loadingRef.current = false
     }
   }, [])
 
   // 打开时加载；关闭时清空草稿，避免下次打开残留旧值
   useEffect(() => {
     generationRef.current += 1
+    loadingRef.current = false
     if (!open) {
       setStatus(null)
       setLoadError('')
@@ -118,9 +125,14 @@ export function ScheduleModal({ open, saving, onClose, onSave }: ScheduleModalPr
 
         {busy && <p className="schedule-note schedule-save-status" role="status">正在保存设置，请稍候。关闭窗口不会取消请求，请勿重复保存。</p>}
         {loadError ? (
-          <div className="empty-block schedule-error">{loadError}</div>
+          <div className="resource-error" role="alert">
+            <strong>定时刷新设置读取失败</strong>
+            <p>暂无法确认当前设置，不代表定时刷新已关闭。重新读取不会修改配置。</p>
+            <Button tone="secondary" size="sm" onClick={load}>重新读取设置</Button>
+            <details><summary>错误详情</summary><p>{loadError}</p></details>
+          </div>
         ) : status === null ? (
-          <div className="empty-block">加载中…</div>
+          <div className="empty-block" role="status">正在读取定时刷新设置…</div>
         ) : (
           <>
             <button
