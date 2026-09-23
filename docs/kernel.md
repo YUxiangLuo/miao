@@ -197,6 +197,34 @@ rm -f "$binary"
 
 本地验证：三目标完整内核构建与各次 Go 回归 ×20 通过；进程回归额外通过 `-race -count=20`，以及 `-race -count=10 -cpu=1,2,12`。资源清单、定制哈希、压缩/解压哈希、Linux 原生版本、3 项 Rust 嵌入资源测试、30 项 Bun 脚本测试及 ShellCheck 均通过。未部署生产；未在 OpenWrt/Windows 真机验收，Windows 的进程查询实现未修改。
 
+### 同步日志分配优化（miao.12）
+
+[`log-allocation.patch`](../scripts/sing-box/log-allocation.patch) 保留同步输出、日志级别和启动前排队行为。单个 string 参数直接作为消息，多参数及其他类型仍交给原有 `format.ToString`；输出使用标准库 `io.WriteString`，让支持 `io.StringWriter` 的目标（包括 stdout/stderr 的 `os.File`）避免整行 string → byte slice 复制，不支持时仍回退到 `Write`。DNS 完成事件先将固定前缀和 JSON 合成一个字符串，仍使用 `encoding/json`，不修改 v1 字段、转义、错误分类和完成时机。
+
+未使用 `unsafe`、缓冲队列或异步日志，也未降级或采样日志。慢输出仍阻塞调用者；优化分配不解决管道写满或数据库积压。原有写错误处理、FATAL/PANIC 行为不变，不新增无损保证。
+
+本机 Linux amd64 / Ryzen 5 5600 / Go 1.27.1 / GOMAXPROCS=12，独立固定源码副本中的真实 logger、关闭颜色和时间戳、模拟同步输出目标。优化前后测试二进制交替运行 6 轮，每项 200 ms，以下为中位数。DNS 使用含全部 v1 字段及引号转义的固定事件，计入 JSON 编码；对比原来的双参数调用与优化后的单字符串调用。
+
+| 输出目标与负载 | 优化前 | 优化后 | 分配字节/次 | 分配次数/次 |
+| --- | ---: | ---: | ---: | ---: |
+| StringWriter：单字符串日志 | 172.4 ns | 120.7 ns | 192 → 112 B | 4 → 2 |
+| StringWriter：多参数日志 | 249.8 ns | 220.9 ns | 256 → 208 B | 5 → 4 |
+| StringWriter：DNS JSON 日志 | 1182.5 ns | 1004.2 ns | 1056 → 720 B | 10 → 7 |
+| 仅 Write：单字符串日志 | 173.0 ns | 146.4 ns | 192 → 160 B | 4 → 3 |
+| 仅 Write：多参数日志 | 244.3 ns | 260.0 ns | 256 → 256 B | 5 → 5 |
+| 仅 Write：DNS JSON 日志 | 1178.0 ns | 1060.5 ns | 1056 → 880 B | 10 → 8 |
+
+仅 Write 的多参数路径无分配收益，本次中位数约慢 6%；不能宣称所有 writer 都更快。基准不包含时间戳、context ID、observable 订阅、实际系统调用、磁盘或数据库写入，不代表 DNS 延迟或代理吞吐的对应改善。特意不用 `io.Discard` 本身作为目标，因为上游会跳过其控制台格式化路径。
+
+复测：在独立固定源码副本中将 [`miao_log_test.go`](../scripts/sing-box/tests/miao_log_test.go) 复制到 `log/`，应用日志补丁前后分别运行：
+
+```bash
+GOTOOLCHAIN=go1.27.1 go test -mod=readonly ./log \
+  -run '^TestMiaoLog' -bench '^BenchmarkMiaoLog$' -benchmem -benchtime=200ms -count=6
+```
+
+构建脚本将日志兼容性与同步背压回归重复执行 20 次；另在隔离源码副本中对日志和 DNS 回归执行 `-race -count=20`。三目标构建通过，但未部署或重启正在提供网络的实例；Windows/OpenWrt 真机及端到端吞吐仍未验证。
+
 ## 来源与许可
 
 上游 sing-box 使用 GPL-3.0-or-later，README 另有派生作品命名限制。定制内核使用独立名称并保留出处；对应源码由固定 SHA、本仓库补丁和构建文件共同确定。分发时保留上游许可及对应源码获取方式。

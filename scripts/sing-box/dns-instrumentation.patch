@@ -3,7 +3,7 @@ new file mode 100644
 index 00000000..7fdbafc1
 --- /dev/null
 +++ b/dns/miao_instrumentation_test.go
-@@ -0,0 +1,108 @@
+@@ -0,0 +1,109 @@
 +package dns
 +
 +import (
@@ -17,6 +17,7 @@ index 00000000..7fdbafc1
 +
 +	mDNS "github.com/miekg/dns"
 +	"github.com/sagernet/sing-box/adapter"
++	F "github.com/sagernet/sing/common/format"
 +	"github.com/sagernet/sing/common/logger"
 +)
 +
@@ -29,7 +30,7 @@ index 00000000..7fdbafc1
 +func (l *miaoCaptureLogger) InfoContext(_ context.Context, args ...any) {
 +	l.access.Lock()
 +	defer l.access.Unlock()
-+	l.lines = append(l.lines, args[0].(string)+args[1].(string))
++	l.lines = append(l.lines, F.ToString(args...))
 +}
 +
 +func (l *miaoCaptureLogger) WarnContext(context.Context, ...any) {}
@@ -149,7 +150,7 @@ index d5b07031..71df9fdc 100644
 +	if marshalErr != nil {
 +		return
 +	}
-+	r.logger.InfoContext(ctx, "MIAO_DNS ", string(encoded))
++	r.logger.InfoContext(ctx, "MIAO_DNS "+string(encoded))
 +}
 +
 +func newMiaoDNSCompletion(started time.Time, domain string, queryType string, response *mDNS.Msg, err error) miaoDNSCompletion {

@@ -1,0 +1,38 @@
+diff --git a/log/observable.go b/log/observable.go
+index ab50e56..8bbac5c 100644
+--- a/log/observable.go
++++ b/log/observable.go
+@@ -152,7 +152,7 @@ func (f *defaultFactory) output(ctx context.Context, level Level, tag string, me
+ 		if level == LevelPanic {
+ 			panic(formatted)
+ 		}
+-		f.writer.Write([]byte(formatted))
++		io.WriteString(f.writer, formatted)
+ 		if level == LevelFatal {
+ 			os.Exit(1)
+ 		}
+@@ -176,6 +176,15 @@ type observableLogger struct {
+ 	tag string
+ }
+ 
++func formatMessage(args []any) string {
++	if len(args) == 1 {
++		if message, ok := args[0].(string); ok {
++			return message
++		}
++	}
++	return F.ToString(args...)
++}
++
+ func (l *observableLogger) Log(ctx context.Context, level Level, args []any) {
+ 	level = OverrideLevelFromContext(level, ctx)
+ 	platformWriters := l.loadPlatformWriters()
+@@ -183,7 +192,7 @@ func (l *observableLogger) Log(ctx context.Context, level Level, args []any) {
+ 		return
+ 	}
+ 	nowTime := time.Now()
+-	message := F.ToString(args...)
++	message := formatMessage(args)
+ 	if !l.started.Load() && level != LevelFatal && level != LevelPanic {
+ 		l.startAccess.Lock()
+ 		if !l.started.Load() {
