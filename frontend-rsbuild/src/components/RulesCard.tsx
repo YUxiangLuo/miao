@@ -137,7 +137,7 @@ export function RulesCard({
         }
       >
         <div className="list-stack">
-          {deleting && <div className="list-row-meta" role="status">正在删除规则并同步列表，请稍候…</div>}
+          {deleting && <div className="list-row-meta" role="status">删除规则并同步列表中…</div>}
           {loadError && <ResourceError label="自定义规则" error={loadError} hasData={rules.length > 0} onRetry={onRetry} />}
           {rules.length === 0 && !loadError && <div className="empty-block">暂无自定义规则</div>}
           {rules.map((rule) => (

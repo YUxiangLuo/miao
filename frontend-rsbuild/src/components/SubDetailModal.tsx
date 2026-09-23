@@ -40,7 +40,7 @@ export function SubDetailModal({ sub, onClose, onToggleNode }: SubDetailModalPro
       if (payload.success && payload.data) {
         const group = payload.data.find((item) => item.url === url)
         if (!group) {
-          setLoadError('当前节点列表中已找不到此订阅，请重新读取或关闭窗口后检查订阅列表。')
+          setLoadError('已找不到此订阅，请重新读取或返回订阅列表确认。')
           return
         }
         setNodes(group.nodes)
@@ -132,7 +132,7 @@ export function SubDetailModal({ sub, onClose, onToggleNode }: SubDetailModalPro
           {loadError
             ? <div className="resource-error" role="alert">
                 <strong>订阅节点读取失败</strong>
-                <p>暂无法确认节点及禁用状态，不代表订阅没有节点。重新读取不会重新获取订阅或修改配置。</p>
+                <p>节点状态未知，不代表订阅没有节点。重试仅读取列表，不刷新订阅或修改配置。</p>
                 <Button tone="secondary" size="sm" loading={loading} onClick={() => {
                   if (!loadingRef.current) void load(sub.url)
                 }}>重新读取节点</Button>
@@ -190,7 +190,7 @@ export function SubDetailModal({ sub, onClose, onToggleNode }: SubDetailModalPro
           </div>
         )}
         <div className="sub-detail-foot">
-          禁用的节点不会出现在生成的配置中；同名节点会一起禁用。自定义规则若引用了被禁节点将被跳过。
+          禁用后节点及引用它的规则不再生效；同名节点一起禁用。
         </div>
       </div>
     </div>

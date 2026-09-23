@@ -57,7 +57,7 @@ const SubRow = memo(function SubRow({ sub, onDelete, onShowNodes, disabled }: Su
           </div>
         )}
         {!pending && !sub.success && sub.node_count > 0 && (
-          <div className="list-row-meta subscription-feedback">保留上次获取的 {sub.node_count} 个缓存节点，不代表本次获取成功</div>
+          <div className="list-row-meta subscription-feedback">保留 {sub.node_count} 个缓存节点，本次获取失败</div>
         )}
       </div>
       <button
@@ -145,7 +145,7 @@ function AddSubModal({ open, loading, onClose, onSubmit }: AddSubModalProps) {
           />
         </div>
         <p className="list-row-meta subscription-feedback" role={busy ? 'status' : undefined}>
-          {busy ? '正在保存订阅并获取节点，请稍候。关闭窗口不会取消请求，请勿重复添加。' : '保存订阅地址不代表已有可用节点；添加后请查看订阅获取状态。'}
+          {busy ? '添加中，关闭窗口不会取消请求。' : '添加后请查看节点获取结果。'}
         </p>
         <div className="modal-actions">
           <Button tone="ghost" size="sm" onClick={onClose}>{busy ? '关闭窗口' : '取消'}</Button>
@@ -227,17 +227,17 @@ export function SubsCard({ subs, loadError, onRetry, refreshStatus, pendingActio
       }
     >
       <div className="list-stack">
-        {deleting && <div className="list-row-meta" role="status">正在删除订阅并同步列表，请稍候…</div>}
+        {deleting && <div className="list-row-meta" role="status">删除订阅并同步列表中…</div>}
         {loadError && <ResourceError label="订阅列表" error={loadError} hasData={subs.length > 0} onRetry={onRetry} />}
         {subs.length > 0 && (refreshing || refreshStatus?.phase === 'fetching') && (
           <div className="list-row" role="status">
-            <div className="list-row-meta">正在获取订阅并检查配置，请稍候…</div>
+            <div className="list-row-meta">获取订阅并检查配置中…</div>
           </div>
         )}
         {subs.length > 0 && !refreshing && refreshStatus && refreshStatus.phase !== 'fetching' && refreshStatus.outcome !== 'not_requested' && (
           <div className="list-row" role="status">
             <div className="list-row-meta subscription-feedback">
-              最近一次获取：成功 {refreshStatus.report.successful_sources} 个订阅，失败 {refreshStatus.report.failed_sources} 个订阅；本次获取 {refreshStatus.report.fresh_nodes} 个节点，保留 {refreshStatus.report.cached_nodes} 个缓存节点。获取结果不代表配置已生效。
+              上次获取：{refreshStatus.report.successful_sources} 个订阅成功，{refreshStatus.report.failed_sources} 个失败
             </div>
           </div>
         )}

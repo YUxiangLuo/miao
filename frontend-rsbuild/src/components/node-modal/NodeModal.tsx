@@ -98,7 +98,7 @@ export function NodeModal({ open, nodeType, setNodeType, form, setForm, loading,
           </button>
         </div>
 
-        {submitting && <p className="node-submit-status" role="status">正在添加节点，请稍候。关闭窗口不会取消请求，请勿重复添加。</p>}
+        {submitting && <p className="node-submit-status" role="status">添加中，关闭窗口不会取消请求。</p>}
         <div className="connections-pills node-modal-tabs" role="group" aria-label="添加方式">
           <button
             type="button"

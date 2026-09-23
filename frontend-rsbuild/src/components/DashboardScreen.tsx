@@ -14,7 +14,6 @@ import { LoaderCircle, Play, RotateCw, Square, TriangleAlert, WifiOff } from 'lu
 import { ICON } from '../tokens'
 import type { useAppController } from '../hooks/useAppController'
 import { Button } from './ui'
-import { ConnectivityCheck } from './ConnectivityCheck'
 import { VpsTasks } from './VpsTasks'
 
 const PHASE_MESSAGE = {
@@ -98,12 +97,11 @@ export function DashboardScreen({ app }: { app: ReturnType<typeof useAppControll
           showToast={app.showToast}
         />
 
-        <ConnectivityCheck status={app.status} backendUnreachable={app.backendUnreachable} />
-
         <div className="content-grid">
           <div className="left-column">
             <ProxyCard
               status={app.status}
+              backendUnreachable={app.backendUnreachable}
               primaryGroup={app.primaryGroup}
               primaryGroupName={app.primaryGroupName}
               nodeProtocols={app.nodeProtocols}

@@ -123,11 +123,11 @@ export function ScheduleModal({ open, saving, onClose, onSave }: ScheduleModalPr
           </button>
         </div>
 
-        {busy && <p className="schedule-note schedule-save-status" role="status">正在保存设置，请稍候。关闭窗口不会取消请求，请勿重复保存。</p>}
+        {busy && <p className="schedule-note schedule-save-status" role="status">保存中，关闭窗口不会取消请求。</p>}
         {loadError ? (
           <div className="resource-error" role="alert">
             <strong>定时刷新设置读取失败</strong>
-            <p>暂无法确认当前设置，不代表定时刷新已关闭。重新读取不会修改配置。</p>
+            <p>设置状态未知，不代表定时刷新已关闭。可重新读取，不会修改配置。</p>
             <Button tone="secondary" size="sm" onClick={load}>重新读取设置</Button>
             <details><summary>错误详情</summary><p>{loadError}</p></details>
           </div>
@@ -154,7 +154,7 @@ export function ScheduleModal({ open, saving, onClose, onSave }: ScheduleModalPr
             <div className="schedule-section-label">每天执行时间</div>
             <div className="schedule-list">
               {times.length === 0
-                ? <div className="schedule-empty">还没有时间点，点下方“添加时间”新增</div>
+                ? <div className="schedule-empty">尚未添加时间</div>
                 : times.map((time, index) => (
                   <div className="schedule-row" key={index}>
                     <input

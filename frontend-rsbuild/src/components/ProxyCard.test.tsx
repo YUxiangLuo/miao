@@ -26,6 +26,14 @@ describe('ProxyCard accessibility', () => {
     }
     const { rerender } = render(<ProxyCard {...props} status={makeStatus(state)} />)
     expect(screen.getByRole('status')).toHaveTextContent('保留上次读取的节点列表')
+    const check = screen.getByRole('button', { name: '连接检查' })
+    expect(screen.getByRole('button', { name: '测试延迟' }).nextElementSibling).toBe(check)
+    expect(check).toBeEnabled()
+    expect(screen.queryByText(/网站可达性需单独检查/)).not.toBeInTheDocument()
+    await user.click(check)
+    expect(screen.getByRole('dialog', { name: '连接检查' }).closest('.panel-card')).toBeNull()
+    if (!state.running) expect(screen.getByRole('dialog')).toHaveTextContent('代理服务已停止')
+    await user.click(screen.getByRole('button', { name: '关闭连接检查' }))
     for (const name of ['切换到 node-b', '测试 node-b 延迟', '测试延迟']) {
       const button = screen.getByRole('button', { name })
       expect(button).toBeDisabled()

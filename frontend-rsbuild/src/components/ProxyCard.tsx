@@ -3,6 +3,7 @@ import type { CSSProperties } from 'react'
 import { Waypoints, Zap, LoaderCircle, Plus } from 'lucide-react'
 import { ARRIVE_MS, ICON, SCAN_STAGGER_CAP } from '../tokens'
 import { Button, SectionCard } from './ui'
+import { ConnectivityCheck } from './ConnectivityCheck'
 import { 
   classNames, 
   formatDelay, 
@@ -83,6 +84,7 @@ const ProxyTile = memo(function ProxyTile({ nodeName, protocol, delay, measuredA
 
 export interface ProxyCardProps {
   status: StatusData
+  backendUnreachable?: boolean
   primaryGroup: ClashProxy | null
   primaryGroupName: string
   nodeProtocols?: Record<string, string>
@@ -103,6 +105,7 @@ export interface ProxyCardProps {
 
 export function ProxyCard({ 
   status, 
+  backendUnreachable = false,
   primaryGroup, 
   primaryGroupName, 
   nodeProtocols = {},
@@ -184,6 +187,7 @@ export function ProxyCard({
             >
               测试延迟
             </Button>
+            <ConnectivityCheck status={status} backendUnreachable={backendUnreachable} />
           </div>
           <label className="node-select">
             <span className="node-select-label">最高倍率</span>
@@ -225,8 +229,8 @@ export function ProxyCard({
         </div>
       }
     >
-      <p className="delay-explanation">延迟反映到检测站点的响应时间，不代表下载速度；时间按当前设备时区显示。</p>
-      {primaryGroup && runtimeUnavailable && <p className="delay-explanation" role="status">代理尚未就绪，暂时无法切换节点或测试延迟。下方保留上次读取的节点列表。</p>}
+      <p className="delay-explanation">延迟不是下载速度；测量时间按设备时区显示。</p>
+      {primaryGroup && runtimeUnavailable && <p className="delay-explanation" role="status">代理未就绪，暂停切换和测速；保留上次读取的节点列表。</p>}
       <div className="proxy-grid-wrap">
         {primaryGroup ? (
           <div className="proxy-grid">

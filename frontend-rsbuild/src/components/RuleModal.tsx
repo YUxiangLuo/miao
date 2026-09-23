@@ -165,7 +165,7 @@ export function RuleModal({ open, loading, onClose, onSubmit, nodeNames = [], pl
         </header>
 
         <fieldset className="rule-modal-body" disabled={busy}>
-          {busy && <p className="rule-submit-status" role="status">正在提交规则，请稍候。关闭窗口不会取消请求，请勿重复添加。</p>}
+          {busy && <p className="rule-submit-status" role="status">添加中，关闭窗口不会取消请求。</p>}
           <section className="rule-form-section" aria-labelledby="rule-match-title">
             <h4 id="rule-match-title">你想为谁设置规则？</h4>
             <div className="rule-kind-grid" role="radiogroup" aria-label="匹配对象">

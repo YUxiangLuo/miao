@@ -89,7 +89,7 @@ export function NodesCard({ nodes, loadError, onRetry, isInitializing, isReady, 
       }
     >
       <div className="list-stack">
-        {deleting && <div className="list-row-meta" role="status">正在删除节点并同步列表，请稍候…</div>}
+        {deleting && <div className="list-row-meta" role="status">删除节点并同步列表中…</div>}
         {loadError && <ResourceError label="手动节点" error={loadError} hasData={nodes.length > 0} onRetry={onRetry} />}
         {nodes.length === 0 
           ? !loadError && <div className="empty-block">暂无手动节点</div>

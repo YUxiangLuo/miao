@@ -62,7 +62,7 @@ describe('McpControl', () => {
       const markdown = writeText.mock.calls[2][0] as string
       expect(markdown).toMatch(/^## Miao MCP\n/)
       expect(markdown).toContain(url)
-      expect(markdown).toContain('先在 Miao 面板启用 MCP')
+      expect(markdown).toContain('在面板启用 MCP')
       expect(markdown).toContain('不会自动配置 MCP')
       expect(markdown).toContain('get_status')
       expect(markdown).toContain('confirm: true')

@@ -58,7 +58,7 @@ describe('App onboarding integration', () => {
     await user.click(button)
     await user.click(screen.getByRole('button', { name: '确认' }))
     expect(button).toBeDisabled()
-    expect(screen.getByText(`正在删除${label}并同步列表，请稍候…`)).toBeInTheDocument()
+    expect(screen.getByText(`删除${label}并同步列表中…`)).toBeInTheDocument()
     await user.click(button)
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
     await act(async () => { finishDelete(jsonResponse({ success: true })) })

@@ -19,14 +19,14 @@ export function VpsTasks({ tasks }: { tasks: VpsTask[] }) {
   return (
     <details className="panel-card vps-tasks">
       <summary>VPS 部署记录 · {PHASE_LABELS[tasks[0].phase]} · {tasks.length} 条</summary>
-      <p>仅保留本页最近 10 次记录。关闭添加窗口不会取消请求；请勿刷新或关闭页面，记录不会跨页面保存。远端状态不明时先核对，勿重复部署。</p>
+      <p>保留最近 10 次记录，刷新或关闭页面后清空。关闭添加窗口不取消部署。</p>
       <div className="vps-tasks-list">
         {tasks.map(task => (
           <article key={task.id} aria-label={`部署 ${task.host}`}>
             <strong>{task.host} · {PHASE_LABELS[task.phase]}</strong>
             <div>{new Date(task.startedAt).toLocaleString()} · {Math.max(0, Math.floor(((task.finishedAt ?? now) - task.startedAt) / 1000))} 秒</div>
             <VpsErrorDetails text={task.message} />
-            {(task.phase === 'unknown' || task.phase === 'error') && <p>请按错误详情核对本地节点和远端服务；请求失败不一定代表远端没有变化。</p>}
+            {(task.phase === 'unknown' || task.phase === 'error') && <p>远端可能已变更，请核对本地节点和远端服务后再重试。</p>}
           </article>
         ))}
       </div>

@@ -47,9 +47,9 @@ export function McpControl({ enabled, pending, onToggle, showToast }: McpControl
   const dialogRef = useDialog(Boolean(manualCopy), () => setManualCopy(null))
   const agentInstructions = `## Miao MCP
 
-Miao 是基于 sing-box 的透明代理。通过 MCP 可查询代理状态、节点、订阅、分流规则和连接，并切换节点、测试延迟或调整设置。
+Miao 是基于 sing-box 的透明代理，MCP 提供状态查询、节点测速和配置管理。
 
-- 接入：先在 Miao 面板启用 MCP，再将 Streamable HTTP 端点 ${url} 添加为 MCP 服务（建议命名为 miao）；该地址必须能从 agent 所在环境访问。本文只提供使用约定，不会自动配置 MCP。
+- 接入：在面板启用 MCP，将 Streamable HTTP 端点 ${url} 添加为服务 miao；agent 必须能访问此地址。本文不会自动配置 MCP。
 - 操作前先用 get_status 查看状态，用 tools/list 获取当前工具及参数；节点名从 list_nodes 获取，不要猜测。
 - 排查网络时优先查询状态、连接和规则；test_delay 测的是节点延迟，不是下载速度；test_connectivity 从运行 Miao 的主机发起请求，不代表用户浏览器必然可用。
 - 修改仅限用户要求的范围。对要求 confirm: true 的工具，须先获得用户明确确认；启停、删除、VPS 部署、关闭 MCP、升级等可能影响网络，不要自行尝试。
@@ -125,7 +125,7 @@ Miao 是基于 sing-box 的透明代理。通过 MCP 可查询代理状态、节
       <div className="modal-overlay" onClick={() => setManualCopy(null)}>
         <div ref={dialogRef} className="modal-card modal-confirm" role="dialog" aria-modal="true" aria-label="手动复制" tabIndex={-1} onClick={event => event.stopPropagation()}>
           <h3>{manualCopy.label}</h3>
-          <p>浏览器未能复制，请手动复制下方文本。命令在终端运行；Markdown 说明粘贴到 AGENTS.md。</p>
+          <p>请手动复制：命令在终端运行，Markdown 粘贴到 AGENTS.md。</p>
           <textarea aria-label="待复制文本" data-autofocus readOnly rows={6} value={manualCopy.text} onFocus={event => event.currentTarget.select()} />
           <div className="modal-actions"><Button tone="primary" onClick={() => setManualCopy(null)}>完成</Button></div>
         </div>

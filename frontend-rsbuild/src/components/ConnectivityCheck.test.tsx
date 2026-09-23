@@ -22,7 +22,7 @@ it.each([204, 403])('reports HTTP %s without claiming browser connectivity', asy
   await user.type(screen.getByRole('textbox', { name: '目标网址' }), 'https://example.com/')
   await user.click(screen.getByRole('button', { name: '开始检查' }))
   const report = await screen.findByRole('textbox', { name: '检查报告' }) as HTMLTextAreaElement
-  expect(report.value).toContain(`收到 HTTP ${status}`)
+  expect(report.value).toContain(`HTTP ${status}`)
   expect(report.value).toContain('耗时：73 ms')
   expect(report.value).toContain('目标：https://example.com/')
   expect(report.value).toContain('不是指定节点或浏览器测试')
@@ -67,7 +67,7 @@ it('rejects unsupported URLs and distinguishes backend failure from target failu
   await user.clear(input)
   await user.type(input, 'https://example.com/')
   await user.click(screen.getByRole('button', { name: '开始检查' }))
-  expect(await screen.findByText(/未能取得后端检查结果；这不代表目标网站不可达/, { selector: 'p' })).toBeInTheDocument()
+  expect(await screen.findByText(/未取得检查结果，目标是否可达未知/, { selector: 'p' })).toBeInTheDocument()
   const report = screen.getByRole('textbox', { name: '检查报告' }) as HTMLTextAreaElement
   expect(report.value).toContain('backend offline')
   const copy = rs.spyOn(navigator.clipboard, 'writeText').mockRejectedValueOnce(new Error('denied'))
