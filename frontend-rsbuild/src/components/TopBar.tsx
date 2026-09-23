@@ -82,8 +82,8 @@ export function TopBar({
           type="button"
           className="traffic-chip"
           onClick={onOpenConnections}
-          disabled={!status.ready}
-          title={status.ready ? '查看链接统计' : '代理就绪后可查看链接统计'}
+          title="查看链接统计"
+          aria-label="查看网络活动分析与链接统计"
         >
           <div className="traffic-item">
             <ArrowUp size={ICON.sm} className="traffic-icon up" />

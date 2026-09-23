@@ -1,8 +1,8 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it, rs } from '@rstest/core'
+import { afterEach, describe, expect, it, rs } from '@rstest/core'
 import { ConnectionsModal } from './ConnectionsModal'
-import { connectionMock, statusMock } from '../testFixtures'
+import { analyticsMock, analyticsLogMock, connectionMock, statusMock } from '../testFixtures'
 import type { EnrichedConnection } from '../types/clash'
 
 function connection({ metadata, ...overrides }: Partial<EnrichedConnection> = {}) {
@@ -33,6 +33,93 @@ function renderModal(connections: EnrichedConnection[], props = {}) {
 }
 
 describe('ConnectionsModal connection list', () => {
+  afterEach(() => { rs.restoreAllMocks() })
+
+  it('keeps historical tabs available while the data plane is stopped', async () => {
+    const user = userEvent.setup()
+    rs.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      success: true, message: '', data: analyticsMock(),
+    }), { status: 200 }))
+    renderModal([], { status: statusMock({ running: false, ready: false }) })
+    expect(screen.getByText(/数据面尚未就绪/)).toBeInTheDocument()
+    await user.click(screen.getByRole('tab', { name: '24 小时分析' }))
+    expect(await screen.findByText('日志活动')).toBeInTheDocument()
+    await user.click(screen.getByRole('tab', { name: '原始日志' }))
+    expect(screen.getByRole('textbox', { name: '搜索日志' })).toBeInTheDocument()
+    rs.restoreAllMocks()
+  })
+
+  it('renders meaningful sampled totals and reports API failures', async () => {
+    const user = userEvent.setup()
+    const fetchMock = rs.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify({
+      success: true, message: '', data: analyticsMock({ log_count: 42, error_count: 3, upload: 1024, download: 2048, sampled_connections: 7, last_sample_at: 1, timeline: [{ timestamp: 1, upload: 100, download: 200, log_count: 1, error_count: 0 }], groups: [{ dimension: 'domain', name: 'example.com', connections: 4, upload: 100, download: 200 }] }),
+    }), { status: 200 })).mockResolvedValueOnce(new Response(JSON.stringify({ success: false, message: '数据库不可用' }), { status: 200 }))
+    renderModal([])
+    await user.click(screen.getByRole('tab', { name: '24 小时分析' }))
+    await user.click(screen.getByRole('button', { name: '流量采样' }))
+    expect(await screen.findByText('↓ 2.0 KB')).toBeInTheDocument()
+    expect(screen.getByText('example.com')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: /刷新/ }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('数据库不可用')
+    fetchMock.mockRestore()
+  })
+
+  it('builds log search, severity and older-page queries', async () => {
+    const user = userEvent.setup()
+    const calls: string[] = []
+    rs.spyOn(globalThis, 'fetch').mockImplementation(async input => {
+      const url = String(input); calls.push(url)
+      const old = url.includes('before=50')
+      return new Response(JSON.stringify({ success: true, message: '', data: { entries: [analyticsLogMock({ id: old ? 40 : 60, level: 'error', message: old ? 'older' : 'needle result' })], next_before: old ? null : 50 } }), { status: 200 })
+    })
+    renderModal([])
+    await user.click(screen.getByRole('tab', { name: '原始日志' }))
+    await screen.findByText('needle result')
+    await user.selectOptions(screen.getByLabelText('日志级别'), 'error')
+    await user.type(screen.getByLabelText('搜索日志'), 'needle & exact')
+    await user.click(screen.getByRole('button', { name: '搜索' }))
+    await user.click(await screen.findByRole('button', { name: '更早日志' }))
+    expect(await screen.findByText('older')).toBeInTheDocument()
+    expect(calls.some(url => url.includes('level=error') && url.includes('q=needle+%26+exact') && url.includes('before=50'))).toBe(true)
+    rs.restoreAllMocks()
+  })
+
+  it('links a slow DNS event to its exact raw log and then the full context', async () => {
+    const user = userEvent.setup()
+    const summary = analyticsMock({ dns: { ...analyticsMock().dns, queries: 1, max_ms: 123.5, p50_ms: 123.5,
+      slowest: [{ log_id: 73, timestamp: 1, domain: 'slow.test', query_type: 'AAAA', duration_ms: 123.5, outcome: 'success', rcode: 0, error: null, transport: 'dns-remote', context: 'kernel-1/42' }],
+    } })
+    const fetch = rs.spyOn(globalThis, 'fetch').mockImplementation(async input => new Response(JSON.stringify({ success: true, data: String(input).includes('summary') ? summary : { entries: [analyticsLogMock({ id: 73, message: '<script>escaped log</script>', context: 'kernel-1/42' })], next_before: null } })))
+    renderModal([])
+    await user.click(screen.getByRole('tab', { name: '24 小时分析' }))
+    await user.click(screen.getByRole('button', { name: 'DNS 行为' }))
+    expect(await screen.findByRole('button', { name: 'slow.test' })).toBeInTheDocument()
+    expect(screen.getByText('dns-remote')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '原文' }))
+    expect(await screen.findByText('<script>escaped log</script>')).toBeInTheDocument()
+    expect(document.querySelector('script')).toBeNull()
+    expect(fetch.mock.calls.some(([url]) => String(url).includes('id=73'))).toBe(true)
+    await user.click(screen.getByRole('button', { name: '同上下文' }))
+    expect(fetch.mock.calls.some(([url]) => String(url).includes('context=kernel-1%2F42') && !String(url).includes('id=73'))).toBe(true)
+  })
+
+  it('ignores an older request after changing the log filter and can repeat a search', async () => {
+    const user = userEvent.setup()
+    let resolveOld!: (response: Response) => void
+    const fetch = rs.spyOn(globalThis, 'fetch').mockImplementationOnce(() => new Promise<Response>(resolve => { resolveOld = resolve }))
+      .mockImplementation(async () => new Response(JSON.stringify({ success: true, data: { entries: [analyticsLogMock({ message: 'current result' })], next_before: null } })))
+    renderModal([])
+    await user.click(screen.getByRole('tab', { name: '原始日志' }))
+    await user.selectOptions(screen.getByLabelText('日志级别'), 'error')
+    expect(await screen.findByText('current result')).toBeInTheDocument()
+    await act(async () => resolveOld(new Response(JSON.stringify({ success: true, data: { entries: [analyticsLogMock({ message: 'stale result' })], next_before: null } }))))
+    expect(screen.queryByText('stale result')).not.toBeInTheDocument()
+    const calls = fetch.mock.calls.length
+    await user.click(screen.getByRole('button', { name: '搜索' }))
+    expect(fetch.mock.calls.length).toBe(calls + 1)
+    expect(await screen.findByText('current result')).toBeInTheDocument()
+  })
+
   it('lists every connection as its own row, ungrouped', () => {
     renderModal([
       connection({ id: 'a' }),

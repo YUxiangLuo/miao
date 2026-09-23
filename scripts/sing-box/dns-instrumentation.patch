@@ -1,0 +1,286 @@
+diff --git a/dns/miao_instrumentation_test.go b/dns/miao_instrumentation_test.go
+new file mode 100644
+index 00000000..7fdbafc1
+--- /dev/null
++++ b/dns/miao_instrumentation_test.go
+@@ -0,0 +1,108 @@
++package dns
++
++import (
++	"context"
++	"encoding/json"
++	"errors"
++	"strings"
++	"sync"
++	"testing"
++	"time"
++
++	mDNS "github.com/miekg/dns"
++	"github.com/sagernet/sing-box/adapter"
++	"github.com/sagernet/sing/common/logger"
++)
++
++type miaoCaptureLogger struct {
++	logger.ContextLogger
++	access sync.Mutex
++	lines  []string
++}
++
++func (l *miaoCaptureLogger) InfoContext(_ context.Context, args ...any) {
++	l.access.Lock()
++	defer l.access.Unlock()
++	l.lines = append(l.lines, args[0].(string)+args[1].(string))
++}
++
++func (l *miaoCaptureLogger) WarnContext(context.Context, ...any) {}
++
++func TestMiaoDNSCompletionSchema(t *testing.T) {
++	started := time.Now().Add(-time.Millisecond)
++	tests := []struct {
++		name     string
++		response *mDNS.Msg
++		err      error
++		outcome  string
++		rcode    *int
++	}{
++		{name: "success", response: &mDNS.Msg{}, outcome: "success", rcode: intPtr(0)},
++		{name: "dns-error-response", response: &mDNS.Msg{MsgHdr: mDNS.MsgHdr{Rcode: mDNS.RcodeNameError}}, outcome: "dns_error", rcode: intPtr(mDNS.RcodeNameError)},
++		{name: "error", err: errors.New("bad \"resolver\"\nline"), outcome: "error"},
++		{name: "typed-rcode-error", err: RcodeError(mDNS.RcodeRefused), outcome: "dns_error", rcode: intPtr(mDNS.RcodeRefused)},
++	}
++	for _, test := range tests {
++		t.Run(test.name, func(t *testing.T) {
++			event := newMiaoDNSCompletion(started, "quote\".example", "A", test.response, test.err)
++			if event.Outcome != test.outcome || event.DurationMS < 0 || !equalIntPtr(event.Rcode, test.rcode) {
++				t.Fatalf("unexpected event: %+v", event)
++			}
++			encoded, err := json.Marshal(event)
++			if err != nil {
++				t.Fatal(err)
++			}
++			if strings.Contains(string(encoded), "\nline") || !strings.Contains(string(encoded), `quote\".example`) {
++				t.Fatalf("JSON fields were not escaped: %s", encoded)
++			}
++		})
++	}
++}
++
++func TestMiaoDNSQuestion(t *testing.T) {
++	if domain, queryType := miaoDNSQuestion(nil); domain != "" || queryType != "UNKNOWN" {
++		t.Fatalf("nil query: %q %q", domain, queryType)
++	}
++	message := &mDNS.Msg{Question: []mDNS.Question{{Name: "example.com.", Qtype: mDNS.TypeAAAA}}}
++	if domain, queryType := miaoDNSQuestion(message); domain != "example.com" || queryType != "AAAA" {
++		t.Fatalf("valid query: %q %q", domain, queryType)
++	}
++}
++
++func TestMiaoDNSAsyncEarlyCompletion(t *testing.T) {
++	log := new(miaoCaptureLogger)
++	router := &Router{logger: log}
++	message := &mDNS.Msg{}
++	callbacks := 0
++	router.ExchangeAsync(context.Background(), message, adapter.DNSQueryOptions{}, func(response *mDNS.Msg, err error) {
++		callbacks++
++		if response == nil || response.Rcode != mDNS.RcodeFormatError || err != nil {
++			t.Fatalf("unexpected early response: %v, %v", response, err)
++		}
++	})
++	if callbacks != 1 || len(log.lines) != 1 || !strings.HasPrefix(log.lines[0], "MIAO_DNS ") {
++		t.Fatalf("completion count: callbacks=%d logs=%q", callbacks, log.lines)
++	}
++	var event miaoDNSCompletion
++	if err := json.Unmarshal([]byte(strings.TrimPrefix(log.lines[0], "MIAO_DNS ")), &event); err != nil {
++		t.Fatal(err)
++	}
++	if event.QueryType != "UNKNOWN" || event.Outcome != "dns_error" || event.Rcode == nil || *event.Rcode != mDNS.RcodeFormatError {
++		t.Fatalf("unexpected completion: %+v", event)
++	}
++}
++
++func TestMiaoDNSLookupCompletion(t *testing.T) {
++	log := new(miaoCaptureLogger)
++	router := &Router{logger: log, closing: true}
++	_, err := router.Lookup(context.Background(), "escape\".example", adapter.DNSQueryOptions{})
++	if err == nil || len(log.lines) != 1 || !strings.Contains(log.lines[0], `"query_type":"LOOKUP"`) || !strings.Contains(log.lines[0], `escape\".example`) {
++		t.Fatalf("lookup completion: err=%v logs=%q", err, log.lines)
++	}
++}
++
++func intPtr(value int) *int { return &value }
++
++func equalIntPtr(left, right *int) bool {
++	return left == nil && right == nil || left != nil && right != nil && *left == *right
++}
+diff --git a/dns/router.go b/dns/router.go
+index d5b07031..71df9fdc 100644
+--- a/dns/router.go
++++ b/dns/router.go
+@@ -2,6 +2,7 @@ package dns
+ 
+ import (
+ 	"context"
++	"encoding/json"
+ 	"errors"
+ 	"maps"
+ 	"net/netip"
+@@ -53,6 +54,65 @@ type Router struct {
+ 	closing               bool
+ }
+ 
++type miaoDNSCompletion struct {
++	Version    int     `json:"v"`
++	Domain     string  `json:"domain"`
++	QueryType  string  `json:"query_type"`
++	DurationMS float64 `json:"duration_ms"`
++	Outcome    string  `json:"outcome"`
++	Rcode      *int    `json:"rcode"`
++	Error      *string `json:"error"`
++	Transport  *string `json:"transport"`
++}
++
++func (r *Router) logMiaoDNSCompletion(ctx context.Context, started time.Time, domain string, queryType string, response *mDNS.Msg, err error, transport adapter.DNSTransport) {
++	event := newMiaoDNSCompletion(started, domain, queryType, response, err)
++	if transport != nil {
++		transportTag := transport.Tag()
++		event.Transport = &transportTag
++	}
++	encoded, marshalErr := json.Marshal(event)
++	if marshalErr != nil {
++		return
++	}
++	r.logger.InfoContext(ctx, "MIAO_DNS ", string(encoded))
++}
++
++func newMiaoDNSCompletion(started time.Time, domain string, queryType string, response *mDNS.Msg, err error) miaoDNSCompletion {
++	event := miaoDNSCompletion{Version: 1, Domain: domain, QueryType: queryType, DurationMS: float64(time.Since(started)) / float64(time.Millisecond), Outcome: "success"}
++	if response != nil {
++		rcode := response.Rcode
++		event.Rcode = &rcode
++		if rcode != mDNS.RcodeSuccess {
++			event.Outcome = "dns_error"
++		}
++	}
++	if err != nil {
++		event.Outcome = "error"
++		errorMessage := err.Error()
++		event.Error = &errorMessage
++		var rcodeError RcodeError
++		if errors.As(err, &rcodeError) {
++			rcode := int(rcodeError)
++			event.Rcode = &rcode
++			event.Outcome = "dns_error"
++		}
++	}
++	return event
++}
++
++func miaoDNSQuestion(message *mDNS.Msg) (string, string) {
++	if message == nil || len(message.Question) != 1 {
++		return "", "UNKNOWN"
++	}
++	question := message.Question[0]
++	queryType, loaded := mDNS.TypeToString[question.Qtype]
++	if !loaded {
++		queryType = F.ToString(question.Qtype)
++	}
++	return FqdnToDomain(question.Name), queryType
++}
++
+ func NewRouter(ctx context.Context, logFactory log.Factory, options option.DNSOptions) (*Router, error) {
+ 	router := &Router{
+ 		ctx:                   ctx,
+@@ -1056,6 +1116,10 @@ type dnsExchangeContext struct {
+ }
+ 
+ func (r *Router) prepareExchange(ctx context.Context, message *mDNS.Msg) (*dnsExchangeContext, *mDNS.Msg, error) {
++	if message == nil {
++		r.logger.WarnContext(ctx, "nil DNS message")
++		return nil, &mDNS.Msg{MsgHdr: mDNS.MsgHdr{Response: true, Rcode: mDNS.RcodeFormatError}}, nil
++	}
+ 	if r.powerManager != nil {
+ 		recorder := r.powerManager.Recorder()
+ 		if recorder != nil {
+@@ -1192,16 +1256,16 @@ func (r *Router) exchangeLegacy(ctx context.Context, exchangeCtx *dnsExchangeCon
+ 	}
+ }
+ 
+-func (r *Router) Exchange(ctx context.Context, message *mDNS.Msg, options adapter.DNSQueryOptions) (*mDNS.Msg, error) {
++func (r *Router) Exchange(ctx context.Context, message *mDNS.Msg, options adapter.DNSQueryOptions) (response *mDNS.Msg, err error) {
++	started := time.Now()
++	domain, queryType := miaoDNSQuestion(message)
++	var transport adapter.DNSTransport
++	defer func() { r.logMiaoDNSCompletion(ctx, started, domain, queryType, response, err, transport) }()
+ 	exchangeCtx, earlyResponse, err := r.prepareExchange(ctx, message)
+ 	if exchangeCtx == nil {
+ 		return earlyResponse, err
+ 	}
+ 	ctx = exchangeCtx.ctx
+-	var (
+-		response  *mDNS.Msg
+-		transport adapter.DNSTransport
+-	)
+ 	if options.Transport != nil {
+ 		transport = options.Transport
+ 		response, err = r.client.Exchange(ctx, transport, message, r.finalizeExchangeOptions(options), nil)
+@@ -1219,25 +1283,34 @@ func (r *Router) Exchange(ctx context.Context, message *mDNS.Msg, options adapte
+ }
+ 
+ func (r *Router) ExchangeAsync(ctx context.Context, message *mDNS.Msg, options adapter.DNSQueryOptions, callback func(response *mDNS.Msg, err error)) {
++	started := time.Now()
++	domain, queryType := miaoDNSQuestion(message)
++	var once sync.Once
++	completionCallback := func(transport adapter.DNSTransport, response *mDNS.Msg, err error) {
++		once.Do(func() {
++			r.logMiaoDNSCompletion(ctx, started, domain, queryType, response, err, transport)
++			callback(response, err)
++		})
++	}
+ 	exchangeCtx, earlyResponse, err := r.prepareExchange(ctx, message)
+ 	if exchangeCtx == nil {
+-		callback(earlyResponse, err)
++		completionCallback(nil, earlyResponse, err)
+ 		return
+ 	}
+ 	ctx = exchangeCtx.ctx
+ 	if options.Transport != nil {
+ 		transport := options.Transport
+ 		r.client.ExchangeAsync(ctx, transport, message, r.finalizeExchangeOptions(options), nil, func(response *mDNS.Msg, exchangeErr error) {
+-			r.finishExchangeAsync(message, transport, response, exchangeErr, callback)
++			r.finishExchangeAsync(message, transport, response, exchangeErr, func(response *mDNS.Msg, err error) { completionCallback(transport, response, err) })
+ 		})
+ 	} else if !exchangeCtx.legacyDNSMode {
+ 		r.exchangeWithRulesAsync(ctx, exchangeCtx.rules, message, options, true, func(result exchangeWithRulesResult) {
+-			r.finishExchangeAsync(message, result.transport, result.response, result.err, callback)
++			r.finishExchangeAsync(message, result.transport, result.response, result.err, func(response *mDNS.Msg, err error) { completionCallback(result.transport, response, err) })
+ 		})
+ 	} else {
+ 		go func() {
+ 			response, transport, exchangeErr := r.exchangeLegacy(ctx, exchangeCtx, message, options)
+-			r.finishExchangeAsync(message, transport, response, exchangeErr, callback)
++			r.finishExchangeAsync(message, transport, response, exchangeErr, func(response *mDNS.Msg, err error) { completionCallback(transport, response, err) })
+ 		}()
+ 	}
+ }
+@@ -1251,7 +1324,9 @@ func (r *Router) finishExchangeAsync(message *mDNS.Msg, transport adapter.DNSTra
+ 	callback(response, nil)
+ }
+ 
+-func (r *Router) Lookup(ctx context.Context, domain string, options adapter.DNSQueryOptions) ([]netip.Addr, error) {
++func (r *Router) Lookup(ctx context.Context, domain string, options adapter.DNSQueryOptions) (responseAddrs []netip.Addr, err error) {
++	started := time.Now()
++	defer func() { r.logMiaoDNSCompletion(ctx, started, domain, "LOOKUP", nil, err, nil) }()
+ 	r.rulesAccess.RLock()
+ 	if r.closing {
+ 		r.rulesAccess.RUnlock()
+@@ -1260,10 +1335,6 @@ func (r *Router) Lookup(ctx context.Context, domain string, options adapter.DNSQ
+ 	rules := r.rules
+ 	legacyDNSMode := r.legacyDNSMode
+ 	r.rulesAccess.RUnlock()
+-	var (
+-		responseAddrs []netip.Addr
+-		err           error
+-	)
+ 	printResult := func() {
+ 		if err == nil && len(responseAddrs) == 0 {
+ 			err = E.New("empty result")

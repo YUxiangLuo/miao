@@ -20,6 +20,18 @@ Miao 的 TUN 使用 `sing-tun`、`auto_route: true`、`strict_route: true`，仅
 
 内置 `direct` 出站使用 `tcp_keep_alive: "30s"`、`tcp_keep_alive_interval: "15s"`，缓解 CDN/NAT 闲置连接失效后，浏览器复用旧连接时的等待。保活用于维持路径并及时发现失效，不保证远端连接永久存活。
 
+### DNS 完成事件（miao.9）
+
+[`dns-instrumentation.patch`](../scripts/sing-box/dns-instrumentation.patch) 在 `Router.Exchange`、`Router.ExchangeAsync` 和 `Router.Lookup` 逻辑请求边界记录一次 INFO 完成事件，不在底层 client 的竞速或推测请求上重复计数。事件以字面量 `MIAO_DNS ` 开头，后接紧凑 JSON；耗时从 Router API 入口以单调时钟计算，包含规则、缓存和去重等待。同步返回、异步早期响应与预定义响应均覆盖，异步先记录再按原顺序调用完成回调。
+
+v1 字段为 `v`、`domain`、`query_type`、`duration_ms`、`outcome`、`rcode`、`error`、`transport`。`duration_ms` 保留亚毫秒精度；`transport` 为实际选定的 DNS transport tag，不是协议类型。Exchange 使用实际 DNS question type（未知类型使用数值），Lookup 固定为 `LOOKUP`；空或畸形请求使用空域名与 `UNKNOWN`。非零响应 RCODE 为 `dns_error`，Go error 为 `error`，但 typed `RcodeError` 仍为 `dns_error`；无法可靠确定最终 transport 时为 `null`。字段使用 `encoding/json` 编码，不从 context 前缀推算延迟，也不虚构 cache hit/miss。
+
+示例：
+
+```text
+MIAO_DNS {"v":1,"domain":"example.com","query_type":"A","duration_ms":12.35,"outcome":"success","rcode":0,"error":null,"transport":"cfdns"}
+```
+
 目标命令 `miao-kernel` 只包含 run/check/version 与 namespace 辅助入口，直接复用上游实现；运行时文件仍叫 `sing-box` / `sing-box.exe`。CLI context 隔离修复已进入上游，Miao 仅保留[回归测试与问题说明](../scripts/patches/README.md)。
 
 ## 构建与嵌入
@@ -94,6 +106,10 @@ miao.6 的额外 half-close 验收**未全部通过**：本地服务在读到 EO
 本地验证：Linux amd64、Linux arm64、Windows amd64 三目标构建均通过；每个目标的未裁剪上游及客户端 Go 回归各重复 20 次。三个资源清单、压缩前后 SHA-256 和解压内容一致，Linux 原生 `version` 显示新 SHA。Rust 495 项测试通过（另 1 项忽略），Clippy、fmt、Windows core 交叉检查、Miao release 编译及 Bun 30 项脚本测试通过。
 
 仍需在隔离网络与 Windows/OpenWrt 真机验证 TUN、DNS、Clash API、连续重载及实际节点传输；这些行为涉及本次上游对路由、代理组和网络栈依赖的变更。未部署生产。
+
+### DNS 分析事件（miao.9）
+
+保持固定源码 `474c63c3a8828602ac6248684edd824c72e49761` 和 Go 1.27.1，新增上述 Router 级 DNS 完成事件。`dns-instrumentation.patch` 纳入既有 `customizationHash()`，其内容经换行归一化后参与资源清单哈希；源码来源由固定 SHA、全部补丁及定制哈希共同确定。构建过程重复运行 `TestMiaoDNS` 回归 20 次。未部署生产，Windows/OpenWrt 真机行为仍需验收。
 
 ## 来源与许可
 

@@ -186,10 +186,6 @@ export function useAppData() {
     }
   }, [status.ready, clearDelays])
 
-  useEffect(() => {
-    if (!isDesktop) setShowConnectionsModal(false)
-  }, [isDesktop])
-
   return {
     firstLoadDone,
     pendingActions,

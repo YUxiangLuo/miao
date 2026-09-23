@@ -1,3 +1,4 @@
+mod analytics;
 mod autostart;
 mod cli;
 mod error;

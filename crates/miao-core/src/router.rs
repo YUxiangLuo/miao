@@ -51,6 +51,11 @@ pub fn build_router(app_state: Arc<AppState>) -> Router {
             get(get_scheduled_refresh).post(set_scheduled_refresh),
         )
         .route("/api/connectivity", post(test_connectivity))
+        .route(
+            "/api/analytics/summary",
+            get(crate::handlers::analytics::summary),
+        )
+        .route("/api/analytics/logs", get(crate::handlers::analytics::logs))
         .route("/api/clash/traffic", get(proxy_clash_traffic))
         .route("/api/clash/{*path}", any(proxy_clash_http))
         .route("/api/version", get(get_version))

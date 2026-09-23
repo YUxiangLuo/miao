@@ -34,6 +34,13 @@ function renderTopBar(overrides: Partial<TopBarProps> = {}) {
 }
 
 describe('TopBar merged layout', () => {
+  it('keeps network history accessible when the kernel is stopped', async () => {
+    const user = userEvent.setup()
+    const { props } = renderTopBar({ status: statusMock({ ready: false, running: false }) })
+    await user.click(screen.getByRole('button', { name: '查看网络活动分析与链接统计' }))
+    expect(props.onOpenConnections).toHaveBeenCalledOnce()
+  })
+
   it('融合了品牌 logo、速率、模式与版本号；品牌文字与状态块已移除', () => {
     const { container } = renderTopBar()
 

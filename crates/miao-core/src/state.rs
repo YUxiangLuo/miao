@@ -37,6 +37,8 @@ pub struct AppState {
     #[cfg(not(windows))]
     pub vps_deployments: Mutex<HashMap<String, std::sync::Weak<Mutex<()>>>>,
     pub sing_process: Mutex<Option<SingBoxProcess>>,
+    pub analytics: std::sync::OnceLock<Arc<crate::analytics::Analytics>>,
+    pub log_tasks: std::sync::Mutex<Vec<tokio::task::JoinHandle<()>>>,
     pub lifecycle: lifecycle::RuntimeLifecycle,
     pub proxy_selection_generation: AtomicU64,
     /// Every foreground subscription fetch advances this generation. Startup
@@ -150,6 +152,8 @@ impl AppState {
             #[cfg(not(windows))]
             vps_deployments: Mutex::new(HashMap::new()),
             sing_process: Mutex::new(None),
+            analytics: std::sync::OnceLock::new(),
+            log_tasks: std::sync::Mutex::new(Vec::new()),
             lifecycle: lifecycle::RuntimeLifecycle::default(),
             proxy_selection_generation: AtomicU64::new(0),
             sub_refresh_generation: AtomicU64::new(0),

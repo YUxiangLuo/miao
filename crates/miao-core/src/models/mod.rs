@@ -1,3 +1,4 @@
+pub mod analytics;
 pub mod api;
 pub mod config;
 pub mod multiplier;
@@ -118,6 +119,17 @@ mod typescript_contract {
         push_decl::<BatchNodeFailure>(&mut output, &config);
         push_decl::<BatchNodeResult>(&mut output, &config);
         push_decl::<DeleteNodeRequest>(&mut output, &config);
+        push_decl::<analytics::AnalyticsLog>(&mut output, &config);
+        push_decl::<analytics::AnalyticsLogs>(&mut output, &config);
+        push_decl::<analytics::AnalyticsBucket>(&mut output, &config);
+        push_decl::<analytics::AnalyticsGroup>(&mut output, &config);
+        push_decl::<analytics::LogFacet>(&mut output, &config);
+        push_decl::<analytics::LogActivity>(&mut output, &config);
+        push_decl::<analytics::DnsBucket>(&mut output, &config);
+        push_decl::<analytics::DnsGroup>(&mut output, &config);
+        push_decl::<analytics::DnsEvent>(&mut output, &config);
+        push_decl::<analytics::DnsAnalytics>(&mut output, &config);
+        push_decl::<analytics::AnalyticsSummary>(&mut output, &config);
 
         while output.ends_with("\n\n") {
             output.pop();

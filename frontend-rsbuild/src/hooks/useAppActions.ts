@@ -1,5 +1,4 @@
 import { useCallback, useRef, useState } from 'react'
-import { CONNECTIONS_MODAL_MIN_WIDTH } from '../tokens'
 import { validateSubscriptionUrl } from '../utils'
 import { buildNodeRequest } from '../nodeForm'
 import { waitForUpgrade } from './upgrade'
@@ -377,13 +376,8 @@ export function useAppActions(data: AppData) {
   }, [clashApiBase, testGroupDelays])
 
   const handleOpenConnections = useCallback(() => {
-    if (window.matchMedia(`(max-width: ${CONNECTIONS_MODAL_MIN_WIDTH - 1}px)`).matches) {
-      showToast('移动端暂不支持链接统计面板', 'info')
-      return
-    }
-
     setShowConnectionsModal(true)
-  }, [showToast, setShowConnectionsModal])
+  }, [setShowConnectionsModal])
 
   const handleStartService = useCallback(async () => {
     try {

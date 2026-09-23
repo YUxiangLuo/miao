@@ -236,6 +236,13 @@ pub(crate) async fn spawn_resolved(
         AppState::with_profile(stable_config, config.clone(), profile)
             .map_err(|e| AppError::context("Failed to create HTTP client", e))?,
     );
+    let database_path = app_state.runtime_paths.analytics_db.clone();
+    let analytics =
+        tokio::task::spawn_blocking(move || crate::analytics::Analytics::open(&database_path))
+            .await
+            .map_err(|e| AppError::context("Failed to initialize analytics worker", e.to_string()))?
+            .map_err(AppError::message)?;
+    let _ = app_state.analytics.set(analytics);
     if let Some(node_select) = migrated_node_select {
         if let Err(err) = save_node_select_preference(&app_state, node_select).await {
             warn!(error = %err, "Failed to migrate volatile node-selection preference");
@@ -275,6 +282,7 @@ pub(crate) async fn spawn_resolved(
 
     // 定时刷新调度循环与服务同生命周期；关闭时通过 wake Notify 退出。
     scheduler::spawn(app_state.clone());
+    let sampler = crate::analytics::spawn_sampler(app_state.clone());
 
     let (init_cancel, init_rx) = oneshot::channel();
     let init_task = tokio::spawn(async move {
@@ -300,6 +308,21 @@ pub(crate) async fn spawn_resolved(
                 // and later HTTP start requests may no longer revive the kernel.
                 let _config_update = state_for_shutdown.config_update.lock().await;
                 stop_sing_internal(&state_for_shutdown).await;
+                let _ = sampler.await;
+                let tasks = std::mem::take(&mut *state_for_shutdown.log_tasks.lock().unwrap());
+                for mut task in tasks {
+                    // Disk failure must not make shutdown unbounded. Normal EOF
+                    // drains every accepted line before closing the database.
+                    if tokio::time::timeout(Duration::from_secs(5), &mut task).await.is_err() {
+                        error!("Log persistence did not drain during shutdown; uncommitted logs may be lost");
+                        task.abort();
+                    }
+                }
+                if let Some(store) = state_for_shutdown.analytics.get() {
+                    if let Err(error) = store.run(|db| crate::analytics::Analytics::prune(db, crate::analytics::now_ms())).await {
+                        warn!(%error, "Failed to checkpoint network history during shutdown");
+                    }
+                }
             })
             .await?;
         Ok(())

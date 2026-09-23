@@ -176,3 +176,25 @@ export type BatchNodeFailure = { index: number, tag: string, message: string, };
 export type BatchNodeResult = { added: Array<BatchNodeAdded>, failed: Array<BatchNodeFailure>, };
 
 export type DeleteNodeRequest = { tag: string, };
+
+export type AnalyticsLog = { id: number, timestamp: number, stream: string, level: string, message: string, component: string, event: string, context: string, };
+
+export type AnalyticsLogs = { entries: Array<AnalyticsLog>, next_before: number | null, };
+
+export type AnalyticsBucket = { timestamp: number, upload: number, download: number, log_count: number, error_count: number, };
+
+export type AnalyticsGroup = { dimension: string, name: string, connections: number, upload: number, download: number, };
+
+export type LogFacet = { dimension: string, name: string, count: number, };
+
+export type LogActivity = { parsed_count: number, contexts: number, facets: Array<LogFacet>, };
+
+export type DnsBucket = { timestamp: number, queries: number, failures: number, p95_ms: number, max_ms: number, };
+
+export type DnsGroup = { dimension: string, name: string, queries: number, failures: number, p95_ms: number, max_ms: number, };
+
+export type DnsEvent = { log_id: number, timestamp: number, domain: string, query_type: string, duration_ms: number, outcome: string, rcode: number | null, error: string | null, transport: string | null, context: string, };
+
+export type DnsAnalytics = { queries: number, failures: number, p50_ms: number | null, p95_ms: number | null, p99_ms: number | null, max_ms: number | null, timeline: Array<DnsBucket>, groups: Array<DnsGroup>, slowest: Array<DnsEvent>, };
+
+export type AnalyticsSummary = { since: number, until: number, log_count: number, error_count: number, upload: number, download: number, sampled_connections: number, last_sample_at: number | null, collection_error: string | null, timeline: Array<AnalyticsBucket>, groups: Array<AnalyticsGroup>, activity: LogActivity, dns: DnsAnalytics, };

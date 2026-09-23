@@ -165,11 +165,14 @@ impl ResolvedProfile {
             None if env.windows => Some(env.data_dir.join("miao.log")),
             None => None,
         };
-        let runtime = RuntimePaths::new(runtime_dir, &config_path).with_preferences(
+        let mut runtime = RuntimePaths::new(runtime_dir, &config_path).with_preferences(
             preference_dir.join(".last_proxy"),
             preference_dir.join(".node_select"),
             preference_dir.join(".max_multiplier"),
         );
+        if !overridden {
+            runtime.analytics_db = persistent.join("analytics/network.duckdb");
+        }
         if let Some(owner) = &temporary {
             let root = std::fs::canonicalize(owner.path())?;
             if [
@@ -179,6 +182,7 @@ impl ResolvedProfile {
                 &runtime.last_proxy,
                 &runtime.node_select_preference,
                 &runtime.max_multiplier_preference,
+                &runtime.analytics_db,
                 &volatile,
             ]
             .iter()

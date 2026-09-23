@@ -27,6 +27,7 @@ pub struct RuntimePaths {
     pub cache_manifest: PathBuf,
     pub sub_nodes_snapshot: PathBuf,
     pub node_bindings: PathBuf,
+    pub analytics_db: PathBuf,
     pub last_proxy: PathBuf,
     pub node_select_preference: PathBuf,
     pub max_multiplier_preference: PathBuf,
@@ -48,6 +49,7 @@ impl RuntimePaths {
             // from the config path prevents two explicit configs in the same
             // directory (and parallel tests) from sharing node identities.
             node_bindings,
+            analytics_db: runtime_dir.join("analytics/network.duckdb"),
             last_proxy: runtime_dir.join(".last_proxy"),
             node_select_preference: runtime_dir.join(".node_select"),
             max_multiplier_preference: runtime_dir.join(".max_multiplier"),

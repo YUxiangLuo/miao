@@ -411,14 +411,19 @@ async fn spawn_and_probe_sing_box(
         .current_dir(sing_box_home)
         .arg("run")
         .arg("-c")
-        .arg(config_path);
+        .arg(config_path)
+        .arg("--disable-color");
 
     #[cfg(windows)]
     command.creation_flags(WINDOWS_CREATE_NEW_PROCESS_GROUP);
     // If start is cancelled between spawn and store, Drop must not leak the kernel.
     command.kill_on_drop(true);
 
-    if let Some(log_path) = crate::paths::active_log_path() {
+    if state.analytics.get().is_some() {
+        command
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
+    } else if let Some(log_path) = crate::paths::active_log_path() {
         if let Ok(file) = std::fs::OpenOptions::new()
             .create(true)
             .append(true)
@@ -442,9 +447,35 @@ async fn spawn_and_probe_sing_box(
             .stderr(std::process::Stdio::inherit());
     }
 
-    let child = command
+    let mut child = command
         .spawn()
         .map_err(|e| AppError::context("Failed to spawn sing-box process", e))?;
+
+    if let Some(store) = state.analytics.get() {
+        let session = format!(
+            "{}-{}",
+            chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default(),
+            child.id().unwrap_or_default()
+        );
+        let mut tasks = state.log_tasks.lock().unwrap();
+        tasks.retain(|task| !task.is_finished());
+        if let Some(stdout) = child.stdout.take() {
+            tasks.push(crate::analytics::capture(
+                stdout,
+                "stdout",
+                store.clone(),
+                session.clone(),
+            ));
+        }
+        if let Some(stderr) = child.stderr.take() {
+            tasks.push(crate::analytics::capture(
+                stderr,
+                "stderr",
+                store.clone(),
+                session,
+            ));
+        }
+    }
 
     #[cfg(windows)]
     assign_child_to_kernel_job(&child);

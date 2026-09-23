@@ -1,9 +1,23 @@
 // 测试夹具工厂：构造满足 API/Clash 类型的 mock，默认值与运行时零值一致。
 // 只被 *.test.* 引用；新增必填字段时在这里补默认值，测试只覆盖差异字段。
 import type {
-  ConnectivityResult, NodeInfo, RuleInfo, ScheduledRefreshStatus, StatusData, SubNodeInfo, SubNodesInfo, SubStatus, SubscriptionRefreshResult,
+  AnalyticsSummary, AnalyticsLog, ConnectivityResult, NodeInfo, RuleInfo, ScheduledRefreshStatus, StatusData, SubNodeInfo, SubNodesInfo, SubStatus, SubscriptionRefreshResult,
 } from './types/api'
 import type { ConnectionGroup, EnrichedConnection } from './types/clash'
+
+export function analyticsMock(overrides: Partial<AnalyticsSummary> = {}): AnalyticsSummary {
+  return {
+    since: 0, until: 1, log_count: 0, error_count: 0, upload: 0, download: 0,
+    sampled_connections: 0, last_sample_at: null, collection_error: null, timeline: [], groups: [],
+    activity: { parsed_count: 0, contexts: 0, facets: [] },
+    dns: { queries: 0, failures: 0, p50_ms: null, p95_ms: null, p99_ms: null, max_ms: null, timeline: [], groups: [], slowest: [] },
+    ...overrides,
+  }
+}
+
+export function analyticsLogMock(overrides: Partial<AnalyticsLog> = {}): AnalyticsLog {
+  return { id: 1, timestamp: 1, stream: 'stderr', level: 'info', message: '', component: 'dns', event: 'other', context: '', ...overrides }
+}
 
 export function subscriptionRefreshMock(overrides: Partial<SubscriptionRefreshResult> = {}): SubscriptionRefreshResult {
   return { refreshed: true, fetch_succeeded: true, report: { successful_sources: 1, failed_sources: 0, fresh_nodes: 3, cached_nodes: 0 }, runtime_updated: false, started: false, reloaded: false, restarted: false, warning: null, ...overrides }

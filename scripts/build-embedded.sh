@@ -133,6 +133,10 @@ git apply --directory=miao-shadowsocks2 "$KERNEL_DIR/shadowsocks2-halfclose.patc
 echo "==> Applying Miao client profile..."
 git apply --check "$KERNEL_DIR/client.patch"
 git apply "$KERNEL_DIR/client.patch"
+echo "==> Applying Miao DNS completion instrumentation..."
+git apply --check "$KERNEL_DIR/dns-instrumentation.patch"
+git apply "$KERNEL_DIR/dns-instrumentation.patch"
+"${go_command[@]}" test -mod=readonly -tags "$build_tags" ./dns -run '^TestMiaoDNS' -count=20
 bun "$KERNEL_DIR/prepare-command.mjs" "$TMP_DIR/sing-box"
 MIAO_REGISTRY_SNAPSHOT="$registry_snapshot" MIAO_CAPTURE_REGISTRIES=0 MIAO_PROFILE_MANIFEST="$profile_manifest" \
   "${go_command[@]}" test -mod=readonly -tags "$build_tags" ./cmd/miao-kernel -run '^TestMiao' -count=20

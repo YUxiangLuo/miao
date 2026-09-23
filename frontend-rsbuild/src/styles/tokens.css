@@ -167,6 +167,9 @@
     --modal-h-rule: min(96dvh, 820px);
     --modal-w-conn: 1560px;
     --modal-conn-inset: 48px; /* 链接统计弹窗距视口四边 */
+    --analytics-nav-w: 180px;
+    --analytics-chart-h: 140px;
+    --analytics-search-w: 180px;
     --onboarding-w: 460px;
     --toast-min-w: 220px;
     --float-offset: 20px; /* toast 距视口边 */

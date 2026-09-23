@@ -476,7 +476,7 @@ pub(super) fn tun_inbound() -> serde_json::Value {
 
 fn get_config_template() -> serde_json::Value {
     serde_json::json!({
-        "log": {"disabled": false, "timestamp": true, "level": "info"},
+        "log": {"disabled": false, "timestamp": true, "level": "trace"},
         "experimental": {
             "clash_api": {"external_controller": crate::services::singbox::CLASH_API_HOST},
             "cache_file": {
