@@ -178,7 +178,8 @@ pub fn spawn_sampler(state: Arc<AppState>) -> JoinHandle<()> {
             }
             // Never contact the machine's production Clash API from an idle
             // test/profile. A ready, owned child is required.
-            if !state.lifecycle.snapshot().ready {
+            let runtime = state.lifecycle.snapshot();
+            if !runtime.ready {
                 continue;
             }
             let identity = state
@@ -200,19 +201,25 @@ pub fn spawn_sampler(state: Arc<AppState>) -> JoinHandle<()> {
                 kernel = Some(identity);
             }
             let result = async {
-                let snapshot = state
-                    .http_client
-                    .get(format!("{CLASH_API_BASE}/connections"))
-                    .timeout(Duration::from_secs(2))
-                    .send()
-                    .await
-                    .map_err(|e| e.to_string())?
-                    .error_for_status()
-                    .map_err(|e| e.to_string())?
-                    .json::<Snapshot>()
-                    .await
-                    .map_err(|e| e.to_string())?;
-                if !state.lifecycle.snapshot().ready
+                // The sampler's shorter deadline must not cancel a UI waiter.
+                let response = tokio::time::timeout(
+                    Duration::from_secs(2),
+                    state.connection_requests.get(
+                        &state.http_client,
+                        &format!("{CLASH_API_BASE}/connections"),
+                        runtime.generation,
+                    ),
+                )
+                .await
+                .map_err(|e| e.to_string())??;
+                if response.status.is_client_error() || response.status.is_server_error() {
+                    return Err(format!("Clash connections: {}", response.status));
+                }
+                let snapshot: Snapshot =
+                    serde_json::from_slice(&response.body).map_err(|e| e.to_string())?;
+                let current = state.lifecycle.snapshot();
+                if !current.ready
+                    || current.generation != runtime.generation
                     || state
                         .sing_process
                         .lock()

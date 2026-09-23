@@ -157,6 +157,19 @@ TMPDIR="$PWD/.cache" cargo test --locked --release -p miao-core \
   analytics::tests::benchmark_ -- --ignored --nocapture --test-threads=1
 ```
 
+### 连接快照请求合并
+
+分析采样和面板的普通 `GET /api/clash/connections` 共用进行中的上游请求，不缓存已完成的结果；下一次轮询仍重新读取计数，不引入固定 TTL 导致速率归零后跳高。内核生命周期代次变化时不复用旧请求，采样落盘前也复核代次和进程身份。DELETE 等写操作仍透传，并在请求前后使已有共享请求失效；带查询参数、请求体或 Content-Type 的 GET 保持独立透传。
+
+采样等待上限仍为 2 秒，上游请求上限为 10 秒。单个等待者取消或超时不会取消其他等待者；最后一个等待者消失后释放上游请求。状态码、Content-Type 和原始响应字节保持不变，包括非成功响应；失败结果不缓存。
+
+隔离回环 HTTP 测试验证 32 个重叠调用只发起 1 次上游请求，之后的调用读取新结果，并覆盖代次切换、失效、取消、超时及响应体截断。**这是重叠请求的去重，不是将常态采样开销降低固定比例**：采样与页面轮询错峰时不会减少请求数，也未据此宣称代理吞吐提升。测试不连接运行实例：
+
+```bash
+cargo test --locked -p miao-core state::connections
+cargo test --locked -p miao-core handlers::clash
+```
+
 ## MCP：让 AI agent 操作代理
 
 设置 `mcp: true` 或使用面板顶部 MCP 开关，连接 `http://<面板地址>/mcp`；关闭时返回 404。顶部的 Claude、Codex 图标可复制对应客户端的添加命令。当前实现 MCP `2025-11-25` Streamable HTTP：先 `initialize`，再 `notifications/initialized`，后续请求携带 `MCP-Protocol-Version`；无 session、无 SSE，启用时 `GET /mcp` 返回 405。

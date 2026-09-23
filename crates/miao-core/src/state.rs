@@ -9,8 +9,10 @@ use tokio::sync::{Mutex, Notify, RwLock};
 use crate::models::{Config, GitHubRelease, NodeMultiplier, NodeSelect, StableConfig, SubStatus};
 use crate::paths::RuntimePaths;
 
+mod connections;
 pub mod lifecycle;
 mod subscriptions;
+use connections::ConnectionRequests;
 use subscriptions::SubscriptionRefresh;
 
 /// 应用状态容器 - 包含所有运行时状态
@@ -38,6 +40,7 @@ pub struct AppState {
     pub vps_deployments: Mutex<HashMap<String, std::sync::Weak<Mutex<()>>>>,
     pub sing_process: Mutex<Option<SingBoxProcess>>,
     pub analytics: std::sync::OnceLock<Arc<crate::analytics::Analytics>>,
+    pub connection_requests: ConnectionRequests,
     pub log_tasks: std::sync::Mutex<Vec<tokio::task::JoinHandle<()>>>,
     pub lifecycle: lifecycle::RuntimeLifecycle,
     pub proxy_selection_generation: AtomicU64,
@@ -153,6 +156,7 @@ impl AppState {
             vps_deployments: Mutex::new(HashMap::new()),
             sing_process: Mutex::new(None),
             analytics: std::sync::OnceLock::new(),
+            connection_requests: ConnectionRequests::default(),
             log_tasks: std::sync::Mutex::new(Vec::new()),
             lifecycle: lifecycle::RuntimeLifecycle::default(),
             proxy_selection_generation: AtomicU64::new(0),
