@@ -131,6 +131,32 @@ DuckDB 放在配置所属的 `.miao-profiles/<配置路径哈希>/analytics/netw
 
 日志含访问域名、地址、进程及可能的敏感错误信息，不包含抓包载荷。Unix 存储目录权限为 `0700`；历史 API 与现有面板共用访问边界，**面板无鉴权，切勿暴露到不可信网络**。支持只读 `GET /api/analytics/summary?hours=1|6|24` 和 `GET /api/analytics/logs`；后者可传 `hours`、`level`、`q`、`component`、`event`、`context`、`id`、`before`、`limit`（1–500）。没有任意 SQL 执行接口。
 
+### 分析存储的写入与查询
+
+采集仍以最多 256 条／约 1 MiB／250 ms 触发批次，保留原始字节和失败重试。批次使用 DuckDB Appender 写入日志及 DNS 事件，ID 从原有序列一次分配并排序后按输入顺序使用；显式检查两张表的 flush 错误，再一起提交。回滚允许序列出现空隙，不允许半批数据留在表中；不迁移旧数据库、不重写已有日志。
+
+写入、采样和保留期清理继续共用一个写连接；面板查询串行复用另一个连接，不再等待写连接的应用层互斥锁。每次查询使用事务快照，摘要中的多个 SQL 看到相同的已提交状态。清理四张表也在同一事务内完成，然后执行 CHECKPOINT。活动读快照可能延迟旧版本的磁盘空间回收；两条连接仍共享数据库的 CPU、内存和 I/O，不代表查询与写入完全没有资源争用。
+
+Linux amd64 / Ryzen 5 5600 / DuckDB 1.5.5，本仓库 release 配置、Btrfs 工作区临时文件数据库的本地对照结果如下。每组交替执行新旧路径 6 轮，表中为中位数；写入项每轮连续提交 10 个批次，包含解析、事务提交，但不含数据库初始化与采集器等待时间。
+
+| 负载 | 优化前 | 优化后 |
+| --- | ---: | ---: |
+| 单条普通日志 | 4.05 ms | 4.01 ms |
+| 256 条普通日志 | 36.80 ms | 5.85 ms |
+| 256 条混合日志（25% DNS 完成事件） | 57.41 ms | 6.30 ms |
+| 256 条 DNS 完成事件 | 109.35 ms | 7.16 ms |
+| 完整分析摘要查询期间提交 256 条 DNS 日志 | 41.34 ms | 7.27 ms |
+
+最后一项使用 16,384 条历史日志（4,096 条 DNS 事件，无流量采样记录），两组均已启用 Appender，仅对比共用连接锁与独立查询连接；检查旧摘要仍保持原快照，新查询能看到完整新增批次。稀疏写入没有确定收益，在 tmpfs 对照中仍有少量固定开销；上述批量收益不能换算成代理吞吐提升或所有磁盘上的固定倍率。
+
+复测仅创建并删除临时数据库，不读取运行实例的数据。指定磁盘目录可避免把 `/tmp` 的 tmpfs 结果当成磁盘写入性能；普通测试默认跳过这两个基准。
+
+```bash
+mkdir -p .cache
+TMPDIR="$PWD/.cache" cargo test --locked --release -p miao-core \
+  analytics::tests::benchmark_ -- --ignored --nocapture --test-threads=1
+```
+
 ## MCP：让 AI agent 操作代理
 
 设置 `mcp: true` 或使用面板顶部 MCP 开关，连接 `http://<面板地址>/mcp`；关闭时返回 404。顶部的 Claude、Codex 图标可复制对应客户端的添加命令。当前实现 MCP `2025-11-25` Streamable HTTP：先 `initialize`，再 `notifications/initialized`，后续请求携带 `MCP-Protocol-Version`；无 session、无 SSE，启用时 `GET /mcp` 返回 405。

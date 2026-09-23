@@ -54,7 +54,7 @@ pub async fn logs(
     })?;
     let now = now_ms();
     let result = store
-        .run(move |db| {
+        .read(move |db| {
             Analytics::logs(db, now - query.hours.unwrap_or(24) * 3_600_000, now, &query)
         })
         .await;
@@ -78,7 +78,7 @@ pub async fn summary(
     })?;
     let now = now_ms();
     let mut data = store
-        .run(move |db| Analytics::summary(db, now - query.hours.unwrap_or(24) * 3_600_000, now))
+        .read(move |db| Analytics::summary(db, now - query.hours.unwrap_or(24) * 3_600_000, now))
         .await
         .map_err(|e| status_error(StatusCode::INTERNAL_SERVER_ERROR, e))?;
     let errors: Vec<String> = [

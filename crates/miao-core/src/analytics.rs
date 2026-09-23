@@ -19,6 +19,7 @@ pub fn now_ms() -> i64 {
 
 pub struct Analytics {
     db: Mutex<Connection>,
+    reader: Mutex<Connection>,
     // Keep a log write failure visible even if connection sampling succeeds.
     pub log_error: Mutex<Option<String>>,
     pub sample_error: Mutex<Option<String>>,
@@ -76,7 +77,7 @@ impl Analytics {
             .map_err(|e| e.to_string())
     }
 
-    fn initialize(db: Connection) -> duckdb::Result<Self> {
+    fn initialize(mut db: Connection) -> duckdb::Result<Self> {
         db.execute_batch(
             "SET enable_external_access = false;
             SET threads = 2;
@@ -98,9 +99,11 @@ impl Analytics {
                 outbound VARCHAR NOT NULL, rule VARCHAR NOT NULL, network VARCHAR NOT NULL,
                 upload BIGINT NOT NULL, download BIGINT NOT NULL);",
         )?;
-        Self::prune(&db, now_ms())?;
+        Self::prune(&mut db, now_ms())?;
+        let reader = db.try_clone()?;
         Ok(Self {
             db: Mutex::new(db),
+            reader: Mutex::new(reader),
             log_error: Mutex::new(None),
             sample_error: Mutex::new(None),
         })
@@ -119,33 +122,58 @@ impl Analytics {
         .map_err(|e| e.to_string())?
     }
 
+    pub async fn read<T, F>(self: &Arc<Self>, work: F) -> Result<T, String>
+    where
+        T: Send + 'static,
+        F: FnOnce(&Connection) -> duckdb::Result<T> + Send + 'static,
+    {
+        let store = self.clone();
+        tokio::task::spawn_blocking(move || {
+            let mut db = store.reader.lock().unwrap();
+            // One bounded reader lane, separate from capture/pruning. A summary
+            // runs multiple SELECTs; they must all see the same committed state.
+            let tx = db.transaction().map_err(|e| e.to_string())?;
+            let result = work(&tx).map_err(|e| e.to_string())?;
+            tx.commit().map_err(|e| e.to_string())?;
+            Ok(result)
+        })
+        .await
+        .map_err(|e| e.to_string())?
+    }
+
     pub fn insert_logs(db: &mut Connection, rows: &[LogRecord]) -> duckdb::Result<()> {
+        if rows.is_empty() {
+            return Ok(());
+        }
         let tx = db.transaction()?;
         {
-            let mut insert = tx.prepare(
-                "INSERT INTO logs (timestamp, stream, level, message, raw, component, event, context, route) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
-            )?;
-            let mut dns_insert =
-                tx.prepare("INSERT INTO dns_events VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")?;
-            for row in rows {
+            // Allocate from the existing sequence in one query. Sort the IDs so
+            // log pagination retains input order regardless of query parallelism.
+            // Rollbacks may consume IDs, just as with INSERT ... RETURNING.
+            let mut ids = tx
+                .prepare("SELECT nextval('log_id') FROM range(?)")?
+                .query_map([rows.len() as i64], |r| r.get::<_, i64>(0))?
+                .collect::<duckdb::Result<Vec<_>>>()?;
+            ids.sort_unstable();
+            let mut insert = tx.appender("logs")?;
+            let mut dns_insert = tx.appender("dns_events")?;
+            for (row, id) in rows.iter().zip(ids) {
                 let message = String::from_utf8_lossy(&row.raw);
                 let parsed = events::parse(&message, &row.session);
-                let id: i64 = insert.query_row(
-                    params![
-                        row.timestamp,
-                        row.stream,
-                        log_level(&message),
-                        message.as_ref(),
-                        row.raw,
-                        parsed.component,
-                        parsed.event,
-                        parsed.context,
-                        parsed.route
-                    ],
-                    |r| r.get(0),
-                )?;
+                insert.append_row(params![
+                    id,
+                    row.timestamp,
+                    row.stream,
+                    log_level(&message),
+                    message.as_ref(),
+                    row.raw,
+                    parsed.component,
+                    parsed.event,
+                    parsed.context,
+                    parsed.route
+                ])?;
                 if let Some(dns) = parsed.dns {
-                    dns_insert.execute(params![
+                    dns_insert.append_row(params![
                         id,
                         row.timestamp,
                         dns.domain,
@@ -159,6 +187,10 @@ impl Analytics {
                     ])?;
                 }
             }
+            // Drop flushes too, but discards errors. Check both flushes before
+            // committing so a failure in either table rolls back the whole batch.
+            insert.flush()?;
+            dns_insert.flush()?;
         }
         tx.commit()
     }
@@ -191,14 +223,17 @@ impl Analytics {
         tx.commit()
     }
 
-    pub fn prune(db: &Connection, now: i64) -> duckdb::Result<()> {
+    pub fn prune(db: &mut Connection, now: i64) -> duckdb::Result<()> {
         // Queries also enforce retention, so records cannot leak between sweeps.
+        // Publish cleanup across all tables atomically to concurrent readers.
+        let tx = db.transaction()?;
         for table in ["logs", "dns_events", "samples", "traffic"] {
-            db.execute(
+            tx.execute(
                 &format!("DELETE FROM {table} WHERE timestamp < ?"),
                 [now - RETENTION_MS],
             )?;
         }
+        tx.commit()?;
         db.execute_batch("CHECKPOINT")
     }
 

@@ -74,7 +74,7 @@ fn retention_boundaries_pagination_search_and_reopen() {
         .unwrap();
         assert_eq!(search.entries.len(), 2);
         assert_eq!(Analytics::summary(&db, cutoff, now).unwrap().error_count, 1);
-        Analytics::prune(&db, now).unwrap();
+        Analytics::prune(&mut db, now).unwrap();
         assert_eq!(
             db.query_row("SELECT count(*) FROM logs", [], |r| r.get::<_, i64>(0))
                 .unwrap(),
@@ -145,7 +145,7 @@ fn aggregates_count_distinct_connections_and_sum_only_in_window_deltas() {
     assert_eq!(result.timeline[1].upload, 220);
     assert_eq!(result.timeline[2].upload, 0);
     assert_eq!(result.last_sample_at, Some(since + 300_001));
-    Analytics::prune(&db, since + RETENTION_MS + 1).unwrap();
+    Analytics::prune(&mut db, since + RETENTION_MS + 1).unwrap();
     assert_eq!(
         db.query_row("SELECT count(*) FROM traffic", [], |r| r.get::<_, i64>(0))
             .unwrap(),
@@ -293,7 +293,7 @@ fn dns_events_have_real_latency_quantiles_exact_drilldown_and_retention() {
     )
     .unwrap();
     assert_eq!(completed.entries.len(), 3);
-    Analytics::prune(&db, now).unwrap();
+    Analytics::prune(&mut db, now).unwrap();
     assert_eq!(
         db.query_row("SELECT count(*) FROM dns_events", [], |r| r
             .get::<_, i64>(0))
@@ -453,4 +453,399 @@ fn timeline_starts_at_first_record_in_window_including_idle_samples() {
         ]
     );
     assert_eq!(recorded.timeline[2].error_count, 1);
+}
+
+fn dns_log(timestamp: i64, context: u32, domain: &str) -> LogRecord {
+    log(
+        timestamp,
+        &format!(
+            "INFO [{context} 2ms] dns: MIAO_DNS {}",
+            serde_json::json!({
+                "v": 1, "domain": domain, "query_type": "AAAA", "duration_ms": 0.125,
+                "outcome": "success", "rcode": 0, "error": null, "transport": "dns-local"
+            })
+        ),
+    )
+}
+
+#[test]
+fn log_batch_failure_rolls_back_both_tables_and_same_batch_can_retry() {
+    let store = Analytics::initialize(Connection::open_in_memory().unwrap()).unwrap();
+    let mut db = store.db.lock().unwrap();
+    let now = now_ms();
+    Analytics::insert_logs(&mut db, &[dns_log(now, 7, "existing.test")]).unwrap();
+    // Appender constraint errors can surface only during flush. Force a failure
+    // in the second table after logs have been flushed into the transaction.
+    db.execute_batch("CREATE UNIQUE INDEX test_dns_context ON dns_events(context)")
+        .unwrap();
+    let rows = vec![
+        log(now + 1, "ERROR [42 1ms] router: first in failed batch"),
+        dns_log(now + 2, 8, "first.test"),
+        dns_log(now + 3, 7, "conflicting.test"),
+    ];
+    assert!(Analytics::insert_logs(&mut db, &rows).is_err());
+    for table in ["logs", "dns_events"] {
+        let count: i64 = db
+            .query_row(&format!("SELECT count(*) FROM {table}"), [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 1, "partial batch persisted in {table}");
+    }
+    db.execute_batch("DROP INDEX test_dns_context").unwrap();
+    Analytics::insert_logs(&mut db, &rows).unwrap();
+    let raw = db
+        .prepare("SELECT raw FROM logs ORDER BY id")
+        .unwrap()
+        .query_map([], |r| r.get::<_, Vec<u8>>(0))
+        .unwrap()
+        .collect::<duckdb::Result<Vec<_>>>()
+        .unwrap();
+    assert_eq!(
+        &raw[1..],
+        rows.iter().map(|r| r.raw.clone()).collect::<Vec<_>>()
+    );
+    let domains = db
+        .prepare("SELECT domain FROM dns_events ORDER BY log_id")
+        .unwrap()
+        .query_map([], |r| r.get::<_, String>(0))
+        .unwrap()
+        .collect::<duckdb::Result<Vec<_>>>()
+        .unwrap();
+    assert_eq!(domains, ["existing.test", "first.test", "conflicting.test"]);
+    let (distinct, linked): (i64, i64) = db.query_row(
+        "SELECT (SELECT count(DISTINCT id) FROM logs), (SELECT count(*) FROM dns_events d JOIN logs l ON l.id = d.log_id AND l.context = d.context)",
+        [], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+    assert_eq!((distinct, linked), (4, 3));
+}
+
+#[test]
+fn large_mixed_log_batches_keep_bytes_order_and_exact_dns_links_after_reopen() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("history/data.duckdb");
+    let now = now_ms();
+    // Cross the appender's vector boundary as well as the collector's 256 rows.
+    let rows: Vec<_> = (0..4097)
+        .map(|i| {
+            if i % 3 == 1 {
+                dns_log(now + i, i as u32, &format!("域名-{i}.test"))
+            } else {
+                let mut row = log(
+                    now + i,
+                    &format!("ERROR [{i} 3ms] router: row {i}\0quoted'"),
+                );
+                row.raw.push(0xff);
+                row.raw.push(b'\n');
+                row.stream = "stdout";
+                row.session = "second-kernel".into();
+                row
+            }
+        })
+        .collect();
+    {
+        let store = Analytics::open(&path).unwrap();
+        let mut db = store.db.lock().unwrap();
+        // Retain compatibility with databases already written by the SQL path.
+        db.execute_batch("INSERT INTO logs (timestamp,stream,level,message,raw,component,event,context,route) VALUES (0,'stderr','info','old','old'::BLOB,'core','other','','')").unwrap();
+        Analytics::insert_logs(&mut db, &[]).unwrap();
+        for batch in [&rows[..257], &rows[257..]] {
+            Analytics::insert_logs(&mut db, batch).unwrap();
+        }
+    }
+    let reopened = Analytics::open(&path).unwrap();
+    let db = reopened.db.lock().unwrap();
+    let actual = db
+        .prepare("SELECT id, timestamp, stream, raw, message, context FROM logs ORDER BY id")
+        .unwrap()
+        .query_map([], |r| {
+            Ok((
+                r.get::<_, i64>(0)?,
+                r.get::<_, i64>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, Vec<u8>>(3)?,
+                r.get::<_, String>(4)?,
+                r.get::<_, String>(5)?,
+            ))
+        })
+        .unwrap()
+        .collect::<duckdb::Result<Vec<_>>>()
+        .unwrap();
+    assert_eq!(actual.len(), rows.len());
+    for (i, (got, expected)) in actual.iter().zip(&rows).enumerate() {
+        assert_eq!(got.0, i as i64 + 2);
+        assert_eq!(got.1, expected.timestamp);
+        assert_eq!(got.2, expected.stream);
+        assert_eq!(got.3, expected.raw);
+        assert_eq!(got.4, String::from_utf8_lossy(&expected.raw));
+        assert_eq!(got.5, format!("{}/{i}", expected.session));
+    }
+    let dns = db.prepare("SELECT d.log_id, d.domain, d.duration_ms, d.rcode, d.error, d.transport FROM dns_events d JOIN logs l ON l.id = d.log_id AND l.context = d.context ORDER BY d.log_id").unwrap()
+        .query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get::<_, f64>(2)?, r.get::<_, Option<i32>>(3)?, r.get::<_, Option<String>>(4)?, r.get::<_, Option<String>>(5)?)))
+        .unwrap().collect::<duckdb::Result<Vec<_>>>().unwrap();
+    assert_eq!(dns.len(), (1..4097).step_by(3).count());
+    for (got, i) in dns.iter().zip((1..4097).step_by(3)) {
+        assert_eq!(
+            got,
+            &(
+                i as i64 + 2,
+                format!("域名-{i}.test"),
+                0.125,
+                Some(0),
+                None,
+                Some("dns-local".into())
+            )
+        );
+    }
+}
+
+// Paired benchmark reference: the pre-Appender implementation. Keep parsing,
+// sequence assignment, transaction boundaries and DNS indexing in both paths.
+fn insert_logs_rowwise(db: &mut Connection, rows: &[LogRecord]) -> duckdb::Result<()> {
+    let tx = db.transaction()?;
+    {
+        let mut insert = tx.prepare("INSERT INTO logs (timestamp, stream, level, message, raw, component, event, context, route) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id")?;
+        let mut dns_insert =
+            tx.prepare("INSERT INTO dns_events VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")?;
+        for row in rows {
+            let message = String::from_utf8_lossy(&row.raw);
+            let parsed = events::parse(&message, &row.session);
+            let id: i64 = insert.query_row(
+                params![
+                    row.timestamp,
+                    row.stream,
+                    log_level(&message),
+                    message.as_ref(),
+                    row.raw,
+                    parsed.component,
+                    parsed.event,
+                    parsed.context,
+                    parsed.route
+                ],
+                |r| r.get(0),
+            )?;
+            if let Some(dns) = parsed.dns {
+                dns_insert.execute(params![
+                    id,
+                    row.timestamp,
+                    dns.domain,
+                    dns.query_type,
+                    dns.duration_ms,
+                    dns.outcome,
+                    dns.rcode,
+                    dns.error,
+                    dns.transport,
+                    parsed.context
+                ])?;
+            }
+        }
+    }
+    tx.commit()
+}
+
+#[test]
+#[ignore = "file-backed paired performance benchmark; run alone with --ignored --nocapture"]
+fn benchmark_log_ingestion() {
+    use std::time::Instant;
+    for (label, size, dns_every) in [
+        ("sparse", 1, 0),
+        ("text", 256, 0),
+        ("mixed", 256, 4),
+        ("dns", 256, 1),
+    ] {
+        let rows: Vec<_> = (0..size).map(|i| {
+            if dns_every > 0 && i % dns_every == 0 {
+                dns_log(now_ms(), i as u32, &format!("domain-{i}.test"))
+            } else {
+                log(now_ms(), &format!("ERROR [{i} 4ms] outbound/direct[direct]: connection to host-{i}.test:443 failed: timeout\n"))
+            }
+        }).collect();
+        let mut timings = [Vec::new(), Vec::new()];
+        for round in 0..6 {
+            for variant in if round % 2 == 0 { [0, 1] } else { [1, 0] } {
+                let dir = tempfile::tempdir().unwrap();
+                let store = Analytics::open(&dir.path().join("history/data.duckdb")).unwrap();
+                let mut db = store.db.lock().unwrap();
+                let insert = if variant == 0 {
+                    insert_logs_rowwise
+                } else {
+                    Analytics::insert_logs
+                };
+                insert(&mut db, &rows).unwrap(); // Warm parser and DB outside measurement.
+                let start = Instant::now();
+                for _ in 0..10 {
+                    insert(&mut db, &rows).unwrap();
+                }
+                timings[variant].push(start.elapsed().as_secs_f64() * 1000.0 / 10.0);
+                let (logs, distinct, dns): (i64, i64, i64) = db.query_row("SELECT (SELECT count(*) FROM logs), (SELECT count(DISTINCT id) FROM logs), (SELECT count(*) FROM dns_events)", [], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).unwrap();
+                let expected_dns = if dns_every == 0 {
+                    0
+                } else {
+                    (0..size).filter(|i| i % dns_every == 0).count()
+                };
+                assert_eq!(
+                    (logs, distinct, dns),
+                    (
+                        (size * 11) as i64,
+                        (size * 11) as i64,
+                        (expected_dns * 11) as i64
+                    )
+                );
+            }
+        }
+        for (variant, mut values) in timings.into_iter().enumerate() {
+            values.sort_by(f64::total_cmp);
+            eprintln!(
+                "{label}: variant={variant} rows={size} median_ms={:.3} samples={values:?}",
+                (values[2] + values[3]) / 2.0
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn reader_snapshot_allows_writes_retention_and_checkpoint() {
+    use std::time::Duration;
+    const IDS: &str = "SELECT
+        (SELECT string_agg(id::VARCHAR, ',' ORDER BY id) FROM logs),
+        (SELECT string_agg(log_id::VARCHAR, ',' ORDER BY log_id) FROM dns_events)";
+    let dir = tempfile::tempdir().unwrap();
+    let store = Analytics::open(&dir.path().join("history/data.duckdb")).unwrap();
+    let now = now_ms();
+    store
+        .run(move |db| {
+            Analytics::insert_logs(
+                db,
+                &[
+                    dns_log(now - RETENTION_MS - 1, 1, "expired.test"),
+                    dns_log(now, 2, "retained.test"),
+                ],
+            )
+        })
+        .await
+        .unwrap();
+    let (started, ready) = tokio::sync::oneshot::channel();
+    let (release, wait) = std::sync::mpsc::channel();
+    let reader_store = store.clone();
+    let reader = tokio::spawn(async move {
+        reader_store
+            .read(move |db| {
+                let before: (String, String) =
+                    db.query_row(IDS, [], |r| Ok((r.get(0)?, r.get(1)?)))?;
+                started.send(()).unwrap();
+                wait.recv_timeout(Duration::from_secs(10)).unwrap();
+                let after: (String, String) =
+                    db.query_row(IDS, [], |r| Ok((r.get(0)?, r.get(1)?)))?;
+                Ok((before, after))
+            })
+            .await
+    });
+    tokio::time::timeout(Duration::from_secs(5), ready)
+        .await
+        .unwrap()
+        .unwrap();
+    // A single connection mutex would deadlock this write until reader release.
+    // Exercise real DELETE + CHECKPOINT, not merely a mocked writer callback.
+    let written = tokio::time::timeout(
+        Duration::from_secs(5),
+        store.run(move |db| {
+            Analytics::insert_logs(db, &[dns_log(now, 3, "new.test")])?;
+            Analytics::prune(db, now)
+        }),
+    )
+    .await;
+    release.send(()).unwrap();
+    let snapshot = reader.await.unwrap().unwrap();
+    written.expect("reader blocked ingestion/pruning").unwrap();
+    assert_eq!(
+        snapshot,
+        (("1,2".into(), "1,2".into()), ("1,2".into(), "1,2".into()))
+    );
+    let fresh: (String, String) = store
+        .read(|db| db.query_row(IDS, [], |r| Ok((r.get(0)?, r.get(1)?))))
+        .await
+        .unwrap();
+    assert_eq!(fresh, ("2,3".into(), "2,3".into()));
+    // A failed query must roll back its read transaction and leave the reusable
+    // connection usable; it must not affect the separate writer transaction.
+    assert!(store
+        .read(|db| db.execute_batch("SELECT * FROM missing_table"))
+        .await
+        .is_err());
+    let fresh: (String, String) = store
+        .read(|db| db.query_row(IDS, [], |r| Ok((r.get(0)?, r.get(1)?))))
+        .await
+        .unwrap();
+    assert_eq!(fresh, ("2,3".into(), "2,3".into()));
+}
+
+#[tokio::test]
+#[ignore = "file-backed query/write contention benchmark; run alone in release mode"]
+async fn benchmark_writes_during_summary() {
+    use std::time::Instant;
+    let mut timings = [Vec::new(), Vec::new()];
+    for round in 0..6 {
+        for variant in if round % 2 == 0 { [0, 1] } else { [1, 0] } {
+            let dir = tempfile::tempdir().unwrap();
+            let store = Analytics::open(&dir.path().join("history/data.duckdb")).unwrap();
+            let now = now_ms();
+            store.run(move |db| {
+                for batch in 0..64 {
+                    let rows: Vec<_> = (0..256).map(|i| {
+                        let index = batch * 256 + i;
+                        if i % 4 == 0 {
+                            dns_log(now - 1000, index, &format!("host-{}.test", index % 512))
+                        } else {
+                            log(now - 1000, &format!("ERROR [{index} 7ms] outbound/direct[direct]: connection failed: timeout"))
+                        }
+                    }).collect();
+                    Analytics::insert_logs(db, &rows)?;
+                }
+                Ok(())
+            }).await.unwrap();
+            let reader_store = store.clone();
+            let (started, ready) = tokio::sync::oneshot::channel();
+            let read = tokio::spawn(async move {
+                let work = move |db: &Connection| {
+                    // Establish the snapshot before allowing the write to start.
+                    let count: i64 = db.query_row("SELECT count(*) FROM logs", [], |r| r.get(0))?;
+                    assert_eq!(count, 16384);
+                    started.send(()).unwrap();
+                    Analytics::summary(db, now - RETENTION_MS, now)
+                };
+                if variant == 0 {
+                    reader_store.run(move |db| work(db)).await
+                } else {
+                    reader_store.read(work).await
+                }
+            });
+            ready.await.unwrap();
+            let rows: Vec<_> = (0..256)
+                .map(|i| dns_log(now - 1, 900_000 + i, "new.test"))
+                .collect();
+            let start = Instant::now();
+            store
+                .run(move |db| Analytics::insert_logs(db, &rows))
+                .await
+                .unwrap();
+            timings[variant].push(start.elapsed().as_secs_f64() * 1000.0);
+            let summary = read.await.unwrap().unwrap();
+            assert_eq!((summary.log_count, summary.dns.queries), (16384, 4096));
+            let counts: (i64, i64) = store
+                .read(|db| {
+                    db.query_row(
+                        "SELECT (SELECT count(*) FROM logs), (SELECT count(*) FROM dns_events)",
+                        [],
+                        |r| Ok((r.get(0)?, r.get(1)?)),
+                    )
+                })
+                .await
+                .unwrap();
+            assert_eq!(counts, (16640, 4352));
+        }
+    }
+    for (variant, mut values) in timings.into_iter().enumerate() {
+        values.sort_by(f64::total_cmp);
+        eprintln!(
+            "write_during_summary: variant={variant} median_ms={:.3} samples={values:?}",
+            (values[2] + values[3]) / 2.0
+        );
+    }
 }
