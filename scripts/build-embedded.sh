@@ -142,6 +142,11 @@ echo "==> Applying Miao DNS completion instrumentation..."
 git apply --check "$KERNEL_DIR/dns-instrumentation.patch"
 git apply "$KERNEL_DIR/dns-instrumentation.patch"
 "${go_command[@]}" test -mod=readonly -tags "$build_tags" ./dns -run '^TestMiaoDNS' -count=20
+echo "==> Applying single-buffer sniff reader optimization..."
+git apply --check "$KERNEL_DIR/sniff-reader.patch"
+git apply "$KERNEL_DIR/sniff-reader.patch"
+cp "$KERNEL_DIR/tests/miao_sniff_test.go" common/sniff/
+"${go_command[@]}" test -mod=readonly -tags "$build_tags" ./common/sniff -run '^TestMiaoSniff' -count=20
 echo "==> Applying Clash snapshot serialization optimization..."
 git apply --check "$KERNEL_DIR/clash-snapshot.patch"
 git apply "$KERNEL_DIR/clash-snapshot.patch"

@@ -1,0 +1,22 @@
+diff --git a/common/sniff/sniff.go b/common/sniff/sniff.go
+index b3651e1..c56c8f6 100644
+--- a/common/sniff/sniff.go
++++ b/common/sniff/sniff.go
+@@ -59,9 +59,14 @@ func PeekStream(ctx context.Context, metadata *adapter.InboundContext, conn net.
+ 		}
+ 		sniffError = nil
+ 		for _, sniffer := range sniffers {
+-			reader := io.MultiReader(common.Map(append(buffers, buffer), func(it *buf.Buffer) io.Reader {
+-				return bytes.NewReader(it.Bytes())
+-			})...)
++			var reader io.Reader
++			if len(buffers) == 0 {
++				reader = bytes.NewReader(buffer.Bytes())
++			} else {
++				reader = io.MultiReader(common.Map(append(buffers, buffer), func(it *buf.Buffer) io.Reader {
++					return bytes.NewReader(it.Bytes())
++				})...)
++			}
+ 			err = sniffer(ctx, metadata, reader)
+ 			if err == nil {
+ 				return nil

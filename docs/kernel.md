@@ -256,6 +256,33 @@ bash scripts/benchmark-tun.sh
 
 这只是本机短时初筛：未固定 CPU affinity，客户端、服务端和压测器共享 CPU，没有置信区间；RSS 是测试后快照，不是稳态或峰值。未覆盖 IPv6、UDP 分片、尾延迟、WAN 丢包、其他节点协议或 OpenWrt 真机，未模拟 Miao 的 DuckDB 采集压力。正式启用前仍需针对目标设备补测，不依据本表修改生产默认值。
 
+### 嗅探：保留范围，减少单缓冲区临时对象（miao.13）
+
+Miao 仍将无条件 `sniff` 放在 DNS 劫持和自定义域名规则之前，保留上游默认嗅探器、顺序、server-first 端口跳过及 300 ms 默认读取超时。**不按 80/443/53 等端口裁剪，也不因 DNS reverse mapping 已提供域名就跳过。**非标准端口同样可能承载 HTTP/TLS/DNS；共享 IP 的映射域名还可能被实际 SNI/Host 覆盖，跳过会改变后续分流。UDP/QUIC 嗅探及其分片状态没有改动。
+
+[`sniff-reader.patch`](../scripts/sing-box/sniff-reader.patch) 只修改 `PeekStream`：没有前置缓存块时，每个嗅探器直接获得当前缓冲区的全新 `bytes.Reader`，省去组合读取器及中间列表；有前置缓存块时保留原路径。各嗅探器仍从头读取同一份字节，多次读取继续累积数据，原始载荷不被消费或改写。
+
+Linux amd64 / Ryzen 5 5600 / Go 1.27.1，优化前后独立测试二进制交替运行 6 轮、每项 200 ms 的中位数如下。使用真实 HTTP、SSH 报文和标准库生成的 TLS ClientHello，调用默认六个 TCP 嗅探器；连接读取由内存替身提供，计入解析和元数据分配，不包含真实网络等待或路由日志。
+
+| 无前置缓存块 | 优化前 | 优化后 | 分配次数/次 | 分配字节/次 |
+| --- | ---: | ---: | ---: | ---: |
+| HTTP | 3.311 μs | 3.142 μs | 35 → 30 | 8709 → 8621 B |
+| TLS | 143.296 μs | 146.155 μs | 67 → 65 | 20868 → 20828 B |
+| SSH | 5.518 μs | 5.104 μs | 90 → 76 | 约 14297 → 14068 B |
+
+HTTP/SSH 本次约快 5%/8%；TLS 仅减少少量分配，耗时中位数反而约慢 2%，不宣称 TLS 加速。有前置缓存块的对照分配次数不变，耗时基本不变。这是局部小优化，不等于连接延迟或代理吞吐的同幅提升，也没有消除等待首包的延迟。
+
+[`miao_sniff_test.go`](../scripts/sing-box/tests/miao_sniff_test.go) 检查 HTTP/TLS/DNS-over-TCP/SSH 元数据，覆盖前置缓存、分段读取、已知域名被 SNI/Host 覆盖、每个嗅探器重读相同字节、载荷保留、绝对 deadline 与读取错误。新回归在原实现和修改后均通过竞态检测 ×20；修改后的整个 `common/sniff` 测试包也通过 `-race -count=20`。构建脚本对新回归重复执行 20 次。
+
+复测时，将测试文件复制到独立固定源码副本的 `common/sniff/`，应用补丁前后分别运行：
+
+```bash
+GOTOOLCHAIN=go1.27.1 go test -mod=readonly ./common/sniff \
+  -run '^TestMiaoSniff' -bench '^BenchmarkMiaoSniff$' -benchmem -benchtime=200ms -count=6
+```
+
+本地三目标内核构建、资源清单/定制哈希及压缩解压哈希、Linux 原生版本检查、Rust 516 项测试（另 3 项忽略）、Bun 30 项测试和 ShellCheck 均通过。未部署或重启当前实例；Windows/OpenWrt 真机及端到端网络分流没有在本轮重测。
+
 ## 来源与许可
 
 上游 sing-box 使用 GPL-3.0-or-later，README 另有派生作品命名限制。定制内核使用独立名称并保留出处；对应源码由固定 SHA、本仓库补丁和构建文件共同确定。分发时保留上游许可及对应源码获取方式。
