@@ -111,6 +111,48 @@ miao.6 的额外 half-close 验收**未全部通过**：本地服务在读到 EO
 
 保持固定源码 `474c63c3a8828602ac6248684edd824c72e49761` 和 Go 1.27.1，新增上述 Router 级 DNS 完成事件。`dns-instrumentation.patch` 纳入既有 `customizationHash()`，其内容经换行归一化后参与资源清单哈希；源码来源由固定 SHA、全部补丁及定制哈希共同确定。构建过程重复运行 `TestMiaoDNS` 回归 20 次。未部署生产，Windows/OpenWrt 真机行为仍需验收。
 
+### Clash 快照序列化（miao.10）
+
+保持上游 SHA、Go 版本和采集频率不变。[`clash-snapshot.patch`](../scripts/sing-box/clash-snapshot.patch) 将每条连接的动态 map 与自定义 `MarshalJSON` 改为明确的 JSON 结构体，直接参与整个快照的编码，避免逐条生成 JSON 缓冲区后再次扫描。HTTP 和 WebSocket 共用这条路径；不切换为可能丢失事件的增量订阅，不减少日志、进程归属或流量计数。
+
+JSON 对象键的顺序可以变化，字段、值和类型保持兼容，包括字符串端口、无效 IP 的空字符串、空列表与 `null` 的区别、纳秒时间、int64 计数及进程名称回退顺序。计数仍为实时采样，并非所有连接在同一时刻的事务快照。构建将 [`miao_connections_test.go`](../scripts/sing-box/tests/miao_connections_test.go) 复制到 `experimental/clashapi`，重复验证真实 HTTP/WebSocket handler、DNS 连接过滤和关闭后的总计 20 次。
+
+Linux amd64 / Ryzen 5 5600 / Go 1.27.1，单 benchmark goroutine、默认 GOMAXPROCS=12；每项 `500ms × 6`，以下为中位数。两组使用相同的合成连接、进程信息与固定计数，衡量**快照转换与 JSON 编码**，不含连接枚举、`Manager.Total()`、HTTP 传输或实际代理流量；分配字节不是 RSS。
+
+| 连接数 | 修改前耗时 | 修改后耗时 | 修改前分配/次 | 修改后分配/次 |
+| --- | ---: | ---: | ---: | ---: |
+| 1 | 8.91 µs | 2.80 µs | 5,399 B | 1,730 B |
+| 100 | 0.800 ms | 0.154 ms | 483,540 B | 107,834 B |
+| 1,000 | 8.826 ms | 1.667 ms | 5,082,004 B | 1,277,422 B |
+| 10,000 | 76.654 ms | 14.654 ms | 58,926,808 B | 15,695,395 B |
+
+1,000 条连接时，分配次数从约 72,039 降至 16,021。不能将这些数字解释为整机 CPU 或网络吞吐提高相同比例；Windows/OpenWrt 的收益仍需真机测量。
+
+复测：在独立的固定上游源码副本中应用客户端、DNS 和快照补丁，复制上述测试文件，然后运行（不能向正在提供网络的 Miao 实例发压测请求）：
+
+```bash
+GOTOOLCHAIN=go1.27.1 CGO_ENABLED=0 go test -mod=readonly \
+  -tags with_quic,with_clash_api,with_utls ./experimental/clashapi \
+  -run '^TestMiaoConnection' -count=20
+GOTOOLCHAIN=go1.27.1 CGO_ENABLED=0 go test -mod=readonly \
+  -tags with_quic,with_clash_api,with_utls ./experimental/clashapi \
+  -run '^$' -bench '^BenchmarkMiaoConnections$' -benchmem -benchtime=500ms -count=6
+```
+
+修改前对照使用另一个相同源码副本，仅不应用 `clash-snapshot.patch`；复制同一测试文件，并在该包新增仅供基准兼容的 `miao_connections_baseline_test.go`，内容如下。不要将适配器带入优化后的源码或发行包。
+
+```go
+package clashapi
+
+import "github.com/sagernet/sing-box/common/trafficcontrol"
+
+func newConnectionObject(c *trafficcontrol.TrackerMetadata) connectionObject {
+    return connectionObject(*c)
+}
+```
+
+本地验证：Linux amd64、Linux arm64、Windows amd64 三目标完整内核构建通过，每次构建均执行 Go 回归 ×20；Clash 回归额外通过 `-race -count=20`。Linux 原生 `version`、Rust 嵌入资源测试 3 项、Bun 脚本测试 30 项及 ShellCheck 通过。未部署或重启正在提供网络的实例；跨平台编译不替代 Windows/OpenWrt 真机验证。
+
 ## 来源与许可
 
 上游 sing-box 使用 GPL-3.0-or-later，README 另有派生作品命名限制。定制内核使用独立名称并保留出处；对应源码由固定 SHA、本仓库补丁和构建文件共同确定。分发时保留上游许可及对应源码获取方式。

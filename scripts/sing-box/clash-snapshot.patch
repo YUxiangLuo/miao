@@ -1,0 +1,102 @@
+diff --git a/experimental/clashapi/connections.go b/experimental/clashapi/connections.go
+index 3da9dc6..df5c87f 100644
+--- a/experimental/clashapi/connections.go
++++ b/experimental/clashapi/connections.go
+@@ -4,6 +4,7 @@ import (
+ 	"bytes"
+ 	"context"
+ 	"net/http"
++	"net/netip"
+ 	"strconv"
+ 	"time"
+ 
+@@ -37,16 +38,37 @@ func connectionsSnapshot(trafficManager *trafficcontrol.Manager) render.M {
+ 	return render.M{
+ 		"downloadTotal": downlinkTotal,
+ 		"uploadTotal":   uplinkTotal,
+-		"connections": common.Map(connections, func(metadata *trafficcontrol.TrackerMetadata) connectionObject {
+-			return connectionObject(*metadata)
+-		}),
+-		"memory": inuseMemory(),
++		"connections":   common.Map(connections, newConnectionObject),
++		"memory":        inuseMemory(),
+ 	}
+ }
+ 
+-type connectionObject trafficcontrol.TrackerMetadata
++// Encode the wire schema directly: a custom MarshalJSON here would allocate a
++// separate JSON buffer for every connection and make the outer encoder scan it again.
++type connectionObject struct {
++	ID          uuid.UUID          `json:"id"`
++	Metadata    connectionMetadata `json:"metadata"`
++	Upload      int64              `json:"upload"`
++	Download    int64              `json:"download"`
++	Start       time.Time          `json:"start"`
++	Chains      []string           `json:"chains"`
++	Rule        string             `json:"rule"`
++	RulePayload string             `json:"rulePayload"`
++}
++
++type connectionMetadata struct {
++	Network         string     `json:"network"`
++	Type            string     `json:"type"`
++	SourceIP        netip.Addr `json:"sourceIP"`
++	DestinationIP   netip.Addr `json:"destinationIP"`
++	SourcePort      string     `json:"sourcePort"`
++	DestinationPort string     `json:"destinationPort"`
++	Host            string     `json:"host"`
++	DNSMode         string     `json:"dnsMode"`
++	ProcessPath     string     `json:"processPath"`
++}
+ 
+-func (c connectionObject) MarshalJSON() ([]byte, error) {
++func newConnectionObject(c *trafficcontrol.TrackerMetadata) connectionObject {
+ 	var inbound string
+ 	if c.Metadata.Inbound != "" {
+ 		inbound = c.Metadata.InboundType + "/" + c.Metadata.Inbound
+@@ -82,26 +104,26 @@ func (c connectionObject) MarshalJSON() ([]byte, error) {
+ 	} else {
+ 		rule = "final"
+ 	}
+-	return json.Marshal(map[string]any{
+-		"id": c.ID,
+-		"metadata": map[string]any{
+-			"network":         c.Metadata.Network,
+-			"type":            inbound,
+-			"sourceIP":        c.Metadata.Source.Addr,
+-			"destinationIP":   c.Metadata.Destination.Addr,
+-			"sourcePort":      F.ToString(c.Metadata.Source.Port),
+-			"destinationPort": F.ToString(c.Metadata.Destination.Port),
+-			"host":            domain,
+-			"dnsMode":         "normal",
+-			"processPath":     processPath,
++	return connectionObject{
++		ID: c.ID,
++		Metadata: connectionMetadata{
++			Network:         c.Metadata.Network,
++			Type:            inbound,
++			SourceIP:        c.Metadata.Source.Addr,
++			DestinationIP:   c.Metadata.Destination.Addr,
++			SourcePort:      F.ToString(c.Metadata.Source.Port),
++			DestinationPort: F.ToString(c.Metadata.Destination.Port),
++			Host:            domain,
++			DNSMode:         "normal",
++			ProcessPath:     processPath,
+ 		},
+-		"upload":      c.Upload.Load(),
+-		"download":    c.Download.Load(),
+-		"start":       c.CreatedAt,
+-		"chains":      c.Chain,
+-		"rule":        rule,
+-		"rulePayload": "",
+-	})
++		Upload:      c.Upload.Load(),
++		Download:    c.Download.Load(),
++		Start:       c.CreatedAt,
++		Chains:      c.Chain,
++		Rule:        rule,
++		RulePayload: "",
++	}
+ }
+ 
+ func getConnections(ctx context.Context, trafficManager *trafficcontrol.Manager) func(w http.ResponseWriter, r *http.Request) {

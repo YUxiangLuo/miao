@@ -137,6 +137,11 @@ echo "==> Applying Miao DNS completion instrumentation..."
 git apply --check "$KERNEL_DIR/dns-instrumentation.patch"
 git apply "$KERNEL_DIR/dns-instrumentation.patch"
 "${go_command[@]}" test -mod=readonly -tags "$build_tags" ./dns -run '^TestMiaoDNS' -count=20
+echo "==> Applying Clash snapshot serialization optimization..."
+git apply --check "$KERNEL_DIR/clash-snapshot.patch"
+git apply "$KERNEL_DIR/clash-snapshot.patch"
+cp "$KERNEL_DIR/tests/miao_connections_test.go" experimental/clashapi/
+"${go_command[@]}" test -mod=readonly -tags "$build_tags" ./experimental/clashapi -run '^TestMiaoConnection' -count=20
 bun "$KERNEL_DIR/prepare-command.mjs" "$TMP_DIR/sing-box"
 MIAO_REGISTRY_SNAPSHOT="$registry_snapshot" MIAO_CAPTURE_REGISTRIES=0 MIAO_PROFILE_MANIFEST="$profile_manifest" \
   "${go_command[@]}" test -mod=readonly -tags "$build_tags" ./cmd/miao-kernel -run '^TestMiao' -count=20
