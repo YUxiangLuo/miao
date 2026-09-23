@@ -24,10 +24,11 @@ export function SubDetailModal({ sub, onClose, onToggleNode }: SubDetailModalPro
   const [loadError, setLoadError] = useState('')
   const [loading, setLoading] = useState(false)
   const loadingRef = useRef(false)
-  // 正在切换的节点名：行级 busy，防止重复点击
-  const [pendingNames, setPendingNames] = useState<ReadonlySet<string>>(new Set())
+  // 操作跨窗口开关保留；同一订阅内的同名节点共享等待状态。
+  const pendingRef = useRef(new Set<string>())
+  const [pendingKeys, setPendingKeys] = useState<ReadonlySet<string>>(new Set())
   const loadGenerationRef = useRef(0)
-  const subGenerationRef = useRef(0)
+  const activeUrlRef = useRef<string | null>(null)
 
   const load = useCallback(async (url: string) => {
     const generation = ++loadGenerationRef.current
@@ -60,7 +61,7 @@ export function SubDetailModal({ sub, onClose, onToggleNode }: SubDetailModalPro
 
   // 打开时拉取；关闭时清空，下次打开重新加载
   useEffect(() => {
-    subGenerationRef.current += 1
+    activeUrlRef.current = sub?.url ?? null
     if (!sub) {
       loadGenerationRef.current += 1
       loadingRef.current = false
@@ -68,50 +69,36 @@ export function SubDetailModal({ sub, onClose, onToggleNode }: SubDetailModalPro
       setNodes(null)
       setStaleDisabled([])
       setLoadError('')
-      setPendingNames(new Set())
       return
     }
     setNodes(null)
     setStaleDisabled([])
     setLoadError('')
-    setPendingNames(new Set())
     void load(sub.url)
   }, [sub, load])
 
   if (!sub) return null
 
   const toggle = async (name: string, disabled: boolean) => {
-    const subGeneration = subGenerationRef.current
-    setPendingNames((prev) => new Set(prev).add(name))
-    const ok = await onToggleNode(sub.url, name, disabled)
-    if (subGeneration !== subGenerationRef.current) return
-    if (ok) await load(sub.url)
-    if (subGeneration !== subGenerationRef.current) return
-    setPendingNames((prev) => {
-      const next = new Set(prev)
-      next.delete(name)
-      return next
-    })
+    const url = sub.url
+    const key = JSON.stringify([url, name])
+    if (pendingRef.current.has(key)) return
+    pendingRef.current.add(key)
+    setPendingKeys(new Set(pendingRef.current))
+    try {
+      const ok = await onToggleNode(url, name, disabled)
+      if (ok && activeUrlRef.current === url) await load(url)
+    } finally {
+      pendingRef.current.delete(key)
+      setPendingKeys(new Set(pendingRef.current))
+    }
   }
+
+  const isPending = (name: string) => pendingKeys.has(JSON.stringify([sub.url, name]))
 
   const disabledCount = nodes?.filter((node) => node.disabled).length ?? 0
   // 禁用节点排在最前面；组内保持订阅原始顺序（Array.sort 稳定）
   const sortedNodes = nodes === null ? null : [...nodes].sort((a, b) => Number(b.disabled) - Number(a.disabled))
-
-  // 移除失配的禁用条目（走「启用」路径按名字删除，不要求节点仍存在）
-  const clearStale = async (name: string) => {
-    const subGeneration = subGenerationRef.current
-    setPendingNames((prev) => new Set(prev).add(name))
-    const ok = await onToggleNode(sub.url, name, false)
-    if (subGeneration !== subGenerationRef.current) return
-    if (ok) await load(sub.url)
-    if (subGeneration !== subGenerationRef.current) return
-    setPendingNames((prev) => {
-      const next = new Set(prev)
-      next.delete(name)
-      return next
-    })
-  }
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -169,8 +156,8 @@ export function SubDetailModal({ sub, onClose, onToggleNode }: SubDetailModalPro
                       aria-label={`${node.disabled ? '启用' : '禁用'}节点 ${node.name}`}
                       title={node.disabled ? '启用该节点' : '禁用该节点（从生成的配置中移除）'}
                       className={classNames('toggle-switch', !node.disabled && 'on')}
-                      disabled={pendingNames.has(node.name)}
-                      aria-busy={pendingNames.has(node.name) || undefined}
+                      disabled={isPending(node.name)}
+                      aria-busy={isPending(node.name) || undefined}
                       onClick={() => toggle(node.name, !node.disabled)}
                     >
                       <span className="toggle-switch-track">
@@ -193,8 +180,8 @@ export function SubDetailModal({ sub, onClose, onToggleNode }: SubDetailModalPro
                   className="icon-button subtle"
                   aria-label={`移除失效禁用 ${name}`}
                   title="移除该失效禁用条目"
-                  disabled={pendingNames.has(name)}
-                  onClick={() => clearStale(name)}
+                  disabled={isPending(name)}
+                  onClick={() => toggle(name, false)}
                 >
                   <X size={ICON.xs} />
                 </button>

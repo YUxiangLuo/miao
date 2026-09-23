@@ -90,6 +90,52 @@ describe('SubDetailModal', () => {
     })
   })
 
+  it.each(['switch', 'stale'])('guards duplicate %s changes and unlocks after failure', async (kind) => {
+    stubSubNodesFetch([subNodesInfoMock({ url: SUB_URL, nodes: [subNodeMock({ name: '香港 01' })], stale_disabled: ['旧节点'] })])
+    let finish!: (ok: boolean) => void
+    const onToggleNode = rs.fn(() => new Promise<boolean>(resolve => { finish = resolve }))
+    renderModal({ onToggleNode })
+    const button = kind === 'switch'
+      ? await screen.findByRole('switch', { name: '禁用节点 香港 01' })
+      : await screen.findByRole('button', { name: '移除失效禁用 旧节点' })
+    act(() => { fireEvent.click(button); fireEvent.click(button) })
+    expect(onToggleNode).toHaveBeenCalledExactlyOnceWith(SUB_URL, kind === 'switch' ? '香港 01' : '旧节点', kind === 'switch')
+    expect(button).toBeDisabled()
+    await act(async () => { finish(false) })
+    expect(button).toBeEnabled()
+    fireEvent.click(button)
+    expect(onToggleNode).toHaveBeenCalledTimes(2)
+    await act(async () => { finish(false) })
+  })
+
+  it('retains pending changes across reopening without blocking the same name in another subscription', async () => {
+    const user = userEvent.setup()
+    const first = subMock({ url: SUB_URL })
+    const second = subMock({ url: 'https://example.com/second' })
+    let disabled = false
+    rs.stubGlobal('fetch', rs.fn(async () => ({ ok: true, json: async () => subNodesPayload([
+      subNodesInfoMock({ url: first.url, nodes: [subNodeMock({ name: '同名节点', disabled })] }),
+      subNodesInfoMock({ url: second.url, nodes: [subNodeMock({ name: '同名节点' })] }),
+    ]) })))
+    let finish!: (ok: boolean) => void
+    const onToggleNode = rs.fn(() => new Promise<boolean>(resolve => { finish = resolve }))
+    const onClose = rs.fn()
+    const { rerender } = renderModal({ sub: first, onClose, onToggleNode })
+    await user.click(await screen.findByRole('switch', { name: '禁用节点 同名节点' }))
+    rerender(<SubDetailModal sub={second} onClose={onClose} onToggleNode={onToggleNode} />)
+    expect(await screen.findByRole('switch', { name: '禁用节点 同名节点' })).toBeEnabled()
+    rerender(<SubDetailModal sub={null} onClose={onClose} onToggleNode={onToggleNode} />)
+    rerender(<SubDetailModal sub={first} onClose={onClose} onToggleNode={onToggleNode} />)
+    const pending = await screen.findByRole('switch', { name: '禁用节点 同名节点' })
+    expect(pending).toBeDisabled()
+    await user.click(pending)
+    expect(onToggleNode).toHaveBeenCalledTimes(1)
+    disabled = true
+    await act(async () => { finish(true) })
+    expect(await screen.findByRole('switch', { name: '启用节点 同名节点' })).toBeEnabled()
+    expect(screen.getByRole('switch', { name: '启用节点 同名节点' })).toHaveAttribute('aria-checked', 'false')
+  })
+
   it('shows an error block when loading fails', async () => {
     const user = userEvent.setup()
     let finish!: (response: unknown) => void
