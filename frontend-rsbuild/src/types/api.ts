@@ -187,7 +187,9 @@ export type AnalyticsGroup = { dimension: string, name: string, connections: num
 
 export type LogFacet = { dimension: string, name: string, count: number, };
 
-export type LogActivity = { parsed_count: number, contexts: number, facets: Array<LogFacet>, };
+export type LogIssueGroup = { component: string, level: string, count: number, contexts: number, latest_at: number, };
+
+export type LogActivity = { parsed_count: number, classified_count: number, contexts: number, facets: Array<LogFacet>, issues: Array<LogIssueGroup>, };
 
 export type DnsBucket = { timestamp: number, queries: number, failures: number, p95_ms: number, max_ms: number, };
 
@@ -195,6 +197,6 @@ export type DnsGroup = { dimension: string, name: string, queries: number, failu
 
 export type DnsEvent = { log_id: number, timestamp: number, domain: string, query_type: string, duration_ms: number, outcome: string, rcode: number | null, error: string | null, transport: string | null, context: string, };
 
-export type DnsAnalytics = { queries: number, failures: number, p50_ms: number | null, p95_ms: number | null, p99_ms: number | null, max_ms: number | null, timeline: Array<DnsBucket>, groups: Array<DnsGroup>, slowest: Array<DnsEvent>, };
+export type DnsAnalytics = { queries: number, failures: number, p50_ms: number | null, p95_ms: number | null, p99_ms: number | null, max_ms: number | null, timeline: Array<DnsBucket>, groups: Array<DnsGroup>, slow_domains: Array<DnsGroup>, failed_domains: Array<DnsGroup>, slowest: Array<DnsEvent>, };
 
 export type AnalyticsSummary = { since: number, until: number, log_count: number, error_count: number, upload: number, download: number, sampled_connections: number, last_sample_at: number | null, collection_error: string | null, timeline: Array<AnalyticsBucket>, groups: Array<AnalyticsGroup>, activity: LogActivity, dns: DnsAnalytics, };

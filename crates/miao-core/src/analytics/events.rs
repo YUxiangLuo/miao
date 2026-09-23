@@ -61,6 +61,12 @@ pub(super) fn parse(message: &str, session: &str) -> ParsedLog {
     };
     let event = if dns.is_some() {
         "dns.complete"
+    } else if matches!(
+        super::log_level(&plain),
+        "warn" | "error" | "fatal" | "panic"
+    ) {
+        // An error such as "exchange failed" is not a query-start event.
+        "other"
     } else if component == "dns" && body.starts_with("exchange ") {
         "dns.query"
     } else if component == "dns" && body.starts_with("lookup domain ") {
@@ -104,18 +110,30 @@ pub(super) fn parse(message: &str, session: &str) -> ParsedLog {
 }
 
 pub(super) fn activity(db: &Connection, since: i64, until: i64) -> duckdb::Result<LogActivity> {
-    let (parsed_count, contexts) = db.query_row("SELECT count(*) FILTER (WHERE event != 'unparsed'), count(DISTINCT context) FILTER (WHERE context != '') FROM logs WHERE timestamp BETWEEN ? AND ?",
-        params![since, until], |r| Ok((r.get(0)?, r.get(1)?)))?;
+    let (parsed_count, classified_count, contexts) = db.query_row("SELECT count(*) FILTER (WHERE event != 'unparsed'), count(*) FILTER (WHERE event NOT IN ('unparsed','other')), count(DISTINCT context) FILTER (WHERE context != '') FROM logs WHERE timestamp BETWEEN ? AND ?",
+        params![since, until], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
     let mut facets = Vec::new();
     for dimension in ["component", "level", "event", "route"] {
         facets.extend(db.prepare(&format!("SELECT {dimension}, count(*) FROM logs WHERE timestamp BETWEEN ? AND ? AND {dimension} != '' GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 20"))?
             .query_map(params![since, until], |r| Ok(LogFacet {dimension: dimension.into(), name: r.get(0)?, count: r.get(1)?}))?
             .collect::<duckdb::Result<Vec<_>>>()?);
     }
+    // Rank each family independently; a busy DNS component must not hide a
+    // low-volume inbound/outbound behind the global component Top 20.
+    for family in ["inbound", "outbound"] {
+        facets.extend(db.prepare("SELECT component, count(*) FROM logs WHERE timestamp BETWEEN ? AND ? AND starts_with(component, ?) GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 20")?
+            .query_map(params![since, until, format!("{family}/")], |r| Ok(LogFacet {dimension: family.into(), name: r.get(0)?, count: r.get(1)?}))?
+            .collect::<duckdb::Result<Vec<_>>>()?);
+    }
+    let issues = db.prepare("SELECT component, level, count(*), count(DISTINCT context) FILTER (WHERE context != ''), max(timestamp) FROM logs WHERE timestamp BETWEEN ? AND ? AND level IN ('warn','error','fatal','panic') GROUP BY 1,2 ORDER BY 3 DESC,1,2 LIMIT 20")?
+        .query_map(params![since, until], |r| Ok(LogIssueGroup {component: r.get(0)?, level: r.get(1)?, count: r.get(2)?, contexts: r.get(3)?, latest_at: r.get(4)?}))?
+        .collect::<duckdb::Result<Vec<_>>>()?;
     Ok(LogActivity {
         parsed_count,
+        classified_count,
         contexts,
         facets,
+        issues,
     })
 }
 
@@ -129,6 +147,19 @@ pub(super) fn dns(db: &Connection, since: i64, until: i64) -> duckdb::Result<Dns
         result.groups.extend(db.prepare(&format!("SELECT coalesce({dimension},'unknown'), count(*), count(*) FILTER (WHERE outcome != 'success'), quantile_cont(duration_ms,0.95), max(duration_ms) FROM dns_events WHERE timestamp BETWEEN ? AND ? GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 20"))?
             .query_map(params![since, until], |r| Ok(DnsGroup {dimension: dimension.into(), name: r.get(0)?, queries: r.get(1)?, failures: r.get(2)?, p95_ms: r.get(3)?, max_ms: r.get(4)?}))?
             .collect::<duckdb::Result<Vec<_>>>()?);
+    }
+    // These rankings run over all domains, not just the busiest 20 domains.
+    for (order, having, target) in [
+        ("5 DESC", "", &mut result.slow_domains),
+        (
+            "3 DESC",
+            "HAVING count(*) FILTER (WHERE outcome != 'success') > 0",
+            &mut result.failed_domains,
+        ),
+    ] {
+        *target = db.prepare(&format!("SELECT domain, count(*), count(*) FILTER (WHERE outcome != 'success'), quantile_cont(duration_ms,0.95), max(duration_ms) FROM dns_events WHERE timestamp BETWEEN ? AND ? GROUP BY 1 {having} ORDER BY {order}, 1 LIMIT 20"))?
+            .query_map(params![since, until], |r| Ok(DnsGroup {dimension: "domain".into(), name: r.get(0)?, queries: r.get(1)?, failures: r.get(2)?, p95_ms: r.get(3)?, max_ms: r.get(4)?}))?
+            .collect::<duckdb::Result<Vec<_>>>()?;
     }
     result.slowest = db.prepare("SELECT log_id,timestamp,domain,query_type,duration_ms,outcome,rcode,error,transport,context FROM dns_events WHERE timestamp BETWEEN ? AND ? ORDER BY duration_ms DESC, log_id DESC LIMIT 20")?
         .query_map(params![since, until], |r| Ok(DnsEvent {log_id: r.get(0)?, timestamp: r.get(1)?, domain: r.get(2)?, query_type: r.get(3)?, duration_ms: r.get(4)?, outcome: r.get(5)?, rcode: r.get(6)?, error: r.get(7)?, transport: r.get(8)?, context: r.get(9)?}))?

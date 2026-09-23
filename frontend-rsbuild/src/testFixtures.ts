@@ -9,8 +9,8 @@ export function analyticsMock(overrides: Partial<AnalyticsSummary> = {}): Analyt
   return {
     since: 0, until: 1, log_count: 0, error_count: 0, upload: 0, download: 0,
     sampled_connections: 0, last_sample_at: null, collection_error: null, timeline: [], groups: [],
-    activity: { parsed_count: 0, contexts: 0, facets: [] },
-    dns: { queries: 0, failures: 0, p50_ms: null, p95_ms: null, p99_ms: null, max_ms: null, timeline: [], groups: [], slowest: [] },
+    activity: { parsed_count: 0, classified_count: 0, contexts: 0, facets: [], issues: [] },
+    dns: { queries: 0, failures: 0, p50_ms: null, p95_ms: null, p99_ms: null, max_ms: null, timeline: [], groups: [], slow_domains: [], failed_domains: [], slowest: [] },
     ...overrides,
   }
 }

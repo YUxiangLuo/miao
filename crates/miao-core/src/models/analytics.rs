@@ -62,8 +62,20 @@ pub struct AnalyticsSummary {
 #[cfg_attr(test, derive(ts_rs::TS))]
 pub struct LogActivity {
     pub parsed_count: i64,
+    pub classified_count: i64,
     pub contexts: i64,
     pub facets: Vec<LogFacet>,
+    pub issues: Vec<LogIssueGroup>,
+}
+
+#[derive(Debug, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+pub struct LogIssueGroup {
+    pub component: String,
+    pub level: String,
+    pub count: i64,
+    pub contexts: i64,
+    pub latest_at: i64,
 }
 
 #[derive(Debug, Serialize)]
@@ -85,6 +97,8 @@ pub struct DnsAnalytics {
     pub max_ms: Option<f64>,
     pub timeline: Vec<DnsBucket>,
     pub groups: Vec<DnsGroup>,
+    pub slow_domains: Vec<DnsGroup>,
+    pub failed_domains: Vec<DnsGroup>,
     pub slowest: Vec<DnsEvent>,
 }
 

@@ -124,6 +124,7 @@ mod typescript_contract {
         push_decl::<analytics::AnalyticsBucket>(&mut output, &config);
         push_decl::<analytics::AnalyticsGroup>(&mut output, &config);
         push_decl::<analytics::LogFacet>(&mut output, &config);
+        push_decl::<analytics::LogIssueGroup>(&mut output, &config);
         push_decl::<analytics::LogActivity>(&mut output, &config);
         push_decl::<analytics::DnsBucket>(&mut output, &config);
         push_decl::<analytics::DnsGroup>(&mut output, &config);

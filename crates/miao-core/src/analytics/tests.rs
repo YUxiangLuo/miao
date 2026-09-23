@@ -301,3 +301,103 @@ fn dns_events_have_real_latency_quantiles_exact_drilldown_and_retention() {
         3
     );
 }
+
+#[test]
+fn issue_groups_separate_severity_and_coverage_and_keep_quiet_outbounds() {
+    let store = Analytics::initialize(Connection::open_in_memory().unwrap()).unwrap();
+    let mut db = store.db.lock().unwrap();
+    let now = now_ms();
+    let mut rows = vec![
+        log(now - 4, "ERROR [7 1ms] dns: exchange failed: timeout"),
+        log(now - 3, "ERROR [7 2ms] dns: exchange failed: timeout"),
+        log(now - 2, "WARN [8 1ms] dns: slow upstream"),
+        log(now - 1, "INFO [9 1ms] dns: message containing ERROR"),
+        log(now, "runtime stack continuation"),
+        log(
+            now,
+            "INFO [10 1ms] outbound/direct[quiet]: outbound connection to a.test:443",
+        ),
+        log(
+            now,
+            "INFO [10 1ms] inbound/tun[tun]: inbound connection from 10.0.0.2:1234",
+        ),
+        log(now - RETENTION_MS - 1, "FATAL dns: expired"),
+    ];
+    for i in 0..21 {
+        for _ in 0..2 {
+            rows.push(log(now, &format!("DEBUG noisy{i}: background activity")));
+        }
+    }
+    Analytics::insert_logs(&mut db, &rows).unwrap();
+    let summary = Analytics::summary(&db, now - RETENTION_MS, now).unwrap();
+    assert_eq!(summary.log_count, 49);
+    assert_eq!(summary.error_count, 2);
+    assert_eq!(summary.activity.parsed_count, 48);
+    assert_eq!(summary.activity.classified_count, 2);
+    assert_eq!(summary.activity.issues.len(), 2);
+    let errors = &summary.activity.issues[0];
+    assert_eq!(
+        (errors.component.as_str(), errors.level.as_str()),
+        ("dns", "error")
+    );
+    assert_eq!(
+        (errors.count, errors.contexts, errors.latest_at),
+        (2, 1, now - 3)
+    );
+    assert_eq!(summary.activity.issues[1].level, "warn");
+    assert!(!summary
+        .activity
+        .facets
+        .iter()
+        .any(|f| f.dimension == "component" && f.name == "outbound/direct[quiet]"));
+    assert!(summary
+        .activity
+        .facets
+        .iter()
+        .any(|f| f.dimension == "outbound" && f.name == "outbound/direct[quiet]" && f.count == 1));
+    assert!(summary
+        .activity
+        .facets
+        .iter()
+        .any(|f| f.dimension == "inbound" && f.name == "inbound/tun[tun]" && f.count == 1));
+}
+
+#[test]
+fn dns_rankings_include_rare_slow_and_failed_domains_outside_popular_top_twenty() {
+    let store = Analytics::initialize(Connection::open_in_memory().unwrap()).unwrap();
+    let mut db = store.db.lock().unwrap();
+    let now = now_ms();
+    let event = |domain: &str, duration: f64, outcome: &str| {
+        log(
+            now,
+            &format!(
+                "INFO dns: MIAO_DNS {}",
+                serde_json::json!({"v":1,"domain":domain,"query_type":"A","duration_ms":duration,"outcome":outcome})
+            ),
+        )
+    };
+    let mut rows = Vec::new();
+    for i in 0..21 {
+        for _ in 0..3 {
+            rows.push(event(&format!("popular-{i}.test"), 2.0, "success"));
+        }
+    }
+    rows.push(event("rare-slow.test", 1234.5, "success"));
+    rows.push(event("rare-failure.test", 400.0, "dns_error"));
+    rows.push(event("rare-failure.test", 10.0, "success"));
+    Analytics::insert_logs(&mut db, &rows).unwrap();
+    let dns = Analytics::summary(&db, now - RETENTION_MS, now)
+        .unwrap()
+        .dns;
+    assert!(!dns
+        .groups
+        .iter()
+        .any(|g| g.dimension == "domain" && g.name.starts_with("rare-")));
+    assert_eq!(dns.slow_domains[0].name, "rare-slow.test");
+    assert_eq!(dns.slow_domains[0].max_ms, 1234.5);
+    assert_eq!(dns.failed_domains.len(), 1);
+    let failed = &dns.failed_domains[0];
+    assert_eq!(failed.name, "rare-failure.test");
+    assert_eq!((failed.queries, failed.failures), (2, 1));
+    assert!((failed.p95_ms - 380.5).abs() < 0.0001);
+}

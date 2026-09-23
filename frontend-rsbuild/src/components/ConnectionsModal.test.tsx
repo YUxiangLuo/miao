@@ -1,7 +1,8 @@
-import { act, fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, rs } from '@rstest/core'
 import { ConnectionsModal } from './ConnectionsModal'
+import { AnalyticsSummaryPane } from './ConnectionAnalytics'
 import { analyticsMock, analyticsLogMock, connectionMock, statusMock } from '../testFixtures'
 import type { EnrichedConnection } from '../types/clash'
 
@@ -34,6 +35,64 @@ function renderModal(connections: EnrichedConnection[], props = {}) {
 
 describe('ConnectionsModal connection list', () => {
   afterEach(() => { rs.restoreAllMocks() })
+
+  it('separates issue levels, coverage and inbound/outbound drilldown without losing the time window', async () => {
+    const user = userEvent.setup()
+    const onExplore = rs.fn()
+    const summary = analyticsMock({ log_count: 50, error_count: 4, activity: {
+      parsed_count: 47, classified_count: 31, contexts: 12,
+      facets: [{ dimension: 'level', name: 'warn', count: 7 }, { dimension: 'outbound', name: 'outbound/direct[quiet]', count: 2 }],
+      issues: [
+        { component: 'dns', level: 'error', count: 3, contexts: 1, latest_at: 1 },
+        { component: 'dns', level: 'warn', count: 7, contexts: 2, latest_at: 2 },
+        { component: '', level: 'fatal', count: 1, contexts: 0, latest_at: 3 },
+      ],
+    } })
+    rs.spyOn(globalThis, 'fetch').mockImplementation(async () => new Response(JSON.stringify({ success: true, data: summary })))
+    render(<AnalyticsSummaryPane visible onExplore={onExplore} />)
+    await screen.findByText('日志活动')
+    await user.click(screen.getByRole('button', { name: '6 小时' }))
+    await screen.findByText('日志活动')
+    await user.click(screen.getByRole('button', { name: '错误与告警' }))
+    expect(within(screen.getByText('错误日志').closest('article')!).getByText('4')).toBeInTheDocument()
+    expect(within(screen.getByText('告警日志').closest('article')!).getByText('7')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '查看 dns warn 日志' }))
+    expect(onExplore).toHaveBeenLastCalledWith({ hours: 6, component: 'dns', level: 'warn' })
+    await user.click(screen.getByRole('button', { name: '查看 未识别组件 fatal 日志' }))
+    expect(onExplore).toHaveBeenLastCalledWith({ hours: 6, event: 'unparsed', level: 'fatal' })
+    const pane = document.querySelector('.analytics-pane')!
+    pane.scrollTop = 500
+    await user.click(screen.getByRole('button', { name: '日志覆盖' }))
+    expect(pane.scrollTop).toBe(0)
+    expect(within(screen.getByText('仅识别前缀').closest('article')!).getByText('16')).toBeInTheDocument()
+    expect(within(screen.getByText('未识别前缀').closest('article')!).getByText('3')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '查看未分类正文' }))
+    expect(onExplore).toHaveBeenLastCalledWith({ hours: 6, event: 'other' })
+    await user.click(screen.getByRole('button', { name: '分流与出口' }))
+    await user.click(screen.getByRole('button', { name: /outbound\/direct\[quiet\]/ }))
+    expect(onExplore).toHaveBeenLastCalledWith({ hours: 6, component: 'outbound/direct[quiet]' })
+  })
+
+  it('uses independent DNS rankings and shows empty failure ranks without inventing data', async () => {
+    const user = userEvent.setup()
+    const onExplore = rs.fn()
+    const summary = analyticsMock({ dns: { ...analyticsMock().dns, queries: 101,
+      groups: [{ dimension: 'domain', name: 'popular.test', queries: 100, failures: 0, p95_ms: 3, max_ms: 5 }],
+      slow_domains: [{ dimension: 'domain', name: 'rare.test', queries: 1, failures: 0, p95_ms: 900, max_ms: 900 }],
+    } })
+    rs.spyOn(globalThis, 'fetch').mockImplementation(async () => new Response(JSON.stringify({ success: true, data: summary })))
+    render(<AnalyticsSummaryPane visible onExplore={onExplore} />)
+    await screen.findByText('日志活动')
+    await user.click(screen.getByRole('button', { name: 'DNS 行为' }))
+    expect(screen.getByRole('button', { name: 'popular.test' })).toBeInTheDocument()
+    await user.selectOptions(screen.getByLabelText('DNS 排行依据'), 'slow')
+    expect(screen.queryByRole('button', { name: 'popular.test' })).toBeNull()
+    await user.click(screen.getByRole('button', { name: 'rare.test' }))
+    expect(onExplore).toHaveBeenLastCalledWith({ hours: 24, component: 'dns', q: 'rare.test' })
+    await user.selectOptions(screen.getByLabelText('DNS 排行依据'), 'failures')
+    expect(screen.getByText('该排行暂无记录')).toBeInTheDocument()
+    expect(screen.getByRole('img', { name: 'DNS 最慢耗时趋势，单位 ms' }).querySelector('.chart-line')).toHaveAttribute('d', '')
+  })
 
   it('keeps historical tabs available while the data plane is stopped', async () => {
     const user = userEvent.setup()
