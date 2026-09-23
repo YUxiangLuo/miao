@@ -78,7 +78,10 @@ mod typescript_contract {
         push_decl::<SubscriptionFetchReport>(&mut output, &config);
         push_decl::<SubscriptionRefreshPhase>(&mut output, &config);
         push_decl::<SubscriptionRefreshStatus>(&mut output, &config);
-        push_decl::<crate::services::commands::subs::SubscriptionRefreshResult>(&mut output, &config);
+        push_decl::<crate::services::commands::subs::SubscriptionRefreshResult>(
+            &mut output,
+            &config,
+        );
         push_decl::<RuntimeWarningSeverity>(&mut output, &config);
         push_decl::<RuntimeWarning>(&mut output, &config);
         push_decl::<ApiResponse<()>>(&mut output, &config);

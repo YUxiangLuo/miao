@@ -87,6 +87,14 @@ miao.6 的额外 half-close 验收**未全部通过**：本地服务在读到 EO
 
 2026-09-22 本地验证：三目标构建及产物哈希/解压校验、每目标 Go 回归 ×20、半关闭竞态检测 ×20、Rust 490 项测试（另 1 项忽略）、Clippy、Windows core 交叉检查、Bun 23 项脚本测试和 ShellCheck 均通过。两个隔离 Linux 网络命名空间中，开启/关闭 `auto_redirect` 分别验证 direct 与 Shadowsocks：空请求和 131071 字节请求半关闭后均收到完整响应；DNS 劫持、TCP 256 KiB、UDP 64/8192/16000 B、Clash 连接链/计数、连续 5 次重载和退出清理均通过。未部署生产；Windows/OpenWrt 真机仍未验收。
 
+### 升级至 alpha.7（miao.8）
+
+2026-09-24，将固定源码更新为上游 `testing` 的 [`474c63c3a8828602ac6248684edd824c72e49761`](https://github.com/SagerNet/sing-box/commit/474c63c3a8828602ac6248684edd824c72e49761)，内核版本为 `1.15.0-alpha.7+miao.8.474c63c3`，继续使用 Go 1.27.1。上游新增 MASQUE endpoint、重写 HTTP 代理，并调整 DNS 查询去重、嵌套代理组连接中断、FakeIP 缓存和 TLS 证书校验；`sing` 与 `sing-tun` 依赖升级，Shadowsocks 客户端依赖仍为 `sing-shadowsocks2 v0.2.1`。Miao 的补丁随上游新增注册项调整，继续只注册既有 `miao-client-v2` 能力，不暴露 MASQUE endpoint 或 HTTP 代理。
+
+本地验证：Linux amd64、Linux arm64、Windows amd64 三目标构建均通过；每个目标的未裁剪上游及客户端 Go 回归各重复 20 次。三个资源清单、压缩前后 SHA-256 和解压内容一致，Linux 原生 `version` 显示新 SHA。Rust 495 项测试通过（另 1 项忽略），Clippy、fmt、Windows core 交叉检查、Miao release 编译及 Bun 30 项脚本测试通过。
+
+仍需在隔离网络与 Windows/OpenWrt 真机验证 TUN、DNS、Clash API、连续重载及实际节点传输；这些行为涉及本次上游对路由、代理组和网络栈依赖的变更。未部署生产。
+
 ## 来源与许可
 
 上游 sing-box 使用 GPL-3.0-or-later，README 另有派生作品命名限制。定制内核使用独立名称并保留出处；对应源码由固定 SHA、本仓库补丁和构建文件共同确定。分发时保留上游许可及对应源码获取方式。

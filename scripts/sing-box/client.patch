@@ -1,5 +1,5 @@
 diff --git a/include/quic.go b/include/quic.go
-index 42182c29..1747436b 100644
+index 42182c2..1747436 100644
 --- a/include/quic.go
 +++ b/include/quic.go
 @@ -8,21 +8,17 @@ import (
@@ -25,10 +25,10 @@ index 42182c29..1747436b 100644
  	hysteria2.RegisterOutbound(registry)
  }
 diff --git a/include/registry.go b/include/registry.go
-index ac817fff..76a1b30a 100644
+index fbb398d..76a1b30 100644
 --- a/include/registry.go
 +++ b/include/registry.go
-@@ -13,35 +13,17 @@ import (
+@@ -13,36 +13,17 @@ import (
  	C "github.com/sagernet/sing-box/constant"
  	"github.com/sagernet/sing-box/dns"
  	"github.com/sagernet/sing-box/dns/transport"
@@ -44,6 +44,7 @@ index ac817fff..76a1b30a 100644
  	"github.com/sagernet/sing-box/protocol/direct"
  	"github.com/sagernet/sing-box/protocol/group"
 -	"github.com/sagernet/sing-box/protocol/http"
+-	"github.com/sagernet/sing-box/protocol/masque"
 -	"github.com/sagernet/sing-box/protocol/mixed"
 -	"github.com/sagernet/sing-box/protocol/naive"
 -	"github.com/sagernet/sing-box/protocol/redirect"
@@ -64,7 +65,7 @@ index ac817fff..76a1b30a 100644
  	E "github.com/sagernet/sing/common/exceptions"
  )
  
-@@ -51,30 +33,7 @@ func Context(ctx context.Context) context.Context {
+@@ -52,30 +33,7 @@ func Context(ctx context.Context) context.Context {
  
  func InboundRegistry() *inbound.Registry {
  	registry := inbound.NewRegistry()
@@ -95,7 +96,7 @@ index ac817fff..76a1b30a 100644
  	return registry
  }
  
-@@ -82,91 +41,39 @@ func OutboundRegistry() *outbound.Registry {
+@@ -83,92 +41,39 @@ func OutboundRegistry() *outbound.Registry {
  	registry := outbound.NewRegistry()
  
  	direct.RegisterOutbound(registry)
@@ -132,6 +133,7 @@ index ac817fff..76a1b30a 100644
 -	registerWireGuardEndpoint(registry)
 -	registerOpenConnectEndpoint(registry)
 -	registerOpenVPNEndpoints(registry)
+-	masque.RegisterEndpoint(registry)
 -	registerTailscaleEndpoint(registry)
 -
 -	return registry
