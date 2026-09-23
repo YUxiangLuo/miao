@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { describe, expect, it, rs } from '@rstest/core'
 import { NodeModal } from './NodeModal'
 import { EMPTY_NODE_FORM } from '../utils'
+import type { BatchNodeResult } from '../types/api'
 
 function renderModal(props = {}) {
   return render(
@@ -76,6 +77,70 @@ describe('manual node submission', () => {
 })
 
 describe('NodeModal link import', () => {
+  it('removes only successful request indices and retains invalid lines and backend failures for retry', async () => {
+    const user = userEvent.setup()
+    const onClose = rs.fn()
+    const onImport = rs.fn().mockResolvedValueOnce({ added: [{ index: 1, tag: '同名' }], failed: [{ index: 0, tag: '同名', message: '模拟错误' }] })
+      .mockResolvedValueOnce({ added: [{ index: 0, tag: '同名' }], failed: [] })
+    renderModal({ onImport, onClose })
+    const input = screen.getByRole('textbox', { name: '节点分享链接' })
+    const failed = 'trojan://password123@failed.example.com:443#同名'
+    const added = 'trojan://password123@added.example.com:443#同名'
+    await user.click(input)
+    await user.paste(`not-a-link\n${failed}\n${added}`)
+    await user.click(screen.getByRole('button', { name: '添加 2 个节点' }))
+    expect(input).toHaveValue(`not-a-link\n${failed}`)
+    expect(screen.getByRole('status')).toHaveTextContent('同名：模拟错误')
+    expect(onClose).not.toHaveBeenCalled()
+    await user.click(screen.getByRole('button', { name: '添加 1 个节点' }))
+    expect(onImport.mock.calls[1][0]).toEqual([expect.objectContaining({ server: 'failed.example.com' })])
+    expect(input).toHaveValue('not-a-link')
+    expect(onClose).not.toHaveBeenCalled()
+  })
+
+  it('guards duplicate import, locks the submitted links, and ignores completion after reopening', async () => {
+    const user = userEvent.setup()
+    let finish!: (result: BatchNodeResult) => void
+    const onImport = rs.fn(() => new Promise<BatchNodeResult>(resolve => { finish = resolve }))
+    function Harness() {
+      const [open, setOpen] = useState(true)
+      return <><button onClick={() => setOpen(true)}>重新打开</button>
+        <NodeModal open={open} nodeType="hysteria2" setNodeType={rs.fn()} form={{ ...EMPTY_NODE_FORM }} setForm={rs.fn()}
+          loading={false} onClose={() => setOpen(false)} onSubmit={rs.fn()} onImport={onImport} onDeployVps={rs.fn()} /></>
+    }
+    render(<Harness />)
+    await user.click(screen.getByRole('textbox', { name: '节点分享链接' }))
+    await user.paste('trojan://password123@example.com:443#x')
+    const submit = screen.getByRole('button', { name: '添加 1 个节点' })
+    act(() => { fireEvent.click(submit); fireEvent.click(submit) })
+    expect(onImport).toHaveBeenCalledTimes(1)
+    expect(screen.getByRole('textbox', { name: '节点分享链接' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '手动填写' })).toBeDisabled()
+    await user.click(screen.getByRole('button', { name: '关闭节点对话框' }))
+    await user.click(screen.getByRole('button', { name: '重新打开' }))
+    await user.type(screen.getByRole('textbox', { name: '节点分享链接' }), '新草稿')
+    await act(async () => { finish({ added: [{ index: 0, tag: 'x' }], failed: [] }) })
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: '节点分享链接' })).toHaveValue('新草稿')
+  })
+
+  it('preserves the full draft when the request fails and closes only on complete success', async () => {
+    const user = userEvent.setup()
+    const onClose = rs.fn()
+    const onImport = rs.fn().mockResolvedValueOnce(undefined).mockResolvedValueOnce({ added: [{ index: 0, tag: 'x' }], failed: [] })
+    renderModal({ onImport, onClose })
+    const input = screen.getByRole('textbox', { name: '节点分享链接' })
+    const link = 'trojan://password123@example.com:443#x'
+    await user.click(input)
+    await user.paste(link)
+    await user.click(screen.getByRole('button', { name: '添加 1 个节点' }))
+    expect(input).toHaveValue(link)
+    expect(input).toBeEnabled()
+    expect(onClose).not.toHaveBeenCalled()
+    await user.click(screen.getByRole('button', { name: '添加 1 个节点' }))
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
   it('parses pasted links into preview cards and imports them', async () => {
     const user = userEvent.setup()
     const onImport = rs.fn()

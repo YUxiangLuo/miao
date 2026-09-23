@@ -7,7 +7,7 @@ import { classNames, type NodeForm } from '../../utils'
 import { LinkImportPane } from './LinkImportPane'
 import { ManualPane } from './ManualPane'
 import { VpsPane } from './VpsPane'
-import type { NodeRequest, NodeType, VpsDeployRequest } from '../../types/api'
+import type { BatchNodeResult, NodeRequest, NodeType, VpsDeployRequest } from '../../types/api'
 
 type NodeModalMode = 'link' | 'manual' | 'vps'
 
@@ -20,7 +20,7 @@ export interface NodeModalProps {
   loading: boolean
   onClose: () => void
   onSubmit: () => Promise<boolean>
-  onImport: (payloads: NodeRequest[]) => Promise<void>
+  onImport: (payloads: NodeRequest[]) => Promise<BatchNodeResult | undefined>
   onDeployVps: (req: VpsDeployRequest) => Promise<boolean>
   vpsSupported?: boolean
 }
@@ -55,6 +55,22 @@ export function NodeModal({ open, nodeType, setNodeType, form, setForm, loading,
     const submittedGeneration = generation.current
     try {
       if (await onSubmit() && submittedGeneration === generation.current) onClose()
+    } finally {
+      inFlight.current = false
+      setSubmitting(false)
+    }
+  }
+
+  const importLinks = async (payloads: NodeRequest[], closeOnSuccess: boolean) => {
+    if (busy || inFlight.current) return
+    inFlight.current = true
+    setSubmitting(true)
+    const submittedGeneration = generation.current
+    try {
+      const result = await onImport(payloads)
+      if (submittedGeneration !== generation.current) return
+      if (closeOnSuccess && result?.added.length === payloads.length && !result.failed.length) onClose()
+      return result
     } finally {
       inFlight.current = false
       setSubmitting(false)
@@ -116,7 +132,7 @@ export function NodeModal({ open, nodeType, setNodeType, form, setForm, loading,
         </div>
 
         {mode === 'link' ? (
-          <LinkImportPane onImport={onImport} loading={busy} />
+          <LinkImportPane onImport={importLinks} loading={busy} />
         ) : mode === 'vps' ? (
           <VpsPane onDeploy={onDeployVps} loading={busy} />
         ) : (

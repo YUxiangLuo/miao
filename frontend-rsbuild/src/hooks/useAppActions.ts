@@ -349,13 +349,12 @@ export function useAppActions(data: AppData) {
         const shown = failures.slice(0, 2).join('; ')
         const more = failures.length > 2 ? ` 等 ${failures.length} 项` : ''
         showToast(`导入失败: ${shown}${more}`, 'error')
-      } else {
-        closeNodeModal()
       }
+      return result
     } catch (error) {
       showToast(errorMessage(error), 'error')
     }
-  }, [apiCall, clearDelays, closeNodeModal, fetchNodes, showToast])
+  }, [apiCall, clearDelays, fetchNodes, showToast])
 
   const handleDeleteNode = useCallback(async (tag: string) => {
     try {

@@ -26,6 +26,14 @@
 .node-modal-tabs {
     margin: -6px 0 var(--space-2);
 }
+.share-link-result {
+    margin: 0;
+    color: var(--text);
+    font-size: var(--fs-sm);
+    line-height: var(--lh-normal);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
 .share-link-input {
     width: 100%;
     min-height: var(--share-link-min-h);

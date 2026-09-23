@@ -1,11 +1,11 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { ListPlus } from 'lucide-react'
 import { ICON } from '../../tokens'
 import { Button } from '../ui'
 import { buildNodeRequest } from '../../nodeForm'
 import { parseShareLinks, type ParsedShareLink } from '../../shareLink'
 import { EMPTY_NODE_FORM, NODE_TYPE_OPTIONS, nodeTypeDefaults } from '../../utils'
-import type { NodeRequest } from '../../types/api'
+import type { BatchNodeResult, NodeRequest } from '../../types/api'
 
 /** 预览条目：解析失败（原始或校验失败）与解析成功且通过完整校验 */
 type LinkItem =
@@ -58,13 +58,15 @@ function ShareLinkItem({ item }: { item: LinkItem }) {
 }
 
 export interface LinkImportPaneProps {
-  onImport: (payloads: NodeRequest[]) => Promise<void>
+  onImport: (payloads: NodeRequest[], closeOnSuccess: boolean) => Promise<BatchNodeResult | undefined>
   loading: boolean
 }
 
 export function LinkImportPane({ onImport, loading }: LinkImportPaneProps) {
   const [text, setText] = useState('')
   const [importing, setImporting] = useState(false)
+  const inFlight = useRef(false)
+  const [resultMessage, setResultMessage] = useState('')
 
   // 粘贴即解析,并顺带用 buildNodeRequest 做完整校验(密码长度等),问题直接显示在预览上
   const items = useMemo<LinkItem[]>(() => parseShareLinks(text).map((item): LinkItem => {
@@ -90,11 +92,23 @@ export function LinkImportPane({ onImport, loading }: LinkImportPaneProps) {
   const busy = loading || importing
 
   const handleImport = async () => {
-    if (!validPayloads.length || busy) return
+    if (!validPayloads.length || busy || inFlight.current) return
+    inFlight.current = true
     setImporting(true)
+    setResultMessage('')
     try {
-      await onImport(validPayloads)
+      const result = await onImport(validPayloads, items.every(item => item.ok))
+      if (!result) return
+      const added = new Set(result.added.map(item => item.index))
+      let validIndex = 0
+      const remaining = items.filter(item => !item.ok || !added.has(validIndex++))
+      setText(remaining.map(item => item.line).join('\n'))
+      setResultMessage([
+        `本次已添加 ${result.added.length} 个节点；未成功的链接已保留，可修改后重试。`,
+        ...result.failed.map(item => `${item.tag}：${item.message}`),
+      ].join('\n'))
     } finally {
+      inFlight.current = false
       setImporting(false)
     }
   }
@@ -106,12 +120,14 @@ export function LinkImportPane({ onImport, loading }: LinkImportPaneProps) {
         data-autofocus
         rows={5}
         value={text}
-        onChange={(event) => setText(event.target.value)}
+        disabled={importing}
+        onChange={(event) => { setText(event.target.value); setResultMessage('') }}
         placeholder={'粘贴节点分享链接,每行一条\n支持 hysteria2 / hy2 / ss / vmess / vless / trojan / tuic / anytls'}
         aria-label="节点分享链接"
       />
 
       <div className="share-link-preview node-pane-scroll">
+        {resultMessage && <p className="share-link-result" role="status">{resultMessage}</p>}
         {items.length > 0 ? (
           items.map((item, index) => (
             <ShareLinkItem key={`${item.line}-${index}`} item={item} />
