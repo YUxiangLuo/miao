@@ -18,6 +18,7 @@ export function readSource() {
     || !Array.isArray(source.build_tags)
     || source.build_tags.length === 0
     || source.build_tags.some(tag => !/^[a-z0-9_]+$/.test(tag))
+    || !validNames(source.inbounds)
     || !validNames(source.node_protocols)
     || !validNames(source.dns_transports)
     || source.tun_stack !== 'go') {

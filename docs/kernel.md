@@ -4,17 +4,17 @@
 
 ## 能力与裁剪
 
-[`client.patch`](../scripts/sing-box/client.patch) 调整组件注册，`miao-client-v2` 保留：
+[`client.patch`](../scripts/sing-box/client.patch) 与 [`ai-http-inbound.patch`](../scripts/sing-box/ai-http-inbound.patch) 调整组件注册，`miao-client-v3` 保留：
 
 | 类别 | 保留能力 |
 | --- | --- |
-| 入站 | TUN，省略已弃用的 `stack` 字段，使用上游默认 GoTUN；保留 system 栈供诊断回退，不自动切换 |
+| 入站 | TUN 与 HTTP；TUN 省略已弃用的 `stack` 字段，使用上游默认 GoTUN；保留 system 栈供诊断回退，不自动切换。HTTP 为本地 AI 网关预备能力，当前应用尚不生成或监听此入站 |
 | 节点出站 | Shadowsocks、VMess、VLESS、Trojan、AnyTLS、Hysteria2、TUIC，以及这些协议的传输、TLS/uTLS、Reality、复用和 Shadowsocks 插件 |
 | 内部出站 | direct、selector、urltest |
 | DNS | UDP、HTTPS、local（隐式兜底） |
 | 控制与缓存 | Clash API、cache_file |
 
-代理服务端入站、endpoint、额外服务、证书签发和其他 DNS transports 不注册。手动 JSON 同样只支持上述七种节点协议：读取或生成配置时跳过不支持的类型并告警，保留用户原始 JSON；内核 `check` 也会拒绝已移除类型。
+除 HTTP 外的代理服务端入站、endpoint、额外服务、证书签发和其他 DNS transports 不注册。HTTP 出站仍未注册；手动 JSON 同样只支持上述七种节点协议：读取或生成配置时跳过不支持的类型并告警，保留用户原始 JSON；内核 `check` 也会拒绝已移除类型。
 
 Miao 的 TUN 使用 `sing-tun`、`auto_route: true`、`strict_route: true`，仅 Linux 写入 `auto_redirect: true`；`multi_queue` 沿用默认关闭。
 
@@ -61,7 +61,7 @@ MIAO_TARGET=windows-amd64 ./scripts/build-embedded.sh --kernel-only
 
 1. 审查协议、TUN、DNS、Clash API 及依赖变化，修改 `source.json`，递增内核版本。源码与 Go 可分别升级；`go.mod` 的最低版本不等于所选工具链已获验证。
 2. 审查客户端补丁。冲突必须处理；上游合入等效修复后删除功能补丁，保留行为回归。
-3. 执行上面的三目标构建及[开发检查](../DEV_NOTES.md#开发检查)。构建会将隔离、能力和配置回归重复 20 次：精确能力集合须为上游子集，仅暴露 TUN 入站，并验证 11 组含 TUN 的客户端配置与 9 种已移除出站（含 Tailcat）的拒绝行为。
+3. 执行上面的三目标构建及[开发检查](../DEV_NOTES.md#开发检查)。构建会将隔离、能力和配置回归重复 20 次：精确能力集合须为上游子集，入站仅含清单声明的 HTTP/TUN，并验证 11 组含 TUN、认证 HTTP 入站及 AI selector 的客户端配置与 9 种已移除出站（含 Tailcat）的拒绝行为。
 4. 在隔离环境验收 TUN/DNS 分流、Clash 面板和连续重载；Windows/OpenWrt 还需真机验证。CI 的原生 `version`、交叉编译及 Rust 真实内核解压测试不替代网络验收。
 5. 发布时保留对应源码和产物清单。Release 附带 `miao-embedded-sources.txt` 与各平台 `miao-kernel-*.json`。
 
@@ -282,6 +282,29 @@ GOTOOLCHAIN=go1.27.1 go test -mod=readonly ./common/sniff \
 ```
 
 本地三目标内核构建、资源清单/定制哈希及压缩解压哈希、Linux 原生版本检查、Rust 516 项测试（另 3 项忽略）、Bun 30 项测试和 ShellCheck 均通过。未部署或重启当前实例；Windows/OpenWrt 真机及端到端网络分流没有在本轮重测。
+
+## AI 网关出口链路（miao.14，第一阶段）
+
+固定上游 SHA 和 Go 版本不变，仅额外注册 HTTP 入站；`source.json` 新增 `inbounds` 能力清单，profile 升为 `miao-client-v3`。这不是对外 HTTP 代理或 AI API 的发布：当前 Miao 配置生成器、面板和监听行为均未改变。
+
+Linux amd64 可在构建真实内核后运行：
+
+```bash
+./scripts/build-embedded.sh --kernel-only
+./scripts/test-ai-transport.sh
+```
+
+脚本校验当前内核的版本、定制哈希及原始二进制哈希，先编译 Rust 集成测试，再进入独立网络/PID/mount 命名空间。只启动 loopback，不启动 TUN、不读取生产配置或供应商密钥、不访问外网。临时生成 TLS 证书，使用真实 reqwest、认证 HTTP CONNECT、两个本地 Shadowsocks 出口和 TLS/SSE 假供应商；通过供应商看到的不同源地址确认路径，而非仅检查 selector 的显示值。普通 Cargo 测试会跳过这项显式网络验收。
+
+测试约束：
+
+- AI 入站规则优先于后续全匹配拒绝规则，CONNECT 保留 `localhost` 域名，经 Shadowsocks 服务端解析；TLS 验证开启。
+- 切换 selector 后，旧连接池仍使用原出口（反例）；替换 client 后的新请求使用新出口，已开始的 SSE 保持原出口并连续超过 30 秒。
+- 按 SSE 帧读取，不假定每个网络 chunk 恰好是一个事件；检查事件顺序。丢弃响应会取消上游流。
+- HTTP 代理凭据不进入供应商请求；错误代理密码被拒绝；不自动跟随重定向。
+- 不存在的 selector 成员被拒绝；已选但不可达的出口请求失败，不回退。内核停止终止旧流，停止期间新请求失败，重启后新请求恢复。
+
+这是传输方案的可执行验证，不是已接入业务层的网关。尚未验证 HTTP/2、TUN 同时工作、真实供应商、Windows/OpenWrt 网络行为；本地调用鉴权、供应商密钥替换、配置提交与并发切换属于后续网关实现。不得把此测试解释成这些功能已完成，也不使用共享的 30 秒总超时 HTTP client 承载长流。
 
 ## 来源与许可
 

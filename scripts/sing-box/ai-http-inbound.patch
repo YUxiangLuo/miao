@@ -1,0 +1,19 @@
+diff --git a/include/registry.go b/include/registry.go
+--- a/include/registry.go
++++ b/include/registry.go
+@@ -21,6 +21,7 @@ import (
+ 	"github.com/sagernet/sing-box/protocol/anytls"
+ 	"github.com/sagernet/sing-box/protocol/direct"
+ 	"github.com/sagernet/sing-box/protocol/group"
++	"github.com/sagernet/sing-box/protocol/http"
+ 	"github.com/sagernet/sing-box/protocol/shadowsocks"
+ 	"github.com/sagernet/sing-box/protocol/trojan"
+ 	"github.com/sagernet/sing-box/protocol/tun"
+@@ -35,6 +36,7 @@ func Context(ctx context.Context) context.Context {
+ func InboundRegistry() *inbound.Registry {
+ 	registry := inbound.NewRegistry()
+ 	tun.RegisterInbound(registry)
++	http.RegisterInbound(registry)
+ 	return registry
+ }
+ 

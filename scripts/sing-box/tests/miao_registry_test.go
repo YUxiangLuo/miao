@@ -10,6 +10,7 @@ import (
 )
 
 type miaoRegistrySnapshot struct {
+	Inbounds  []string
 	Outbounds []string
 	Endpoints []string
 	DNS       []string
@@ -19,6 +20,7 @@ type miaoRegistrySnapshot struct {
 // every retained type exists in the unmodified pinned upstream build.
 func TestMiaoRegistryCompatibility(t *testing.T) {
 	got := miaoRegistrySnapshot{
+		Inbounds:  include.InboundRegistry().OptionTypes(),
 		Outbounds: include.OutboundRegistry().OptionTypes(),
 		Endpoints: include.EndpointRegistry().OptionTypes(),
 		DNS:       include.DNSTransportRegistry().OptionTypes(),
@@ -50,6 +52,7 @@ func TestMiaoRegistryCompatibility(t *testing.T) {
 		t.Fatal(err)
 	}
 	var profile struct {
+		Inbounds      []string `json:"inbounds"`
 		NodeProtocols []string `json:"node_protocols"`
 		DNSTransports []string `json:"dns_transports"`
 	}
@@ -72,8 +75,14 @@ func TestMiaoRegistryCompatibility(t *testing.T) {
 			t.Fatalf("retained DNS transport %s is absent upstream", retained)
 		}
 	}
-	if got := include.InboundRegistry().OptionTypes(); !slices.Equal(got, []string{"tun"}) {
-		t.Fatalf("client must expose only TUN inbound, got %v", got)
+	slices.Sort(profile.Inbounds)
+	if !slices.Equal(got.Inbounds, profile.Inbounds) {
+		t.Fatalf("client inbounds differ from profile: got %v, want %v", got.Inbounds, profile.Inbounds)
+	}
+	for _, retained := range got.Inbounds {
+		if !slices.Contains(want.Inbounds, retained) {
+			t.Fatalf("retained inbound %s is absent upstream", retained)
+		}
 	}
 	if got := include.ServiceRegistry().OptionTypes(); len(got) != 0 {
 		t.Fatalf("client unexpectedly includes services: %v", got)

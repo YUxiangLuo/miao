@@ -39,19 +39,21 @@ func TestMiaoClientConfigurations(t *testing.T) {
 			var config map[string]any
 			if err := json.Unmarshal([]byte(`{
 				"log":{"disabled":true},
-				"inbounds":[{"type":"tun","tag":"tun-in","interface_name":"sing-tun","address":["172.18.0.1/30"],"mtu":9000,"auto_route":true,"strict_route":true}],
+				"inbounds":[{"type":"tun","tag":"tun-in","interface_name":"sing-tun","address":["172.18.0.1/30"],"mtu":9000,"auto_route":true,"strict_route":true},
+					{"type":"http","tag":"ai-in","listen":"127.0.0.1","listen_port":0,"users":[{"username":"gateway","password":"synthetic-internal-only"}]}],
 				"experimental":{"clash_api":{"external_controller":"127.0.0.1:0"}},
 				"dns":{"final":"remote","strategy":"ipv4_only","reverse_mapping":true,"cache_capacity":4096,
 					"optimistic":{"enabled":true,"timeout":"8h"},
 					"servers":[{"type":"https","tag":"remote","server":"1.1.1.1","detour":"proxy"},{"type":"udp","tag":"local","server":"223.5.5.5"}],
 					"rules":[{"rule_set":["test-rules"],"action":"route","server":"local"}]},
 				"route":{"final":"proxy","auto_detect_interface":true,"find_process":true,"default_domain_resolver":"local",
-					"rules":[{"action":"sniff"},{"protocol":"dns","action":"hijack-dns"},{"rule_set":["test-rules"],"action":"route","outbound":"direct"}]}
+					"rules":[{"inbound":["ai-in"],"action":"route","outbound":"ai"},{"action":"sniff"},{"protocol":"dns","action":"hijack-dns"},{"rule_set":["test-rules"],"action":"route","outbound":"direct"}]}
 			}`), &config); err != nil {
 				t.Fatal(err)
 			}
 			config["outbounds"] = []any{
 				map[string]any{"type": "direct", "tag": "direct"}, node,
+				map[string]any{"type": "selector", "tag": "ai", "outbounds": []string{"proxy", "node", "direct"}, "default": "node", "interrupt_exist_connections": false},
 				map[string]any{"type": "selector", "tag": "proxy", "outbounds": []string{"direct", "node"}},
 				map[string]any{"type": "urltest", "tag": "auto", "outbounds": []string{"node"}, "url": "https://www.gstatic.com/generate_204"},
 			}

@@ -32,6 +32,8 @@ bun test scripts
 - 写路径测试必须注入隔离环境，不能启动真实 TUN。真实内核的网络验收使用独立网络命名空间或专用机器。
 - 修改 shell 脚本运行 `shellcheck`；修改 workflow 运行 `actionlint`。前端检查命令和 mock 约定见[前端文档](frontend-rsbuild/README.md#检查与测试)。
 
+AI 网关第一阶段的真实出口验收使用 `./scripts/test-ai-transport.sh`（Linux amd64，需要当前真实 embedded 内核、OpenSSL、jq、iproute2、sudo/unshare）。脚本编译后进入隔离网络/PID 命名空间，不使用生产 TUN 或真实 API key；普通 Cargo 测试将其标记为 ignored。验证范围和未实现部分见[内核文档](docs/kernel.md#ai-网关出口链路miao14第一阶段)。
+
 ## 构建、发布与部署
 
 ```bash
