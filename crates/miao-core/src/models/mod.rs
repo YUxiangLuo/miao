@@ -139,6 +139,9 @@ mod typescript_contract {
         push_decl::<ai::AiSettingsView>(&mut output, &config);
         push_decl::<ai::AiStatus>(&mut output, &config);
         push_decl::<ai::AiAccessKey>(&mut output, &config);
+        push_decl::<ai::AiRequestRecord>(&mut output, &config);
+        push_decl::<ai::AiUsageGroup>(&mut output, &config);
+        push_decl::<ai::AiAnalytics>(&mut output, &config);
 
         while output.ends_with("\n\n") {
             output.pop();

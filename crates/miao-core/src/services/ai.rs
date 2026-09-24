@@ -23,6 +23,7 @@ use crate::{
 };
 
 mod transport;
+mod usage;
 pub(crate) use transport::inference_router;
 
 pub const INBOUND: &str = "miao-ai-in";

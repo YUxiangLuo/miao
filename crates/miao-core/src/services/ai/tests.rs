@@ -242,36 +242,40 @@ async fn management_routes_require_admin_not_client_token_and_reject_cross_origi
         .await
         .unwrap();
     let client = rotate_access_key(&state).await.unwrap().key;
+    let store = crate::analytics::Analytics::open(&state.runtime_paths.analytics_db).unwrap();
+    let _ = state.analytics.set(store);
     let app = crate::router::build_router(state);
-    for (token, origin, expected) in [
-        ("", "http://localhost:6161", StatusCode::UNAUTHORIZED),
-        (
-            client.as_str(),
-            "http://localhost:6161",
-            StatusCode::UNAUTHORIZED,
-        ),
-        (
-            admin.as_str(),
-            "https://evil.test",
-            StatusCode::UNAUTHORIZED,
-        ),
-        (admin.as_str(), "http://localhost:6161", StatusCode::OK),
-    ] {
-        let response = app
-            .clone()
-            .oneshot(
-                Request::builder()
-                    .uri("/api/ai/settings")
-                    .header("host", "localhost:6161")
-                    .header("origin", origin)
-                    .header("authorization", format!("Bearer {token}"))
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(response.status(), expected);
-        assert_eq!(response.headers()["cache-control"], "no-store");
+    for path in ["/api/ai/settings", "/api/ai/analytics?days=7"] {
+        for (token, origin, expected) in [
+            ("", "http://localhost:6161", StatusCode::UNAUTHORIZED),
+            (
+                client.as_str(),
+                "http://localhost:6161",
+                StatusCode::UNAUTHORIZED,
+            ),
+            (
+                admin.as_str(),
+                "https://evil.test",
+                StatusCode::UNAUTHORIZED,
+            ),
+            (admin.as_str(), "http://localhost:6161", StatusCode::OK),
+        ] {
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .uri(path)
+                        .header("host", "localhost:6161")
+                        .header("origin", origin)
+                        .header("authorization", format!("Bearer {token}"))
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), expected);
+            assert_eq!(response.headers()["cache-control"], "no-store");
+        }
     }
 }
 

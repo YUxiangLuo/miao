@@ -8,6 +8,7 @@ use duckdb::{params, Connection};
 
 use crate::models::analytics::*;
 
+pub mod ai;
 mod collector;
 mod events;
 pub(crate) use collector::{capture, spawn_sampler};
@@ -23,6 +24,9 @@ pub struct Analytics {
     // Keep a log write failure visible even if connection sampling succeeds.
     pub log_error: Mutex<Option<String>>,
     pub sample_error: Mutex<Option<String>>,
+    ai_pending: Arc<tokio::sync::Semaphore>,
+    ai_dropped: std::sync::atomic::AtomicU64,
+    ai_error: Mutex<Option<String>>,
 }
 
 pub struct LogRecord {
@@ -99,6 +103,7 @@ impl Analytics {
                 outbound VARCHAR NOT NULL, rule VARCHAR NOT NULL, network VARCHAR NOT NULL,
                 upload BIGINT NOT NULL, download BIGINT NOT NULL);",
         )?;
+        ai::initialize(&db)?;
         Self::prune(&mut db, now_ms())?;
         let reader = db.try_clone()?;
         Ok(Self {
@@ -106,6 +111,9 @@ impl Analytics {
             reader: Mutex::new(reader),
             log_error: Mutex::new(None),
             sample_error: Mutex::new(None),
+            ai_pending: Arc::new(tokio::sync::Semaphore::new(ai::MAX_PENDING)),
+            ai_dropped: std::sync::atomic::AtomicU64::new(0),
+            ai_error: Mutex::new(None),
         })
     }
 
@@ -233,6 +241,10 @@ impl Analytics {
                 [now - RETENTION_MS],
             )?;
         }
+        tx.execute(
+            "DELETE FROM ai_requests WHERE timestamp < ?",
+            [now - ai::RETENTION_MS],
+        )?;
         tx.commit()?;
         db.execute_batch("CHECKPOINT")
     }

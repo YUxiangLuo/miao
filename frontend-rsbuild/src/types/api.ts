@@ -222,3 +222,9 @@ export type AiSettingsView = { revision: number, enabled: boolean, port: number,
 export type AiStatus = { enabled: boolean, ready: boolean, port: number, outbound: string, error: string | null, admin_token_path: string, };
 
 export type AiAccessKey = { key: string, revision: number, };
+
+export type AiRequestRecord = { id: number, timestamp: number, provider: string, model: string, upstream_model: string, endpoint: string, streaming: boolean, outcome: string, http_status: number | null, duration_ms: number, first_byte_ms: number | null, input_tokens: number | null, output_tokens: number | null, total_tokens: number | null, usage_complete: boolean, };
+
+export type AiUsageGroup = { provider: string, model: string, requests: number, succeeded: number, failed: number, cancelled: number, usage_known: number, input_tokens: number, output_tokens: number, total_tokens: number, avg_duration_ms: number | null, p95_duration_ms: number | null, };
+
+export type AiAnalytics = { since: number, until: number, totals: AiUsageGroup, groups: Array<AiUsageGroup>, records: Array<AiRequestRecord>, next_before: number | null, dropped_records: number, collection_error: string | null, };

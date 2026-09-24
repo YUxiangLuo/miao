@@ -232,6 +232,67 @@
   color: var(--danger);
   font-size: var(--fs-sm);
 }
+.ai-tabs,
+.ai-stat-pages {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+.ai-stat-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: var(--space-2);
+}
+.ai-stat-filters label {
+  display: grid;
+  gap: var(--space-1);
+  flex: 1 1 150px;
+  font-size: var(--fs-sm);
+  min-width: 0;
+}
+.ai-stat-filters input,
+.ai-stat-filters select {
+  width: 100%;
+  min-width: 0;
+  min-height: var(--control-h-input);
+  padding: 0 var(--space-2);
+  border: var(--bw) solid var(--border);
+  border-radius: var(--r-sm);
+  color: var(--text);
+  background: var(--surface-soft);
+}
+.ai-stat-table {
+  overflow-x: auto;
+  border: var(--bw) solid var(--border);
+  border-radius: var(--r-md);
+  margin-bottom: var(--space-3);
+}
+.ai-stat-table table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-sm);
+}
+.ai-stat-table th,
+.ai-stat-table td {
+  text-align: left;
+  vertical-align: top;
+  padding: var(--space-3);
+  border-bottom: var(--bw) solid var(--border-soft);
+  min-width: 125px;
+  max-width: 300px;
+  overflow-wrap: anywhere;
+}
+.ai-stat-table th {
+  color: var(--text-muted);
+  background: var(--surface-soft);
+}
+.ai-stat-table small {
+  display: block;
+  color: var(--text-muted);
+  margin-top: var(--space-1);
+}
 @media (max-width: 560px) {
   .ai-configuration-header {
     align-items: stretch;

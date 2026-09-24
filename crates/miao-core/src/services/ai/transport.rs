@@ -11,7 +11,7 @@ use axum::{
 use futures::StreamExt;
 use serde_json::{json, Value};
 
-use super::{matches_token, Pool, Provider, Stored, OUTBOUND};
+use super::{matches_token, usage::Observation, Pool, Provider, Stored, OUTBOUND};
 use crate::{
     error::{AppError, AppResult},
     state::AppState,
@@ -257,7 +257,7 @@ async fn inference(
     bytes: Bytes,
     responses: bool,
 ) -> Response {
-    let (provider, body, url, client, mut cancel) = {
+    let (provider, body, url, client, mut cancel, mut observation) = {
         // Serialize admission with gateway edits and kernel operations, not
         // with a provider's potentially multi-minute inference or SSE stream.
         let _guard = state.config_update.lock().await;
@@ -269,28 +269,73 @@ async fn inference(
             Ok(value) => value,
             Err(err) => return failure(StatusCode::BAD_REQUEST, &err.to_string()),
         };
+        let original: Value = serde_json::from_slice(&bytes).expect("validated request");
+        let mut observation = Observation::new(
+            state.analytics.get().cloned(),
+            crate::models::ai::AiRequestRecord {
+                provider: provider.id.clone(),
+                model: original["model"].as_str().unwrap().into(),
+                upstream_model: body["model"].as_str().unwrap().into(),
+                endpoint: if responses {
+                    "responses"
+                } else {
+                    "chat/completions"
+                }
+                .into(),
+                streaming: body["stream"].as_bool().unwrap_or(false),
+                ..Default::default()
+            },
+        );
         let client = match prepare_client(&state, &stored).await {
             Ok(value) => value,
-            Err(err) => return failure(StatusCode::SERVICE_UNAVAILABLE, &err.to_string()),
+            Err(err) => {
+                observation.finish("gateway_error");
+                return failure(StatusCode::SERVICE_UNAVAILABLE, &err.to_string());
+            }
         };
-        (provider, body, url, client, state.ai.cancel.subscribe())
+        (
+            provider,
+            body,
+            url,
+            client,
+            state.ai.cancel.subscribe(),
+            observation,
+        )
     };
     // No incoming headers are forwarded: local access keys, cookies and
     // caller-provided upstream authentication must never reach the provider.
     let request = client.post(url).bearer_auth(&provider.api_key).json(&body);
     let response = tokio::select! {
-        _ = cancel.changed() => return failure(StatusCode::SERVICE_UNAVAILABLE, "Gateway stopped"),
+        _ = cancel.changed() => { observation.finish("gateway_stopped"); return failure(StatusCode::SERVICE_UNAVAILABLE, "Gateway stopped"); },
         result = tokio::time::timeout(Duration::from_secs(120), request.send()) => match result {
             Ok(Ok(response)) => response,
-            Ok(Err(_)) => return failure(StatusCode::BAD_GATEWAY, "Upstream connection failed; request was not retried"),
-            Err(_) => return failure(StatusCode::GATEWAY_TIMEOUT, "Timed out waiting for upstream response; request was not retried"),
+            Ok(Err(_)) => { observation.finish("connection_error"); return failure(StatusCode::BAD_GATEWAY, "Upstream connection failed; request was not retried"); },
+            Err(_) => { observation.finish("timeout"); return failure(StatusCode::GATEWAY_TIMEOUT, "Timed out waiting for upstream response; request was not retried"); },
         },
     };
-    relay(response, cancel)
+    relay(response, cancel, observation)
 }
 
-fn relay(response: reqwest::Response, cancel: tokio::sync::watch::Receiver<u64>) -> Response {
+fn relay(
+    response: reqwest::Response,
+    cancel: tokio::sync::watch::Receiver<u64>,
+    mut observation: Observation,
+) -> Response {
     let status = response.status();
+    observation.response(
+        status.as_u16(),
+        response
+            .headers()
+            .get("content-type")
+            .and_then(|v| v.to_str().ok())
+            .is_some_and(|v| {
+                v.split(';')
+                    .next()
+                    .unwrap_or("")
+                    .trim()
+                    .eq_ignore_ascii_case("text/event-stream")
+            }),
+    );
     let mut headers = HeaderMap::new();
     for name in ["content-type", "retry-after", "x-request-id"] {
         if let Some(value) = response.headers().get(name) {
@@ -299,15 +344,15 @@ fn relay(response: reqwest::Response, cancel: tokio::sync::watch::Receiver<u64>)
     }
     headers.insert("cache-control", "no-store".parse().unwrap());
     let stream = futures::stream::try_unfold(
-        (response.bytes_stream(), cancel),
-        |(mut stream, mut cancel)| async move {
+        (response.bytes_stream(), cancel, observation),
+        |(mut stream, mut cancel, mut observation)| async move {
             tokio::select! {
-                _ = cancel.changed() => Err(io::Error::new(io::ErrorKind::Interrupted, "AI gateway stopped")),
+                _ = cancel.changed() => { observation.finish("gateway_stopped"); Err(io::Error::new(io::ErrorKind::Interrupted, "AI gateway stopped")) },
                 chunk = tokio::time::timeout(Duration::from_secs(120), stream.next()) => match chunk {
-                    Ok(Some(Ok(bytes))) => Ok(Some((bytes, (stream, cancel)))),
-                    Ok(None) => Ok(None),
-                    Ok(Some(Err(_))) => Err(io::Error::new(io::ErrorKind::ConnectionReset, "AI upstream stream interrupted")),
-                    Err(_) => Err(io::Error::new(io::ErrorKind::TimedOut, "AI upstream stream idle timeout")),
+                    Ok(Some(Ok(bytes))) => { observation.feed(&bytes); Ok(Some((bytes, (stream, cancel, observation)))) },
+                    Ok(None) => { observation.eof(); Ok(None) },
+                    Ok(Some(Err(_))) => { observation.finish("stream_interrupted"); Err(io::Error::new(io::ErrorKind::ConnectionReset, "AI upstream stream interrupted")) },
+                    Err(_) => { observation.finish("timeout"); Err(io::Error::new(io::ErrorKind::TimedOut, "AI upstream stream idle timeout")) },
                 },
             }
         },

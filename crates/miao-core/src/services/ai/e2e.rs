@@ -29,6 +29,8 @@ async fn gateway_contract() {
         ..Config::default()
     });
     initialize(&state).await.unwrap();
+    let store = crate::analytics::Analytics::open(&state.runtime_paths.analytics_db).unwrap();
+    let _ = state.analytics.set(store.clone());
     let client_key = rotate_access_key(&state).await.unwrap().key;
     let seen = Observations::default();
     let (base, cert, provider_task) = provider(root.path(), seen.clone()).await;
@@ -241,6 +243,22 @@ async fn gateway_contract() {
             .status(),
         StatusCode::UNAUTHORIZED
     );
+    store.drain_ai().await;
+    let statistics = store
+        .ai_summary(crate::analytics::ai::Filter::default())
+        .await
+        .unwrap();
+    assert!(statistics.totals.succeeded >= 3);
+    assert_eq!(statistics.totals.cancelled, 1);
+    assert!(statistics
+        .records
+        .iter()
+        .any(|r| r.outcome == "gateway_error"));
+    assert!(statistics.records.iter().all(|r| r.model != "unknown"));
+    assert!(statistics
+        .records
+        .iter()
+        .any(|r| r.model == "alias" && r.upstream_model == "upstream/model"));
     shutdown(&state).await;
     let mut process = state.sing_process.lock().await.take().unwrap();
     process.child.kill().await.unwrap();

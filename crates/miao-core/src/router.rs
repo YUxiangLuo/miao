@@ -47,6 +47,7 @@ pub fn build_router(app_state: Arc<AppState>) -> Router {
             get(crate::handlers::ai::settings).post(crate::handlers::ai::save),
         )
         .route("/api/ai/access-key", post(crate::handlers::ai::rotate))
+        .route("/api/ai/analytics", get(crate::handlers::ai::analytics))
         .route("/api/service/start", post(start_service))
         .route("/api/service/stop", post(stop_service))
         .route("/api/route-mode", post(set_route_mode))

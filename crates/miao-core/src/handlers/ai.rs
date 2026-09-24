@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use axum::{
-    extract::State,
+    extract::{Query, State},
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
     Json,
@@ -63,6 +63,23 @@ async fn authorized(state: &AppState, headers: &HeaderMap) -> bool {
 
 pub async fn status(State(state): State<Arc<AppState>>) -> Response {
     reply(ai::status(&state).await)
+}
+
+pub async fn analytics(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Query(filter): Query<crate::analytics::ai::Filter>,
+) -> Response {
+    if !authorized(&state, &headers).await {
+        return error(StatusCode::UNAUTHORIZED, "管理令牌无效或请求来源不受信任");
+    }
+    let Some(store) = state.analytics.get() else {
+        return error(StatusCode::SERVICE_UNAVAILABLE, "AI 统计存储不可用");
+    };
+    match store.ai_summary(filter).await {
+        Ok(value) => reply(value),
+        Err(_) => error(StatusCode::SERVICE_UNAVAILABLE, "AI 统计查询失败"),
+    }
 }
 
 pub async fn settings(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Response {

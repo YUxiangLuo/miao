@@ -4,6 +4,7 @@ import { ICON } from '../tokens'
 import { classNames } from '../utils'
 import { Button, SectionCard } from './ui'
 import { WorkspaceSwitch } from './WorkspaceSwitch'
+import { AiAnalytics } from './AiAnalytics'
 import { useTheme } from '../hooks/useTheme'
 import type { AiStatus, AiProviderView as AiProvider, AiSettingsView as AiSettings } from '../types/api'
 
@@ -132,6 +133,7 @@ function AiGatewaySettings({
   const [error, setError] = useState('')
   const [stale, setStale] = useState(false)
   const [newKey, setNewKey] = useState('')
+  const [view, setView] = useState<'settings' | 'overview' | 'requests'>('settings')
   const load = async () => {
     if (!token.trim() || busy) return
     setBusy(true)
@@ -261,7 +263,7 @@ function AiGatewaySettings({
     <section className="ai-configuration" aria-label="AI 网关配置">
       <header className="ai-configuration-header">
         <div>
-          <h2>{draft ? '网关配置' : '解锁网关配置'}</h2>
+          <h2>{draft ? '网关管理' : '解锁网关配置'}</h2>
           <p className="ai-help">切换页面或锁定后，将清除管理令牌和未保存的草稿。</p>
         </div>
         {draft && (
@@ -269,18 +271,41 @@ function AiGatewaySettings({
             <Button tone="secondary" size="sm" icon={<LockKeyhole size={ICON.xs} />} onClick={onLock}>
               锁定配置
             </Button>
-            <Button
-              tone="primary"
-              size="sm"
-              loading={busy}
-              disabled={!!validation}
-              onClick={() => void save()}
-            >
-              保存配置
-            </Button>
+            {view === 'settings' && (
+              <Button
+                tone="primary"
+                size="sm"
+                loading={busy}
+                disabled={!!validation}
+                onClick={() => void save()}
+              >
+                保存配置
+              </Button>
+            )}
           </div>
         )}
       </header>
+      {draft && (
+        <nav className="ai-tabs" aria-label="AI 网关管理页面">
+          {(
+            [
+              ['overview', '用量概览'],
+              ['requests', '请求记录'],
+              ['settings', '网关配置'],
+            ] as const
+          ).map(([key, label]) => (
+            <Button
+              key={key}
+              tone={view === key ? 'primary' : 'secondary'}
+              size="sm"
+              aria-pressed={view === key}
+              onClick={() => setView(key)}
+            >
+              {label}
+            </Button>
+          ))}
+        </nav>
+      )}
       <div>
         {!draft ? (
           <section className="ai-auth">
@@ -311,6 +336,8 @@ function AiGatewaySettings({
               读取配置
             </Button>
           </section>
+        ) : view !== 'settings' ? (
+          <AiAnalytics token={token.trim()} view={view} />
         ) : (
           <fieldset disabled={busy} className="ai-settings">
             <section className="ai-settings-section" aria-label="网关接入">
@@ -516,7 +543,7 @@ function AiGatewaySettings({
             </section>
           </fieldset>
         )}
-        {(error || validation) && (
+        {(error || (view === 'settings' && validation)) && (
           <p className="ai-error" role="alert">
             {error || validation}{' '}
             {stale && (

@@ -327,6 +327,7 @@ pub(crate) async fn spawn_resolved(
                     }
                 }
                 if let Some(store) = state_for_shutdown.analytics.get() {
+                    store.drain_ai().await;
                     if let Err(error) = store.run(|db| crate::analytics::Analytics::prune(db, crate::analytics::now_ms())).await {
                         warn!(%error, "Failed to checkpoint network history during shutdown");
                     }

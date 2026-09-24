@@ -106,7 +106,7 @@ async fn relay_preserves_sse_status_and_allowlisted_headers_only() {
         .await
         .unwrap();
     let (_tx, cancel) = tokio::sync::watch::channel(0u64);
-    let response = relay(upstream, cancel);
+    let response = relay(upstream, cancel, Observation::new(None, Default::default()));
     assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
     assert_eq!(response.headers()["content-type"], "text/event-stream");
     assert_eq!(response.headers()["retry-after"], "3");
@@ -116,5 +116,55 @@ async fn relay_preserves_sse_status_and_allowlisted_headers_only() {
     assert!(!response.headers().contains_key("x-internal"));
     let bytes = to_bytes(response.into_body(), 1024).await.unwrap();
     assert_eq!(&bytes[..], b"data: first\n\ndata: second\n\n");
+    server.abort();
+}
+
+#[tokio::test]
+async fn relay_persists_completion_and_body_drop_once_without_content() {
+    use crate::analytics::{ai::Filter, Analytics};
+    let dir = tempfile::tempdir().unwrap();
+    let store = Analytics::open(&dir.path().join("history.duckdb")).unwrap();
+    let listener = tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
+        .await
+        .unwrap();
+    let address = listener.local_addr().unwrap();
+    let data = "data: {\"choices\":[{\"delta\":{\"content\":\"never-store-this\"}}]}\n\ndata: {\"usage\":{\"prompt_tokens\":23,\"completion_tokens\":5,\"total_tokens\":28}}\n\ndata: [DONE]\n\n";
+    let app = Router::new().route(
+        "/",
+        get(move || async move { ([("content-type", "text/event-stream")], data) }),
+    );
+    let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let (_tx, cancel) = tokio::sync::watch::channel(0u64);
+    for consume in [true, false] {
+        let upstream = reqwest::Client::new()
+            .get(format!("http://{address}/"))
+            .send()
+            .await
+            .unwrap();
+        let observation = Observation::new(
+            Some(store.clone()),
+            crate::models::ai::AiRequestRecord {
+                model: "alias".into(),
+                ..Default::default()
+            },
+        );
+        let response = relay(upstream, cancel.clone(), observation);
+        if consume {
+            assert_eq!(to_bytes(response.into_body(), 4096).await.unwrap(), data);
+        } else {
+            drop(response);
+        }
+    }
+    store.drain_ai().await;
+    let result = store.ai_summary(Filter::default()).await.unwrap();
+    assert_eq!(result.totals.requests, 2);
+    assert_eq!(result.totals.succeeded, 1);
+    assert_eq!(result.totals.cancelled, 1);
+    assert_eq!(result.totals.usage_known, 1);
+    assert_eq!(result.totals.input_tokens, 23);
+    assert_eq!(result.totals.output_tokens, 5);
+    assert!(!serde_json::to_string(&result)
+        .unwrap()
+        .contains("never-store-this"));
     server.abort();
 }
