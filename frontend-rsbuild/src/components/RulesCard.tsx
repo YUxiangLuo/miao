@@ -7,7 +7,6 @@ import { ResourceError } from './ResourceError'
 import { classNames } from '../utils'
 import { describeRule, ruleFieldTone, ruleTargetLabel } from '../ruleFormat'
 import { activeRuleIndexes } from '../ruleActivity'
-import { AiGateway } from './AiGateway'
 import type { RuleInfo, RuleRequest } from '../types/api'
 import type { ClashConnection } from '../types/clash'
 
@@ -138,7 +137,13 @@ export function RulesCard({
         }
       >
         <div className="list-stack">
-          <AiGateway nodeNames={nodeNames} />
+          <a href="#ai" className="list-row ai-rule-link">
+            <div className="list-row-content">
+              <div className="list-row-title">AI 网关</div>
+              <div className="list-row-meta">固定分流 · 前往 AI 网关页面配置</div>
+            </div>
+            <span aria-hidden="true">→</span>
+          </a>
           {deleting && <div className="list-row-meta" role="status">删除规则并同步列表中…</div>}
           {loadError && <ResourceError label="自定义规则" error={loadError} hasData={rules.length > 0} onRetry={onRetry} />}
           {rules.length === 0 && !loadError && <div className="empty-block">暂无自定义规则</div>}

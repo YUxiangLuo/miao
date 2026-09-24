@@ -6,9 +6,17 @@ import {
 import { DashboardScreen } from './components/DashboardScreen'
 import { VpsTasks } from './components/VpsTasks'
 import { useAppController } from './hooks/useAppController'
+import { useEffect, useState } from 'react'
+import { AiGateway } from './components/AiGateway'
 
 export default function App() {
   const app = useAppController()
+  const [page, setPage] = useState(() => window.location.hash === '#ai' ? 'ai' : 'proxy')
+  useEffect(() => {
+    const navigate = () => setPage(window.location.hash === '#ai' ? 'ai' : 'proxy')
+    window.addEventListener('hashchange', navigate)
+    return () => window.removeEventListener('hashchange', navigate)
+  }, [])
 
   if (!app.firstLoadDone) {
     return <div className="shell"><div className="onboarding-loading" role="status">加载中…</div></div>
@@ -18,6 +26,10 @@ export default function App() {
   // 轮询仍在后台继续，恢复后自动进入正常流程
   if (!app.statusLoaded) {
     return <div className="shell"><div className="onboarding-loading" role="status">无法连接后端，正在自动重试…</div></div>
+  }
+
+  if (page === 'ai') {
+    return <AiGateway nodeNames={app.ruleNodeNames} />
   }
 
   if (app.needsOnboarding) {

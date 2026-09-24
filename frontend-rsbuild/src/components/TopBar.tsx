@@ -7,8 +7,9 @@ import {
   Route,
   Sun,
 } from 'lucide-react'
-import { ICON, LOGO_SIZE } from '../tokens'
-import { SectionCard, LogoIcon } from './ui'
+import { ICON } from '../tokens'
+import { SectionCard } from './ui'
+import { WorkspaceSwitch } from './WorkspaceSwitch'
 import { McpControl } from './McpControl'
 import { useTheme, type Theme } from '../hooks/useTheme'
 import type { ToastTone } from '../hooks/useApi'
@@ -72,9 +73,7 @@ export function TopBar({
 
   return (
     <SectionCard className="status-card topbar" bodyClassName="status-card-body" header={null}>
-      <div className="brand">
-        <LogoIcon size={LOGO_SIZE.topbar} />
-      </div>
+      <WorkspaceSwitch page="proxy" />
       <div className="topbar-divider" />
 
       <div className="status-cluster">

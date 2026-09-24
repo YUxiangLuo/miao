@@ -1,9 +1,10 @@
-import { useEffect, useId, useState } from 'react'
-import { Bot, KeyRound, Plus, RotateCw, Settings2, Trash2, X } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { KeyRound, Plus, RotateCw, Trash2, LockKeyhole, Moon, Sun } from 'lucide-react'
 import { ICON } from '../tokens'
 import { classNames } from '../utils'
-import { useDialog } from '../hooks/useDialog'
-import { Button } from './ui'
+import { Button, SectionCard } from './ui'
+import { WorkspaceSwitch } from './WorkspaceSwitch'
+import { useTheme } from '../hooks/useTheme'
 import type { AiStatus, AiProviderView as AiProvider, AiSettingsView as AiSettings } from '../types/api'
 
 type ProviderDraft = AiProvider & { api_key: string | null }
@@ -32,7 +33,8 @@ function toDraft(settings: AiSettings): SettingsDraft {
 export function AiGateway({ nodeNames }: { nodeNames: string[] }) {
   const [status, setStatus] = useState<AiStatus | null>(null)
   const [statusError, setStatusError] = useState('')
-  const [open, setOpen] = useState(false)
+  const [session, setSession] = useState(0)
+  const { theme, toggle } = useTheme()
 
   const loadStatus = async () => {
     try {
@@ -49,51 +51,81 @@ export function AiGateway({ nodeNames }: { nodeNames: string[] }) {
   }, [])
 
   return (
-    <>
-      <div className="list-row ai-gateway-row">
-        <Bot size={ICON.sm} className="icon-accent" aria-hidden="true" />
-        <div className="list-row-content">
-          <div className="list-row-title">AI 网关</div>
-          <div className={classNames('list-row-meta', statusError && 'error')}>
-            {statusError ||
-              status?.error ||
-              (status ? `http://127.0.0.1:${status.port}/v1 · 出口：${status.outbound}` : '正在读取状态…')}
+    <div className="shell">
+      <main className="workspace ai-workspace">
+        <SectionCard className="ai-page-header" bodyClassName="ai-page-header-body">
+          <WorkspaceSwitch page="ai" />
+          <div className="ai-page-heading">
+            <h1>AI 网关</h1>
+            <p>统一模型接入，独立配置出站路径</p>
           </div>
+          <button type="button" className="theme-toggle" onClick={toggle} aria-label="切换主题">
+            {theme === 'dark' ? <Moon size={ICON.sm} /> : <Sun size={ICON.sm} />}
+          </button>
+        </SectionCard>
+        <div className="ai-page-content">
+          <div className="ai-overview" aria-label="网关运行概况">
+            <SectionCard>
+              <span className="ai-overview-label">运行状态</span>
+              <strong className={classNames(status?.ready && 'icon-accent')}>
+                {statusError
+                  ? '状态不可用'
+                  : !status
+                    ? '读取中…'
+                    : status.ready
+                      ? '已就绪'
+                      : status.enabled
+                        ? '未就绪'
+                        : '已停用'}
+              </strong>
+              <p>仅供本机 API 客户端访问</p>
+            </SectionCard>
+            <SectionCard>
+              <span className="ai-overview-label">本地 API 地址</span>
+              <strong className="ai-endpoint">{status ? `http://127.0.0.1:${status.port}/v1` : '—'}</strong>
+              <p>OpenAI 兼容接口</p>
+            </SectionCard>
+            <SectionCard>
+              <span className="ai-overview-label">AI 分流出口</span>
+              <strong>
+                {status?.outbound === 'proxy'
+                  ? '跟随全局代理'
+                  : status?.outbound === 'direct'
+                    ? '直连'
+                    : status?.outbound || '—'}
+              </strong>
+              <p>出口不可用时拒绝请求，不自动直连</p>
+            </SectionCard>
+          </div>
+          {(statusError || status?.error) && (
+            <div className="runtime-banner failed" role="alert">
+              {statusError || status?.error}
+            </div>
+          )}
+          <AiGatewaySettings
+            key={session}
+            status={status}
+            nodeNames={nodeNames}
+            onLock={() => setSession((value) => value + 1)}
+            onSaved={loadStatus}
+          />
         </div>
-        <span
-          className={classNames('badge', status?.ready ? 'success' : status?.enabled ? 'warning' : 'neutral')}
-        >
-          {status?.ready ? '已就绪' : status?.enabled ? '未就绪' : '已停用'}
-        </span>
-        <button className="icon-button subtle" aria-label="配置 AI 网关" onClick={() => setOpen(true)}>
-          <Settings2 size={ICON.xs} />
-        </button>
-      </div>
-      {open && (
-        <AiGatewayModal
-          status={status}
-          nodeNames={nodeNames}
-          onClose={() => setOpen(false)}
-          onSaved={loadStatus}
-        />
-      )}
-    </>
+      </main>
+    </div>
   )
 }
 
-function AiGatewayModal({
+function AiGatewaySettings({
   status,
   nodeNames,
-  onClose,
+  onLock,
   onSaved,
 }: {
   status: AiStatus | null
   nodeNames: string[]
-  onClose: () => void
+  onLock: () => void
   onSaved: () => Promise<void>
 }) {
-  const titleId = useId()
-  const dialogRef = useDialog(true, onClose)
   const [token, setToken] = useState('')
   const [draft, setDraft] = useState<SettingsDraft | null>(null)
   const [busy, setBusy] = useState(false)
@@ -195,7 +227,7 @@ function AiGatewayModal({
         setError('密钥已生成，但配置被其他页面修改。请重新加载后保存。')
         setStale(true)
       } else {
-        setDraft(current => current && { ...current, revision: result.revision, has_access_key: true })
+        setDraft((current) => current && { ...current, revision: result.revision, has_access_key: true })
       }
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : '生成失败')
@@ -226,60 +258,64 @@ function AiGatewayModal({
   }
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div
-        ref={dialogRef}
-        className="modal-card ai-modal"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        tabIndex={-1}
-        onClick={(event) => event.stopPropagation()}
-      >
-        <header className="rule-modal-header">
-          <div className="rule-modal-heading">
-            <Bot size={ICON.lg} className="icon-accent" />
-            <div>
-              <h3 id={titleId}>AI 网关</h3>
-              <p>在 Miao 主机上提供 OpenAI 兼容接口</p>
-            </div>
+    <section className="ai-configuration" aria-label="AI 网关配置">
+      <header className="ai-configuration-header">
+        <div>
+          <h2>{draft ? '网关配置' : '解锁网关配置'}</h2>
+          <p className="ai-help">切换页面或锁定后，将清除管理令牌和未保存的草稿。</p>
+        </div>
+        {draft && (
+          <div className="ai-configuration-actions">
+            <Button tone="secondary" size="sm" icon={<LockKeyhole size={ICON.xs} />} onClick={onLock}>
+              锁定配置
+            </Button>
+            <Button
+              tone="primary"
+              size="sm"
+              loading={busy}
+              disabled={!!validation}
+              onClick={() => void save()}
+            >
+              保存配置
+            </Button>
           </div>
-          <button className="icon-button" aria-label="关闭 AI 网关对话框" onClick={onClose}>
-            <X size={ICON.md} />
-          </button>
-        </header>
-        <div className="ai-modal-body">
-          {!draft ? (
-            <section className="ai-auth">
-              <p>读取和修改配置需要管理员令牌。令牌仅保存在当前页面内存中。</p>
-              <label>
-                管理员令牌
-                <input
-                  type="password"
-                  value={token}
-                  autoComplete="off"
-                  data-autofocus
-                  onChange={(e) => setToken(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && void load()}
-                />
-              </label>
-              <p className="ai-help">
-                令牌文件：<code>{status?.admin_token_path || '读取状态后显示'}</code>
-                <br />
-                远程面板需在运行 Miao 的机器上读取此文件，再粘贴到这里。
-              </p>
-              <Button
-                tone="primary"
-                size="sm"
-                loading={busy}
-                disabled={!token.trim()}
-                onClick={() => void load()}
-              >
-                读取配置
-              </Button>
-            </section>
-          ) : (
-            <fieldset disabled={busy} className="ai-settings">
+        )}
+      </header>
+      <div>
+        {!draft ? (
+          <section className="ai-auth">
+            <KeyRound size={ICON.lg} className="icon-accent" aria-hidden="true" />
+            <p>读取和修改配置需要管理员令牌。令牌仅保存在当前页面内存中。</p>
+            <label>
+              管理员令牌
+              <input
+                type="password"
+                value={token}
+                autoComplete="off"
+                onChange={(e) => setToken(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && void load()}
+              />
+            </label>
+            <p className="ai-help">
+              令牌文件：<code>{status?.admin_token_path || '读取状态后显示'}</code>
+              <br />
+              远程面板需在运行 Miao 的机器上读取此文件，再粘贴到这里。
+            </p>
+            <Button
+              tone="primary"
+              size="sm"
+              loading={busy}
+              disabled={!token.trim()}
+              onClick={() => void load()}
+            >
+              读取配置
+            </Button>
+          </section>
+        ) : (
+          <fieldset disabled={busy} className="ai-settings">
+            <section className="ai-settings-section" aria-label="网关接入">
+              <h2>网关接入</h2>
+              <p className="ai-help">管理本机接口、出站路径与客户端凭据。</p>
               <div className="ai-grid">
                 <label>
                   运行状态
@@ -353,12 +389,14 @@ function AiGatewayModal({
               </div>
               {newKey && (
                 <div className="ai-new-key" role="status">
-                  <strong>请立即复制新密钥，仅显示到本次关闭窗口：</strong>
+                  <strong>请立即复制新密钥，离开页面或锁定后不再显示：</strong>
                   <code>{newKey}</code>
                 </div>
               )}
+            </section>
+            <section className="ai-settings-section" aria-label="供应商与模型">
               <div className="ai-provider-heading">
-                <strong>提供商</strong>
+                <h2>供应商与模型</h2>
                 <span>
                   <button type="button" onClick={() => addProvider('openrouter')}>
                     + OpenRouter
@@ -475,36 +513,20 @@ function AiGatewayModal({
               {draft.providers.length === 0 && (
                 <div className="empty-block">暂无提供商；停用状态可直接保存。</div>
               )}
-            </fieldset>
-          )}
-          {(error || validation) && (
-            <p className="ai-error" role="alert">
-              {error || validation}{' '}
-              {stale && (
-                <button type="button" onClick={() => void load()}>
-                  放弃草稿并重新加载
-                </button>
-              )}
-            </p>
-          )}
-        </div>
-        {draft && (
-          <footer className="rule-modal-footer">
-            <Button tone="ghost" size="sm" onClick={onClose}>
-              取消
-            </Button>
-            <Button
-              tone="primary"
-              size="sm"
-              loading={busy}
-              disabled={!!validation}
-              onClick={() => void save()}
-            >
-              保存配置
-            </Button>
-          </footer>
+            </section>
+          </fieldset>
+        )}
+        {(error || validation) && (
+          <p className="ai-error" role="alert">
+            {error || validation}{' '}
+            {stale && (
+              <button type="button" onClick={() => void load()}>
+                放弃草稿并重新加载
+              </button>
+            )}
+          </p>
         )}
       </div>
-    </div>
+    </section>
   )
 }

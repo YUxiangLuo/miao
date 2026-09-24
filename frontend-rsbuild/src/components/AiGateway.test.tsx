@@ -21,7 +21,6 @@ function setup(rejectSave = false) {
 }
 
 async function unlock(user: ReturnType<typeof userEvent.setup>) {
-  await user.click(screen.getByRole('button', { name: '配置 AI 网关' }))
   await user.type(screen.getByLabelText('管理员令牌'), 'synthetic-admin')
   await user.click(screen.getByRole('button', { name: '读取配置' }))
   await screen.findByLabelText('Base URL')
@@ -43,7 +42,7 @@ describe('AI gateway configuration', () => {
     expect(JSON.parse(String(init?.body)).providers[0]).toMatchObject({ api_key: null, models: [{ id: 'alias-edited', upstream: 'vendor/model' }] })
   })
 
-  it('keeps rejected drafts and offers reload; closing clears administrator credentials', async () => {
+  it('keeps rejected drafts and offers reload; locking clears administrator credentials', async () => {
     setup(true)
     const user = userEvent.setup()
     await unlock(user)
@@ -51,9 +50,10 @@ describe('AI gateway configuration', () => {
     await user.click(screen.getByRole('button', { name: '保存配置' }))
     await screen.findByRole('button', { name: '放弃草稿并重新加载' })
     expect(screen.getByLabelText('名称')).toHaveValue('OpenRouter draft')
-    await user.click(screen.getByRole('button', { name: '关闭 AI 网关对话框' }))
-    await user.click(screen.getByRole('button', { name: '配置 AI 网关' }))
+    await user.click(screen.getByRole('button', { name: '锁定配置' }))
     expect(screen.getByLabelText('管理员令牌')).toHaveValue('')
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '切换到代理' })).toHaveAttribute('href', '#proxy')
   })
 
   it('rotation preserves draft and advances its revision without fetching over concurrent edits', async () => {

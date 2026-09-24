@@ -72,7 +72,9 @@ export function OnboardingScreen({ onAddSub, pendingActions, onOpenAddNode, show
     <div className="onboarding">
       <div className="onboarding-card">
         <div className="onboarding-header">
-          <LogoIcon size={LOGO_SIZE.onboarding} />
+          <a href="#ai" className="workspace-switch" aria-label="切换到AI 网关" title="切换到 AI 网关">
+            <LogoIcon size={LOGO_SIZE.onboarding} />
+          </a>
           <h1 className="onboarding-title">Miao</h1>
           <p className="onboarding-subtitle">添加订阅链接或手动节点以开始使用</p>
         </div>

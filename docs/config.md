@@ -172,7 +172,7 @@ cargo test --locked -p miao-core handlers::clash
 
 ## 本地 AI 网关
 
-规则卡片中的固定「AI 网关」项管理**经过本机网关的 API 请求**，不是 AI 网站域名规则。默认关闭，需要 Miao 代理内核及至少一个可用节点；暂停代理时网关拒绝推理请求，不自动直连。支持 OpenAI 兼容的 `GET /v1/models`、`POST /v1/chat/completions`，以及按供应商显式开启的 `POST /v1/responses`。不支持 ChatGPT/Claude 订阅登录、账号转换、任意路径透传或协议转换。
+点击左上角猫头，在代理页面与独立的「AI 网关」页面之间切换；规则卡片中的固定「AI 网关」项也可进入该页面。支持通过 `#ai` 直接进入、刷新和浏览器前进/后退。AI 分流管理**经过本机网关的 API 请求**，不是 AI 网站域名规则。默认关闭，需要 Miao 代理内核及至少一个可用节点；暂停代理时网关拒绝推理请求，不自动直连。支持 OpenAI 兼容的 `GET /v1/models`、`POST /v1/chat/completions`，以及按供应商显式开启的 `POST /v1/responses`。不支持 ChatGPT/Claude 订阅登录、账号转换、任意路径透传或协议转换。
 
 1. 打开「AI 网关」配置，按页面显示的路径，在运行 Miao 的机器上读取 `admin-token.txt`，粘贴管理员令牌解锁。它与客户端密钥不同。
 2. 添加供应商，填写 **HTTPS API 根地址**、API Key，以及公开模型别名 → 上游模型 ID。例如 OpenRouter：`https://openrouter.ai/api/v1`，Fireworks：`https://api.fireworks.ai/inference/v1`。其他 OpenAI 兼容供应商可修改同一表单的名称和地址。不要把 `/chat/completions` 加入 Base URL。
@@ -190,7 +190,7 @@ curl http://127.0.0.1:6162/v1/chat/completions \
 
 请求只改写顶层 `model`，工具调用、图像内容和供应商扩展参数原样转交；上游响应与 SSE 字节不改写。网关不自动重试计费请求、不跟随重定向、不把本地密钥/cookie 转发给供应商。连接超时 15 秒，等待响应头和流空闲超时各 120 秒，持续输出的流没有总时长限制；请求体上限 8 MiB。`/v1/models` 返回已配置的别名，不自动获取供应商模型目录。「已就绪」表示本地监听、内核及所选出口可用，不代表供应商密钥、余额或模型已验证。
 
-密钥保存在配置所属的 `.miao-profiles/<配置路径哈希>/ai/`，不进入普通 `config.yaml`；供应商密钥以明文保存在受权限保护的 `settings.json`，客户端密钥只保存哈希。Unix 目录 `0700`、文件 `0600`；Windows 使用仅所有者和 SYSTEM 可访问的目录 ACL。保护备份，不要将该目录纳入版本控制。管理接口为 `/api/ai/settings` 和 `/api/ai/access-key`，需要管理员 Bearer 令牌，读取设置只返回 `has_key`；`/api/ai/status` 只公开运行信息与令牌文件路径。浏览器配置窗口关闭后清除令牌和密钥草稿，不写入浏览器存储。网关推理端点拒绝带 Origin 的浏览器请求，仅面向本机 API 客户端。
+密钥保存在配置所属的 `.miao-profiles/<配置路径哈希>/ai/`，不进入普通 `config.yaml`；供应商密钥以明文保存在受权限保护的 `settings.json`，客户端密钥只保存哈希。Unix 目录 `0700`、文件 `0600`；Windows 使用仅所有者和 SYSTEM 可访问的目录 ACL。保护备份，不要将该目录纳入版本控制。管理接口为 `/api/ai/settings` 和 `/api/ai/access-key`，需要管理员 Bearer 令牌，读取设置只返回 `has_key`；`/api/ai/status` 只公开运行信息与令牌文件路径。切换回代理页面、刷新或点击「锁定配置」后清除令牌和未保存的配置/密钥草稿，不写入浏览器存储；锁定页面不会停用网关。网关推理端点拒绝带 Origin 的浏览器请求，仅面向本机 API 客户端。
 
 **这不是给整个面板增加鉴权。** 现有面板/MCP 仍须限制在可信网络。远程管理密钥时使用 HTTPS 或 SSH 隧道，勿通过不可信网络的明文 HTTP 粘贴令牌。网关默认不记录提示词、响应正文或供应商密钥；既有网络活动分析仍可记录供应商域名和连接元数据。
 

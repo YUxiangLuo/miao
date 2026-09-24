@@ -27,6 +27,33 @@ describe('App onboarding integration', () => {
   afterEach(() => {
     rs.useRealTimers()
     rs.unstubAllGlobals()
+    window.history.replaceState(null, '', window.location.pathname)
+  })
+
+  it.each(['', '#ai'])('switches workspaces through the cat logo and supports direct entry %s', async (hash) => {
+    window.history.replaceState(null, '', `${window.location.pathname}${hash}`)
+    const fetch = rs.fn(async (input) => {
+      const url = String(input)
+      if (url === '/api/status') return jsonResponse({ success: true, data: statusMock() })
+      if (url === '/api/nodes') return jsonResponse({ success: true, data: [nodeMock()] })
+      if (url === '/api/subs' || url === '/api/rules') return jsonResponse({ success: true, data: [] })
+      if (url === '/api/version') return jsonResponse({ success: true, data: { current: '0.48.1', latest: null, has_update: false } })
+      if (url === '/api/ai/status') return jsonResponse({ enabled: false, ready: false, port: 6162, outbound: 'proxy', error: null, admin_token_path: '/fixture/admin-token.txt' })
+      throw new Error(`Unexpected request: ${url}`)
+    })
+    rs.stubGlobal('fetch', fetch)
+    stubMatchMedia()
+    const user = userEvent.setup()
+    render(<App />)
+    if (!hash) await user.click(await screen.findByRole('link', { name: '切换到AI 网关' }))
+    expect(await screen.findByRole('heading', { name: 'AI 网关', level: 1 })).toBeInTheDocument()
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(screen.queryByText('自定义规则')).not.toBeInTheDocument()
+    await user.type(screen.getByLabelText('管理员令牌'), 'draft-secret')
+    await user.click(screen.getByRole('link', { name: '切换到代理' }))
+    expect(await screen.findByText('自定义规则')).toBeInTheDocument()
+    await user.click(screen.getByRole('link', { name: '切换到AI 网关' }))
+    expect(await screen.findByLabelText('管理员令牌')).toHaveValue('')
   })
 
   it.each([
