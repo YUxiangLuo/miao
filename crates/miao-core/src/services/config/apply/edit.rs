@@ -33,7 +33,7 @@ impl<'a> ConfigEdit<'a> {
 
     // Preference transactions must retain the lock through preference rollback
     // and through observing effective state, not only through runtime apply.
-    pub(super) async fn apply(&self) -> AppResult<ConfigApplyEffect> {
+    pub(crate) async fn apply(&self) -> AppResult<ConfigApplyEffect> {
         if self.before.subs != self.candidate.subs {
             return Err(AppError::message(
                 "Subscription edits require edit_subscriptions",

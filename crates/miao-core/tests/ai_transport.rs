@@ -57,9 +57,9 @@ impl Connected<axum::serve::IncomingStream<'_, TlsListener>> for Peer {
 }
 
 #[derive(Clone, Default)]
-struct Observations {
-    requests: Arc<AtomicUsize>,
-    streams: Arc<AtomicUsize>,
+pub(crate) struct Observations {
+    pub(crate) requests: Arc<AtomicUsize>,
+    pub(crate) streams: Arc<AtomicUsize>,
 }
 
 struct ActiveStream(Arc<AtomicUsize>);
@@ -80,6 +80,7 @@ async fn probe(
         "peer": peer.to_string(), "body": body,
         "authorization": headers.get("authorization").and_then(|h| h.to_str().ok()),
         "proxy_authorization": headers.get("proxy-authorization").and_then(|h| h.to_str().ok()),
+        "cookie": headers.get("cookie").and_then(|h| h.to_str().ok()),
     }))
 }
 
@@ -103,6 +104,21 @@ async fn events(
         .into_response()
 }
 
+async fn gateway_probe(
+    state: State<Observations>,
+    peer: ConnectInfo<Peer>,
+    headers: HeaderMap,
+    body: Json<Value>,
+) -> Response {
+    if body.0["stream"] == true {
+        return events(state, peer).await;
+    }
+    if body.0["model"] == "redirect" {
+        return (StatusCode::TEMPORARY_REDIRECT, [("location", "/probe")]).into_response();
+    }
+    probe(state, peer, headers, body).await.into_response()
+}
+
 fn openssl(dir: &Path, args: &[&str]) {
     let output = std::process::Command::new("openssl")
         .current_dir(dir)
@@ -116,7 +132,7 @@ fn openssl(dir: &Path, args: &[&str]) {
     );
 }
 
-async fn provider(
+pub(crate) async fn provider(
     dir: &Path,
     seen: Observations,
 ) -> (String, reqwest::Certificate, tokio::task::JoinHandle<()>) {
@@ -168,6 +184,8 @@ async fn provider(
     let router = Router::new()
         .route("/probe", post(probe))
         .route("/events", get(events))
+        .route("/v1/chat/completions", post(gateway_probe))
+        .route("/v1/responses", post(gateway_probe))
         .route(
             "/redirect",
             get(|| async { (StatusCode::TEMPORARY_REDIRECT, [("location", "/events")]) }),
@@ -184,7 +202,7 @@ async fn provider(
     (format!("https://localhost:{}", addr.port()), trust, server)
 }
 
-fn reserve_port() -> u16 {
+pub(crate) fn reserve_port() -> u16 {
     std::net::TcpListener::bind("127.0.0.1:0")
         .unwrap()
         .local_addr()
@@ -192,7 +210,13 @@ fn reserve_port() -> u16 {
         .port()
 }
 
-async fn kernel(binary: &Path, dir: &Path, name: &str, config: Value, port: u16) -> Child {
+pub(crate) async fn kernel(
+    binary: &Path,
+    dir: &Path,
+    name: &str,
+    config: Value,
+    port: u16,
+) -> Child {
     let path = dir.join(format!("{name}.json"));
     std::fs::write(&path, serde_json::to_vec(&config).unwrap()).unwrap();
     let log_path = dir.join(format!("{name}.log"));
@@ -278,19 +302,19 @@ async fn observe(client: &Client, base: &str) -> Value {
     response
 }
 
-fn assert_exit(response: &Value, ip: &str) {
+pub(crate) fn assert_exit(response: &Value, ip: &str) {
     let peer: SocketAddr = response["peer"].as_str().unwrap().parse().unwrap();
     assert_eq!(peer.ip().to_string(), ip);
 }
 
-struct Events {
-    response: reqwest::Response,
-    pending: Vec<u8>,
-    expected: u64,
+pub(crate) struct Events {
+    pub(crate) response: reqwest::Response,
+    pub(crate) pending: Vec<u8>,
+    pub(crate) expected: u64,
 }
 
 impl Events {
-    async fn next(&mut self) -> Value {
+    pub(crate) async fn next(&mut self) -> Value {
         timeout(Duration::from_secs(3), async {
             loop {
                 // A TCP/TLS chunk is not an SSE frame. Preserve partial and

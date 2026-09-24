@@ -17,6 +17,8 @@ regex = "1"
 url = "2.5"
 sha2 = "0.10"
 hex = "0.4"
+getrandom = "0.3"
+subtle = "2"
 semver = "1.0"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
@@ -37,9 +39,8 @@ nix = { version = "0.29", features = ["signal", "user"] }
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = [
     "Win32_Foundation",
-    # TODO: Win32_Security 疑似可删——全仓库无 Win32::Security 引用（CreateMutexW 等均传空安全属性）。
-    # 删除前须在 Windows 真机 cargo build -p miao-desktop 验证，交叉 check 覆盖不到桌面壳。
     "Win32_Security",
+    "Win32_Security_Authorization",
     "Win32_System_Console",
     "Win32_System_JobObjects",
     "Win32_System_Threading",

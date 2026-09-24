@@ -83,6 +83,9 @@ pub async fn cache_compatibility(state: &AppState, config: &Config) -> CacheComp
         Ok(_) => return CacheCompatibility::Incompatible("cache is empty".to_string()),
         Err(err) => return CacheCompatibility::Incompatible(format!("cache unavailable: {err}")),
     };
+    if !state.ai.cache_matches(&cache).await {
+        return CacheCompatibility::Incompatible("AI gateway runtime settings changed".into());
+    }
     let manifest_bytes = match tokio::fs::read(&state.runtime_paths.cache_manifest).await {
         Ok(bytes) => bytes,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
@@ -537,6 +540,12 @@ pub async fn read_config_cache(state: &AppState) -> Option<Vec<u8>> {
 }
 
 pub async fn restore_config_from_cache(state: &AppState) -> AppResult<()> {
+    let bytes = tokio::fs::read(config_cache_path(state)).await?;
+    if !state.ai.cache_matches(&bytes).await {
+        return Err(AppError::message(
+            "Cached AI gateway settings are incompatible",
+        ));
+    }
     restore_config_from_cache_at(config_cache_path(state), &state.runtime_paths.active_config).await
 }
 
@@ -1167,7 +1176,8 @@ mod tests {
         tokio::fs::create_dir_all(&state.runtime_paths.runtime_dir)
             .await
             .unwrap();
-        tokio::fs::write(&state.runtime_paths.config_cache, b"legacy")
+        // Legacy means no compatibility manifest, not an invalid JSON file.
+        tokio::fs::write(&state.runtime_paths.config_cache, b"{}")
             .await
             .unwrap();
         assert_eq!(

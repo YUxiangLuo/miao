@@ -569,11 +569,12 @@ async fn build_prepared(
             multiplier: node_multiplier(name),
         })
         .collect();
-    let reserved_rule_tags = custom_rule_outbound_tags(&config.custom_rules);
+    let mut reserved_rule_tags = custom_rule_outbound_tags(&config.custom_rules);
+    reserved_rule_tags.extend(state.ai.reserved_tags().await);
     let (final_node_names, final_outbounds, node_bindings) =
         assign_subscription_tags(state, &my_names, &reserved_rule_tags, nodes).await;
 
-    let (sing_box_config, skipped_rules, node_select) = build_sing_box_config_with_multipliers(
+    let (mut sing_box_config, skipped_rules, node_select) = build_sing_box_config_with_multipliers(
         config,
         my_names,
         my_outbounds,
@@ -581,6 +582,7 @@ async fn build_prepared(
         final_outbounds,
         metadata,
     )?;
+    state.ai.inject(&mut sing_box_config).await?;
 
     Ok(GenConfigOutcome {
         bytes: serde_json::to_vec(&sing_box_config)?,

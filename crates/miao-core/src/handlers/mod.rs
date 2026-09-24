@@ -1,3 +1,4 @@
+pub mod ai;
 pub mod analytics;
 pub mod clash;
 pub mod mcp;

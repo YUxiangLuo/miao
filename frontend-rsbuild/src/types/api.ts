@@ -200,3 +200,25 @@ export type DnsEvent = { log_id: number, timestamp: number, domain: string, quer
 export type DnsAnalytics = { queries: number, failures: number, p50_ms: number | null, p95_ms: number | null, p99_ms: number | null, max_ms: number | null, timeline: Array<DnsBucket>, groups: Array<DnsGroup>, slow_domains: Array<DnsGroup>, failed_domains: Array<DnsGroup>, slowest: Array<DnsEvent>, };
 
 export type AnalyticsSummary = { since: number, until: number, log_count: number, error_count: number, upload: number, download: number, sampled_connections: number, last_sample_at: number | null, collection_error: string | null, timeline: Array<AnalyticsBucket>, groups: Array<AnalyticsGroup>, activity: LogActivity, dns: DnsAnalytics, };
+
+export type AiModel = {
+/**
+ * Public, unique model ID presented to clients.
+ */
+id: string, upstream: string, };
+
+export type AiProviderInput = { id: string, name: string, base_url: string,
+/**
+ * None preserves the existing key. Keys are never returned by GET.
+ */
+api_key: string | null, responses: boolean, models: Array<AiModel>, };
+
+export type AiProviderView = { id: string, name: string, base_url: string, has_key: boolean, responses: boolean, models: Array<AiModel>, };
+
+export type AiSettingsInput = { revision: number, enabled: boolean, port: number, proxy_port: number, outbound: string, providers: Array<AiProviderInput>, };
+
+export type AiSettingsView = { revision: number, enabled: boolean, port: number, proxy_port: number, outbound: string, providers: Array<AiProviderView>, has_access_key: boolean, };
+
+export type AiStatus = { enabled: boolean, ready: boolean, port: number, outbound: string, error: string | null, admin_token_path: string, };
+
+export type AiAccessKey = { key: string, revision: number, };

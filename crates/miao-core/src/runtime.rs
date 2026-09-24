@@ -273,6 +273,13 @@ pub(crate) async fn spawn_resolved(
     let url = format!("http://127.0.0.1:{port}");
     info!(port = port, url = %url, "Miao panel started");
 
+    if extract_runtime {
+        if let Err(err) = crate::services::ai::initialize(&app_state).await {
+            warn!(%err, "AI gateway initialization failed; ordinary proxy remains available");
+            *app_state.ai.error.write().await = Some(err.to_string());
+        }
+    }
+
     if options.open_browser && config.subs.is_empty() && config.nodes.is_empty() {
         let browser_url = url.clone();
         tokio::spawn(async move {
@@ -304,6 +311,7 @@ pub(crate) async fn spawn_resolved(
                 state_for_shutdown.lifecycle.shutdown();
                 state_for_shutdown.next_sub_refresh();
                 state_for_shutdown.scheduled_refresh_wake.notify_waiters();
+                crate::services::ai::shutdown(&state_for_shutdown).await;
                 // Let the current config transaction drain, but its rollback
                 // and later HTTP start requests may no longer revive the kernel.
                 let _config_update = state_for_shutdown.config_update.lock().await;

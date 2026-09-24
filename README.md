@@ -47,6 +47,7 @@ curl -fsSL https://raw.githubusercontent.com/YUxiangLuo/miao/master/install.sh |
 | 需要做什么 | 文档 |
 | --- | --- |
 | 配置订阅、节点、规则或 MCP | [配置参考](docs/config.md) |
+| 通过本地 AI 网关使用 OpenRouter / Fireworks 等 API | [AI 网关](docs/config.md#本地-ai-网关) |
 | 查看平台差异、PWA、升级与卸载 | [平台说明](docs/platforms.md) |
 | 从源码构建、测试或部署 | [开发指南](DEV_NOTES.md) |
 | 修改面板或定制内核 | [前端开发](frontend-rsbuild/README.md)、[内核维护](docs/kernel.md) |

@@ -170,6 +170,32 @@ cargo test --locked -p miao-core state::connections
 cargo test --locked -p miao-core handlers::clash
 ```
 
+## 本地 AI 网关
+
+规则卡片中的固定「AI 网关」项管理**经过本机网关的 API 请求**，不是 AI 网站域名规则。默认关闭，需要 Miao 代理内核及至少一个可用节点；暂停代理时网关拒绝推理请求，不自动直连。支持 OpenAI 兼容的 `GET /v1/models`、`POST /v1/chat/completions`，以及按供应商显式开启的 `POST /v1/responses`。不支持 ChatGPT/Claude 订阅登录、账号转换、任意路径透传或协议转换。
+
+1. 打开「AI 网关」配置，按页面显示的路径，在运行 Miao 的机器上读取 `admin-token.txt`，粘贴管理员令牌解锁。它与客户端密钥不同。
+2. 添加供应商，填写 **HTTPS API 根地址**、API Key，以及公开模型别名 → 上游模型 ID。例如 OpenRouter：`https://openrouter.ai/api/v1`，Fireworks：`https://api.fireworks.ai/inference/v1`。其他 OpenAI 兼容供应商可修改同一表单的名称和地址。不要把 `/chat/completions` 加入 Base URL。
+3. 生成客户端访问密钥并立即复制。旧密钥不可再次读取；轮换立即阻止旧密钥的新请求，已开始的请求不追溯撤销。
+4. 选择出口：跟随全局代理、指定节点，或**显式直连**。配置供应商和模型后启用并保存。指定节点消失时拒绝请求，不切换到其他节点。仅切换可用出口不重启内核；保存后的新请求换用新连接池，已建立的流继续使用旧连接。启停网关或更改内部代理端口需要应用内核配置，可能中断连接。
+5. 将 AI 客户端 Base URL 设为 `http://127.0.0.1:6162/v1`，API Key 使用刚生成的客户端密钥，模型填写公开别名。端口可修改，API 与内部代理默认分别为 `6162`、`6163`，仅监听 IPv4 回环，不能相同或占用面板/Clash 端口。网关地址属于 **Miao 所在机器**，不是远程浏览器所在机器。
+
+```bash
+# MIAO_AI_KEY 是生成的客户端密钥，不是供应商 API Key。
+curl http://127.0.0.1:6162/v1/chat/completions \
+  -H "Authorization: Bearer $MIAO_AI_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"assistant","messages":[{"role":"user","content":"Hello"}],"stream":true}'
+```
+
+请求只改写顶层 `model`，工具调用、图像内容和供应商扩展参数原样转交；上游响应与 SSE 字节不改写。网关不自动重试计费请求、不跟随重定向、不把本地密钥/cookie 转发给供应商。连接超时 15 秒，等待响应头和流空闲超时各 120 秒，持续输出的流没有总时长限制；请求体上限 8 MiB。`/v1/models` 返回已配置的别名，不自动获取供应商模型目录。「已就绪」表示本地监听、内核及所选出口可用，不代表供应商密钥、余额或模型已验证。
+
+密钥保存在配置所属的 `.miao-profiles/<配置路径哈希>/ai/`，不进入普通 `config.yaml`；供应商密钥以明文保存在受权限保护的 `settings.json`，客户端密钥只保存哈希。Unix 目录 `0700`、文件 `0600`；Windows 使用仅所有者和 SYSTEM 可访问的目录 ACL。保护备份，不要将该目录纳入版本控制。管理接口为 `/api/ai/settings` 和 `/api/ai/access-key`，需要管理员 Bearer 令牌，读取设置只返回 `has_key`；`/api/ai/status` 只公开运行信息与令牌文件路径。浏览器配置窗口关闭后清除令牌和密钥草稿，不写入浏览器存储。网关推理端点拒绝带 Origin 的浏览器请求，仅面向本机 API 客户端。
+
+**这不是给整个面板增加鉴权。** 现有面板/MCP 仍须限制在可信网络。远程管理密钥时使用 HTTPS 或 SSH 隧道，勿通过不可信网络的明文 HTTP 粘贴令牌。网关默认不记录提示词、响应正文或供应商密钥；既有网络活动分析仍可记录供应商域名和连接元数据。
+
+隔离测试（Linux amd64，需要 sudo、网络命名空间和已构建内核）运行 `./scripts/test-ai-transport.sh`，覆盖真实 CONNECT/TLS、不同出口、连接池更换、超过 30 秒的 SSE、断开取消和拒绝回落。测试供应商与密钥均为本地合成数据，不调用收费 API，不启动 TUN 或操作运行实例。
+
 ## MCP：让 AI agent 操作代理
 
 设置 `mcp: true` 或使用面板顶部 MCP 开关，连接 `http://<面板地址>/mcp`；关闭时返回 404。顶部的 Claude、Codex 图标可复制对应客户端的添加命令。当前实现 MCP `2025-11-25` Streamable HTTP：先 `initialize`，再 `notifications/initialized`，后续请求携带 `MCP-Protocol-Version`；无 session、无 SSE，启用时 `GET /mcp` 返回 405。

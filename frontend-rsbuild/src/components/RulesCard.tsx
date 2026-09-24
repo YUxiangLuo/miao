@@ -7,6 +7,7 @@ import { ResourceError } from './ResourceError'
 import { classNames } from '../utils'
 import { describeRule, ruleFieldTone, ruleTargetLabel } from '../ruleFormat'
 import { activeRuleIndexes } from '../ruleActivity'
+import { AiGateway } from './AiGateway'
 import type { RuleInfo, RuleRequest } from '../types/api'
 import type { ClashConnection } from '../types/clash'
 
@@ -137,6 +138,7 @@ export function RulesCard({
         }
       >
         <div className="list-stack">
+          <AiGateway nodeNames={nodeNames} />
           {deleting && <div className="list-row-meta" role="status">删除规则并同步列表中…</div>}
           {loadError && <ResourceError label="自定义规则" error={loadError} hasData={rules.length > 0} onRetry={onRetry} />}
           {rules.length === 0 && !loadError && <div className="empty-block">暂无自定义规则</div>}

@@ -21,13 +21,14 @@ bun --eval '
     throw new Error("Rebuild the current kernel first: ./scripts/build-embedded.sh --kernel-only");
   }
 ' "$ROOT"
-binary=$(cargo test --manifest-path "$ROOT/Cargo.toml" -p miao-core --test ai_transport \
-  --locked --no-run --message-format=json | jq -r 'select(.reason == "compiler-artifact" and .target.name == "ai_transport" and .executable != null) | .executable')
+binary=$(cargo test --manifest-path "$ROOT/Cargo.toml" -p miao-core --lib \
+  --locked --no-run --message-format=json | jq -r 'select(.reason == "compiler-artifact" and .target.name == "miao_core" and .executable != null) | .executable')
 [[ -x "$binary" ]]
 exec sudo env MIAO_TEST_HOST_NETNS="$(readlink /proc/self/ns/net)" \
   unshare --net --pid --fork --mount --mount-proc bash -c '
     set -euo pipefail
     [[ $(readlink /proc/self/ns/net) != "$MIAO_TEST_HOST_NETNS" ]]
     ip link set lo up
-    exec timeout 120s "$1" --ignored --exact ai_transport_contract --nocapture
+    timeout 120s "$1" --ignored --exact services::ai::fixture::ai_transport_contract --nocapture
+    exec timeout 120s "$1" --ignored --exact services::ai::e2e::gateway_contract --nocapture
   ' _ "$binary"

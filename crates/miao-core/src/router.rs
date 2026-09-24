@@ -41,6 +41,12 @@ pub fn build_router(app_state: Arc<AppState>) -> Router {
         .route("/icon-512.png", get(serve_icon_512))
         .route("/icon-maskable-512.png", get(serve_icon_maskable_512))
         .route("/api/status", get(get_status))
+        .route("/api/ai/status", get(crate::handlers::ai::status))
+        .route(
+            "/api/ai/settings",
+            get(crate::handlers::ai::settings).post(crate::handlers::ai::save),
+        )
+        .route("/api/ai/access-key", post(crate::handlers::ai::rotate))
         .route("/api/service/start", post(start_service))
         .route("/api/service/stop", post(stop_service))
         .route("/api/route-mode", post(set_route_mode))

@@ -18,6 +18,7 @@ use subscriptions::SubscriptionRefresh;
 /// 应用状态容器 - 包含所有运行时状态
 /// 通过依赖注入传递，避免全局静态变量
 pub struct AppState {
+    pub ai: crate::services::ai::Gateway,
     /// Effective runtime configuration. `node_select` may be `manual` after a
     /// region temporarily has no usable nodes.
     pub config: RwLock<Config>,
@@ -144,6 +145,7 @@ impl AppState {
             .build()?;
 
         Ok(Self {
+            ai: crate::services::ai::Gateway::default(),
             config: RwLock::new(config),
             node_select_preference: RwLock::new(node_select_preference),
             max_multiplier_preference: RwLock::new(max_multiplier_preference),

@@ -27,6 +27,9 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 .env.production.local
 .env.local
 
+# Local AI gateway administrator tokens and provider credentials
+**/.miao-profiles/*/ai/
+
 # caches
 .eslintcache
 .cache

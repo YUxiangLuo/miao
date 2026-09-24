@@ -1,3 +1,4 @@
+pub mod ai;
 pub mod analytics;
 pub mod api;
 pub mod config;
@@ -131,6 +132,13 @@ mod typescript_contract {
         push_decl::<analytics::DnsEvent>(&mut output, &config);
         push_decl::<analytics::DnsAnalytics>(&mut output, &config);
         push_decl::<analytics::AnalyticsSummary>(&mut output, &config);
+        push_decl::<ai::AiModel>(&mut output, &config);
+        push_decl::<ai::AiProviderInput>(&mut output, &config);
+        push_decl::<ai::AiProviderView>(&mut output, &config);
+        push_decl::<ai::AiSettingsInput>(&mut output, &config);
+        push_decl::<ai::AiSettingsView>(&mut output, &config);
+        push_decl::<ai::AiStatus>(&mut output, &config);
+        push_decl::<ai::AiAccessKey>(&mut output, &config);
 
         while output.ends_with("\n\n") {
             output.pop();
