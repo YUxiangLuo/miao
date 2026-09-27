@@ -30,7 +30,7 @@ iana-time-zone = "0.1"
 tokio-tungstenite = "0.29"
 tempfile = "3"
 ruzstd = "0.9"
-jsonschema = { version = "0.56.0", default-features = false }
+jsonschema = { version = "0.57.0", default-features = false }
 duckdb = { version = "1.10505.0", features = ["bundled"] }
 
 [target.'cfg(unix)'.dependencies]
