@@ -95,6 +95,22 @@ miao.6 的额外 half-close 验收**未全部通过**：本地服务在读到 EO
 
 仍需在隔离网络与 Windows/OpenWrt 真机验证 TUN、DNS、Clash API、连续重载及实际节点传输；这些行为涉及本次上游对路由、代理组和网络栈依赖的变更。未部署生产。
 
+### 升级至 alpha.10（miao.9）
+
+2026-10-08，将固定源码更新为上游 `testing` 的 [`fe92ab3e78a9bb7d448c155ef6906218e2ca5453`](https://github.com/SagerNet/sing-box/commit/fe92ab3e78a9bb7d448c155ef6906218e2ca5453)，内核版本为 `1.15.0-alpha.10+miao.9.fe92ab3e`，继续使用 Go 1.27.1。相对 alpha.7 固定点，上游新增 `dns_server_address` / `dns_search_domain` 规则项（alpha.8）、升级 NaiveProxy（alpha.9）并重做 forward NAT 的 UDP 映射与分片，同时调整证书 SHA-256 固定、FakeIP 缓存一致性、DNS 嗅探、AnyTLS UDP 分帧、嵌套代理组中断和 HTTP/2 extended CONNECT；`sing`、`sing-tun`、`sing-quic`、`sing-mux`、`sing-anytls`、`sing-vmess` 等依赖升级。
+
+`include/` 注册表未变，`client.patch` 无需调整，继续只注册既有 `miao-client-v2` 能力，不暴露 MASQUE endpoint 或 HTTP 代理。Shadowsocks 客户端依赖升级到 `sing-shadowsocks2 v0.2.2-0.20260929152114-a69d1086332b`；上游仍未提供 `CloseWrite`，`shadowsocks2-halfclose.patch` 原样适用（构建脚本中的依赖版本校验与 `replace` 目标已同步更新）。`sing-shadowsocks` 服务端依赖同步升级到 `v0.2.9-0.20260929204512-65740e0f0e3e`，与客户端依赖不可混淆。
+
+本地验证：Linux amd64、Linux arm64、Windows amd64 三目标构建均通过；每个目标的未裁剪上游及客户端 Go 回归各重复 20 次。三个资源清单的源码版本、SHA-256 与压缩前后大小已核对，Linux 原生 `version` 显示新 SHA。Rust 495 项测试（另 1 项忽略）、Clippy、fmt 及 Bun 30 项脚本测试通过。
+
+| 目标 | 原始内核 | 压缩内核 |
+| --- | ---: | ---: |
+| Linux amd64 | 24,899,708 B | 7,796,626 B |
+| Linux arm64 | 23,068,796 B | 6,935,650 B |
+| Windows amd64 | 24,455,680 B | 7,668,933 B |
+
+仍需在隔离网络与 Windows/OpenWrt 真机验证 TUN、DNS、Clash API、连续重载及实际节点传输；本次上游对路由、网络栈和协议输入校验的改动尚未做网络验收。未部署生产。
+
 ## 来源与许可
 
 上游 sing-box 使用 GPL-3.0-or-later，README 另有派生作品命名限制。定制内核使用独立名称并保留出处；对应源码由固定 SHA、本仓库补丁和构建文件共同确定。分发时保留上游许可及对应源码获取方式。

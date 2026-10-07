@@ -119,7 +119,7 @@ echo "==> Building host sing-box ($host_goarch) for rule compilation..."
 echo "==> Applying Shadowsocks AEAD half-close fix..."
 ss_module=github.com/sagernet/sing-shadowsocks2
 ss_version=$("${go_command[@]}" list -mod=readonly -m -f '{{.Version}}{{if .Replace}} replaced{{end}}' "$ss_module")
-if [[ "$ss_version" != v0.2.1 ]]; then
+if [[ "$ss_version" != v0.2.2-0.20260929152114-a69d1086332b ]]; then
   echo "Shadowsocks dependency changed; review shadowsocks2-halfclose.patch" >&2
   exit 1
 fi
@@ -128,7 +128,7 @@ cp -R "$ss_dir" miao-shadowsocks2
 chmod -R u+w miao-shadowsocks2
 git apply --check --directory=miao-shadowsocks2 "$KERNEL_DIR/shadowsocks2-halfclose.patch"
 git apply --directory=miao-shadowsocks2 "$KERNEL_DIR/shadowsocks2-halfclose.patch"
-"${go_command[@]}" mod edit "-replace=$ss_module@v0.2.1=./miao-shadowsocks2"
+"${go_command[@]}" mod edit "-replace=$ss_module@$ss_version=./miao-shadowsocks2"
 
 echo "==> Applying Miao client profile..."
 git apply --check "$KERNEL_DIR/client.patch"
