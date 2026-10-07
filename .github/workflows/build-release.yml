@@ -1,8 +1,8 @@
 name: Build Release
 
+# 仓库转私密后不再使用 GitHub Actions，保留本工作流作为参考。
+# 已移除 tag 触发，仅可手动 workflow_dispatch 运行。
 on:
-  push:
-    tags: ["v*"]
   workflow_dispatch:
 
 permissions:

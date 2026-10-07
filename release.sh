@@ -67,5 +67,5 @@ git push origin "$TAG_VERSION"
 echo "✅ 已创建并推送 tag: $TAG_VERSION"
 
 echo ""
-echo "🎉 发布完成！GitHub Actions 将构建 Linux（amd64/arm64 musl）与 Windows（NSIS 安装包）并上传到 Release。"
-echo "   查看进度: https://github.com/YUxiangLuo/miao/actions"
+echo "🎉 版本与 tag 已推送。GitHub Actions 已停用，请在本机构建并上传发布产物："
+echo "   ./scripts/release-local.sh $TAG_VERSION"

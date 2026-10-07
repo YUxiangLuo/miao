@@ -1,9 +1,9 @@
 name: CI
 
+# 仓库转私密后不再使用 GitHub Actions，保留本工作流作为参考。
+# 已移除 push / pull_request 触发，仅可手动 workflow_dispatch 运行。
 on:
-  push:
-    branches: [master]
-  pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read

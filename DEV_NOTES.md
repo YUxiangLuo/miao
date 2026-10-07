@@ -28,6 +28,8 @@ bun test scripts
 
 `test-rust.sh` 会构建前端，仅为缺失资源创建 inert stub，并在结束时清理；不覆盖已有真实内核。直接运行 Cargo 前须先准备嵌入资源。默认测试只覆盖 core + cli，**不要用 `cargo test --workspace`**，它会额外构建桌面壳和 WebKit。
 
+仓库转私密后不再依赖免费的 GitHub Actions，`.github/workflows/` 保留为参考但已改为仅 `workflow_dispatch` 手动触发。本地用 `./scripts/ci.sh` 复现 [`quality.yml`](.github/workflows/quality.yml) 的 Linux 检查：`frontend`、`kernel [target]`、`rust`、`desktop` 子命令，默认 `all`（前端 + amd64/arm64 内核 + Rust），`quick` 跳过内核重建。本地不编译 Windows 版本；Windows 交叉检查、桌面壳和 NSIS 安装包仍见 workflow 参考。`CI_SKIP_AUDIT=1` 可跳过需要联网的审计。
+
 - 常规测试使用临时目录、假内核和 localhost 订阅；`spawn_server` 必须设置 `skip_extract: true` 并注入临时 `volatile_path`，不能读取或写入生产运行目录。
 - 写路径测试必须注入隔离环境，不能启动真实 TUN。真实内核的网络验收使用独立网络命名空间或专用机器。
 - 修改 shell 脚本运行 `shellcheck`；修改 workflow 运行 `actionlint`。前端检查命令和 mock 约定见[前端文档](frontend-rsbuild/README.md#检查与测试)。
@@ -35,12 +37,15 @@ bun test scripts
 ## 构建、发布与部署
 
 ```bash
-./build.sh  # 前端、内核/规则、本机原生 release → target/release/miao-rust
+./build.sh              # 前端、内核/规则、本机原生 + arm64 musl
+./build.sh --no-arm64   # 只构建本机原生版本
 ```
+
+产物为 `target/release/miao-rust`（host 原生）和 `target/aarch64-unknown-linux-musl/release/miao-rust`（arm64 musl）。arm64 交叉构建需要 `zig`、`cargo-zigbuild` 和 `aarch64-unknown-linux-musl` Rust target（Arch：`sudo pacman -S zig cargo-zigbuild` + `rustup target add aarch64-unknown-linux-musl`）；规则文件只随 host 目标构建，arm64 只补内核。
 
 只改前端时，先 `./scripts/build-frontend.sh` 再 `cargo build --locked --release`；只跑 Cargo 会继续嵌入旧页面。内核变化先按[内核文档](docs/kernel.md#构建与嵌入)重建 `embedded/`，再构建 Miao。
 
-[CI](.github/workflows/ci.yml) 在 master push 和 PR 上调用 [quality.yml](.github/workflows/quality.yml)：前端检查、三目标内核构建、Rust 检查与 Windows 桌面编译。[Build Release](.github/workflows/build-release.yml) 先跑质量检查，再构建 Linux musl 矩阵和 Windows NSIS；tag 触发时上传 Release，手动触发只保留 artifacts。发版入口为 `./release.sh vX.Y.Z`，各平台同号，发布产物以 CI 为准。推送含 workflow 的提交使用 SSH。
+[CI](.github/workflows/ci.yml) 与 [Build Release](.github/workflows/build-release.yml) 因仓库转私密已改为仅 `workflow_dispatch` 手动触发，保留作参考；日常检查改用本地 `./scripts/ci.sh`（见[开发检查](#开发检查)）。发版入口为 `./release.sh vX.Y.Z`（更新版本、提交、推送 master 与 tag），随后用 `./scripts/release-local.sh vX.Y.Z` 构建 amd64/arm64 musl 产物并经 `gh` 上传 Release（`--dry-run` 只构建不传，`--skip-build` 复用 `dist/`）。Windows 版本已取消；推送 tag 不再触发 GitHub Actions。推送含 workflow 的提交使用 SSH。
 
 ### Arch 生产实例
 
