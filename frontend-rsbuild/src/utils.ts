@@ -235,6 +235,8 @@ export function formatDelay(delay: number | null | undefined): string {
   return `${delay} ms`
 }
 
+// 测量时间按浏览器所在系统的本地时区展示（与定时刷新不同：后者按后端系统时区）。
+// toLocaleString 不带 timeZone 即使用浏览器本地时区，远程打开面板看到的是本机时间。
 export function formatDelayTime(timestamp?: number): string {
   if (!timestamp || !Number.isFinite(timestamp)) return '测试时间未知'
   return `测于 ${new Date(timestamp).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}`

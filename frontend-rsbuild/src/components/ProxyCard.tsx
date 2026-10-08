@@ -229,7 +229,7 @@ export function ProxyCard({
         </div>
       }
     >
-      <p className="delay-explanation">延迟不是下载速度；测量时间按设备时区显示。</p>
+      <p className="delay-explanation">延迟不是下载速度；测量时间按浏览器所在系统的本地时间显示。</p>
       {primaryGroup && runtimeUnavailable && <p className="delay-explanation" role="status">代理未就绪，暂停切换和测速；保留上次读取的节点列表。</p>}
       <div className="proxy-grid-wrap">
         {primaryGroup ? (
