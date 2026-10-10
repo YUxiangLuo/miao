@@ -111,6 +111,21 @@ miao.6 的额外 half-close 验收**未全部通过**：本地服务在读到 EO
 
 仍需在隔离网络与 Windows/OpenWrt 真机验证 TUN、DNS、Clash API、连续重载及实际节点传输；本次上游对路由、网络栈和协议输入校验的改动尚未做网络验收。未部署生产。
 
+### 升级至 alpha.11（miao.10）
+
+2026-10-10，将固定源码更新为上游 `testing` 的 [`6afeff4c0f7123b5782f888812e96b8c82c7b699`](https://github.com/SagerNet/sing-box/commit/6afeff4c0f7123b5782f888812e96b8c82c7b699)，内核版本为 `1.15.0-alpha.11+miao.10.6afeff4c`，继续使用 Go 1.27.1。相对 alpha.10 改动很小（13 个文件）：`Scope.Close` 改为收集并过滤 closed/canceled 清理错误、libbox monitor 与 command server 调整、powerreport 精简，以及 macOS `systemconfig` 重写；`sing-tun` 升级到 `v0.9.7-0.20261009022811-5c2edb183cc9`，Shadowsocks 客户端依赖仍为 `sing-shadowsocks2 v0.2.2-...`。
+
+`include/` 注册表与上一固定点一致，`client.patch` 与 `shadowsocks2-halfclose.patch` 均无需调整，`build-embedded.sh` 的依赖版本校验不变。
+
+本地验证（Windows 版本已取消，仅 amd64/arm64）：两个目标的未裁剪上游及客户端 Go 回归各重复 20 次；资源清单的源码版本与 SHA-256 已核对，Linux 原生 `version` 显示新 SHA。`./scripts/ci.sh all`（前端 + 两目标内核 + Rust 495 项测试 + Clippy/fmt/cargo-audit）通过。
+
+| 目标 | 原始内核 | 压缩内核 |
+| --- | ---: | ---: |
+| Linux amd64 | 24,899,708 B | 7,796,036 B |
+| Linux arm64 | 23,068,796 B | 6,934,680 B |
+
+`embedded/sing-box-windows-amd64.exe` 保留在上一个固定点（alpha.10）；本机不再编译 Windows 版本，需要时由参考 workflow 重建。仍需在隔离网络与真机验证 TUN、DNS、Clash API 与连续重载。未部署生产。
+
 ## 来源与许可
 
 上游 sing-box 使用 GPL-3.0-or-later，README 另有派生作品命名限制。定制内核使用独立名称并保留出处；对应源码由固定 SHA、本仓库补丁和构建文件共同确定。分发时保留上游许可及对应源码获取方式。
