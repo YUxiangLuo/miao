@@ -126,6 +126,19 @@ miao.6 的额外 half-close 验收**未全部通过**：本地服务在读到 EO
 
 `embedded/sing-box-windows-amd64.exe` 保留在上一个固定点（alpha.10）；本机不再编译 Windows 版本，需要时由参考 workflow 重建。仍需在隔离网络与真机验证 TUN、DNS、Clash API 与连续重载。未部署生产。
 
+### 升级至 alpha.12（miao.11）
+
+2026-10-11，将固定源码更新为上游 `testing` 的 [`e4b7e692f4545890bfc9d43960328e1449fa803b`](https://github.com/SagerNet/sing-box/commit/e4b7e692f4545890bfc9d43960328e1449fa803b)，内核版本为 `1.15.0-alpha.12+miao.11.e4b7e692`。相对 alpha.11 源码树没有变化：差异仅在 `docs/changelog.md`（新增 alpha.12 条目）和上游自己的 `.github/workflows/build.yml`，`go.mod`、`include/` 与两个补丁均未变，属版本号递增。
+
+本地验证（Windows 已取消，仅 amd64/arm64）：两目标 Go 回归 ×20、`./scripts/ci.sh all` 通过；原始内核字节数与 alpha.11 完全相同，仅版本字符串与压缩产物变化。
+
+| 目标 | 原始内核 | 压缩内核 |
+| --- | ---: | ---: |
+| Linux amd64 | 24,899,708 B | 7,796,068 B |
+| Linux arm64 | 23,068,796 B | 6,935,262 B |
+
+未部署生产。
+
 ## 来源与许可
 
 上游 sing-box 使用 GPL-3.0-or-later，README 另有派生作品命名限制。定制内核使用独立名称并保留出处；对应源码由固定 SHA、本仓库补丁和构建文件共同确定。分发时保留上游许可及对应源码获取方式。
