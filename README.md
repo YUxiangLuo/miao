@@ -7,51 +7,46 @@
   </p>
 </div>
 
-Miao 将 sing-box 内核、分流规则和 Web 面板打包在一起，用 TUN 接管整机流量。Linux / OpenWrt 分发单个可执行文件，Windows 提供带托盘的桌面程序。
+Miao 将 sing-box 内核、分流规则和 Web 面板打包为单个可执行文件，通过 TUN 接管整机流量。当前发布 Linux / OpenWrt amd64、arm64 版本；Windows 桌面源码保留，已停止发布安装包。
 
-客户端内核支持 Shadowsocks、VMess、VLESS、Trojan、AnyTLS、Hysteria2、TUIC，裁剪与构建方式见[内核文档](docs/kernel.md)。
+支持[七种节点协议](docs/kernel.md#能力与裁剪)、订阅管理、自动选节点、自定义分流和 MCP 控制。
 
 <img width="1440" height="1400" alt="Miao 控制面板" src="https://github.com/user-attachments/assets/320dd0bb-f1da-4bf9-99ab-6c04c3c2c95b" />
 
-## 安装
+## 安装与启动
 
-### Linux / OpenWrt
-
-```bash
-wget https://github.com/YUxiangLuo/miao/releases/latest/download/miao-rust-linux-amd64 -O miao
-chmod +x miao
-sudo ./miao
-#面板在 localhost:6161
-```
-
-也可使用临时订阅，以“日本最快”启动：
+从 [Releases](https://github.com/YUxiangLuo/miao/releases/latest) 下载二进制及 `.sha256`。私有仓库需访问权限；已登录的 GitHub CLI 可用以下命令，arm64 替换文件名中的 `amd64`：
 
 ```bash
-sudo ./miao --sub 'https://your-subscription-url' JP
+gh release download --repo YUxiangLuo/miao \
+  --pattern miao-rust-linux-amd64 --pattern miao-rust-linux-amd64.sha256 &&
+sha256sum -c miao-rust-linux-amd64.sha256 &&
+chmod +x miao-rust-linux-amd64 &&
+sudo ./miao-rust-linux-amd64
 ```
 
-支持 `HK/JP/TW/SG/US`，省略地区时手动选择；临时运行不改写已有配置。不要与已有实例同时启动，详见[命令行用法](docs/config.md#命令行启动)。
+校验通过后再运行，面板地址为 `http://localhost:6161`。OpenWrt 以 root 运行，无需 `sudo`。**面板无鉴权，默认监听所有网卡，只应允许可信设备访问。**
 
-systemd Linux 可直接安装为服务：
+也可使用临时订阅，以“日本最快”启动；正常退出后清理，不改写已有配置：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/YUxiangLuo/miao/master/install.sh | sudo bash
+sudo ./miao-rust-linux-amd64 --sub 'https://your-subscription-url' JP
 ```
 
-### Windows
+地区、配置文件与临时运行限制见[配置参考](docs/config.md#命令行启动)。TUN 和 Clash API 不支持多开，请先退出已有实例。
 
-从 [Releases](https://github.com/YUxiangLuo/miao/releases/latest) 下载 `miao-windows-amd64-setup.exe`（Windows 10/11 x64）。启动时确认 UAC，关窗进入托盘；WebView2、自启、升级和卸载见[平台说明](docs/platforms.md)。
+systemd Linux 可[安装为服务](docs/platforms.md#升级与卸载)；OpenWrt 与 Windows 自行构建见平台说明。
 
 ## 文档
 
-| 需要做什么 | 文档 |
+| 任务 | 入口 |
 | --- | --- |
-| 配置订阅、节点、规则或 MCP | [配置参考](docs/config.md) |
-| 查看平台差异、PWA、升级与卸载 | [平台说明](docs/platforms.md) |
-| 从源码构建、测试或部署 | [开发指南](DEV_NOTES.md) |
-| 修改面板或定制内核 | [前端开发](frontend-rsbuild/README.md)、[内核维护](docs/kernel.md) |
+| 配置订阅、节点、分流、定时刷新或 MCP | [配置参考](docs/config.md) |
+| 平台差异、升级、卸载、PWA | [平台说明](docs/platforms.md) |
+| 构建、测试、发布、生产部署 | [开发指南](DEV_NOTES.md) |
+| 修改面板或内核 | [前端开发](frontend-rsbuild/README.md)、[内核维护](docs/kernel.md) |
+| 修改配置与运行逻辑 | [状态与事务](docs/runtime-state.md)、[Profile 路径](docs/profiles.md) |
 
-[官网与 FAQ](https://miao.vesein.dev) · [Miao 源码许可](LICENSE) · [内嵌内核来源与许可](docs/kernel.md#来源与许可)
+[官网与 FAQ](https://miao.vesein.dev) · [Miao 源码许可](LICENSE) · [内核来源与许可](docs/kernel.md#来源与许可)
 
-##
-Hysteria2直连机场 https://nachoneko.cc/#/register?code=7ofhHt8x
+相关服务：[Hysteria2 直连机场](https://nachoneko.cc/#/register?code=7ofhHt8x)。
