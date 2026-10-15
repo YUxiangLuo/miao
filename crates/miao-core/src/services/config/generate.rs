@@ -14,7 +14,7 @@ use crate::services::subscription::{fetch_sub, is_informational_subscription_nod
 use crate::state::{AppState, SkippedRule};
 
 use super::bindings::{assign_subscription_tags, reserved_node_tags, NodeTagBindings};
-use super::builder::{build_sing_box_config_with_multipliers, NodeMetadata};
+use super::builder::{build_sing_box_config_with_multipliers, NodeMetadata, ParsedCustomRules};
 use super::persist::{read_sub_nodes_snapshot, save_sub_nodes_snapshot, SubNodesSnapshot};
 
 #[derive(Clone)]
@@ -552,16 +552,7 @@ async fn build_prepared(
     let nodes = filter_disabled_nodes(nodes, &config.disabled_nodes);
     let (my_outbounds, my_names) = collect_manual_outbounds(config);
 
-    let manual_multipliers: Vec<_> = my_names.iter().map(|name| node_multiplier(name)).collect();
-    let subscription_multipliers: Vec<_> = nodes
-        .iter()
-        .map(|node| node_multiplier(&node.name))
-        .collect();
-    let mut available_multipliers = BTreeSet::new();
-    available_multipliers.extend(manual_multipliers.iter().flatten().copied());
-    available_multipliers.extend(subscription_multipliers.iter().flatten().copied());
-
-    let metadata = my_names
+    let metadata: Vec<_> = my_names
         .iter()
         .chain(nodes.iter().map(|node| &node.name))
         .map(|name| NodeMetadata {
@@ -569,7 +560,10 @@ async fn build_prepared(
             multiplier: node_multiplier(name),
         })
         .collect();
-    let reserved_rule_tags = custom_rule_outbound_tags(&config.custom_rules);
+    let available_multipliers: BTreeSet<_> =
+        metadata.iter().filter_map(|meta| meta.multiplier).collect();
+    let parsed_rules = ParsedCustomRules::parse(&config.custom_rules);
+    let reserved_rule_tags = parsed_rules.outbound_tags();
     let (final_node_names, final_outbounds, node_bindings) =
         assign_subscription_tags(state, &my_names, &reserved_rule_tags, nodes).await;
 
@@ -580,6 +574,7 @@ async fn build_prepared(
         final_node_names,
         final_outbounds,
         metadata,
+        parsed_rules,
     )?;
 
     Ok(GenConfigOutcome {
@@ -619,22 +614,6 @@ pub(super) fn filter_disabled_nodes(
                 .is_none_or(|names| !names.contains(node.name.as_str()))
         })
         .collect()
-}
-
-fn custom_rule_outbound_tags(custom_rules: &[String]) -> Vec<String> {
-    let mut tags = Vec::new();
-    for raw in custom_rules {
-        let Some(tag) = serde_json::from_str::<serde_json::Value>(raw)
-            .ok()
-            .and_then(|rule| rule.get("outbound")?.as_str().map(str::to_string))
-        else {
-            continue;
-        };
-        if !tags.contains(&tag) {
-            tags.push(tag);
-        }
-    }
-    tags
 }
 
 /// 在配置事务真正提交后发布候选配置携带的诊断元数据。
@@ -719,7 +698,7 @@ pub async fn known_rule_targets(config: &Config, state: &AppState) -> Vec<String
     // Existing rules reserve their target even while the node is absent. This
     // is the fail-closed fallback when node-bindings.json is missing or invalid:
     // a future same-name node must not silently inherit a dormant rule.
-    for tag in custom_rule_outbound_tags(&config.custom_rules) {
+    for tag in ParsedCustomRules::parse(&config.custom_rules).outbound_tags() {
         if !tags.contains(&tag) {
             tags.push(tag);
         }
@@ -914,6 +893,15 @@ mod tests {
             .unwrap()
             .iter()
             .any(|outbound| outbound["tag"] == "日本[1.3x]-将改名"));
+        assert_eq!(
+            second
+                .available_multipliers
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>(),
+            ["1.3", "18"],
+            "倍率选项也必须来自当前显示名，而非保留的旧 tag"
+        );
     }
 
     #[tokio::test]
@@ -1035,6 +1023,79 @@ mod tests {
         let targets = known_rule_targets(&config, &state).await;
 
         assert!(targets.contains(&"gone-node".to_string()));
+    }
+
+    #[tokio::test]
+    async fn generation_preserves_rule_semantics_across_tag_reservation_and_filtering() {
+        use crate::models::RouteMode;
+        use serde_json::json;
+
+        let dormant = r#" { "domain_suffix" : "dormant.example", "outbound" : "gone-node" } "#;
+        let direct = json!({"domain_suffix": "direct.example", "outbound": "direct"});
+        // The builder must retain fields it does not mirror to DNS.
+        let tcp_only = json!({
+            "domain_suffix": "tcp.example", "network": "tcp", "outbound": "manual-a"
+        });
+        for route_mode in [RouteMode::Rule, RouteMode::Global] {
+            let config = Config {
+                nodes: vec![
+                    r#"{"type":"trojan","tag":"manual-a","server":"manual.example.com","server_port":443,"password":"x"}"#.to_string(),
+                ],
+                custom_rules: vec![
+                    dormant.to_string(),
+                    direct.to_string(),
+                    "{invalid".to_string(),
+                    tcp_only.to_string(),
+                    direct.to_string(),
+                ],
+                route_mode,
+                ..Config::default()
+            };
+            let state = crate::test_support::app_state(config.clone());
+            let outcome = super::build_prepared(
+                &config,
+                &state,
+                vec![fetched_node("https://a", "gone-node")],
+            )
+            .await
+            .unwrap();
+            let generated: serde_json::Value = serde_json::from_slice(&outcome.bytes).unwrap();
+
+            // Missing bindings must not let a new node take over an old rule.
+            assert_eq!(
+                generated["outbounds"][0]["outbounds"],
+                json!(["manual-a", "gone-node (2)"])
+            );
+            assert_eq!(outcome.skipped_rules.len(), 1);
+            assert_eq!(outcome.skipped_rules[0].raw, dormant);
+            let rules = generated["route"]["rules"].as_array().unwrap();
+            assert_eq!(
+                &rules[2..5],
+                &[direct.clone(), tcp_only.clone(), direct.clone()]
+            );
+            assert_eq!(
+                rules.len(),
+                if route_mode == RouteMode::Global {
+                    5
+                } else {
+                    8
+                }
+            );
+
+            let dns_rules = generated["dns"]["rules"].as_array().unwrap();
+            let expected_dns = json!({
+                "domain_suffix": "direct.example", "action": "route", "server": "local"
+            });
+            assert_eq!(&dns_rules[..2], &[expected_dns.clone(), expected_dns]);
+            assert_eq!(
+                dns_rules.len(),
+                if route_mode == RouteMode::Global {
+                    2
+                } else {
+                    3
+                }
+            );
+        }
     }
 
     #[test]

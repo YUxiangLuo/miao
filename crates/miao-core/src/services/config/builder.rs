@@ -122,8 +122,9 @@ pub(super) fn filter_rules_with_missing_outbound(
     custom_rules: &[String],
     available_outbounds: &HashSet<String>,
 ) -> (Vec<String>, Vec<SkippedRule>) {
-    let parsed = parse_custom_rules(custom_rules);
-    let (kept, skipped) = filter_parsed_rules_with_missing_outbound(parsed, available_outbounds);
+    let parsed = ParsedCustomRules::parse(custom_rules);
+    let (kept, skipped) =
+        filter_parsed_rules_with_missing_outbound(parsed.rules, available_outbounds);
     (kept.into_iter().map(|rule| rule.raw).collect(), skipped)
 }
 
@@ -133,20 +134,42 @@ struct ParsedCustomRule {
     value: serde_json::Value,
 }
 
-fn parse_custom_rules(custom_rules: &[String]) -> Vec<ParsedCustomRule> {
-    custom_rules
-        .iter()
-        .filter_map(|raw| match serde_json::from_str(raw) {
-            Ok(value) => Some(ParsedCustomRule {
-                raw: raw.clone(),
-                value,
-            }),
-            Err(err) => {
-                warn!(rule = %raw, error = %err, "Failed to parse custom rule");
-                None
-            }
-        })
-        .collect()
+/// Keep the raw compatibility format alongside its parsed value throughout
+/// generation: tag reservation, outbound validation, DNS and route insertion.
+pub(super) struct ParsedCustomRules {
+    rules: Vec<ParsedCustomRule>,
+}
+
+impl ParsedCustomRules {
+    pub(super) fn parse(custom_rules: &[String]) -> Self {
+        Self {
+            rules: custom_rules
+                .iter()
+                .filter_map(|raw| match serde_json::from_str(raw) {
+                    Ok(value) => Some(ParsedCustomRule {
+                        raw: raw.clone(),
+                        value,
+                    }),
+                    Err(err) => {
+                        warn!(rule = %raw, error = %err, "Failed to parse custom rule");
+                        None
+                    }
+                })
+                .collect(),
+        }
+    }
+
+    /// Reserve even absent targets before assigning subscription tags, so new
+    /// same-name nodes cannot silently inherit dormant rules. Keep first-seen order.
+    pub(super) fn outbound_tags(&self) -> Vec<String> {
+        let mut seen = HashSet::new();
+        self.rules
+            .iter()
+            .filter_map(|rule| rule.value.get("outbound")?.as_str())
+            .filter(|tag| seen.insert(*tag))
+            .map(str::to_string)
+            .collect()
+    }
 }
 
 fn filter_parsed_rules_with_missing_outbound(
@@ -201,6 +224,7 @@ pub(super) fn build_sing_box_config(
         final_node_names,
         final_outbounds,
         metadata,
+        ParsedCustomRules::parse(&config.custom_rules),
     )
 }
 
@@ -218,6 +242,7 @@ pub(super) fn build_sing_box_config_with_multipliers(
     final_node_names: Vec<String>,
     final_outbounds: Vec<serde_json::Value>,
     metadata: Vec<NodeMetadata>,
+    parsed_rules: ParsedCustomRules,
 ) -> AppResult<(serde_json::Value, Vec<SkippedRule>, NodeSelect)> {
     let total_nodes = my_outbounds.len() + final_outbounds.len();
     if total_nodes == 0 {
@@ -261,12 +286,8 @@ pub(super) fn build_sing_box_config_with_multipliers(
     let mut available_outbounds: HashSet<String> = node_names.iter().cloned().collect();
     available_outbounds.insert("proxy".to_string());
     available_outbounds.insert("direct".to_string());
-    // Parse once, then use the same typed rules for outbound validation, DNS
-    // derivation and route insertion. This removes three subtly different
-    // interpretations of the same raw compatibility format.
-    let parsed_rules = parse_custom_rules(&config.custom_rules);
     let (custom_rules, skipped_rules) =
-        filter_parsed_rules_with_missing_outbound(parsed_rules, &available_outbounds);
+        filter_parsed_rules_with_missing_outbound(parsed_rules.rules, &available_outbounds);
 
     let mut sing_box_config = get_config_template();
     apply_proxy_group(&mut sing_box_config, effective_select, &group_names);
