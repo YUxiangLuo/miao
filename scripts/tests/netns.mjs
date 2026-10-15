@@ -1,4 +1,4 @@
-// Invoked only by test-netns.sh after namespace isolation and fixture setup.
+// Invoked only by netns.sh after namespace isolation and fixture setup.
 import assert from 'node:assert/strict'
 import { existsSync, readFileSync, readlinkSync } from 'node:fs'
 

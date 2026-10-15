@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from 'bun:test'
 import { createHash } from 'node:crypto'
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -78,4 +78,54 @@ test('installation and removal help and argument errors are handled before privi
     }
   }
   expect(readFileSync(log, 'utf8')).toBe('')
+})
+
+test('removal clears interrupted upgrade state so a fresh installation is not blocked', () => {
+  const root = mkdtempSync(join(tmpdir(), 'miao-remove-test-'))
+  roots.push(root)
+  const commands = join(root, 'commands')
+  mkdirSync(commands)
+  // All service, process and network commands are fake; every removal path
+  // points inside this fixture, even when the test runner happens to be root.
+  for (const [name, body] of Object.entries({
+    id: 'echo 0',
+    systemctl: '[[ "$1" == daemon-reload ]]',
+    pgrep: 'exit 1',
+    pkill: 'exit 1',
+    ip: 'exit 1',
+  })) writeFileSync(join(commands, name), `#!/bin/bash\n${body}\n`, { mode: 0o755 })
+  const paths = {
+    '/usr/local/bin/miao': join(root, 'miao'),
+    '/etc/miao': join(root, 'config'),
+    '/tmp/miao-sing-box': join(root, 'runtime'),
+    '/etc/systemd/system/miao.service': join(root, 'miao.service'),
+  }
+  let script = readFileSync(new URL('../../remove.sh', import.meta.url), 'utf8')
+  for (const [from, to] of Object.entries(paths)) script = script.replaceAll(from, to)
+  const scriptPath = join(root, 'remove.sh')
+  writeFileSync(scriptPath, script)
+  const binaries = ['', '.bak', '.new', '.failed', '.upgrade-pending.json', '.upgrade-pending.json.tmp']
+    .map(suffix => join(root, `miao${suffix}`))
+  for (const path of [...binaries, paths['/etc/systemd/system/miao.service'], join(root, 'keep')]) writeFileSync(path, 'fixture')
+  for (const path of [paths['/etc/miao'], paths['/tmp/miao-sing-box']]) {
+    mkdirSync(path)
+    writeFileSync(join(path, 'data'), 'fixture')
+  }
+  const result = Bun.spawnSync(['bash', scriptPath, '-y'], {
+    env: { ...process.env, PATH: `${commands}:/usr/bin:/bin` },
+    stdout: 'pipe', stderr: 'pipe',
+  })
+  expect(result.exitCode).toBe(0)
+  for (const path of [...binaries, ...Object.values(paths)]) expect(existsSync(path)).toBe(false)
+  expect(readFileSync(join(root, 'keep'), 'utf8')).toBe('fixture')
+  const pending = Bun.spawnSync(['bash', '-c', `
+source "$INSTALL_SCRIPT"
+SELF_UPGRADE_BACKUP="$FIXTURE/miao.bak"
+SELF_UPGRADE_PENDING="$FIXTURE/miao.upgrade-pending.json"
+self_upgrade_pending
+`], {
+    env: { ...process.env, INSTALL_SCRIPT: fileURLToPath(new URL('../../install.sh', import.meta.url)), FIXTURE: root },
+    stdout: 'pipe', stderr: 'pipe',
+  })
+  expect(pending.exitCode).toBe(1)
 })

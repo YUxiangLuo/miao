@@ -19,7 +19,7 @@ build_rules=true
 if [[ "${1:-}" == --kernel-only ]]; then build_rules=false; shift; fi
 (( $# == 0 )) || { echo "Unexpected kernel argument: $1" >&2; exit 1; }
 
-host_goarch=$(go env GOARCH)
+host_goarch=$(go env GOHOSTARCH)
 case "$host_goarch" in
   amd64|arm64) ;;
   *)
@@ -71,7 +71,7 @@ git -C "$TMP_DIR/sing-box" checkout -q FETCH_HEAD
 
 cd "$TMP_DIR/sing-box"
 # Always select the reviewed toolchain, even when the host Go is newer.
-go_command=(env "GOTOOLCHAIN=go$go_version" CGO_ENABLED=0 go)
+go_command=(env "GOTOOLCHAIN=go$go_version" GOOS=linux CGO_ENABLED=0 go)
 actual_go=$("${go_command[@]}" env GOVERSION)
 if [[ "$actual_go" != "go$go_version" ]]; then
   echo "Expected go$go_version, got $actual_go" >&2
@@ -85,12 +85,12 @@ registry_snapshot="$TMP_DIR/registries.json"
 profile_manifest="$KERNEL_DIR/source.json"
 cp "$KERNEL_DIR/tests/miao_context_test.go" "$KERNEL_DIR/tests/miao_registry_test.go" cmd/sing-box/
 echo "==> Testing upstream isolation and recording client capabilities..."
-MIAO_REGISTRY_SNAPSHOT="$registry_snapshot" MIAO_CAPTURE_REGISTRIES=1 \
+GOARCH="$host_goarch" MIAO_REGISTRY_SNAPSHOT="$registry_snapshot" MIAO_CAPTURE_REGISTRIES=1 \
   "${go_command[@]}" test -mod=readonly -tags "$build_tags" ./cmd/sing-box -run '^TestMiao' -count=20
 
 if [[ "$build_rules" == true ]]; then
   echo "==> Building host sing-box ($host_goarch) for rule compilation..."
-  "${go_command[@]}" build "${build_flags[@]}" -o "$artifacts/sing-box-host" ./cmd/sing-box
+  GOARCH="$host_goarch" "${go_command[@]}" build "${build_flags[@]}" -o "$artifacts/sing-box-host" ./cmd/sing-box
 fi
 
 # Patch a private dependency copy, never the shared Go module cache. Keep the
@@ -113,7 +113,7 @@ echo "==> Applying Miao client profile..."
 git apply --check "$KERNEL_DIR/client.patch"
 git apply "$KERNEL_DIR/client.patch"
 bun "$KERNEL_DIR/prepare-command.mjs" "$TMP_DIR/sing-box"
-MIAO_REGISTRY_SNAPSHOT="$registry_snapshot" MIAO_CAPTURE_REGISTRIES=0 MIAO_PROFILE_MANIFEST="$profile_manifest" \
+GOARCH="$host_goarch" MIAO_REGISTRY_SNAPSHOT="$registry_snapshot" MIAO_CAPTURE_REGISTRIES=0 MIAO_PROFILE_MANIFEST="$profile_manifest" \
   "${go_command[@]}" test -mod=readonly -tags "$build_tags" ./cmd/miao-kernel -run '^TestMiao' -count=20
 
 for target in "${targets[@]}"; do

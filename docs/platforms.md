@@ -18,7 +18,7 @@ systemd Linux 在源码目录用 `sudo bash install.sh /path/to/miao-rust-linux-
 
 私有仓库资源需使用有权限的浏览器或已登录的 `gh` 下载，见 [README](../README.md#安装与启动)。安装脚本的自动下载和应用内升级仍请求未鉴权的 GitHub 地址，不会继承本机 `gh` 登录；无法访问私有 Release 时使用已下载的本地二进制。
 
-在源码目录执行 `sudo bash remove.sh` 卸载，`-y` 跳过确认。它会删除服务、程序、`/etc/miao`、运行目录及残留内核/TUN，**先备份配置**。
+在源码目录执行 `sudo bash remove.sh` 卸载，`-y` 跳过确认。它会删除服务、程序及升级残留、`/etc/miao`、运行目录及残留内核/TUN，**先备份配置**。
 
 ## PWA
 

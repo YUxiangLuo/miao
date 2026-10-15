@@ -75,10 +75,9 @@ if command -v ip >/dev/null 2>&1 && ip link show sing-tun >/dev/null 2>&1; then
   ip link delete sing-tun || true
 fi
 
-if [[ -e "$BIN_PATH" || -e "${BIN_PATH}.bak" ]]; then
-  rm -f "$BIN_PATH" "${BIN_PATH}.bak"
-  log "已删除二进制 $BIN_PATH"
-fi
+rm -f "$BIN_PATH" "${BIN_PATH}.bak" "${BIN_PATH}.new" "${BIN_PATH}.failed" \
+  "${BIN_PATH}.upgrade-pending.json" "${BIN_PATH}.upgrade-pending.json.tmp"
+log "已删除二进制及升级状态 $BIN_PATH"
 if [[ -d "$CONFIG_DIR" ]]; then
   rm -rf "$CONFIG_DIR"
   log "已删除配置目录 $CONFIG_DIR"

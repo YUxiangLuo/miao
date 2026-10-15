@@ -95,10 +95,10 @@ build() {
     if [[ "$target" == all ]]; then kernel_build all; else kernel_build "${targets[0]}"; fi
   fi
   if [[ "$target" == native ]]; then
-    cargo build --locked --release -p miao-cli
+    cargo build --locked --release -p miao-cli --target-dir "$ROOT_DIR/target"
   else
     for arch in "${targets[@]}"; do
-      cargo zigbuild --locked --release -p miao-cli --target "$(rust_target "$arch")"
+      cargo zigbuild --locked --release -p miao-cli --target "$(rust_target "$arch")" --target-dir "$ROOT_DIR/target"
     done
   fi
 }
@@ -144,8 +144,11 @@ case "$command" in
   help|-h|--help) no_args "$@"; usage ;;
   build) build "$@" ;;
   kernel)
-    target=${1:-$(host_target)}
-    if (( $# )); then shift; fi
+    if (( $# == 0 )) || [[ "$1" == --kernel-only ]]; then
+      target=$(host_target)
+    else
+      target=$1; shift
+    fi
     kernel_build "$target" "$@" ;;
   check)
     scope=${1:-all}

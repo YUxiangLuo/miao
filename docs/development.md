@@ -29,7 +29,7 @@ Miao 仅支持 Linux/OpenWrt amd64、arm64。Rust `miao-core` 管理配置、RES
 
 本机构建需要 Rust、Bun，资源缺失或过期时还需 Go、Git、curl。`build --refresh-kernel` 强制重建内核和规则；`./dev.sh kernel amd64 --kernel-only` 仅更新指定内核。内核使用固定源码与工具链，两个目标共用一次源码准备、Go 回归和规则编译，见[内核维护](kernel.md)。
 
-`build` 产物为 `target/release/miao-rust`；musl 产物位于 `target/x86_64-unknown-linux-musl/release/miao-rust` 或 `target/aarch64-unknown-linux-musl/release/miao-rust`。musl 构建须安装 `zig`、`cargo-zigbuild` 和对应 Rust target，缺失时命令提前报错。
+`build` 产物为 `target/release/miao-rust`；musl 产物位于 `target/x86_64-unknown-linux-musl/release/miao-rust` 或 `target/aarch64-unknown-linux-musl/release/miao-rust`。构建固定使用仓库的 `target/`，不受 `CARGO_TARGET_DIR` 影响，避免发布时取到旧产物。musl 构建须安装 `zig`、`cargo-zigbuild` 和对应 Rust target，缺失时命令提前报错。
 
 发布流程：
 
@@ -42,7 +42,9 @@ Miao 仅支持 Linux/OpenWrt amd64、arm64。Rust `miao-core` 管理配置、RES
 ./dev.sh release --publish    # 核验产物后创建/推送 tag，通过 gh 上传 Release
 ```
 
-准备阶段不提交、打 tag 或上传；发布阶段可加 `--draft` 创建草稿。`dist/vX.Y.Z/release-manifest.json` 是唯一的本地发布清单，绑定 HEAD、版本、两架构二进制的大小与 SHA-256、内核元数据和规则来源；发布拒绝缺失、改动或来自其他提交的产物。目标为当前仓库 origin，需已登录的 `gh`；已有同名远端 tag 必须指向同一提交。
+`version` 离线更新 workspace 版本并保留依赖锁定；失败时恢复原有 `Cargo.toml` 和 `Cargo.lock`。准备阶段不提交、打 tag 或上传。`dist/vX.Y.Z/release-manifest.json` 是唯一的本地发布清单，绑定 HEAD、版本、两架构二进制的大小与 SHA-256、内核元数据和规则来源；发布拒绝缺失、改动或来自其他提交的产物。
+
+发布目标为 `origin` 唯一的 GitHub 推送地址，tag 检查、推送和附件上传使用同一仓库，需已登录 github.com 的 `gh`。已有同名远端 tag 必须指向同一提交；GitHub 查询失败时在推送前停止。`--draft` 创建或更新草稿，不能用于已公开的 Release；不加该参数时，已有草稿会在上传和附件清理成功后公开。
 
 Release 只上传 `miao-rust-linux-amd64`、`miao-rust-linux-arm64`，源码 ZIP/TAR.GZ 由 GitHub 根据 tag 自动生成。清单不上传。旧格式清单需重新执行 `release` 生成。重复发布会在两个二进制上传成功后删除该 Release 的其他附件。安装与自升级使用 [GitHub 生成的 SHA-256 摘要](https://docs.github.com/en/rest/releases/releases)，不再下载 `.sha256` 附件。
 

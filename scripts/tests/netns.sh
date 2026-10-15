@@ -3,7 +3,7 @@
 # inside new network/mount/PID namespaces; no host service is stopped or installed.
 set -euo pipefail
 
-die() { echo "test-netns: $*" >&2; exit 1; }
+die() { echo "netns: $*" >&2; exit 1; }
 
 if [[ "${1:-}" == --inside ]]; then
   shift

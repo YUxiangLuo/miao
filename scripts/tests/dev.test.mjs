@@ -12,6 +12,8 @@ function run(args, overrides = {}) {
   roots.push(root)
   mkdirSync(join(root, 'scripts/lib'), { recursive: true })
   mkdirSync(join(root, 'bin'))
+  writeFileSync(join(root, 'Cargo.toml'), 'original manifest\n')
+  writeFileSync(join(root, 'Cargo.lock'), 'original lock\n')
   copyFileSync(new URL('../../dev.sh', import.meta.url), join(root, 'dev.sh'))
   copyFileSync(new URL('../lib/release.sh', import.meta.url), join(root, 'scripts/lib/release.sh'))
   writeFileSync(join(root, 'scripts/lib/kernel.sh'), 'printf "kernel %s\\n" "$*" >> "$LOG"\n')
@@ -21,17 +23,19 @@ function run(args, overrides = {}) {
 tool=\${0##*/}
 printf '%s %s\\n' "$tool" "$*" >> "$LOG"
 case "$tool:$*" in
-  'git:status '*) printf '%s' "\${DIRTY:-}" ;;
+  'git:status '*) printf '%s' "\${DIRTY:-}"; exit "\${GIT_STATUS:-0}" ;;
   'git:rev-parse HEAD') printf '%s\\n' "$HEAD" ;;
   'git:rev-parse --verify '*) exit 1 ;;
-  'git:remote get-url origin') echo 'git@github.com:example/miao.git' ;;
+  'git:remote get-url --push --all origin') printf '%s\\n' "\${PUSH_URL:-git@github.com:example/miao.git}" ;;
   'git:ls-remote '*) printf '%s' "\${REMOTE_TAG:-}" ;;
   'bun:scripts/lib/release-artifacts.mjs version') echo 1.2.3 ;;
+  'bun:scripts/lib/release-artifacts.mjs version '*) echo 'updated manifest' > Cargo.toml ;;
+  'cargo:check '*--offline*) echo 'updated lock' > Cargo.lock; exit "\${CARGO_STATUS:-0}" ;;
   'bun:scripts/lib/release-artifacts.mjs verify '*) exit "\${VERIFY_STATUS:-0}" ;;
   'rustup:target list --installed') printf '%s\\n' x86_64-unknown-linux-musl aarch64-unknown-linux-musl ;;
-  'gh:release view '*"--json assets"*)
-    [[ \${EXISTING_ASSETS+x} ]] || exit 1
-    printf '%s\\n' "$EXISTING_ASSETS" ;;
+  'gh:api '*)
+    [[ \${GH_API_STATUS:-0} == 0 ]] || exit "$GH_API_STATUS"
+    if [[ \${EXISTING_ASSETS+x} ]]; then printf '%s\\n%s\\n' "\${RELEASE_STATE:-published}" "$EXISTING_ASSETS"; fi ;;
   'gh:release upload '*) exit "\${UPLOAD_STATUS:-0}" ;;
 esac
 `
@@ -42,7 +46,10 @@ esac
     env: { ...process.env, PATH: `${join(root, 'bin')}:/usr/bin:/bin`, LOG: log, HEAD: head, ...overrides },
     stdout: 'pipe', stderr: 'pipe',
   })
-  return { status: result.exitCode, calls: readFileSync(log, 'utf8').trim().split('\n'), error: result.stderr.toString() }
+  return {
+    status: result.exitCode, calls: readFileSync(log, 'utf8').trim().split('\n'), error: result.stderr.toString(),
+    manifest: readFileSync(join(root, 'Cargo.toml'), 'utf8'), lock: readFileSync(join(root, 'Cargo.lock'), 'utf8'), root,
+  }
 }
 
 test('build rejects ambiguous targets and core checks do not need Bun or resources', () => {
@@ -65,21 +72,65 @@ test('frontend and script checks run independently', () => {
   expect(scripts.calls.some(call => call.includes('frontend-rsbuild') || call.startsWith('cargo '))).toBe(false)
 })
 
+test('kernel-only builds accept the default host target', () => {
+  const defaultTarget = run(['kernel']).calls.find(call => call.startsWith('kernel '))
+  const result = run(['kernel', '--kernel-only'])
+  expect(result.status).toBe(0)
+  expect(result.calls).toContain(`${defaultTarget} --kernel-only`)
+  expect(run(['kernel', 'arm64', '--kernel-only']).calls).toContain('kernel arm64 --kernel-only')
+})
+
 test('release preparation builds both musl targets with one kernel build and no remote writes', () => {
-  const result = run(['release'])
+  const result = run(['release'], { CARGO_TARGET_DIR: '/unused-review-target' })
   expect(result.status).toBe(0)
   expect(result.calls.filter(call => call === 'kernel all')).toHaveLength(1)
   expect(result.calls.filter(call => call.startsWith('cargo zigbuild'))).toHaveLength(2)
+  expect(result.calls.filter(call => call.startsWith('cargo zigbuild')).every(call => call.includes(`--target-dir ${result.root}/target`))).toBe(true)
   expect(result.calls.some(call => call.includes('mjs stage '))).toBe(true)
   expect(result.calls.some(call => /^(gh |git (push|tag) )/.test(call))).toBe(false)
 })
 
 test('publishing rejects dirty trees, unverified builds and mismatched remote tags before writes', () => {
-  for (const env of [{ DIRTY: ' M changed' }, { VERIFY_STATUS: '1' }, { REMOTE_TAG: `${'b'.repeat(40)}\trefs/tags/v1.2.3` }]) {
+  for (const env of [{ DIRTY: ' M changed' }, { GIT_STATUS: '1' }, { VERIFY_STATUS: '1' }, { GH_API_STATUS: '1' }, { REMOTE_TAG: `${'b'.repeat(40)}\trefs/tags/v1.2.3` }, { PUSH_URL: 'git@github.com:a/one.git\ngit@github.com:b/two.git' }]) {
     const result = run(['release', '--publish'], env)
     expect(result.status).toBe(1)
     expect(result.calls.some(call => /^(git (push|tag) |gh release (create|upload|delete-asset) )/.test(call))).toBe(false)
   }
+})
+
+test('version updates restore both original files when Cargo fails', () => {
+  const failed = run(['version', 'v1.2.4'], { CARGO_STATUS: '1' })
+  expect(failed.status).toBe(1)
+  expect(failed.manifest).toBe('original manifest\n')
+  expect(failed.lock).toBe('original lock\n')
+  const success = run(['version', 'v1.2.4'])
+  expect(success.status).toBe(0)
+  expect(success.manifest).toBe('updated manifest\n')
+  expect(success.lock).toBe('updated lock\n')
+})
+
+test('tag checks, push and GitHub uploads all use the origin push URL', () => {
+  const pushUrl = 'https://github.com/release-owner/miao.git'
+  const result = run(['release', '--publish'], { PUSH_URL: pushUrl })
+  expect(result.status).toBe(0)
+  expect(result.calls.some(call => call.startsWith(`git ls-remote --tags ${pushUrl} `))).toBe(true)
+  expect(result.calls).toContain(`git push ${pushUrl} refs/tags/v1.2.3`)
+  expect(result.calls.find(call => call.startsWith('gh release create '))).toContain('--repo github.com/release-owner/miao')
+})
+
+test('draft releases are published only after uploads, while --draft cannot overwrite a public release', () => {
+  const env = { EXISTING_ASSETS: '', RELEASE_STATE: 'draft' }
+  const publish = run(['release', '--publish'], env)
+  expect(publish.status).toBe(0)
+  const upload = publish.calls.findIndex(call => call.startsWith('gh release upload '))
+  const edit = publish.calls.findIndex(call => call.startsWith('gh release edit ') && call.includes('--draft=false'))
+  expect(edit).toBeGreaterThan(upload)
+  for (const result of [run(['release', '--publish', '--draft'], env), run(['release', '--publish'], { ...env, UPLOAD_STATUS: '1' })]) {
+    expect(result.calls.some(call => call.startsWith('gh release edit '))).toBe(false)
+  }
+  const rejected = run(['release', '--publish', '--draft'], { EXISTING_ASSETS: '', RELEASE_STATE: 'published' })
+  expect(rejected.status).toBe(1)
+  expect(rejected.calls.some(call => /^(git (push|tag) |gh release (create|upload|edit) )/.test(call))).toBe(false)
 })
 
 test('publishing uploads exactly two binaries to origin and leaves source archives to GitHub', () => {
