@@ -1,32 +1,56 @@
-use crate::models::{Config, NodeMultiplier, NodeSelect, RuntimeWarning, RuntimeWarningSeverity};
+use crate::models::{
+    NodeMultiplier, NodeSelect, RouteMode, RuntimeWarning, RuntimeWarningSeverity,
+};
 use crate::state::AppState;
 
 /// Shared configuration projection for REST and MCP status responses.
-/// `config.node_select` is effective; `requested_node_select` survives a
+/// `node_select` is effective; `requested_node_select` survives a
 /// temporary regional fallback. The current cap remains an available option
-/// even when no currently available node advertises that exact value.
+/// even when no currently available node advertises that exact value. Node,
+/// subscription and rule strings are not needed by status polling.
+#[derive(Debug, PartialEq, Eq)]
 pub struct RuntimeConfigStatus {
-    pub config: Config,
+    pub route_mode: RouteMode,
+    pub node_select: NodeSelect,
+    pub max_multiplier: Option<NodeMultiplier>,
+    pub mcp: bool,
+    pub manual_node_count: usize,
     pub requested_node_select: NodeSelect,
     pub multiplier_options: Vec<NodeMultiplier>,
 }
 
 pub async fn runtime_config_status(state: &AppState) -> RuntimeConfigStatus {
-    let config = state.config.read().await.clone();
+    let (route_mode, node_select, max_multiplier, mcp, manual_node_count) = {
+        let config = state.config.read().await;
+        (
+            config.route_mode,
+            config.node_select,
+            config.max_multiplier,
+            config.mcp,
+            config.nodes.len(),
+        )
+    };
     let requested_node_select = *state.node_select_preference.read().await;
     let mut multiplier_options = state.available_multipliers.read().await.clone();
-    if let Some(current) = config.max_multiplier {
+    if let Some(current) = max_multiplier {
         if !multiplier_options.contains(&current) {
             multiplier_options.push(current);
             multiplier_options.sort_unstable();
         }
     }
     RuntimeConfigStatus {
-        config,
+        route_mode,
+        node_select,
+        max_multiplier,
+        mcp,
+        manual_node_count,
         requested_node_select,
         multiplier_options,
     }
 }
+
+#[cfg(test)]
+mod benchmarks;
 
 /// Build one diagnostic snapshot for REST and MCP. Keeping the compatibility
 /// string as a projection of this list prevents the two control planes from

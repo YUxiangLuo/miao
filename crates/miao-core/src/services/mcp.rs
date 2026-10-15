@@ -386,8 +386,7 @@ async fn tool_get_status(state: &Arc<AppState>) -> Result<JsonValue, String> {
     // and clears the flag. Clash queries below still require a live process.
     let ready = kernel.ready;
 
-    let config_status = runtime_config_status(state).await;
-    let config = config_status.config;
+    let config = runtime_config_status(state).await;
     let route_mode = config.route_mode;
 
     let warnings = runtime_warnings(state).await;
@@ -396,7 +395,7 @@ async fn tool_get_status(state: &Arc<AppState>) -> Result<JsonValue, String> {
     // 当前节点与节点数：仅在运行时问 Clash，失败静默降级；
     // 节点数按平铺节点池计（不随 fastest_* 地区过滤收缩）
     let mut current_node = JsonValue::Null;
-    let mut node_count = config.nodes.len();
+    let mut node_count = config.manual_node_count;
     if running && ready {
         if let Ok(proxies) = fetch_proxies(state).await {
             let pool = flat_node_pool(&proxies);
@@ -417,9 +416,9 @@ async fn tool_get_status(state: &Arc<AppState>) -> Result<JsonValue, String> {
         "initializing": state.initializing.load(Ordering::Relaxed),
         "route_mode": route_mode,
         "node_select": config.node_select,
-        "requested_node_select": config_status.requested_node_select,
+        "requested_node_select": config.requested_node_select,
         "max_multiplier": config.max_multiplier.map(|value| value.as_config_value()),
-        "multiplier_options": config_status.multiplier_options
+        "multiplier_options": config.multiplier_options
             .into_iter()
             .map(|value| value.as_config_value())
             .collect::<Vec<_>>(),

@@ -31,6 +31,10 @@ Linux/OpenWrt CLI 与保留的 Windows 桌面源码共用 `miao-core` 和 React 
 
 需要资源集成测试时用 `./scripts/test-rust.sh --embedded`：构建前端，仅为缺失资源创建测试桩，结束后清理，不覆盖真实内核。资源测试覆盖页面/PWA 与内核解包；普通 Cargo 默认构建仍须先准备资源。
 
+真实内核验收用 `./scripts/test-netns.sh [miao-rust 路径]`，默认运行 `target/debug/miao-rust`，须先准备真实资源并执行 `cargo build --locked -p miao-cli`。需 Linux、Bun、iproute2、util-linux 和 root/sudo。脚本在独立网络/挂载/PID 命名空间内验证启动、重载、规则/DNS 配置、策略回退、停止与 TUN 清理；总超时 120 秒，退出销毁测试环境。虚拟上联网卡不通外网，因此不验证远端代理的实际转发；此检查独立执行，不纳入普通 `quick/all`。
+
+状态查询微基准：`cargo test -p miao-core --locked --no-default-features --release benchmark_status_projection -- --ignored --nocapture`，比较完整配置复制与精简读模型，覆盖空配置及 100/10000 个节点和规则。仅测状态投影，不含 HTTP/内核查询；耗时不作为 CI 断言。
+
 - 默认 Cargo 检查覆盖 core + cli；不要用 `cargo test --workspace`，它会额外构建桌面壳和 WebKit。
 - 测试用临时目录、假内核、localhost 订阅；`spawn_server` 设置 `skip_extract: true`，注入隔离配置、运行目录与 `volatile_path`，不得读写生产目录或启动真实 TUN。网络验收用独立网络命名空间或专用机器。
 - 修改 shell 跑 `shellcheck`，修改 workflow 跑 `actionlint`；前端约定见[检查与测试](frontend-rsbuild/README.md#检查与测试)。

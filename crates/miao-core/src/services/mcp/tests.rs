@@ -292,13 +292,18 @@ async fn get_status_works_when_stopped_without_network() {
     let selected = crate::models::NodeMultiplier::parse("2.5").unwrap();
     let state = state(Config {
         max_multiplier: Some(selected),
+        route_mode: crate::models::RouteMode::Global,
+        mcp: true,
+        nodes: vec![
+            json!({"tag": "manual-a"}).to_string(),
+            json!({"tag": "manual-b"}).to_string(),
+        ],
         ..Config::default()
     });
     *state.node_select_preference.write().await =
         crate::models::NodeSelect::Fastest(crate::models::Region::Jp);
     *state.available_multipliers.write().await = vec![
         crate::models::NodeMultiplier::ONE,
-        selected,
         crate::models::NodeMultiplier::parse("6.5").unwrap(),
     ];
     let response = call(
@@ -315,12 +320,32 @@ async fn get_status_works_when_stopped_without_network() {
     assert_eq!(response["result"]["structuredContent"], payload);
     assert_eq!(payload["running"], false);
     assert_eq!(payload["ready"], false);
-    assert_eq!(payload["route_mode"], "rule");
+    assert_eq!(payload["route_mode"], "global");
     assert_eq!(payload["node_select"], "manual");
     assert_eq!(payload["requested_node_select"], "fastest_jp");
     assert_eq!(payload["max_multiplier"], "2.5");
     assert_eq!(payload["multiplier_options"], json!(["1", "2.5", "6.5"]));
-    assert_eq!(payload["mcp"], false);
+    assert_eq!(payload["mcp"], true);
+    assert_eq!(payload["node_count"], 2);
+    let rest = crate::services::commands::service::get_status(state.clone()).await;
+    let rest = serde_json::to_value(rest.data.unwrap()).unwrap();
+    for field in [
+        "running",
+        "ready",
+        "route_mode",
+        "node_select",
+        "requested_node_select",
+        "max_multiplier",
+        "multiplier_options",
+        "mcp",
+    ] {
+        assert_eq!(rest[field], payload[field], "status field {field}");
+    }
+    assert_eq!(
+        state.available_multipliers.read().await.len(),
+        2,
+        "including the current cap in the response must not modify the node-derived options"
+    );
     assert_eq!(
         payload["upgrade_supported"],
         crate::platform::upgrade_supported()

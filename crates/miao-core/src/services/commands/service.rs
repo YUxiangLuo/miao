@@ -28,8 +28,7 @@ pub async fn get_status(state: Arc<AppState>) -> CommandReply<StatusData> {
         .load(std::sync::atomic::Ordering::Relaxed);
     let warnings = runtime_warnings(&state).await;
     let warning = legacy_warning(&warnings);
-    let config_status = runtime_config_status(&state).await;
-    let config = config_status.config;
+    let config = runtime_config_status(&state).await;
 
     success(
         if running { "running" } else { "stopped" },
@@ -42,9 +41,9 @@ pub async fn get_status(state: Arc<AppState>) -> CommandReply<StatusData> {
             initializing,
             route_mode: config.route_mode,
             node_select: config.node_select,
-            requested_node_select: config_status.requested_node_select,
+            requested_node_select: config.requested_node_select,
             max_multiplier: config.max_multiplier.map(|value| value.as_config_value()),
-            multiplier_options: config_status
+            multiplier_options: config
                 .multiplier_options
                 .into_iter()
                 .map(|value| value.as_config_value())

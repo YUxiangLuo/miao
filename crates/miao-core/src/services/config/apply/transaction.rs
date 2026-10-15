@@ -517,14 +517,7 @@ async fn restore_after_apply_failure(
     let bindings_restore =
         restore_file_snapshot(&state.runtime_paths.node_bindings, bindings_snapshot).await;
 
-    match (runtime_restore, bindings_restore) {
-        (Ok(()), Ok(())) => Ok(()),
-        (Err(runtime_err), Ok(())) => Err(runtime_err),
-        (Ok(()), Err(bindings_err)) => Err(bindings_err),
-        (Err(runtime_err), Err(bindings_err)) => Err(AppError::message(format!(
-            "Runtime rollback failed: {runtime_err}. Bindings rollback failed: {bindings_err}"
-        ))),
-    }
+    combine_rollback_results(runtime_restore, bindings_restore)
 }
 
 // Low-level fault-injection tests supply their own before/candidate snapshots.

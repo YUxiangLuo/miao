@@ -158,7 +158,17 @@ async fn restore_runtime_files(
         restore_file_snapshot(&state.runtime_paths.active_config, old_runtime).await;
     let bindings_rollback =
         restore_file_snapshot(&state.runtime_paths.node_bindings, old_bindings).await;
-    runtime_rollback.and(bindings_rollback)
+    combine_rollback_results(runtime_rollback, bindings_rollback)
+}
+
+fn combine_rollback_results(runtime: AppResult<()>, bindings: AppResult<()>) -> AppResult<()> {
+    match (runtime, bindings) {
+        (Ok(()), Ok(())) => Ok(()),
+        (Err(err), Ok(())) | (Ok(()), Err(err)) => Err(err),
+        (Err(runtime_err), Err(bindings_err)) => Err(AppError::message(format!(
+            "Runtime rollback failed: {runtime_err}. Bindings rollback failed: {bindings_err}"
+        ))),
+    }
 }
 
 async fn commit_runtime_files(
@@ -450,6 +460,8 @@ pub(super) use transaction::{
 
 #[cfg(test)]
 mod edit_tests;
+#[cfg(test)]
+mod rollback_tests;
 #[cfg(all(test, unix))]
 mod transaction_tests;
 
