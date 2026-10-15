@@ -7,39 +7,54 @@
   </p>
 </div>
 
-Miao 将 sing-box 内核、分流规则和 Web 面板打包为单个可执行文件，通过 TUN 接管整机流量。仅支持 Linux / OpenWrt amd64、arm64。
+Miao 将 sing-box 内核、分流规则和 Web 面板打包为单个可执行文件，通过 TUN 接管整机流量。支持 Linux / OpenWrt，提供 amd64、arm64 两种架构。
 
-支持[七种节点协议](docs/kernel.md#能力与裁剪)、订阅管理、自动选节点、自定义分流和 MCP 控制。
+支持订阅管理、按地区自动选最快节点、自定义分流、定时刷新和 MCP 控制。节点协议见[内核能力](docs/kernel.md#能力与裁剪)。
+
+<details>
+<summary>查看控制面板</summary>
 
 <img width="1440" height="1400" alt="Miao 控制面板" src="https://github.com/user-attachments/assets/320dd0bb-f1da-4bf9-99ab-6c04c3c2c95b" />
 
+</details>
+
 ## 安装与启动
 
-每个 [Release](https://github.com/YUxiangLuo/miao/releases/latest) 仅包含 amd64、arm64 两个 Linux 二进制及 GitHub 自动生成的源码 ZIP/TAR.GZ。私有仓库需访问权限；已登录的 GitHub CLI 可下载并校验二进制，arm64 替换文件名中的 `amd64`：
+从 [Release](https://github.com/YUxiangLuo/miao/releases/latest) 下载对应二进制。发布附件为两个架构的程序，源码 ZIP/TAR.GZ 由 GitHub 自动生成。
+
+| 主机架构（`uname -m`） | 下载文件 |
+| --- | --- |
+| `x86_64` | `miao-rust-linux-amd64` |
+| `aarch64` | `miao-rust-linux-arm64` |
+
+先按[下载与校验](docs/platforms.md#下载与校验)核对 SHA-256，私有仓库需使用有访问权限的账号。启动需要 root 权限，TUN 和 Clash API 不支持多开，请先退出已有实例。
+
+以下以 amd64 为例，arm64 替换文件名；OpenWrt 以 root 直接运行，省略 `sudo`：
 
 ```bash
-repo=YUxiangLuo/miao
-asset=miao-rust-linux-amd64
-tag=$(gh release view --repo "$repo" --json tagName -q .tagName) &&
-digest=$(gh api "repos/$repo/releases/tags/$tag" --jq ".assets[] | select(.name == \"$asset\") | .digest") &&
-[[ "$digest" =~ ^sha256:[0-9a-fA-F]{64}$ ]] &&
-gh release download "$tag" --repo "$repo" --pattern "$asset" &&
-printf '%s  %s\n' "${digest#sha256:}" "$asset" | sha256sum -c - &&
-chmod +x "$asset" &&
-sudo ./"$asset"
+chmod +x ./miao-rust-linux-amd64 &&
+sudo ./miao-rust-linux-amd64
 ```
 
-校验通过后再运行，面板地址为 `http://localhost:6161`。OpenWrt 以 root 运行，无需 `sudo`。**面板无鉴权，默认监听所有网卡，只应允许可信设备访问。**
+浏览器访问 `http://<设备IP>:6161`（本机为 `http://localhost:6161`），添加订阅或节点。**面板和 MCP 无鉴权，默认监听所有网卡，只应允许可信设备访问。**
 
-也可使用临时订阅，以“日本最快”启动；正常退出后清理，不改写已有配置：
+临时订阅与启动参数见[配置参考](docs/config.md#命令行启动)；systemd Linux 的服务安装、升级和卸载见[平台说明](docs/platforms.md#升级与卸载)。
+
+## 从源码构建
+
+需要 Rust、Bun；首次构建还需 Go、Git、curl 准备内核与规则。在仓库根目录执行：
 
 ```bash
-sudo ./miao-rust-linux-amd64 --sub 'https://your-subscription-url' JP
+./dev.sh build
 ```
 
-地区、配置文件与临时运行限制见[配置参考](docs/config.md#命令行启动)。TUN 和 Clash API 不支持多开，请先退出已有实例。
+产物为 `target/release/miao-rust`。使用当前源码安装或更新 systemd 服务：
 
-systemd Linux 可[安装为服务](docs/platforms.md#升级与卸载)；OpenWrt 运行方式见平台说明。
+```bash
+sudo bash install.sh ./target/release/miao-rust
+```
+
+安装保留现有配置并重启服务，期间会短暂断网。交叉编译、测试和发布见[开发指南](docs/development.md)。
 
 ## 文档
 
@@ -51,6 +66,6 @@ systemd Linux 可[安装为服务](docs/platforms.md#升级与卸载)；OpenWrt 
 | 修改面板或内核 | [前端开发](frontend-rsbuild/README.md)、[内核维护](docs/kernel.md) |
 | 修改配置与运行逻辑 | [状态与事务](docs/runtime-state.md)、[Profile 路径](docs/profiles.md) |
 
-[官网与 FAQ](https://miao.vesein.dev) · [Miao 源码许可](LICENSE) · [内核来源与许可](docs/kernel.md#来源与许可)
+[Miao 源码许可](LICENSE) · [内核来源与许可](docs/kernel.md#来源与许可)
 
 相关服务：[Hysteria2 直连机场](https://nachoneko.cc/#/register?code=7ofhHt8x)。
