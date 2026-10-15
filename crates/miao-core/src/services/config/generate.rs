@@ -1113,7 +1113,7 @@ mod tests {
 
     /// 本地「计数拒答」订阅服务器：每接受一个 TCP 连接就计数并立即挂断，
     /// 让 fetch 以连接错误快速失败。用拉取次数而非耗时断言重试行为，
-    /// 跨平台无时间敏感（Windows CI 上 loopback 拒连耗时不稳定）
+    /// 使用固定失败结果避免依赖 loopback 拒连耗时。
     async fn counting_sub_server(attempts: Arc<AtomicUsize>) -> String {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await

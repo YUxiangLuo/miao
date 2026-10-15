@@ -4,13 +4,10 @@ use std::path::Path;
 pub(super) enum PreferenceStore {
     Runtime,
     Working,
-    Persistent,
 }
 
-fn store_for(windows: bool, openwrt_like: bool, pid1: &str) -> PreferenceStore {
-    if windows {
-        PreferenceStore::Persistent
-    } else if openwrt_like || pid1.trim() != "systemd" {
+fn store_for(openwrt_like: bool, pid1: &str) -> PreferenceStore {
+    if openwrt_like || pid1.trim() != "systemd" {
         PreferenceStore::Runtime
     } else {
         PreferenceStore::Working
@@ -21,7 +18,7 @@ pub(super) fn preference_store() -> PreferenceStore {
     let os_release = std::fs::read_to_string("/etc/os-release").ok();
     let openwrt = openwrt_like_from_paths(|path| Path::new(path).exists(), os_release.as_deref());
     let pid1 = std::fs::read_to_string("/proc/1/comm").unwrap_or_default();
-    store_for(cfg!(windows), openwrt, &pid1)
+    store_for(openwrt, &pid1)
 }
 
 fn os_release_looks_like_openwrt(content: &str) -> bool {
@@ -47,12 +44,11 @@ fn openwrt_like_from_paths(exists: impl Fn(&str) -> bool, os_release: Option<&st
 mod tests {
     use super::*;
     #[test]
-    fn persistence_policy_preserves_windows_systemd_and_flash_safe_defaults() {
+    fn persistence_policy_preserves_systemd_and_flash_safe_defaults() {
         for openwrt in [true, false] {
             for pid1 in ["systemd", "procd", "", "init"] {
-                assert_eq!(store_for(true, openwrt, pid1), PreferenceStore::Persistent);
                 assert_eq!(
-                    store_for(false, openwrt, pid1),
+                    store_for(openwrt, pid1),
                     if !openwrt && pid1 == "systemd" {
                         PreferenceStore::Working
                     } else {

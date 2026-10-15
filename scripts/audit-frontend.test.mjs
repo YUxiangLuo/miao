@@ -4,7 +4,6 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { spawnSync } from 'node:child_process'
 
-const shellTest = test.skipIf(process.platform === 'win32')
 const audit = new URL('./audit-frontend.sh', import.meta.url).pathname
 
 function runAudit(failures, message) {
@@ -31,27 +30,27 @@ echo 'No vulnerabilities found'
 
 const unavailable = 'error: POST https://registry.npmjs.org/-/npm/v1/security/advisories/bulk - 503'
 
-shellTest('audit recovers from a temporary registry outage', () => {
+test('audit recovers from a temporary registry outage', () => {
   const result = runAudit(2, unavailable)
   expect(result.status).toBe(0)
   expect(result.attempts).toBe(3)
 })
 
-shellTest('audit fails after bounded retries if the registry stays unavailable', () => {
+test('audit fails after bounded retries if the registry stays unavailable', () => {
   const result = runAudit(5, unavailable)
   expect(result.status).toBe(1)
   expect(result.attempts).toBe(3)
 })
 
 for (const message of ['1 high vulnerability found', 'error: unknown audit failure']) {
-  shellTest(`audit fails immediately for ${message}`, () => {
+  test(`audit fails immediately for ${message}`, () => {
     const result = runAudit(1, message)
     expect(result.status).toBe(1)
     expect(result.attempts).toBe(1)
   })
 }
 
-shellTest('successful audit is not retried', () => {
+test('successful audit is not retried', () => {
   const result = runAudit(0, '')
   expect(result.status).toBe(0)
   expect(result.attempts).toBe(1)

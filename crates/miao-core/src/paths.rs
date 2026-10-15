@@ -69,16 +69,7 @@ impl RuntimePaths {
 }
 
 pub(crate) fn is_standard_config(path: &std::path::Path) -> bool {
-    #[cfg(windows)]
-    {
-        path.file_name()
-            .and_then(|name| name.to_str())
-            .is_some_and(|name| name.eq_ignore_ascii_case(CONFIG_FILENAME))
-    }
-    #[cfg(not(windows))]
-    {
-        path.file_name() == Some(std::ffi::OsStr::new(CONFIG_FILENAME))
-    }
+    path.file_name() == Some(std::ffi::OsStr::new(CONFIG_FILENAME))
 }
 
 /// Stable, lossless identity for a resolved config path. Specify the encoding
@@ -86,18 +77,12 @@ pub(crate) fn is_standard_config(path: &std::path::Path) -> bool {
 pub(crate) fn profile_id(path: &std::path::Path) -> String {
     use sha2::{Digest, Sha256};
     let mut hash = Sha256::new();
-    #[cfg(unix)]
+
     {
         use std::os::unix::ffi::OsStrExt;
         hash.update(path.as_os_str().as_bytes());
     }
-    #[cfg(windows)]
-    {
-        use std::os::windows::ffi::OsStrExt;
-        for unit in path.as_os_str().encode_wide() {
-            hash.update(unit.to_le_bytes());
-        }
-    }
+
     hex::encode(hash.finalize())
 }
 
@@ -160,31 +145,8 @@ fn resolve_config_path_from_parts(
     }
 }
 
-/// Windows app-data folder. Must not be `$LOCALAPPDATA\Miao` — that is the
-/// current-user NSIS install dir on a case-insensitive volume.
-pub const WINDOWS_APP_DIR: &str = "io.github.yuxiangluo.miao";
-
-pub fn platform_data_dir() -> PathBuf {
-    if cfg!(windows) {
-        std::env::var_os("LOCALAPPDATA")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from(r"C:\ProgramData"))
-            .join(WINDOWS_APP_DIR)
-    } else {
-        PathBuf::from("/etc/miao")
-    }
-}
-
 pub fn platform_default_config_path() -> PathBuf {
-    if cfg!(windows) {
-        platform_data_dir().join(CONFIG_FILENAME)
-    } else {
-        PathBuf::from(ETC_CONFIG_PATH)
-    }
-}
-
-pub fn default_log_path() -> PathBuf {
-    platform_data_dir().join("miao.log")
+    PathBuf::from(ETC_CONFIG_PATH)
 }
 
 #[cfg(test)]
@@ -195,21 +157,10 @@ mod tests {
 
     #[test]
     fn persisted_profile_id_encoding_is_stable() {
-        #[cfg(unix)]
         assert_eq!(
             super::profile_id(std::path::Path::new("/profiles/travel.yaml")),
             "c63470fcbe3b2d2241bbdf6030603413f3eebc98b8b7287e1f53b32e9ade5545"
         );
-        #[cfg(windows)]
-        {
-            assert_eq!(
-                super::profile_id(std::path::Path::new(r"C:\profiles\travel.yaml")),
-                "0b8ad46865d2941794a15c90f2f8c780a2897c304b063d5e44e80f0ecbc03f46"
-            );
-            assert!(super::is_standard_config(std::path::Path::new(
-                "CONFIG.YAML"
-            )));
-        }
     }
 
     #[test]
@@ -281,29 +232,11 @@ mod tests {
         assert_eq!(resolution.source, ConfigPathSource::EtcDefault);
     }
 
-    #[cfg(not(windows))]
     #[test]
     fn platform_default_config_is_etc_on_unix() {
         assert_eq!(
             super::platform_default_config_path(),
             PathBuf::from(super::ETC_CONFIG_PATH)
-        );
-        assert_eq!(
-            super::default_log_path(),
-            PathBuf::from("/etc/miao/miao.log")
-        );
-    }
-
-    #[cfg(windows)]
-    #[test]
-    fn platform_paths_live_under_local_app_data_on_windows() {
-        let data_dir = super::platform_data_dir();
-        assert!(data_dir.ends_with(super::WINDOWS_APP_DIR));
-        assert!(!data_dir.ends_with("miao"));
-        assert_eq!(super::default_log_path(), data_dir.join("miao.log"));
-        assert_eq!(
-            super::platform_default_config_path(),
-            data_dir.join(super::CONFIG_FILENAME)
         );
     }
 }

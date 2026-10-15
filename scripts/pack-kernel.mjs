@@ -30,8 +30,8 @@ export function writePackedKernel(base, packed) {
 
 if (import.meta.main) {
   const [, , path, target] = process.argv
-  if (!path || !['amd64', 'arm64', 'windows-amd64'].includes(target)) {
-    throw new Error('Usage: bun pack-kernel.mjs <binary> <amd64|arm64|windows-amd64>')
+  if (!path || !['amd64', 'arm64'].includes(target)) {
+    throw new Error('Usage: bun pack-kernel.mjs <binary> <amd64|arm64>')
   }
   const source = readSource()
   const packed = packKernel(readFileSync(path), {

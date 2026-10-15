@@ -205,7 +205,7 @@ pub const DEFAULT_PORT: u16 = 6161;
 
 /// 易变配置层：高频变更的运行选择（节点选择策略 / 路由模式）。
 /// 与稳定层 config.yaml 分文件落盘：OpenWrt/Linux 写 tmpfs（系统重启即回默认），
-/// Windows 写应用数据目录（持久）。文件缺失/读不出/损坏等价于「无覆盖」，
+/// 文件缺失/读不出/损坏等价于「无覆盖」，
 /// 此时 config.yaml 里的同名字段（旧版遗留或手写的启动默认值）生效。
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct VolatileConfig {

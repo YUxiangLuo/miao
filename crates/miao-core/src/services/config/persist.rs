@@ -254,7 +254,6 @@ async fn write_file_atomic_inner(
             .await
             .map_err(|e| AppError::context("Failed to atomically rename file", e))?;
 
-        #[cfg(unix)]
         {
             #[cfg(test)]
             if fail_directory_sync {
@@ -432,7 +431,7 @@ async fn remove_file_durable(path: &Path) -> AppResult<()> {
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(()),
         Err(err) => return Err(AppError::context("Failed to remove stable config", err)),
     }
-    #[cfg(unix)]
+
     {
         let parent = path
             .parent()
@@ -777,7 +776,6 @@ mod tests {
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }
 
-    #[cfg(unix)]
     #[tokio::test]
     async fn atomic_write_reports_that_rename_committed_before_directory_sync_failure() {
         let temp_dir = tempfile::tempdir().unwrap();
@@ -819,7 +817,6 @@ mod tests {
         assert!(config_path.is_dir());
     }
 
-    #[cfg(unix)]
     #[tokio::test]
     async fn save_config_layered_restores_both_files_and_memory_after_post_rename_failure() {
         use crate::models::{Config, NodeSelect, Region};
@@ -882,7 +879,6 @@ mod tests {
         let _ = tokio::fs::remove_dir_all(&base).await;
     }
 
-    #[cfg(unix)]
     #[tokio::test]
     async fn layered_post_rename_failure_removes_previously_absent_files() {
         for (fail_stable, fail_volatile) in [(true, false), (false, true)] {
@@ -914,7 +910,6 @@ mod tests {
         }
     }
 
-    #[cfg(unix)]
     #[tokio::test]
     async fn save_config_layered_reports_primary_and_rollback_failures() {
         use crate::models::Config;
@@ -952,7 +947,6 @@ mod tests {
         );
     }
 
-    #[cfg(unix)]
     #[tokio::test]
     async fn save_config_layered_skips_unchanged_stable_layer() {
         use crate::models::{Config, NodeSelect, Region};

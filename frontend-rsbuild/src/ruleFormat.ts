@@ -22,22 +22,6 @@ export const RULE_FIELD_OPTIONS: RuleFieldOption[] = [
   { value: 'process_path', label: '进程路径', placeholder: '/usr/bin/curl' },
 ]
 
-export function ruleFieldOptions(platform = 'linux'): RuleFieldOption[] {
-  if (platform !== 'windows') {
-    return RULE_FIELD_OPTIONS
-  }
-
-  return RULE_FIELD_OPTIONS.map((option) => {
-    if (option.value === 'process_name') {
-      return { ...option, placeholder: 'qbittorrent.exe' }
-    }
-    if (option.value === 'process_path') {
-      return { ...option, placeholder: 'C:\\Program Files\\qBittorrent\\qbittorrent.exe' }
-    }
-    return option
-  })
-}
-
 export interface RuleTargetOption {
   value: string
   label: string

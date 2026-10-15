@@ -77,10 +77,6 @@ describe('processNameOf', () => {
     expect(processNameOf('/opt/brave-origin-bin/brave (alice)')).toBe('brave')
   })
 
-  it('handles Windows paths and NT device paths', () => {
-    expect(processNameOf('C:\\Program Files\\qBittorrent\\qbittorrent.exe')).toBe('qbittorrent.exe')
-    expect(processNameOf('\\Device\\HarddiskVolume3\\Windows\\System32\\svchost.exe')).toBe('svchost.exe')
-  })
 
   it('returns null for empty input', () => {
     expect(processNameOf('')).toBeNull()

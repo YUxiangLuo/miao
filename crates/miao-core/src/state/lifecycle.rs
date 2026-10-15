@@ -25,8 +25,6 @@ impl Default for RuntimeSnapshot {
 #[derive(Clone, Copy, Debug)]
 pub enum KernelOperation {
     Start,
-    // Windows uses a stop/start sequence instead of Unix SIGHUP.
-    #[cfg_attr(not(unix), allow(dead_code))]
     Reload,
     Stop,
 }

@@ -1,38 +1,36 @@
 use std::sync::Arc;
 use std::time::Instant;
-#[cfg(not(windows))]
+
 use std::{fs, path::Path, sync::atomic::Ordering};
 
-#[cfg(not(windows))]
 use futures::StreamExt;
-#[cfg(not(windows))]
+
 use sha2::{Digest, Sha256};
-#[cfg(not(windows))]
+
 use tokio::io::AsyncWriteExt;
-#[cfg(not(windows))]
+
 use tokio::time::sleep;
 use tokio::time::Duration;
-#[cfg(not(windows))]
+
 use tracing::info;
 use tracing::{error, warn};
 
 use crate::error::{AppError, AppResult};
-#[cfg(not(windows))]
+
 use crate::models::GitHubAsset;
 use crate::models::{GitHubRelease, VersionInfo};
 use crate::services::singbox::is_sing_box_running;
-#[cfg(not(windows))]
+
 use crate::services::singbox::{start_sing_internal, stop_sing_internal};
 use crate::state::{AppState, VersionCache};
 use crate::VERSION;
 
 const CACHE_TTL: Duration = Duration::from_secs(300);
-#[cfg(not(windows))]
+
 const DOWNLOAD_MAX_ATTEMPTS: u32 = 3;
-#[cfg(not(windows))]
+
 const DOWNLOAD_RETRY_BASE_MS: u64 = 500;
 
-#[cfg(not(windows))]
 #[derive(serde::Serialize, serde::Deserialize)]
 struct UpgradePending {
     expected_version: String,
@@ -41,7 +39,6 @@ struct UpgradePending {
     boot_pid: Option<u32>,
 }
 
-#[cfg(unix)]
 fn process_is_alive(pid: u32) -> bool {
     use nix::{errno::Errno, sys::signal, unistd::Pid};
 
@@ -54,17 +51,10 @@ fn process_is_alive(pid: u32) -> bool {
     }
 }
 
-#[cfg(all(not(windows), not(unix)))]
-fn process_is_alive(_pid: u32) -> bool {
-    false
-}
-
-#[cfg(not(windows))]
 fn upgrade_pending_path(current_exe: &Path) -> std::path::PathBuf {
     std::path::PathBuf::from(format!("{}.upgrade-pending.json", current_exe.display()))
 }
 
-#[cfg(not(windows))]
 fn write_upgrade_pending(path: &Path, pending: &UpgradePending) -> AppResult<()> {
     let temp = std::path::PathBuf::from(format!("{}.tmp", path.display()));
     let bytes = serde_json::to_vec(pending)?;
@@ -81,7 +71,6 @@ fn write_upgrade_pending(path: &Path, pending: &UpgradePending) -> AppResult<()>
 /// the new binary moves `installed` to `booting`; a second boot before embedded
 /// extraction and the expected data plane become healthy rolls back to the
 /// retained executable.
-#[cfg(not(windows))]
 fn upgrade_requires_rollback(current_exe: &Path) -> AppResult<bool> {
     let backup = std::path::PathBuf::from(format!("{}.bak", current_exe.display()));
     let pending_path = upgrade_pending_path(current_exe);
@@ -118,7 +107,6 @@ fn upgrade_requires_rollback(current_exe: &Path) -> AppResult<bool> {
     Ok(pending.state == "booting" && backup.exists())
 }
 
-#[cfg(not(windows))]
 pub fn reconcile_pending_upgrade() -> AppResult<()> {
     let current_exe = std::env::current_exe()?;
     if !upgrade_requires_rollback(&current_exe)? {
@@ -144,12 +132,6 @@ pub fn reconcile_pending_upgrade() -> AppResult<()> {
     )))
 }
 
-#[cfg(windows)]
-pub fn reconcile_pending_upgrade() -> AppResult<()> {
-    Ok(())
-}
-
-#[cfg(not(windows))]
 pub fn mark_upgrade_healthy() {
     let Ok(current_exe) = std::env::current_exe() else {
         return;
@@ -157,7 +139,6 @@ pub fn mark_upgrade_healthy() {
     mark_upgrade_healthy_at(&current_exe);
 }
 
-#[cfg(not(windows))]
 fn mark_upgrade_healthy_at(current_exe: &Path) {
     let pending = upgrade_pending_path(current_exe);
     if !pending.exists() {
@@ -168,68 +149,7 @@ fn mark_upgrade_healthy_at(current_exe: &Path) {
     let _ = fs::remove_file(pending);
 }
 
-#[cfg(windows)]
-pub fn mark_upgrade_healthy() {}
-
-/// 解析 `sha256sum` 输出首行：`<64 hex>[  *]<filename>`
-#[cfg(any(not(windows), test))]
-fn parse_sha256sum_line(line: &str) -> AppResult<String> {
-    let line = line.trim();
-    let hex = line
-        .split_whitespace()
-        .next()
-        .ok_or_else(|| AppError::message("checksum file is empty"))?;
-    if hex.len() != 64 || !hex.chars().all(|c| c.is_ascii_hexdigit()) {
-        return Err(AppError::message(format!(
-            "invalid SHA256 in checksum file (first token): {line}"
-        )));
-    }
-    Ok(hex.to_ascii_lowercase())
-}
-
-#[cfg(not(windows))]
-async fn fetch_checksum_hex(client: &reqwest::Client, url: &str) -> AppResult<String> {
-    let text = client
-        .get(url)
-        .timeout(Duration::from_secs(30))
-        .header("User-Agent", "miao")
-        .send()
-        .await?
-        .error_for_status()
-        .map_err(|e| AppError::context("Failed to download checksum file", e))?
-        .text()
-        .await
-        .map_err(|e| AppError::context("Failed to read checksum body", e))?;
-
-    let first = text.lines().next().unwrap_or("").trim();
-    parse_sha256sum_line(first)
-}
-
-#[cfg(not(windows))]
-async fn fetch_checksum_hex_retried(client: &reqwest::Client, url: &str) -> AppResult<String> {
-    let mut last_err: Option<AppError> = None;
-    for attempt in 0..DOWNLOAD_MAX_ATTEMPTS {
-        if attempt > 0 {
-            sleep(Duration::from_millis(
-                DOWNLOAD_RETRY_BASE_MS * (1 << (attempt - 1)),
-            ))
-            .await;
-            warn!(
-                attempt = attempt + 1,
-                max = DOWNLOAD_MAX_ATTEMPTS,
-                "retrying checksum download"
-            );
-        }
-        match fetch_checksum_hex(client, url).await {
-            Ok(v) => return Ok(v),
-            Err(e) => last_err = Some(e),
-        }
-    }
-    Err(last_err.expect("checksum retry loop"))
-}
-
 /// 流式下载到临时文件并增量 SHA256；成功时文件已关闭且校验通过。
-#[cfg(not(windows))]
 async fn download_binary_streaming_once(
     client: &reqwest::Client,
     url: &str,
@@ -310,7 +230,7 @@ async fn download_binary_streaming_once(
     if actual_hex != expected_hex {
         let _ = tokio::fs::remove_file(temp_path).await;
         return Err(AppError::message(format!(
-            "SHA256 mismatch: expected {expected_hex} (from checksum file), got {actual_hex}"
+            "SHA256 mismatch: expected {expected_hex} (from GitHub release metadata), got {actual_hex}"
         )));
     }
 
@@ -322,7 +242,6 @@ async fn download_binary_streaming_once(
     Ok(())
 }
 
-#[cfg(not(windows))]
 async fn download_binary_streaming_retried(
     client: &reqwest::Client,
     url: &str,
@@ -389,7 +308,6 @@ async fn fetch_latest_release(
     Ok(release)
 }
 
-#[cfg(not(windows))]
 async fn invalidate_release_cache(state: &Arc<AppState>) {
     state.version_cache.store(Arc::new(VersionCache {
         release: None,
@@ -399,16 +317,13 @@ async fn invalidate_release_cache(state: &Arc<AppState>) {
 
 pub async fn get_version_info(state: &Arc<AppState>) -> VersionInfo {
     let current = current_version();
-    // Skip GitHub while the kernel is down (no TUN / likely no route). Still
-    // fetch when in-app upgrade is unsupported so Windows can show a chip.
+    // Skip GitHub while the kernel is down (no TUN / likely no route).
     if !is_sing_box_running(state).await {
         return version_info_without_release(current);
     }
 
     match fetch_latest_release(&state.http_client, state).await {
-        Ok(release) => {
-            version_info_from_release(current, &release, crate::platform::upgrade_supported())
-        }
+        Ok(release) => version_info_from_release(current, &release),
         Err(e) => {
             warn!(error = %e, "Failed to fetch latest release from GitHub");
             version_info_without_release(current)
@@ -416,14 +331,10 @@ pub async fn get_version_info(state: &Arc<AppState>) -> VersionInfo {
     }
 }
 
-fn version_info_from_release(
-    current: String,
-    release: &GitHubRelease,
-    upgrade_supported: bool,
-) -> VersionInfo {
+fn version_info_from_release(current: String, release: &GitHubRelease) -> VersionInfo {
     let latest = release.tag_name.clone();
     let has_update = release_is_newer_than_current(&current, &latest);
-    let download_url = if upgrade_supported {
+    let download_url = {
         current_arch_asset_name().and_then(|asset_name| {
             release
                 .assets
@@ -431,8 +342,6 @@ fn version_info_from_release(
                 .find(|asset| asset.name == asset_name)
                 .map(|asset| asset.browser_download_url.clone())
         })
-    } else {
-        None
     };
 
     VersionInfo {
@@ -440,11 +349,10 @@ fn version_info_from_release(
         latest: Some(latest),
         has_update,
         download_url,
-        upgrade_supported,
+        upgrade_supported: true,
     }
 }
 
-#[cfg(not(windows))]
 fn get_temp_binary_path() -> String {
     let pid = std::process::id();
     let timestamp = std::time::SystemTime::now()
@@ -457,28 +365,24 @@ fn get_temp_binary_path() -> String {
         .into_owned()
 }
 
-#[cfg(not(windows))]
-fn checksum_asset_name(binary_asset_name: &str) -> String {
-    format!("{binary_asset_name}.sha256")
-}
-
-#[cfg(not(windows))]
-fn find_binary_and_checksum_assets<'a>(
+fn binary_asset_and_digest<'a>(
     release: &'a GitHubRelease,
     asset_name: &str,
-) -> AppResult<(&'a GitHubAsset, &'a GitHubAsset)> {
-    let sum_name = checksum_asset_name(asset_name);
+) -> AppResult<(&'a GitHubAsset, String)> {
     let binary = release
         .assets
         .iter()
         .find(|a| a.name == asset_name)
         .ok_or_else(|| AppError::message("No binary found for current architecture"))?;
-    let checksum = release.assets.iter().find(|a| a.name == sum_name).ok_or_else(|| {
-        AppError::message(format!(
-            "Release is missing checksum asset {sum_name}; upgrade requires a release that publishes .sha256 files"
-        ))
-    })?;
-    Ok((binary, checksum))
+    let hex = binary
+        .digest
+        .as_deref()
+        .and_then(|digest| digest.strip_prefix("sha256:"))
+        .filter(|hex| hex.len() == 64 && hex.bytes().all(|c| c.is_ascii_hexdigit()))
+        .ok_or_else(|| {
+            AppError::message("Release asset is missing a valid GitHub SHA256 digest")
+        })?;
+    Ok((binary, hex.to_ascii_lowercase()))
 }
 
 /// 将 `v1.2.3` / `1.2.3` 解析为 semver；解析失败返回 `None`。
@@ -509,7 +413,6 @@ fn release_is_newer_than_current(current: &str, release_tag: &str) -> bool {
 }
 
 /// 对已通过 SHA256 校验的临时文件 chmod 并执行 `--version` 核对。
-#[cfg(not(windows))]
 async fn verify_temp_binary_executable(temp_path: &Path, tag_name: &str) -> AppResult<()> {
     set_executable(temp_path).map_err(|e| AppError::context("Failed to chmod temp binary", e))?;
 
@@ -539,7 +442,6 @@ async fn verify_temp_binary_executable(temp_path: &Path, tag_name: &str) -> AppR
     Ok(())
 }
 
-#[cfg(any(not(windows), test))]
 fn stdout_version_matches_release(stdout: &str, tag_name: &str) -> bool {
     let lower = stdout.to_ascii_lowercase();
     if !lower.contains("miao") {
@@ -550,7 +452,6 @@ fn stdout_version_matches_release(stdout: &str, tag_name: &str) -> bool {
     stdout.contains(tag_trim) || stdout.contains(no_v)
 }
 
-#[cfg(not(windows))]
 pub async fn upgrade_binary(state: &Arc<AppState>) -> AppResult<String> {
     if state
         .upgrading
@@ -578,11 +479,7 @@ pub async fn upgrade_binary(state: &Arc<AppState>) -> AppResult<String> {
 
     let asset_name =
         current_arch_asset_name().ok_or_else(|| AppError::message("Unsupported architecture"))?;
-    let (binary_asset, checksum_asset) = find_binary_and_checksum_assets(&release, asset_name)?;
-
-    let expected_hex =
-        fetch_checksum_hex_retried(&state.http_client, &checksum_asset.browser_download_url)
-            .await?;
+    let (binary_asset, expected_hex) = binary_asset_and_digest(&release, asset_name)?;
 
     let temp_path = get_temp_binary_path();
     let temp_path = Path::new(&temp_path);
@@ -712,46 +609,18 @@ pub async fn upgrade_binary(state: &Arc<AppState>) -> AppResult<String> {
     Ok(new_version)
 }
 
-#[cfg(not(windows))]
 fn set_executable(path: &Path) -> std::io::Result<()> {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(path, fs::Permissions::from_mode(0o755))
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = path;
-        Ok(())
-    }
+    use std::os::unix::fs::PermissionsExt;
+    fs::set_permissions(path, fs::Permissions::from_mode(0o755))
 }
 
-#[cfg(not(windows))]
 fn exec_replace(command: &mut std::process::Command) -> std::io::Error {
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        command.exec()
-    }
-    #[cfg(not(unix))]
-    {
-        match command.spawn() {
-            Ok(_) => std::io::Error::other("spawned replacement process"),
-            Err(err) => err,
-        }
-    }
+    use std::os::unix::process::CommandExt;
+    command.exec()
 }
 
-#[cfg(not(windows))]
 fn upgrade_failure_log_path() -> std::path::PathBuf {
-    #[cfg(unix)]
-    {
-        std::path::PathBuf::from("/tmp/miao-upgrade-failure.log")
-    }
-    #[cfg(not(unix))]
-    {
-        std::env::temp_dir().join("miao-upgrade-failure.log")
-    }
+    std::path::PathBuf::from("/tmp/miao-upgrade-failure.log")
 }
 
 fn current_version() -> String {
@@ -759,10 +628,6 @@ fn current_version() -> String {
 }
 
 fn current_arch_asset_name() -> Option<&'static str> {
-    if cfg!(windows) {
-        return None;
-    }
-
     if cfg!(target_arch = "x86_64") {
         Some("miao-rust-linux-amd64")
     } else if cfg!(target_arch = "aarch64") {
@@ -778,7 +643,7 @@ fn version_info_without_release(current: String) -> VersionInfo {
         latest: None,
         has_update: false,
         download_url: None,
-        upgrade_supported: crate::platform::upgrade_supported(),
+        upgrade_supported: true,
     }
 }
 

@@ -14,7 +14,7 @@ use crate::{
     state::AppState,
 };
 
-/// Test thread names look like `foo::bar::baz`; `:` is illegal in Windows paths.
+/// Normalize test thread names to compact filesystem-safe components.
 fn safe_test_path_component(raw: &str) -> String {
     raw.chars()
         .map(|c| {
@@ -120,7 +120,7 @@ pub async fn response_json(response: axum::response::Response) -> Value {
 #[cfg(test)]
 mod tests {
     #[test]
-    fn test_path_component_strips_windows_illegal_chars() {
+    fn test_path_component_normalizes_punctuation() {
         assert_eq!(
             super::safe_test_path_component("services::config::tests::foo"),
             "services__config__tests__foo"

@@ -14,7 +14,7 @@ SELF_UPGRADE_BACKUP="${BIN_PATH}.bak"
 SELF_UPGRADE_PENDING="${BIN_PATH}.upgrade-pending.json"
 REPO=YUxiangLuo/miao
 LOCAL_BIN="${1:-}"
-BASE_URL="https://github.com/$REPO/releases/latest/download"
+RELEASE_API="https://api.github.com/repos/$REPO/releases/latest"
 REMOVE_SH_URL="https://raw.githubusercontent.com/$REPO/master/remove.sh"
 
 log() { echo "==> $*"; }
@@ -62,6 +62,35 @@ resolve_panel_port() {
   fi
   printf '6161\n'
 }
+
+download_release_binary() {
+  local name=$1 directory=$2 destination=$3 metadata url digest expected actual
+  for tool in jq sha256sum; do
+    if ! command -v "$tool" >/dev/null 2>&1; then
+      echo "缺少 $tool，请先安装后重试" >&2
+      return 1
+    fi
+  done
+  metadata="$directory/release.json"
+  download "$RELEASE_API" "$metadata"
+  # Resolve URL and digest from one release to avoid racing a newer latest tag.
+  url=$(jq -er --arg name "$name" '[.assets[] | select(.name == $name)] | select(length == 1) | .[0].browser_download_url | strings | select(startswith("https://"))' "$metadata") || return 1
+  digest=$(jq -er --arg name "$name" '.assets[] | select(.name == $name) | .digest | strings' "$metadata") || return 1
+  if [[ ! "$digest" =~ ^sha256:([[:xdigit:]]{64})$ ]]; then
+    echo "Release 缺少有效的 SHA256 摘要，已中止" >&2
+    return 1
+  fi
+  expected=${BASH_REMATCH[1],,}
+  download "$url" "$destination"
+  actual=$(sha256sum "$destination")
+  if [[ "${actual%% *}" != "$expected" ]]; then
+    echo "二进制 SHA256 校验失败，已中止" >&2
+    return 1
+  fi
+}
+
+# Sourcing exposes helpers without installing or touching services.
+if [[ ${BASH_SOURCE[0]:-$0} != "$0" ]]; then return 0; fi
 
 PANEL_PORT=$(resolve_panel_port)
 
@@ -113,25 +142,8 @@ if [[ -n "$LOCAL_BIN" ]]; then
   log "校验本地二进制: $LOCAL_BIN"
   cp "$LOCAL_BIN" "$candidate"
 else
-  checksum_file="$work_dir/$asset.sha256"
   log "下载最新 release（linux-$asset_arch）..."
-  download "$BASE_URL/$asset" "$candidate"
-  download "$BASE_URL/$asset.sha256" "$checksum_file"
-
-  if ! command -v sha256sum >/dev/null 2>&1; then
-    echo "缺少 sha256sum，无法校验下载文件" >&2
-    exit 1
-  fi
-  expected_sha=$(awk 'NR == 1 { print $1 }' "$checksum_file")
-  if [[ ! "$expected_sha" =~ ^[[:xdigit:]]{64}$ ]]; then
-    echo "发布校验文件格式无效" >&2
-    exit 1
-  fi
-  actual_sha=$(sha256sum "$candidate" | awk '{ print $1 }')
-  if [[ "${actual_sha,,}" != "${expected_sha,,}" ]]; then
-    echo "二进制 SHA256 校验失败，已中止" >&2
-    exit 1
-  fi
+  download_release_binary "$asset" "$work_dir" "$candidate"
 fi
 
 if [[ "$(head -c 4 "$candidate")" != $'\x7fELF' ]]; then

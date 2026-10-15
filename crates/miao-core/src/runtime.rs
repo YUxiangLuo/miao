@@ -31,8 +31,7 @@ use crate::services::{
 use crate::state::AppState;
 use crate::VERSION;
 
-/// How the panel process should start. The CLI opens a browser; the desktop
-/// shell supplies its own window and skips that.
+/// Configure a CLI or embedded server launch.
 #[derive(Clone, Debug, Default)]
 pub struct RuntimeOptions {
     pub open_browser: bool,
@@ -40,8 +39,7 @@ pub struct RuntimeOptions {
     /// Override the config `port`. `Some(0)` asks the OS for an ephemeral port.
     pub bind_port: Option<u16>,
     /// When the requested panel port is occupied, bind an ephemeral port
-    /// instead of failing. The desktop shell sets this: its single-instance
-    /// lock is the mutex, so the port is free to move.
+    /// instead of failing. Useful for isolated SDK instances and tests.
     pub port_fallback: bool,
     /// Select a config profile (missing file → in-memory default). Relative
     /// paths are resolved once. None uses default discovery, never host argv.
@@ -55,8 +53,7 @@ pub struct RuntimeOptions {
     /// kernel. This makes config transactions fully hermetic in integration
     /// tests and supports alternate runtime locations without global state.
     pub runtime_dir: Option<PathBuf>,
-    /// Override the log file. Windows defaults to
-    /// `%LOCALAPPDATA%\io.github.yuxiangluo.miao\miao.log`.
+    /// Write logs to this file instead of the default terminal output.
     pub log_path: Option<PathBuf>,
 }
 
@@ -109,7 +106,7 @@ pub async fn run() -> AppResult<()> {
         crate::cli::Command::Run(source) => source,
     };
 
-    crate::require_privileges();
+    crate::privilege::require_privileges();
 
     // Own the temporary --sub profile until initialization and the managed
     // kernel have shut down; never reuse the installed profile's preferences.
@@ -153,9 +150,6 @@ pub(crate) async fn spawn_resolved(
     if let Some(path) = log_path.clone() {
         let _ = crate::paths::set_active_log_path(path);
     }
-
-    #[cfg(windows)]
-    crate::services::singbox::ensure_hidden_console();
 
     crate::services::version::reconcile_pending_upgrade()?;
 
@@ -320,7 +314,7 @@ mod startup;
 
 use startup::initialize_runtime;
 pub(crate) use startup::recover_data_plane_once;
-#[cfg(all(test, unix))]
+#[cfg(test)]
 use startup::{
     initialize_runtime_locked, refresh_subscriptions_in_background, retry_failed_startup,
 };
@@ -358,24 +352,14 @@ async fn request_shutdown(handle: &mut ServerHandle) {
 }
 
 async fn wait_os_shutdown() {
-    #[cfg(unix)]
-    {
-        let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-            .expect("failed to install SIGTERM handler");
+    let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+        .expect("failed to install SIGTERM handler");
 
-        tokio::select! {
-            result = tokio::signal::ctrl_c() => {
-                result.expect("failed to install Ctrl+C handler");
-            }
-            _ = sigterm.recv() => {}
+    tokio::select! {
+        result = tokio::signal::ctrl_c() => {
+            result.expect("failed to install Ctrl+C handler");
         }
-    }
-
-    #[cfg(not(unix))]
-    {
-        tokio::signal::ctrl_c()
-            .await
-            .expect("failed to install Ctrl+C handler");
+        _ = sigterm.recv() => {}
     }
 }
 
@@ -438,14 +422,7 @@ fn install_tracing(log_path: Option<&std::path::Path>) {
 }
 
 fn panel_bind_addr(port: u16) -> String {
-    #[cfg(windows)]
-    {
-        format!("127.0.0.1:{port}")
-    }
-    #[cfg(not(windows))]
-    {
-        format!("0.0.0.0:{port}")
-    }
+    format!("0.0.0.0:{port}")
 }
 
 fn browser_launch_env() -> Vec<(String, String)> {

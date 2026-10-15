@@ -239,7 +239,6 @@ async fn mcp_setting_is_a_shared_persistence_only_command() {
     );
 }
 
-#[cfg(unix)]
 #[tokio::test]
 async fn concurrent_rest_and_mcp_node_adds_share_the_local_edit_lock() {
     use std::os::unix::fs::PermissionsExt;
@@ -347,7 +346,7 @@ fn subscription_refresh_result_preserves_the_refreshed_compatibility_field() {
 }
 
 #[tokio::test]
-#[cfg(unix)]
+
 async fn rest_subscription_refresh_retains_failed_fetch_details() {
     use std::os::unix::fs::PermissionsExt;
     let (_root, state) = isolated_stopped_state(Config {

@@ -41,7 +41,7 @@ export function customizationHash() {
   const hash = createHash('sha256')
   for (const path of files.sort()) {
     hash.update(relative(directory, path).replaceAll('\\', '/')).update('\0')
-    // Git may check out CRLF on Windows; all customization inputs are text.
+    // Normalize line endings in text customization inputs.
     hash.update(readFileSync(path, 'utf8').replaceAll('\r\n', '\n')).update('\0')
   }
   return hash.digest('hex')

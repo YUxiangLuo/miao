@@ -55,7 +55,6 @@ async fn http_probe_requires_success_and_bounds_a_stalled_response() {
     );
 }
 
-#[cfg(unix)]
 mod controller {
     use super::*;
     use std::collections::VecDeque;

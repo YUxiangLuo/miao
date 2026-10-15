@@ -33,9 +33,7 @@ pub(crate) struct ResolvedProfile {
 struct Environment {
     default_config: ConfigPathResolution,
     runtime_root: PathBuf,
-    data_dir: PathBuf,
     cwd: PathBuf,
-    windows: bool,
     preferences: PreferenceStore,
 }
 
@@ -44,9 +42,7 @@ impl Environment {
         Ok(Self {
             default_config: paths::resolve_default_config_path(),
             runtime_root: crate::services::singbox::get_sing_box_home(),
-            data_dir: paths::platform_data_dir(),
             cwd: std::env::current_dir()?,
-            windows: cfg!(windows),
             preferences: platform::preference_store(),
         })
     }
@@ -65,9 +61,7 @@ fn resolve_path(path: &Path, cwd: &Path) -> AppResult<PathBuf> {
     loop {
         match std::fs::canonicalize(ancestor) {
             Ok(mut resolved) => {
-                // Windows may report NotFound (rather than NotADirectory) for
-                // file/child. A canonicalized ancestor is not necessarily a
-                // directory: only directories can own the missing suffix.
+                // Only directories can own a missing path suffix.
                 if !tail.is_empty() && !std::fs::metadata(&resolved)?.is_dir() {
                     return Err(AppError::message(
                         "Profile path ancestor is not a directory",
@@ -148,21 +142,15 @@ impl ResolvedProfile {
         } else {
             match env.preferences {
                 PreferenceStore::Working => env.cwd.clone(),
-                PreferenceStore::Persistent => env.data_dir.clone(),
                 PreferenceStore::Runtime => unreachable!("handled above"),
             }
         };
         let volatile = match &options.volatile_path {
             Some(path) => resolve_path(path, &env.cwd)?,
-            None if overridden || !env.windows => runtime_dir.join("volatile.yaml"),
-            None if kind == ProfileKind::Named => persistent.join("volatile.yaml"),
-            None => env.data_dir.join("volatile.yaml"),
+            None => runtime_dir.join("volatile.yaml"),
         };
         let log = match &options.log_path {
             Some(path) => Some(resolve_path(path, &env.cwd)?),
-            None if env.windows && overridden => Some(runtime_dir.join("miao.log")),
-            // The installed desktop's log is process-scoped (tray "open log").
-            None if env.windows => Some(env.data_dir.join("miao.log")),
             None => None,
         };
         let runtime = RuntimePaths::new(runtime_dir, &config_path).with_preferences(

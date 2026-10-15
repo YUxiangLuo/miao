@@ -422,9 +422,9 @@ async fn tool_get_status(state: &Arc<AppState>) -> Result<JsonValue, String> {
             .into_iter()
             .map(|value| value.as_config_value())
             .collect::<Vec<_>>(),
-        "platform": if cfg!(windows) { "windows" } else { "linux" },
-        "vps_supported": crate::platform::vps_supported(),
-        "upgrade_supported": crate::platform::upgrade_supported(),
+        "platform": "linux",
+        "vps_supported": true,
+        "upgrade_supported": true,
         "mcp": config.mcp,
         "current_node": current_node,
         "node_count": node_count,

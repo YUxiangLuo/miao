@@ -9,7 +9,7 @@ export type ResourceReadResult<T> =
   | { status: 'superseded' }
 
 // 未拿到首个响应前的占位状态。vps_supported: true 与历史上的 undefined 等价
-// （消费方判断 `!== false`）；platform 兜底与 ruleFieldOptions 的默认参数一致。
+// 消费方判断 `!== false`，保留旧 API 的默认能力值。
 const INITIAL_STATUS: StatusData = {
   data_revision: 0,
   subscription_refresh: {

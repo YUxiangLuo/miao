@@ -3,7 +3,6 @@ use std::sync::Arc;
 use serde::Serialize;
 use serde_json::{json, Value as JsonValue};
 
-#[cfg(not(windows))]
 use crate::models::VpsDeployRequest;
 use crate::models::{
     BatchNodeRequest, DeleteNodeRequest, DeleteRuleRequest, MaxMultiplierRequest, McpRequest,
@@ -335,7 +334,6 @@ pub(super) async fn deploy_vps(
         .and_then(JsonValue::as_str)
         .ok_or_else(|| "Invalid params: missing `password`".to_string())?;
 
-    #[cfg(not(windows))]
     {
         command_payload(
             commands::vps::deploy_vps(
@@ -348,12 +346,6 @@ pub(super) async fn deploy_vps(
             .await,
         )
     }
-
-    #[cfg(windows)]
-    {
-        let _ = (state, ip, password);
-        Err("当前平台不支持 VPS 一键部署".to_string())
-    }
 }
 
 pub(super) async fn upgrade_miao(
@@ -362,7 +354,6 @@ pub(super) async fn upgrade_miao(
 ) -> Result<JsonValue, String> {
     require_confirmation(args, "升级并重启 Miao")?;
 
-    #[cfg(not(windows))]
     {
         let result = crate::services::version::upgrade_binary(state)
             .await
@@ -376,11 +367,5 @@ pub(super) async fn upgrade_miao(
                 "note": "新版本已安装；Miao 将立即重启，本 MCP 端点会短暂断开",
             })
         })
-    }
-
-    #[cfg(windows)]
-    {
-        let _ = state;
-        Err("Windows 不支持进程内升级，请下载安装包并退出 Miao 后覆盖安装".to_string())
     }
 }

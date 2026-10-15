@@ -3,8 +3,8 @@ import { Ban, ChevronDown, Globe, ListFilter, Plus, Search, TriangleAlert, X, Za
 import { ICON } from '../tokens'
 import { useDialog } from '../hooks/useDialog'
 import { Button } from './ui'
-import { PROTOCOL_OPTIONS, ruleFieldOptions } from '../ruleFormat'
-import { COMMON_DOMAIN_SITES, COMMON_PROCESS_APPS, processNameFor } from '../ruleApps'
+import { PROTOCOL_OPTIONS, RULE_FIELD_OPTIONS } from '../ruleFormat'
+import { COMMON_DOMAIN_SITES, COMMON_PROCESS_APPS } from '../ruleApps'
 import { rulePlainPreview } from '../rulePreview'
 import { classNames } from '../utils'
 import type { RuleRequest } from '../types/api'
@@ -74,13 +74,12 @@ export interface RuleModalProps {
   onClose: () => void
   onSubmit: (rule: RuleRequest) => Promise<boolean>
   nodeNames?: string[]
-  platform?: string
   delays?: Record<string, number>
   testingNodes?: Record<string, boolean>
   onTestNodes?: () => void
 }
 
-export function RuleModal({ open, loading, onClose, onSubmit, nodeNames = [], platform = 'linux', delays = {}, testingNodes = {}, onTestNodes }: RuleModalProps) {
+export function RuleModal({ open, loading, onClose, onSubmit, nodeNames = [], delays = {}, testingNodes = {}, onTestNodes }: RuleModalProps) {
   const titleId = useId()
   const valueId = useId()
   const errorId = useId()
@@ -114,7 +113,7 @@ export function RuleModal({ open, loading, onClose, onSubmit, nodeNames = [], pl
   if (!open) return null
 
   const matchGroup = MATCH_GROUPS.find((group) => (group.fields as readonly string[]).includes(field)) || MATCH_GROUPS[0]
-  const fieldOption = ruleFieldOptions(platform).find((option) => option.value === field)
+  const fieldOption = RULE_FIELD_OPTIONS.find((option) => option.value === field)
   const error = valueError(field, value)
   const canSubmit = value.trim().length > 0 && !error
   const isNodeTarget = !TARGET_OPTIONS.some((option) => option.value === target)
@@ -202,7 +201,7 @@ export function RuleModal({ open, loading, onClose, onSubmit, nodeNames = [], pl
               {field === 'process_name' && (
                 <div className="rule-examples" aria-label="常见应用">
                   <span>试试：</span>
-                  {PROCESS_EXAMPLES.map((app) => <button type="button" key={app.label} onClick={() => setValue(processNameFor(app, platform))}>{app.label}</button>)}
+                  {PROCESS_EXAMPLES.map((app) => <button type="button" key={app.label} onClick={() => setValue(app.name)}>{app.label}</button>)}
                 </div>
               )}
             </div>

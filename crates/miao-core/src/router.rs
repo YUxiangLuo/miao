@@ -5,9 +5,8 @@ use axum::{
     Router,
 };
 
-#[cfg(not(windows))]
 use crate::handlers::version::upgrade;
-#[cfg(not(windows))]
+
 use crate::handlers::vps::deploy_vps;
 use crate::handlers::{
     clash::{proxy_clash_http, proxy_clash_traffic},
@@ -74,7 +73,6 @@ pub fn build_router(app_state: Arc<AppState>) -> Router {
         .route("/api/proxy/switch", post(switch_proxy))
         .route("/mcp", get(handle_mcp_get).post(handle_mcp));
 
-    #[cfg(not(windows))]
     let router = router
         .route("/api/upgrade", post(upgrade))
         .route("/api/vps/deploy", post(deploy_vps));

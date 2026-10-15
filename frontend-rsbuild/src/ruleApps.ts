@@ -1,10 +1,8 @@
 // 规则工作台「快捷选择」数据：常见应用进程与常见站点。
-// 进程名按平台适配：Windows 的可执行文件带 .exe 后缀。
 
 export interface ProcessApp {
   label: string
   name: string
-  windowsName?: string
 }
 
 export interface ProcessAppCategory {
@@ -34,9 +32,9 @@ export const COMMON_PROCESS_APPS: ProcessAppCategory[] = [
   {
     category: '浏览器',
     apps: [
-      { label: 'Chrome', name: 'chrome', windowsName: 'chrome.exe' },
-      { label: 'Firefox', name: 'firefox', windowsName: 'firefox.exe' },
-      { label: 'Edge', name: 'msedge', windowsName: 'msedge.exe' },
+      { label: 'Chrome', name: 'chrome' },
+      { label: 'Firefox', name: 'firefox' },
+      { label: 'Edge', name: 'msedge' },
     ],
   },
   {
@@ -55,8 +53,7 @@ export const COMMON_PROCESS_APPS: ProcessAppCategory[] = [
   {
     category: '游戏 / 娱乐',
     apps: [
-      { label: 'Steam', name: 'steam', windowsName: 'steam.exe' },
-      { label: 'Epic Games', name: 'epicgameslauncher', windowsName: 'EpicGamesLauncher.exe' },
+      { label: 'Steam', name: 'steam' },
     ],
   },
 ]
@@ -71,11 +68,3 @@ export const COMMON_DOMAIN_SITES: string[] = [
   'wikipedia.org',
   'cloudflare.com',
 ]
-
-// 进程名的平台适配：优先显式 windowsName，否则 Linux 名 + .exe
-export function processNameFor(app: ProcessApp, platform = 'linux'): string {
-  if (platform === 'windows') {
-    return app.windowsName || `${app.name}.exe`
-  }
-  return app.name
-}

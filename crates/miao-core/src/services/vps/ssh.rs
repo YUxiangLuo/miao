@@ -161,7 +161,7 @@ pub(super) fn failure(output: &SshOutput, stage: &str, secrets: &[&str]) -> AppE
     ))
 }
 
-#[cfg(all(test, unix))]
+#[cfg(test)]
 mod tests {
     use super::*;
     use std::os::unix::process::ExitStatusExt;

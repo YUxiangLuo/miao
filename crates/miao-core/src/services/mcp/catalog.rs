@@ -296,7 +296,7 @@ pub(super) fn tools_catalog() -> JsonValue {
         },
         {
             "name": "set_node_select",
-            "description": "设置节点选择策略：manual 手动选择；fastest_hk/jp/tw/sg/us 由 sing-box 在香港/日本/台湾/新加坡/美国节点中自动测速选择。只用本地快照重建，不刷新订阅；Unix 热重载，Windows 重启内核。地区无节点时回退 manual。",
+            "description": "设置节点选择策略：manual 手动选择；fastest_hk/jp/tw/sg/us 由 sing-box 在香港/日本/台湾/新加坡/美国节点中自动测速选择。只用本地快照重建，不刷新订阅；热重载内核。地区无节点时回退 manual。",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -339,7 +339,7 @@ pub(super) fn tools_catalog() -> JsonValue {
         },
         {
             "name": "set_route_mode",
-            "description": "设置路由模式：rule 使用内置国内直连/国外代理分流；global 关闭内置地域分流，但自定义规则仍优先生效。写入易变层；Unix 热重载，Windows 重启内核，可能短暂影响连接。",
+            "description": "设置路由模式：rule 使用内置国内直连/国外代理分流；global 关闭内置地域分流，但自定义规则仍优先生效。写入易变层；热重载内核，可能短暂影响连接。",
             "inputSchema": {
                 "type": "object",
                 "properties": { "mode": { "type": "string", "enum": ["rule", "global"] } },
@@ -457,7 +457,7 @@ pub(super) fn tools_catalog() -> JsonValue {
         },
         {
             "name": "deploy_vps",
-            "description": "仅支持具备 ssh/askpass 的非 Windows 平台：使用用户提供的 root 密码通过 SSH 在远端 VPS 部署或复用 Miao 管理的 Hysteria2，并把节点加入配置。会修改远端主机，最长约 5 分钟；密码不持久化，也不要在回答中复述。仅在用户明确确认后调用。",
+            "description": "运行主机须具备 ssh/askpass：使用用户提供的 root 密码通过 SSH 在远端 VPS 部署或复用 Miao 管理的 Hysteria2，并把节点加入配置。会修改远端主机，最长约 5 分钟；密码不持久化，也不要在回答中复述。仅在用户明确确认后调用。",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -472,7 +472,7 @@ pub(super) fn tools_catalog() -> JsonValue {
         },
         {
             "name": "upgrade_miao",
-            "description": "仅 Linux/OpenWrt 支持：检查 GitHub Release，下载并校验 SHA256，替换当前 Miao 二进制后重启整个进程。MCP 响应后端点会短暂断开，代理连接也可能中断；仅在用户明确确认后调用。Windows 必须下载安装包。",
+            "description": "仅 Linux/OpenWrt 支持：检查 GitHub Release，下载并校验 SHA256，替换当前 Miao 二进制后重启整个进程。MCP 响应后端点会短暂断开，代理连接也可能中断；仅在用户明确确认后调用。",
             "inputSchema": {
                 "type": "object",
                 "properties": { "confirm": confirmation_property("升级并重启 Miao") },

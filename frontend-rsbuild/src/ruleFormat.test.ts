@@ -5,7 +5,6 @@ import {
   RULE_FIELD_OPTIONS,
   RULE_TARGET_OPTIONS,
   ruleFieldLabel,
-  ruleFieldOptions,
   ruleFieldTone,
   ruleTargetLabel,
 } from './ruleFormat'
@@ -59,18 +58,6 @@ describe('ruleFormat', () => {
     expect(ruleFieldTone('unknown-field')).toBe('neutral')
   })
 
-  it('uses windows process placeholders without changing field values', () => {
-    const options = ruleFieldOptions('windows')
-    expect(options.find((option) => option.value === 'process_name')?.placeholder).toBe(
-      'qbittorrent.exe',
-    )
-    expect(options.find((option) => option.value === 'process_path')?.placeholder).toContain(
-      'Program Files',
-    )
-    expect(ruleFieldOptions('linux').find((option) => option.value === 'process_name')?.placeholder).toBe(
-      'curl',
-    )
-  })
 
   it('describes structured rules from the API', () => {
     expect(describeRule({ index: 0, field: 'port', value: '25', target: 'reject', skipped: false, raw: '' }))

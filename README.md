@@ -7,7 +7,7 @@
   </p>
 </div>
 
-Miao 将 sing-box 内核、分流规则和 Web 面板打包为单个可执行文件，通过 TUN 接管整机流量。当前发布 Linux / OpenWrt amd64、arm64 版本；Windows 桌面源码保留，已停止发布安装包。
+Miao 将 sing-box 内核、分流规则和 Web 面板打包为单个可执行文件，通过 TUN 接管整机流量。仅支持 Linux / OpenWrt amd64、arm64。
 
 支持[七种节点协议](docs/kernel.md#能力与裁剪)、订阅管理、自动选节点、自定义分流和 MCP 控制。
 
@@ -15,14 +15,18 @@ Miao 将 sing-box 内核、分流规则和 Web 面板打包为单个可执行文
 
 ## 安装与启动
 
-从 [Releases](https://github.com/YUxiangLuo/miao/releases/latest) 下载二进制及 `.sha256`。私有仓库需访问权限；已登录的 GitHub CLI 可用以下命令，arm64 替换文件名中的 `amd64`：
+每个 [Release](https://github.com/YUxiangLuo/miao/releases/latest) 仅包含 amd64、arm64 两个 Linux 二进制及 GitHub 自动生成的源码 ZIP/TAR.GZ。私有仓库需访问权限；已登录的 GitHub CLI 可下载并校验二进制，arm64 替换文件名中的 `amd64`：
 
 ```bash
-gh release download --repo YUxiangLuo/miao \
-  --pattern miao-rust-linux-amd64 --pattern miao-rust-linux-amd64.sha256 &&
-sha256sum -c miao-rust-linux-amd64.sha256 &&
-chmod +x miao-rust-linux-amd64 &&
-sudo ./miao-rust-linux-amd64
+repo=YUxiangLuo/miao
+asset=miao-rust-linux-amd64
+tag=$(gh release view --repo "$repo" --json tagName -q .tagName) &&
+digest=$(gh api "repos/$repo/releases/tags/$tag" --jq ".assets[] | select(.name == \"$asset\") | .digest") &&
+[[ "$digest" =~ ^sha256:[0-9a-fA-F]{64}$ ]] &&
+gh release download "$tag" --repo "$repo" --pattern "$asset" &&
+printf '%s  %s\n' "${digest#sha256:}" "$asset" | sha256sum -c - &&
+chmod +x "$asset" &&
+sudo ./"$asset"
 ```
 
 校验通过后再运行，面板地址为 `http://localhost:6161`。OpenWrt 以 root 运行，无需 `sudo`。**面板无鉴权，默认监听所有网卡，只应允许可信设备访问。**
@@ -35,7 +39,7 @@ sudo ./miao-rust-linux-amd64 --sub 'https://your-subscription-url' JP
 
 地区、配置文件与临时运行限制见[配置参考](docs/config.md#命令行启动)。TUN 和 Clash API 不支持多开，请先退出已有实例。
 
-systemd Linux 可[安装为服务](docs/platforms.md#升级与卸载)；OpenWrt 与 Windows 自行构建见平台说明。
+systemd Linux 可[安装为服务](docs/platforms.md#升级与卸载)；OpenWrt 运行方式见平台说明。
 
 ## 文档
 

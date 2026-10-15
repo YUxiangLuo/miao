@@ -84,7 +84,6 @@ export interface RulesCardProps {
   onDeleteRule: (rule: RuleInfo) => void
   nodeNames?: string[]
   connections?: ClashConnection[]
-  platform?: string
   delays?: Record<string, number>
   testingNodes?: Record<string, boolean>
   onTestNodes?: () => void
@@ -100,7 +99,6 @@ export function RulesCard({
   onDeleteRule,
   nodeNames = [],
   connections = [],
-  platform = 'linux',
   delays = {},
   testingNodes = {},
   onTestNodes,
@@ -158,7 +156,6 @@ export function RulesCard({
         onClose={() => setShowRuleModal(false)}
         onSubmit={onAddRule}
         nodeNames={nodeNames}
-        platform={platform}
         delays={delays}
         testingNodes={testingNodes}
         onTestNodes={onTestNodes}

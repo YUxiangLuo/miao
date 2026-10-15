@@ -6,13 +6,8 @@ use ruzstd::decoding::StreamingDecoder;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use tracing::{info, warn};
-#[cfg(windows)]
-use windows_sys::Win32::Foundation::ERROR_ACCESS_DENIED;
 
-use super::{
-    is_windows_sharing_violation, map_remove_embedded_error, restrict_to_owner, set_executable,
-    sing_box_file_name,
-};
+use super::{restrict_to_owner, set_executable, sing_box_file_name};
 use crate::error::{AppError, AppResult};
 
 struct EmbeddedKernel {
@@ -128,25 +123,9 @@ fn unpack_kernel(compressed: &[u8], metadata: &str, path: &Path) -> AppResult<()
         .as_file()
         .sync_all()
         .map_err(|err| AppError::context("Failed to flush embedded kernel", err))?;
-    output.persist(path).map_err(|err| {
-        #[cfg(windows)]
-        if err.error.raw_os_error() == Some(ERROR_ACCESS_DENIED as i32) {
-            // MoveFileExW also reports access denied for an occupied destination.
-            // The same code covers read-only files and insufficient permissions.
-            return AppError::context(
-                format!(
-                    "无法更新内核文件 {}：文件可能被进程占用、设为只读或缺少写入权限。请退出残留的 sing-box，并检查文件属性和目录权限后重试。",
-                    sing_box_file_name()
-                ),
-                err.error,
-            );
-        }
-        if is_windows_sharing_violation(&err.error) {
-            map_remove_embedded_error(sing_box_file_name(), err.error)
-        } else {
-            AppError::context("Failed to install embedded kernel", err.error)
-        }
-    })?;
+    output
+        .persist(path)
+        .map_err(|err| AppError::context("Failed to install embedded kernel", err.error))?;
     Ok(())
 }
 
@@ -170,7 +149,9 @@ pub fn extract_sing_box_to(directory: &Path) -> AppResult<PathBuf> {
     ] {
         let path = directory.join(name);
         if path.exists() {
-            fs::remove_file(&path).map_err(|err| map_remove_embedded_error(name, err))?;
+            fs::remove_file(&path).map_err(|err| {
+                AppError::context(format!("Failed to remove stale embedded file {name}"), err)
+            })?;
         }
         fs::write(&path, bytes).map_err(|err| {
             AppError::context(format!("Failed to write embedded file {name}"), err)
@@ -230,13 +211,13 @@ mod tests {
         let path = directory.path().join(sing_box_file_name());
         fs::write(&path, b"previous kernel").unwrap();
         fs::write(directory.path().join("cache.db"), b"keep cache").unwrap();
-        #[cfg(unix)]
+
         let mut previous_inode = fs::File::open(&path).unwrap();
         let bytes: Vec<u8> = (0..300_000).map(|i| (i % 251) as u8).collect();
         let (compressed, metadata) = fixture(&bytes);
         unpack_kernel(&compressed, &metadata, &path).unwrap();
         assert_eq!(fs::read(&path).unwrap(), bytes);
-        #[cfg(unix)]
+
         {
             let mut previous_bytes = Vec::new();
             previous_inode.read_to_end(&mut previous_bytes).unwrap();
@@ -247,7 +228,7 @@ mod tests {
             b"keep cache"
         );
         assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 2);
-        #[cfg(unix)]
+
         {
             use std::os::unix::fs::PermissionsExt;
             assert_eq!(
@@ -311,62 +292,5 @@ mod tests {
             SITE_RULE_BINARY
         );
         assert!(!directory.path().join("adblock_reject.srs").exists());
-    }
-
-    #[cfg(windows)]
-    #[test]
-    fn locked_windows_kernel_is_preserved_with_a_clear_error() {
-        use std::os::windows::fs::OpenOptionsExt;
-
-        let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join(sing_box_file_name());
-        fs::write(&path, b"previous kernel").unwrap();
-        let locked = fs::OpenOptions::new()
-            .read(true)
-            .share_mode(0)
-            .open(&path)
-            .unwrap();
-        let (compressed, metadata) = fixture(b"replacement kernel");
-        let error = unpack_kernel(&compressed, &metadata, &path).unwrap_err();
-        let message = error.to_string();
-        assert!(
-            message.contains("无法更新内核文件 sing-box.exe")
-                && message.contains("残留的 sing-box"),
-            "unexpected replacement error: {error}"
-        );
-        drop(locked);
-        assert_eq!(fs::read(&path).unwrap(), b"previous kernel");
-        assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 1);
-        unpack_kernel(&compressed, &metadata, &path).unwrap();
-        assert_eq!(fs::read(&path).unwrap(), b"replacement kernel");
-        assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 1);
-    }
-
-    #[cfg(windows)]
-    #[test]
-    fn readonly_windows_kernel_is_preserved_with_a_permissions_hint() {
-        let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join(sing_box_file_name());
-        fs::write(&path, b"previous kernel").unwrap();
-        let original_permissions = fs::metadata(&path).unwrap().permissions();
-        let mut readonly = original_permissions.clone();
-        readonly.set_readonly(true);
-        fs::set_permissions(&path, readonly).unwrap();
-        let (compressed, metadata) = fixture(b"replacement kernel");
-        let result = unpack_kernel(&compressed, &metadata, &path);
-        // Restore permissions before assertions so the temporary directory can
-        // still be cleaned up if the replacement unexpectedly succeeds.
-        fs::set_permissions(&path, original_permissions).unwrap();
-        let error = result.unwrap_err();
-        let message = error.to_string();
-        assert!(
-            message.contains("只读") && message.contains("权限"),
-            "unexpected replacement error: {error}"
-        );
-        assert_eq!(fs::read(&path).unwrap(), b"previous kernel");
-        assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 1);
-        unpack_kernel(&compressed, &metadata, &path).unwrap();
-        assert_eq!(fs::read(&path).unwrap(), b"replacement kernel");
-        assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 1);
     }
 }

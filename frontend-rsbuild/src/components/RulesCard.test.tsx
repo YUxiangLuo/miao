@@ -114,16 +114,6 @@ describe('RulesCard', () => {
     expect(screen.getByLabelText('规则值')).toHaveValue('qbittorrent')
   })
 
-  it('uses .exe names for app chips on windows', async () => {
-    const user = userEvent.setup()
-    renderCard({ platform: 'windows' })
-
-    await openRuleModal(user)
-    await user.click(screen.getByRole('radio', { name: /应用/ }))
-    await user.click(screen.getByRole('button', { name: 'qBittorrent' }))
-
-    expect(screen.getByLabelText('规则值')).toHaveValue('qbittorrent.exe')
-  })
 
   it('fills the value from common site chips for domain fields', async () => {
     const user = userEvent.setup()

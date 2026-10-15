@@ -18,15 +18,9 @@ const SSH_PROBE_TIMEOUT: Duration = Duration::from_secs(180);
 const SSH_PROVISION_TIMEOUT: Duration = Duration::from_secs(300);
 
 fn set_file_mode(path: &Path, mode: u32) -> std::io::Result<()> {
-    #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode))
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = (path, mode);
-        Ok(())
     }
 }
 

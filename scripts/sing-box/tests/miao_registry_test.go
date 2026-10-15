@@ -25,7 +25,7 @@ func TestMiaoRegistryCompatibility(t *testing.T) {
 	}
 	path := os.Getenv("MIAO_REGISTRY_SNAPSHOT")
 	if path == "" {
-		t.Fatal("MIAO_REGISTRY_SNAPSHOT is required; run scripts/build-embedded.sh")
+		t.Fatal("MIAO_REGISTRY_SNAPSHOT is required; run ./dev.sh kernel")
 	}
 	if os.Getenv("MIAO_CAPTURE_REGISTRIES") == "1" {
 		data, err := json.Marshal(got)

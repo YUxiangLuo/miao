@@ -128,7 +128,7 @@ pub async fn refresh_subscriptions_foreground(
         })
 }
 
-#[cfg(all(test, unix))]
+#[cfg(test)]
 pub async fn regenerate_preserving_service_state(
     config: &Config,
     state: &Arc<AppState>,
@@ -822,9 +822,6 @@ async fn restart_with_previous_config(
     state: &Arc<AppState>,
     snapshot: Option<&[u8]>,
 ) -> AppResult<()> {
-    #[cfg(not(unix))]
-    stop_sing_internal(state).await;
-
     // 本地材料分层（快照 → 缓存）：写回 → 校验 → 启动，全程不碰网络。
     // 校验挡掉损坏的材料，也兜住内核升级后旧配置不再合法的情况（落到下一层/重新生成）。
     let cache = read_config_cache(state).await;
@@ -841,14 +838,12 @@ async fn restart_with_previous_config(
             warn!(error = %err, source = source, "Restored runtime config failed validation, trying next source");
             continue;
         }
-        #[cfg(unix)]
+
         let activation = if is_sing_box_running(state).await {
             crate::services::singbox::reload_sing_internal(state).await
         } else {
             start_sing_internal(state).await
         };
-        #[cfg(not(unix))]
-        let activation = start_sing_internal(state).await;
 
         match activation {
             Ok(()) => {

@@ -18,7 +18,7 @@ pub fn command_result<T: Serialize>(
             CommandErrorKind::Conflict => StatusCode::CONFLICT,
             CommandErrorKind::NotFound => StatusCode::NOT_FOUND,
             CommandErrorKind::Internal => StatusCode::INTERNAL_SERVER_ERROR,
-            #[cfg(not(windows))]
+
             CommandErrorKind::Upstream => StatusCode::BAD_GATEWAY,
         };
         status_error(status, error)
@@ -105,7 +105,6 @@ mod tests {
             (Conflict, StatusCode::CONFLICT),
             (NotFound, StatusCode::NOT_FOUND),
             (Internal, StatusCode::INTERNAL_SERVER_ERROR),
-            #[cfg(not(windows))]
             (Upstream, StatusCode::BAD_GATEWAY),
         ] {
             let (status, Json(response)) = super::command_result::<()>(Err(CommandError {

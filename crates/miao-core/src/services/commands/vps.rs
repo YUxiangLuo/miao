@@ -24,13 +24,6 @@ async fn deploy_vps_with<F: std::future::Future<Output = crate::error::AppResult
 ) -> CommandResult<VpsDeployResponse> {
     super::ensure_initialized(&state)?;
 
-    if !crate::platform::vps_supported() {
-        return Err(command_error(
-            CommandErrorKind::InvalidInput,
-            "当前平台不支持 VPS 一键部署",
-        ));
-    }
-
     let ip = req.ip.trim();
     Validator::server_address(ip).map_err(|e| command_error(CommandErrorKind::InvalidInput, e))?;
     if req.password.is_empty() {
@@ -104,7 +97,7 @@ async fn deploy_vps_with<F: std::future::Future<Output = crate::error::AppResult
     ))
 }
 
-#[cfg(all(test, unix))]
+#[cfg(test)]
 mod tests {
     use super::*;
     use std::os::unix::fs::PermissionsExt;

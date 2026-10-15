@@ -9,7 +9,7 @@ mod warnings;
 #[cfg(test)]
 mod tests;
 
-#[cfg(all(test, unix))]
+#[cfg(test)]
 pub use apply::apply_config_change;
 pub use apply::{
     apply_disabled_nodes, apply_max_multiplier, apply_node_select, apply_route_mode,
@@ -39,7 +39,7 @@ pub use warnings::{
     SUBS_RETRYING_SLOWLY,
 };
 
-#[cfg(all(test, unix))]
+#[cfg(test)]
 pub use apply::regenerate_preserving_service_state;
 
 pub(crate) use apply::ConfigEdit;

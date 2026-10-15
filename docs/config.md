@@ -39,7 +39,7 @@ scheduled_refresh:
   times: ["04:30", "16:30"]  # 运行主机的本地时区，最多 24 个
 ```
 
-节点支持范围见[内核能力](kernel.md#能力与裁剪)。自定义规则优先于内置分流，全局模式下仍生效；出口可填 `proxy`、`direct` 或节点 tag。引用缺失/禁用节点的规则会跳过并在面板标记；Windows 进程名需带 `.exe`。
+节点支持范围见[内核能力](kernel.md#能力与裁剪)。自定义规则优先于内置分流，全局模式下仍生效；出口可填 `proxy`、`direct` 或节点 tag。引用缺失/禁用节点的规则会跳过并在面板标记。
 
 ## 状态保存与节点选择
 
@@ -82,7 +82,7 @@ disabled_nodes:
 
 ## VPS 一键部署
 
-「添加节点 → VPS 部署」通过 SSH 安装 Hysteria2 或恢复已有 Miao 节点。Miao 主机须有 OpenSSH 客户端，Windows 不提供此功能。
+「添加节点 → VPS 部署」通过 SSH 安装 Hysteria2 或恢复已有 Miao 节点。Miao 主机须有 OpenSSH 客户端。
 
 - 目标为 Linux x86_64/arm64、systemd/OpenRC、POSIX sh；自动安装依赖支持 apt、dnf/yum、apk、pacman、zypper，其他环境须预装工具。
 - 仅支持 **root 密码登录、SSH 22 端口**，不支持密钥或非 root sudo；密码只用于本次连接，不写入 Miao 配置。
@@ -96,4 +96,4 @@ disabled_nodes:
 
 使用 MCP `2025-11-25` Streamable HTTP：先 `initialize`，再 `notifications/initialized`，后续请求携带 `MCP-Protocol-Version`；无 session、无 SSE，启用时 `GET /mcp` 返回 405。用 `tools/list` 获取工具和参数，覆盖状态、连接、启停、节点、订阅、规则、定时刷新、VPS 与升级；平台不支持的操作返回明确错误。主题、弹窗、PWA、分享链接解析在浏览器本地完成，结构化节点用 `add_node` / `import_nodes` 导入。
 
-停止、删除、部署、关闭 MCP、升级等工具要求 `confirm: true`，调用前须获用户明确确认。订阅 URL、连接记录和 VPS 密码应保密；热应用可能影响当前连接。MCP 与面板共用[无鉴权的访问边界](platforms.md#平台对照)。
+停止、删除、部署、关闭 MCP、升级等工具要求 `confirm: true`，调用前须获用户明确确认。订阅 URL、连接记录和 VPS 密码应保密；热应用可能影响当前连接。MCP 与面板共用[无鉴权的访问边界](platforms.md#访问与持久化)。

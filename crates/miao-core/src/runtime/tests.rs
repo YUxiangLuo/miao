@@ -4,13 +4,11 @@ use super::{
     panel_bind_addr, prepare_compatible_startup_cache, spawn_server, startup_is_settled,
     RuntimeOptions,
 };
-// 仅被 #[cfg(unix)] 测试使用（Windows 测试构建下 import 会报未使用）。
-#[cfg(unix)]
+
 use super::{initialize_runtime_locked, recover_data_plane_once};
 
-#[cfg(unix)]
 mod background_retry;
-#[cfg(unix)]
+
 mod subscription_state;
 
 #[tokio::test]
@@ -51,7 +49,6 @@ async fn incompatible_cache_is_rejected_before_it_replaces_active_config() {
     let _ = tokio::fs::remove_dir_all(&state.runtime_paths.runtime_dir).await;
 }
 
-#[cfg(unix)]
 async fn local_startup_test_state(
     config: crate::models::Config,
     label: &str,
@@ -93,7 +90,6 @@ async fn local_startup_test_state(
     (state, root)
 }
 
-#[cfg(unix)]
 async fn subscription_server(
     accepted: Option<std::sync::Arc<tokio::sync::Notify>>,
     release: Option<std::sync::Arc<tokio::sync::Notify>>,
@@ -132,7 +128,6 @@ proxies:
     format!("http://{addr}/sub")
 }
 
-#[cfg(unix)]
 async fn eventually_available_subscription_server(
     failures: usize,
 ) -> (String, std::sync::Arc<std::sync::atomic::AtomicUsize>) {
@@ -172,7 +167,6 @@ proxies:
     (format!("http://{addr}/sub"), calls)
 }
 
-#[cfg(unix)]
 async fn superseding_subscription_server(
     first_accepted: std::sync::Arc<tokio::sync::Notify>,
     release_first: std::sync::Arc<tokio::sync::Notify>,
@@ -218,7 +212,6 @@ proxies:
     (format!("http://{addr}/sub"), calls)
 }
 
-#[cfg(unix)]
 async fn refusing_sub_url() -> String {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -230,7 +223,6 @@ async fn refusing_sub_url() -> String {
     format!("http://{addr}/sub")
 }
 
-#[cfg(unix)]
 #[tokio::test]
 async fn manual_nodes_start_before_any_subscription_request() {
     let config = crate::models::Config {
@@ -263,7 +255,6 @@ async fn manual_nodes_start_before_any_subscription_request() {
     let _ = tokio::fs::remove_dir_all(root).await;
 }
 
-#[cfg(unix)]
 #[tokio::test]
 async fn legacy_manual_cache_requests_local_background_reconciliation() {
     let config = crate::models::Config {
@@ -308,7 +299,6 @@ async fn legacy_manual_cache_requests_local_background_reconciliation() {
     let _ = tokio::fs::remove_dir_all(root).await;
 }
 
-#[cfg(unix)]
 #[tokio::test]
 async fn capped_automatic_selection_rejects_a_legacy_cache_without_provenance() {
     let config = crate::models::Config {
@@ -340,7 +330,6 @@ async fn capped_automatic_selection_rejects_a_legacy_cache_without_provenance() 
     let _ = tokio::fs::remove_dir_all(root).await;
 }
 
-#[cfg(unix)]
 #[tokio::test]
 async fn matching_node_snapshot_starts_before_any_subscription_request() {
     let subscription = "http://127.0.0.1:9/unreachable".to_string();
@@ -388,7 +377,6 @@ async fn matching_node_snapshot_starts_before_any_subscription_request() {
     let _ = tokio::fs::remove_dir_all(root).await;
 }
 
-#[cfg(unix)]
 #[tokio::test]
 async fn manual_node_startup_keeps_retrying_subscriptions_after_the_initial_budget() {
     use std::sync::atomic::Ordering;
@@ -463,7 +451,6 @@ async fn manual_node_startup_keeps_retrying_subscriptions_after_the_initial_budg
     let _ = tokio::fs::remove_dir_all(root).await;
 }
 
-#[cfg(unix)]
 #[tokio::test]
 async fn failed_foreground_refresh_does_not_cancel_startup_subscription_recovery() {
     use std::sync::atomic::Ordering;
@@ -534,7 +521,6 @@ async fn failed_foreground_refresh_does_not_cancel_startup_subscription_recovery
     let _ = tokio::fs::remove_dir_all(root).await;
 }
 
-#[cfg(unix)]
 #[tokio::test]
 async fn local_startup_does_not_fetch_subscriptions_under_the_config_lock() {
     let accepted = std::sync::Arc::new(tokio::sync::Notify::new());
@@ -563,7 +549,6 @@ async fn local_startup_does_not_fetch_subscriptions_under_the_config_lock() {
     let _ = tokio::fs::remove_dir_all(root).await;
 }
 
-#[cfg(unix)]
 #[tokio::test]
 async fn failed_initial_start_keeps_retrying_until_the_data_plane_recovers() {
     use std::sync::atomic::Ordering;
@@ -608,7 +593,6 @@ async fn failed_initial_start_keeps_retrying_until_the_data_plane_recovers() {
     let _ = tokio::fs::remove_dir_all(root).await;
 }
 
-#[cfg(unix)]
 #[tokio::test]
 async fn recovery_starts_compatible_cache_when_subscription_fetch_fails() {
     let subscription = refusing_sub_url().await;
@@ -664,7 +648,6 @@ async fn recovery_starts_compatible_cache_when_subscription_fetch_fails() {
     let _ = tokio::fs::remove_dir_all(root).await;
 }
 
-#[cfg(unix)]
 #[tokio::test]
 async fn recovery_activates_manuals_when_fetch_fails_and_nothing_is_running() {
     use std::sync::atomic::Ordering;
@@ -726,7 +709,6 @@ async fn empty_configuration_is_a_settled_startup_state() {
     assert!(startup_is_settled(&state).await);
 }
 
-#[cfg(unix)]
 #[tokio::test]
 async fn foreground_refresh_supersedes_an_older_startup_fetch() {
     use std::sync::atomic::Ordering;
@@ -797,44 +779,12 @@ async fn foreground_refresh_supersedes_an_older_startup_fetch() {
     let _ = tokio::fs::remove_dir_all(root).await;
 }
 
-/// Hold a port the panel would bind. Windows needs SO_EXCLUSIVEADDRUSE so
-/// Tokio's SO_REUSEADDR cannot hijack it.
+/// Hold a port the panel would bind.
 fn occupy_panel_port() -> (std::net::TcpListener, u16) {
     let probe = std::net::TcpListener::bind(panel_bind_addr(0)).expect("probe port");
     let port = probe.local_addr().expect("probe addr").port();
     drop(probe);
 
-    #[cfg(windows)]
-    {
-        use std::os::windows::io::AsRawSocket;
-        use windows_sys::Win32::Networking::WinSock::{
-            setsockopt, SOL_SOCKET, SO_EXCLUSIVEADDRUSE,
-        };
-
-        let socket = tokio::net::TcpSocket::new_v4().expect("tcp socket");
-        let enable: i32 = 1;
-        let rc = unsafe {
-            setsockopt(
-                socket.as_raw_socket() as _,
-                SOL_SOCKET,
-                SO_EXCLUSIVEADDRUSE,
-                (&enable as *const i32).cast(),
-                std::mem::size_of_val(&enable) as i32,
-            )
-        };
-        assert_ne!(rc, -1, "SO_EXCLUSIVEADDRUSE");
-        socket
-            .bind(panel_bind_addr(port).parse().expect("addr"))
-            .expect("exclusive bind");
-        let listener = socket
-            .listen(1)
-            .expect("listen")
-            .into_std()
-            .expect("into std listener");
-        (listener, port)
-    }
-
-    #[cfg(not(windows))]
     {
         let listener = std::net::TcpListener::bind(panel_bind_addr(port)).expect("occupy port");
         (listener, port)

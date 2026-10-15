@@ -1,4 +1,3 @@
-#[cfg(unix)]
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -24,14 +23,7 @@ pub fn clash_api_url(path: &str) -> String {
 }
 
 pub fn get_sing_box_home() -> PathBuf {
-    #[cfg(windows)]
-    {
-        std::env::temp_dir().join("miao-sing-box")
-    }
-    #[cfg(not(windows))]
-    {
-        PathBuf::from("/tmp/miao-sing-box")
-    }
+    PathBuf::from("/tmp/miao-sing-box")
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -85,14 +77,7 @@ pub async fn is_sing_box_running(state: &AppState) -> bool {
 }
 
 fn sing_box_file_name() -> &'static str {
-    #[cfg(windows)]
-    {
-        "sing-box.exe"
-    }
-    #[cfg(not(windows))]
-    {
-        "sing-box"
-    }
+    "sing-box"
 }
 
 /// 在停止运行中的实例前验证 sing-box 配置，避免不必要的服务中断。
@@ -150,7 +135,7 @@ pub async fn start_sing_internal(state: &Arc<AppState>) -> AppResult<()> {
     };
 
     // Capture ownership before dependency I/O too, so Stop cancels this work.
-    #[cfg(not(windows))]
+
     if let Err(err) = crate::services::openwrt::check_and_install_openwrt_dependencies().await {
         error!(error = %err, "Failed to check or install OpenWrt dependencies");
     }
@@ -167,7 +152,6 @@ pub async fn start_sing_internal(state: &Arc<AppState>) -> AppResult<()> {
 /// Reload the active config in place on Unix. sing-box officially wires
 /// SIGHUP to its reload path; miao still verifies that the same process stays
 /// alive and the data plane becomes healthy before publishing `ready` again.
-#[cfg(unix)]
 pub async fn reload_sing_internal(state: &Arc<AppState>) -> AppResult<()> {
     use nix::sys::signal::{kill, Signal};
     use nix::unistd::Pid;
@@ -234,7 +218,6 @@ pub async fn reload_sing_internal(state: &Arc<AppState>) -> AppResult<()> {
     Ok(())
 }
 
-#[cfg(unix)]
 async fn wait_for_sing_box_reload_ready(
     state: &Arc<AppState>,
     expected_generation: u64,
@@ -303,12 +286,6 @@ async fn spawn_and_probe_sing_box(
 
     info!(binary = ?sing_box_path, config = ?config_path, "Starting sing-box");
 
-    #[cfg(windows)]
-    {
-        cleanup_stale_tun_adapter();
-        ensure_hidden_console();
-    }
-
     let mut command = tokio::process::Command::new(&sing_box_path);
     command
         .current_dir(sing_box_home)
@@ -316,8 +293,6 @@ async fn spawn_and_probe_sing_box(
         .arg("-c")
         .arg(config_path);
 
-    #[cfg(windows)]
-    command.creation_flags(WINDOWS_CREATE_NEW_PROCESS_GROUP);
     // If start is cancelled between spawn and store, Drop must not leak the kernel.
     command.kill_on_drop(true);
 
@@ -348,9 +323,6 @@ async fn spawn_and_probe_sing_box(
     let child = command
         .spawn()
         .map_err(|e| AppError::context("Failed to spawn sing-box process", e))?;
-
-    #[cfg(windows)]
-    assign_child_to_kernel_job(&child);
 
     let pid = child.id();
     info!(pid = pid, "sing-box process spawned");
@@ -401,246 +373,35 @@ pub async fn stop_sing_internal(state: &Arc<AppState>) {
 
 mod watcher;
 
-#[cfg(all(test, unix))]
+#[cfg(test)]
 use watcher::watch_sing_box;
 use watcher::{clear_kernel_give_up_warning, spawn_crash_watcher, start_still_current};
 #[cfg(test)]
 use watcher::{restart_backoff, KERNEL_GIVE_UP_WARNING};
 
 /// unix：运行时目录设为 0700（内含订阅凭证，仅属主可入）。
-/// 其他平台无需处理：Windows 的 %TEMP% 本就是用户私有目录。
 fn restrict_to_owner(path: &std::path::Path) -> std::io::Result<()> {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(path, fs::Permissions::from_mode(0o700))
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = path;
-        Ok(())
-    }
+    use std::os::unix::fs::PermissionsExt;
+    fs::set_permissions(path, fs::Permissions::from_mode(0o700))
 }
 
 fn set_executable(path: &std::path::Path) -> std::io::Result<()> {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(path, fs::Permissions::from_mode(0o755))
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = path;
-        Ok(())
-    }
+    use std::os::unix::fs::PermissionsExt;
+    fs::set_permissions(path, fs::Permissions::from_mode(0o755))
 }
 
 async fn request_graceful_exit(child: &mut tokio::process::Child) {
-    #[cfg(unix)]
-    {
-        use nix::sys::signal::{kill, Signal};
-        use nix::unistd::Pid;
+    use nix::sys::signal::{kill, Signal};
+    use nix::unistd::Pid;
 
-        if let Some(pid) = child.id() {
-            let _ = kill(Pid::from_raw(pid as i32), Signal::SIGTERM);
-            match tokio::time::timeout(Duration::from_secs(3), child.wait()).await {
-                Ok(Ok(_)) => {}
-                _ => {
-                    let _ = child.start_kill();
-                    let _ = child.wait().await;
-                }
-            }
-        }
-    }
-
-    #[cfg(windows)]
-    {
-        // CREATE_NEW_PROCESS_GROUP child; CTRL_BREAK reaches that group only.
-        // Go maps CTRL_BREAK to os.Interrupt so sing-box can close WinTun.
-        if let Some(pid) = child.id() {
-            send_ctrl_break_to_group(pid);
-        }
+    if let Some(pid) = child.id() {
+        let _ = kill(Pid::from_raw(pid as i32), Signal::SIGTERM);
         match tokio::time::timeout(Duration::from_secs(3), child.wait()).await {
-            Ok(Ok(_)) => restore_ctrl_handler(),
+            Ok(Ok(_)) => {}
             _ => {
-                restore_ctrl_handler();
                 let _ = child.start_kill();
                 let _ = child.wait().await;
-                cleanup_stale_tun_adapter();
             }
-        }
-    }
-
-    #[cfg(not(any(unix, windows)))]
-    {
-        let _ = child.start_kill();
-        let _ = child.wait().await;
-    }
-}
-
-/// Give this process a hidden console so a GUI parent can still deliver Ctrl+C
-/// to sing-box. No-op when a console is already attached (CLI in a terminal).
-#[cfg(windows)]
-pub(crate) fn ensure_hidden_console() {
-    use windows_sys::Win32::System::Console::{AllocConsole, GetConsoleWindow};
-    use windows_sys::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_HIDE};
-
-    unsafe {
-        if GetConsoleWindow().is_null() && AllocConsole() != 0 {
-            let hwnd = GetConsoleWindow();
-            if !hwnd.is_null() {
-                ShowWindow(hwnd, SW_HIDE);
-            }
-        }
-    }
-}
-
-#[cfg(windows)]
-fn send_ctrl_break_to_group(pid: u32) {
-    use windows_sys::Win32::System::Console::{GenerateConsoleCtrlEvent, SetConsoleCtrlHandler};
-
-    unsafe {
-        SetConsoleCtrlHandler(None, 1);
-        let _ = GenerateConsoleCtrlEvent(WINDOWS_CTRL_BREAK_EVENT, pid);
-    }
-}
-
-#[cfg(windows)]
-fn restore_ctrl_handler() {
-    use windows_sys::Win32::System::Console::SetConsoleCtrlHandler;
-
-    unsafe {
-        SetConsoleCtrlHandler(None, 0);
-    }
-}
-
-fn map_remove_embedded_error(name: &str, err: std::io::Error) -> AppError {
-    if is_windows_sharing_violation(&err) {
-        AppError::message(format!(
-            "无法更新内核文件 {name}：残留的 sing-box 仍在运行。请结束该进程后重试。"
-        ))
-    } else {
-        AppError::context(format!("Failed to remove stale embedded file {name}"), err)
-    }
-}
-
-/// ERROR_SHARING_VIOLATION / ERROR_LOCK_VIOLATION: the previous kernel still
-/// has the exe mapped.
-fn is_windows_sharing_violation(err: &std::io::Error) -> bool {
-    matches!(err.raw_os_error(), Some(32) | Some(33))
-}
-
-/// CREATE_NEW_PROCESS_GROUP. The child is its own group so CTRL_BREAK can
-/// target that pid instead of broadcasting CTRL_C on the hidden console.
-#[cfg_attr(not(windows), allow(dead_code))]
-pub(crate) const WINDOWS_CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
-
-/// CTRL_BREAK_EVENT. Go treats this like CTRL_C (`os.Interrupt`).
-#[cfg_attr(not(windows), allow(dead_code))]
-pub(crate) const WINDOWS_CTRL_BREAK_EVENT: u32 = 0x0000_0001;
-
-/// JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE. Closing miao.exe kills assigned children.
-#[cfg_attr(not(windows), allow(dead_code))]
-pub(crate) const WINDOWS_JOB_KILL_ON_CLOSE: u32 = 0x0000_2000;
-
-#[cfg(windows)]
-fn kernel_job_handle() -> Option<windows_sys::Win32::Foundation::HANDLE> {
-    use std::sync::OnceLock;
-    static JOB: OnceLock<isize> = OnceLock::new();
-    let raw = *JOB.get_or_init(|| {
-        create_kill_on_close_job()
-            .map(|handle| handle as isize)
-            .unwrap_or(0)
-    });
-    if raw == 0 {
-        None
-    } else {
-        Some(raw as windows_sys::Win32::Foundation::HANDLE)
-    }
-}
-
-#[cfg(windows)]
-fn create_kill_on_close_job() -> Option<windows_sys::Win32::Foundation::HANDLE> {
-    use windows_sys::Win32::Foundation::CloseHandle;
-    use windows_sys::Win32::System::JobObjects::{
-        CreateJobObjectW, JobObjectExtendedLimitInformation, SetInformationJobObject,
-        JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
-    };
-
-    let job = unsafe { CreateJobObjectW(std::ptr::null(), std::ptr::null()) };
-    if job.is_null() {
-        return None;
-    }
-
-    let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = unsafe { std::mem::zeroed() };
-    info.BasicLimitInformation.LimitFlags = WINDOWS_JOB_KILL_ON_CLOSE;
-    let ok = unsafe {
-        SetInformationJobObject(
-            job,
-            JobObjectExtendedLimitInformation,
-            (&info as *const JOBOBJECT_EXTENDED_LIMIT_INFORMATION).cast(),
-            std::mem::size_of_val(&info) as u32,
-        )
-    };
-    if ok == 0 {
-        unsafe {
-            CloseHandle(job);
-        }
-        return None;
-    }
-    Some(job)
-}
-
-#[cfg(windows)]
-fn assign_child_to_kernel_job(child: &tokio::process::Child) {
-    use windows_sys::Win32::Foundation::HANDLE;
-    use windows_sys::Win32::System::JobObjects::AssignProcessToJobObject;
-
-    let Some(job) = kernel_job_handle() else {
-        tracing::warn!("No kernel job object; leftover sing-box will not die with this process");
-        return;
-    };
-    let Some(process) = child.raw_handle() else {
-        tracing::warn!("sing-box process handle is unavailable");
-        return;
-    };
-    if unsafe { AssignProcessToJobObject(job, process as HANDLE) } == 0 {
-        tracing::warn!("Failed to assign sing-box to kernel job object");
-    }
-}
-
-#[cfg(test)]
-const TUN_ADAPTER_NAME: &str = "sing-tun";
-
-/// Forced TerminateProcess leaves WinTun attached; remove only `sing-tun`.
-#[cfg(any(windows, test))]
-pub(crate) fn tun_adapter_cleanup_command() -> (&'static str, Vec<&'static str>) {
-    (
-        "powershell.exe",
-        vec![
-            "-NoProfile",
-            "-NonInteractive",
-            "-Command",
-            "Get-NetAdapter -Name 'sing-tun' -ErrorAction SilentlyContinue | Remove-NetAdapter -Confirm:$false",
-        ],
-    )
-}
-
-#[cfg(windows)]
-fn cleanup_stale_tun_adapter() {
-    let (program, args) = tun_adapter_cleanup_command();
-    match std::process::Command::new(program).args(args).output() {
-        Ok(output) if output.status.success() => {
-            info!("Removed leftover sing-tun adapter if it was present");
-        }
-        Ok(output) => {
-            tracing::warn!(
-                status = ?output.status,
-                "sing-tun adapter cleanup returned non-success"
-            );
-        }
-        Err(err) => {
-            tracing::warn!(error = %err, "Failed to run sing-tun adapter cleanup");
         }
     }
 }
@@ -648,5 +409,5 @@ fn cleanup_stale_tun_adapter() {
 #[cfg(test)]
 mod tests;
 
-#[cfg(all(test, unix))]
+#[cfg(test)]
 mod lifecycle_tests;

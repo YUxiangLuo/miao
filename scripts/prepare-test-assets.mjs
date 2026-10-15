@@ -11,7 +11,7 @@ function record(path) {
 }
 
 // Only prepare missing assets. Never turn an existing real kernel into a stub.
-for (const name of ['sing-box-amd64', 'sing-box-arm64', 'sing-box-windows-amd64.exe']) {
+for (const name of ['sing-box-amd64', 'sing-box-arm64']) {
   const base = `${directory}${name}`
   const compressedExists = existsSync(`${base}.zst`)
   const metadataExists = existsSync(`${base}.meta.json`)

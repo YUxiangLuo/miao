@@ -2,7 +2,7 @@ pub mod commands;
 pub mod config;
 pub mod mcp;
 pub mod node_parser;
-#[cfg(not(windows))]
+
 pub mod openwrt;
 pub mod proxy;
 pub mod schedule;
@@ -11,5 +11,5 @@ pub mod status;
 pub mod subscription;
 pub mod verge;
 pub mod version;
-#[cfg(not(windows))]
+
 pub mod vps;

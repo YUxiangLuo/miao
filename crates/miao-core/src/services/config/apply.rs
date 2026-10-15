@@ -236,25 +236,6 @@ async fn read_file_snapshot(path: &Path) -> AppResult<Option<Vec<u8>>> {
     }
 }
 
-#[cfg(not(unix))]
-async fn restore_after_activation_failure(
-    state: &Arc<AppState>,
-    old_runtime: Option<&[u8]>,
-    old_bindings: Option<&[u8]>,
-) -> AppResult<()> {
-    stop_sing_internal(state).await;
-    restore_file_snapshot(&state.runtime_paths.node_bindings, old_bindings).await?;
-    match old_runtime {
-        Some(bytes) => {
-            write_file_atomic(&state.runtime_paths.active_config, bytes).await?;
-            start_sing_internal(state)
-                .await
-                .map_err(|e| AppError::context("Failed to restart previous sing-box config", e))
-        }
-        None => restore_file_snapshot(&state.runtime_paths.active_config, None).await,
-    }
-}
-
 async fn activate_running_config(
     state: &Arc<AppState>,
     outcome: &GenConfigOutcome,
@@ -263,90 +244,52 @@ async fn activate_running_config(
     let old_bindings = read_file_snapshot(&state.runtime_paths.node_bindings).await?;
     let was_running = is_sing_box_running(state).await;
 
-    #[cfg(unix)]
-    {
-        use crate::services::singbox::reload_sing_internal;
+    use crate::services::singbox::reload_sing_internal;
 
-        // Commit both files before asking sing-box to reload. If either write
-        // fails, the running process is still untouched and rollback is purely
-        // local. Once SIGHUP is sent, any failure restores the old files and
-        // reactivates them before returning.
-        commit_runtime_files(
-            state,
-            &outcome.bytes,
-            &outcome.node_bindings,
-            old_runtime.as_deref(),
-            old_bindings.as_deref(),
-        )
-        .await?;
+    // Commit both files before asking sing-box to reload. If either write
+    // fails, the running process is still untouched and rollback is purely
+    // local. Once SIGHUP is sent, any failure restores the old files and
+    // reactivates them before returning.
+    commit_runtime_files(
+        state,
+        &outcome.bytes,
+        &outcome.node_bindings,
+        old_runtime.as_deref(),
+        old_bindings.as_deref(),
+    )
+    .await?;
 
-        let (activation, runtime_update) = if was_running {
-            (reload_sing_internal(state).await, RuntimeUpdate::Reloaded)
-        } else {
-            (start_sing_internal(state).await, RuntimeUpdate::Started)
-        };
-        if let Err(reload_err) = activation {
-            if let Err(restore_err) =
-                restore_runtime_files(state, old_runtime.as_deref(), old_bindings.as_deref()).await
-            {
-                return Err(AppError::message(format!(
-                    "{}. Runtime file rollback failed: {}",
-                    reload_err, restore_err
-                )));
-            }
-
-            // A failed reload may still be inside sing-box's close/recreate
-            // loop. Do not queue another SIGHUP into that ambiguous state;
-            // failure recovery may interrupt once, then starts the known-good
-            // previous bytes deterministically.
-            stop_sing_internal(state).await;
-            let reactivate = start_sing_internal(state).await;
-            return match reactivate {
-                Ok(()) => Err(reload_err),
-                Err(rollback_err) => Err(AppError::message(format!(
-                    "{}. Runtime rollback failed: {}",
-                    reload_err, rollback_err
-                ))),
-            };
+    let (activation, runtime_update) = if was_running {
+        (reload_sing_internal(state).await, RuntimeUpdate::Reloaded)
+    } else {
+        (start_sing_internal(state).await, RuntimeUpdate::Started)
+    };
+    if let Err(reload_err) = activation {
+        if let Err(restore_err) =
+            restore_runtime_files(state, old_runtime.as_deref(), old_bindings.as_deref()).await
+        {
+            return Err(AppError::message(format!(
+                "{}. Runtime file rollback failed: {}",
+                reload_err, restore_err
+            )));
         }
 
-        Ok(runtime_update)
-    }
-
-    #[cfg(not(unix))]
-    {
+        // A failed reload may still be inside sing-box's close/recreate
+        // loop. Do not queue another SIGHUP into that ambiguous state;
+        // failure recovery may interrupt once, then starts the known-good
+        // previous bytes deterministically.
         stop_sing_internal(state).await;
-
-        let activate_result = async {
-            write_file_atomic(&state.runtime_paths.active_config, &outcome.bytes).await?;
-            start_sing_internal(state)
-                .await
-                .map_err(|e| AppError::context("Failed to restart sing-box", e))?;
-            save_node_bindings(state, &outcome.node_bindings).await
-        }
-        .await;
-
-        if let Err(activate_err) = activate_result {
-            return match restore_after_activation_failure(
-                state,
-                old_runtime.as_deref(),
-                old_bindings.as_deref(),
-            )
-            .await
-            {
-                Ok(()) => Err(activate_err),
-                Err(rollback_err) => Err(AppError::message(format!(
-                    "{}. Runtime rollback failed: {}",
-                    activate_err, rollback_err
-                ))),
-            };
-        }
-        Ok(if was_running {
-            RuntimeUpdate::Restarted
-        } else {
-            RuntimeUpdate::Started
-        })
+        let reactivate = start_sing_internal(state).await;
+        return match reactivate {
+            Ok(()) => Err(reload_err),
+            Err(rollback_err) => Err(AppError::message(format!(
+                "{}. Runtime rollback failed: {}",
+                reload_err, rollback_err
+            ))),
+        };
     }
+
+    Ok(runtime_update)
 }
 
 /// 订阅刷新统一管线：获取节点集（source 决定真拉取还是快照重建）→ 生成配置 →（策略门控）→ 校验 → 激活内核。
@@ -446,7 +389,7 @@ pub use preferences::{apply_max_multiplier, apply_node_select};
 
 #[cfg(test)]
 pub use transaction::apply_config_change;
-#[cfg(all(test, unix))]
+#[cfg(test)]
 pub(super) use transaction::regenerate_without_restart_runtime;
 pub use transaction::{
     apply_disabled_nodes, apply_route_mode, edit_subscriptions, refresh_subscriptions_foreground,
@@ -462,8 +405,8 @@ pub(super) use transaction::{
 mod edit_tests;
 #[cfg(test)]
 mod rollback_tests;
-#[cfg(all(test, unix))]
+#[cfg(test)]
 mod transaction_tests;
 
-#[cfg(all(test, unix))]
+#[cfg(test)]
 pub use transaction::regenerate_preserving_service_state;

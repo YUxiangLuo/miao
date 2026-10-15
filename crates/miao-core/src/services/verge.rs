@@ -6,7 +6,7 @@
 
 use std::path::PathBuf;
 
-/// clash-verge-rev 的应用数据目录名（Tauri bundle identifier）。
+/// clash-verge-rev 的应用数据目录名。
 const VERGE_DATA_DIR: &str = "io.github.clash-verge-rev.clash-verge-rev";
 const PROFILES_FILE: &str = "profiles.yaml";
 
@@ -65,17 +65,6 @@ pub async fn scan() -> Option<Vec<VergeSubscription>> {
 }
 
 /// 解析 profiles.yaml 的位置；不存在返回 None。
-#[cfg(windows)]
-fn profiles_path() -> Option<PathBuf> {
-    let appdata = std::env::var_os("APPDATA")?;
-    let path = PathBuf::from(appdata)
-        .join(VERGE_DATA_DIR)
-        .join(PROFILES_FILE);
-    path.is_file().then_some(path)
-}
-
-/// 解析 profiles.yaml 的位置；不存在返回 None。
-#[cfg(unix)]
 fn profiles_path() -> Option<PathBuf> {
     unix_candidates()
         .into_iter()
@@ -92,7 +81,6 @@ fn profiles_path() -> Option<PathBuf> {
 ///
 /// miao 以 root 运行（sudo 或 systemd），而 clash-verge-rev 的数据在普通用户
 /// home 下；sudo 时 HOME 可能指向 /root，systemd 下则没有 SUDO_USER 可用。
-#[cfg(unix)]
 fn unix_candidates() -> Vec<PathBuf> {
     let mut homes: Vec<PathBuf> = Vec::new();
     if let Some(home) = sudo_user_home() {
@@ -108,14 +96,12 @@ fn unix_candidates() -> Vec<PathBuf> {
     homes
 }
 
-#[cfg(unix)]
 fn sudo_user_home() -> Option<PathBuf> {
     let name = std::env::var("SUDO_USER").ok()?;
     let user = nix::unistd::User::from_name(&name).ok()??;
     Some(user.dir)
 }
 
-#[cfg(unix)]
 fn home_dir_scan() -> Vec<PathBuf> {
     let Ok(entries) = std::fs::read_dir("/home") else {
         return vec![];
@@ -128,8 +114,8 @@ fn home_dir_scan() -> Vec<PathBuf> {
 }
 
 /// 从给定 home 目录集合中解析 profiles.yaml（unix 测试注入点；
-/// 唯一调用方是 cfg(unix) 测试，Windows 测试构建下会报死代码，故同门）。
-#[cfg(all(test, unix))]
+/// 唯一调用方是测试。
+#[cfg(test)]
 fn resolve_in_homes(homes: &[PathBuf]) -> Option<PathBuf> {
     homes
         .iter()
@@ -216,7 +202,6 @@ items:
         assert!(parse_profiles("current: only\n").is_empty());
     }
 
-    #[cfg(unix)]
     #[test]
     fn resolves_profiles_file_under_xdg_data_home() {
         let root = std::env::temp_dir().join(format!("miao-verge-test-{}", std::process::id()));

@@ -64,7 +64,7 @@ YAML
 fi
 
 if [[ "${1:-}" == --help || "${1:-}" == -h ]]; then
-  echo "Usage: ./scripts/test-netns.sh [path-to-miao-rust]"
+  echo "Usage: ./dev.sh netns [path-to-miao-rust]"
   echo "Requires Linux, a real embedded kernel, Bun, iproute2, util-linux and root/sudo."
   echo "Build first: cargo build --locked -p miao-cli (with generated assets prepared)."
   echo "Default binary: target/debug/miao-rust. Overall timeout: 120 seconds."

@@ -346,11 +346,8 @@ async fn get_status_works_when_stopped_without_network() {
         2,
         "including the current cap in the response must not modify the node-derived options"
     );
-    assert_eq!(
-        payload["upgrade_supported"],
-        crate::platform::upgrade_supported()
-    );
-    assert_eq!(payload["vps_supported"], crate::platform::vps_supported());
+    assert_eq!(payload["upgrade_supported"], true);
+    assert_eq!(payload["vps_supported"], true);
     assert!(payload["current_node"].is_null());
 }
 

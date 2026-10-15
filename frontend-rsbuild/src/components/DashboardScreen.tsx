@@ -161,7 +161,6 @@ export function DashboardScreen({ app }: { app: ReturnType<typeof useAppControll
               onDeleteRule={app.handleOpenDeleteRuleConfirm}
               nodeNames={app.ruleNodeNames}
               connections={app.connectionsInfo?.connections}
-              platform={app.status.platform || 'linux'}
               delays={app.delays}
               testingNodes={app.testingNodes}
               onTestNodes={() => {

@@ -140,11 +140,8 @@ mod tests {
         assert!(!data.running);
         assert!(data.pid.is_none());
         assert!(data.uptime_secs.is_none());
-        assert_eq!(data.vps_supported, crate::platform::vps_supported());
-        assert_eq!(
-            data.platform,
-            if cfg!(windows) { "windows" } else { "linux" }
-        );
+        assert!(data.vps_supported);
+        assert_eq!(data.platform, "linux");
     }
 
     #[tokio::test]

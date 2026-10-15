@@ -11,17 +11,15 @@ const READY_TIMEOUT: Duration = Duration::from_secs(8);
 #[derive(Clone, Copy)]
 pub(super) enum Operation {
     Start,
-    #[cfg(unix)]
-    Reload {
-        pid: u32,
-    },
+
+    Reload { pid: u32 },
 }
 
 impl Operation {
     fn settle_time(self) -> Duration {
         match self {
             Self::Start => Duration::from_millis(100),
-            #[cfg(unix)]
+
             Self::Reload { .. } => Duration::from_millis(500),
         }
     }
@@ -29,7 +27,7 @@ impl Operation {
     fn cancelled(self) -> &'static str {
         match self {
             Self::Start => "sing-box start was cancelled",
-            #[cfg(unix)]
+
             Self::Reload { .. } => "sing-box reload was cancelled",
         }
     }
@@ -39,7 +37,7 @@ impl Operation {
             Self::Start => {
                 "sing-box process started but its data plane did not become ready within 8 seconds"
             }
-            #[cfg(unix)]
+
             Self::Reload { .. } => {
                 "sing-box data plane did not become ready within 8 seconds after reload"
             }
@@ -105,11 +103,11 @@ async fn check_process(state: &AppState, generation: u64, operation: Operation) 
     let Some(process) = slot.as_mut() else {
         return Err(AppError::message(match operation {
             Operation::Start => operation.cancelled(),
-            #[cfg(unix)]
+
             Operation::Reload { .. } => "sing-box exited during reload",
         }));
     };
-    #[cfg(unix)]
+
     if let Operation::Reload { pid } = operation {
         if process.child.id() != Some(pid) {
             return Err(AppError::message(
@@ -119,7 +117,7 @@ async fn check_process(state: &AppState, generation: u64, operation: Operation) 
     }
     let context = match operation {
         Operation::Start => "Failed to check sing-box startup status",
-        #[cfg(unix)]
+
         Operation::Reload { .. } => "Failed to check sing-box reload status",
     };
     if let Some(status) = process
@@ -128,11 +126,10 @@ async fn check_process(state: &AppState, generation: u64, operation: Operation) 
         .map_err(|e| AppError::context(context, e))?
     {
         *slot = None;
-        #[cfg(windows)]
-        cleanup_stale_tun_adapter();
+
         let phase = match operation {
             Operation::Start => "startup",
-            #[cfg(unix)]
+
             Operation::Reload { .. } => "reload",
         };
         return Err(AppError::message(format!(

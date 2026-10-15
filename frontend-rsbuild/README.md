@@ -22,14 +22,14 @@ bun run test
 bun run build
 ```
 
-`test:watch` 用于调试，`preview` 预览产物；根目录 `./scripts/build-frontend.sh` 冻结安装并构建。升级 TypeScript 至少跑 lint、typecheck、test。
+`test:watch` 用于调试，`preview` 预览产物；根目录 `./dev.sh check frontend` 冻结安装并执行全部前端检查和构建。升级 TypeScript 至少跑 lint、typecheck、test。
 
 - API/Clash mock 使用 [testFixtures.ts](src/testFixtures.ts) 工厂，仅覆盖差异字段。App 集成测试 mock `/api/status|subs|nodes|rules|version` 与 Clash 端点；[setupTests.ts](src/setupTests.ts) 提供深色 `matchMedia` 和内存 `localStorage`。
 - 浏览器用 `agent-browser`，截图用 `agent-browser screenshot [--full] <path>`；`eval` 使用 IIFE。修改 React 受控输入须用原生 setter 并触发 input/change 事件。
 
 ## API 类型与请求
 
-[api.ts](src/types/api.ts) 由 Rust serde models 生成，禁止手改。修改 `crates/miao-core/src/models/*.rs` 后在根目录运行 `./scripts/generate-api-types.sh`，常规 Rust 测试会检查一致性。[clash.ts](src/types/clash.ts) 按实际消费的 Clash API 手工维护。
+[api.ts](src/types/api.ts) 由 Rust serde models 生成，禁止手改。修改 `crates/miao-core/src/models/*.rs` 后在根目录运行 `./dev.sh types`，常规 Rust 测试会检查一致性。[clash.ts](src/types/clash.ts) 按实际消费的 Clash API 手工维护。
 
 状态、代理与连接每 3 秒轮询；订阅、手动节点、规则按 `data_revision` 刷新，30 秒兜底。首次读取共用轮询器，请求必须有超时、取消和代次校验，旧响应不得覆盖新状态；清空/卸载取消测速批次，自动历史与手动测量按时间合并。
 

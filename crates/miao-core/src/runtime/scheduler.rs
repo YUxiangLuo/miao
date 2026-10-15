@@ -495,7 +495,6 @@ mod tests {
     }
 
     /// 部分来源失败是与启动恢复一致的可接受结果：正常提交、不退避重试。
-    #[cfg(unix)]
     #[tokio::test]
     async fn partial_source_failure_is_accepted_without_retry() {
         use crate::models::SubscriptionFetchOutcome;

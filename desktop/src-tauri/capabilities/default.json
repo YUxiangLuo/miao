@@ -1,6 +1,0 @@
-{
-  "identifier": "default",
-  "description": "Main window is driven from Rust; the panel does not use Tauri IPC",
-  "windows": ["main"],
-  "permissions": []
-}

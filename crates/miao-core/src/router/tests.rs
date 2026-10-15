@@ -127,14 +127,8 @@ async fn router_returns_status_payload() {
     assert_eq!(json["data"]["max_multiplier"], serde_json::Value::Null);
     assert_eq!(json["data"]["multiplier_options"], json!([]));
     assert_eq!(json["data"]["warnings"], json!([]));
-    assert_eq!(
-        json["data"]["vps_supported"],
-        crate::platform::vps_supported()
-    );
-    assert_eq!(
-        json["data"]["platform"],
-        if cfg!(windows) { "windows" } else { "linux" }
-    );
+    assert_eq!(json["data"]["vps_supported"], true);
+    assert_eq!(json["data"]["platform"], "linux");
 }
 
 #[tokio::test]
@@ -160,10 +154,7 @@ async fn router_returns_version_capability_flags() {
     assert_eq!(response.status(), StatusCode::OK);
     let json = response_json(response).await;
     assert_eq!(json["success"], true);
-    assert_eq!(
-        json["data"]["upgrade_supported"],
-        crate::platform::upgrade_supported()
-    );
+    assert_eq!(json["data"]["upgrade_supported"], true);
     assert_eq!(json["data"]["has_update"], false);
 }
 
@@ -544,41 +535,6 @@ async fn router_returns_rule_list_payload() {
     );
 }
 
-#[cfg(windows)]
-#[tokio::test]
-async fn router_omits_upgrade_and_vps_on_windows() {
-    let app = test_app(Config {
-        port: None,
-        subs: vec![],
-        nodes: vec![],
-        custom_rules: vec![],
-        route_mode: Default::default(),
-        mcp: false,
-        node_select: Default::default(),
-        max_multiplier: None,
-        disabled_nodes: Default::default(),
-    })
-    .await;
-
-    let upgrade = app
-        .clone()
-        .oneshot(empty_request("POST", "/api/upgrade"))
-        .await
-        .unwrap();
-    assert_eq!(upgrade.status(), StatusCode::NOT_FOUND);
-
-    let vps = app
-        .oneshot(json_request(
-            "POST",
-            "/api/vps/deploy",
-            json!({ "ip": "203.0.113.10", "password": "secret" }),
-        ))
-        .await
-        .unwrap();
-    assert_eq!(vps.status(), StatusCode::NOT_FOUND);
-}
-
-#[cfg(not(windows))]
 #[tokio::test]
 async fn router_rejects_vps_deploy_with_invalid_ip() {
     let app = test_app(Config {
@@ -608,7 +564,6 @@ async fn router_rejects_vps_deploy_with_invalid_ip() {
     assert_eq!(json["success"], false);
 }
 
-#[cfg(not(windows))]
 #[tokio::test]
 async fn router_rejects_vps_deploy_with_empty_password() {
     let app = test_app(Config {
@@ -639,7 +594,6 @@ async fn router_rejects_vps_deploy_with_empty_password() {
     assert_eq!(json["message"], "root 密码不能为空");
 }
 
-#[cfg(not(windows))]
 #[tokio::test]
 async fn router_vps_deploy_returns_existing_node_without_ssh() {
     let app = test_app(Config {
@@ -747,7 +701,7 @@ async fn router_setting_results_preserve_structured_command_data() {
 }
 
 #[tokio::test]
-#[cfg(unix)]
+
 async fn router_node_select_reports_requested_and_effective_strategy_on_fallback() {
     use std::os::unix::fs::PermissionsExt;
     let (_root, state) = crate::test_support::isolated_stopped_state(Config {

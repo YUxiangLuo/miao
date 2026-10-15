@@ -34,7 +34,6 @@ pub struct AppState {
     pub runtime_paths: RuntimePaths,
     pub config_update: Arc<Mutex<()>>,
     /// Serialize each VPS's remote provisioning through local config commit.
-    #[cfg(not(windows))]
     pub vps_deployments: Mutex<HashMap<String, std::sync::Weak<Mutex<()>>>>,
     pub sing_process: Mutex<Option<SingBoxProcess>>,
     pub lifecycle: lifecycle::RuntimeLifecycle,
@@ -63,7 +62,7 @@ pub struct AppState {
     pub initializing: AtomicBool,
     pub http_client: reqwest::Client,
     pub version_cache: ArcSwap<VersionCache>, // 使用 ArcSwap 实现无锁读取
-    #[cfg(not(windows))]
+
     pub upgrading: AtomicBool, // 防止并发升级
     // Last field: every request/background task holding Arc<AppState> also
     // keeps the temporary files alive. Caller-supplied directories are unowned.
@@ -147,7 +146,7 @@ impl AppState {
             volatile_path,
             runtime_paths,
             config_update: Arc::new(Mutex::new(())),
-            #[cfg(not(windows))]
+
             vps_deployments: Mutex::new(HashMap::new()),
             sing_process: Mutex::new(None),
             lifecycle: lifecycle::RuntimeLifecycle::default(),
@@ -169,7 +168,7 @@ impl AppState {
                 release: None,
                 fetched_at: None,
             })),
-            #[cfg(not(windows))]
+
             upgrading: AtomicBool::new(false),
             _temporary_profile: None,
         })

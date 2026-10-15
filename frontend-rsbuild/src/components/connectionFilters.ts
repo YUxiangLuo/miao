@@ -87,11 +87,11 @@ function actionTargetLabel(action: string): string | null {
 /**
  * 从 sing-box processPath 提取进程名：
  * `/usr/lib/firefox/firefox (alice)` → `firefox`；
- * Windows NT 路径（`\Device\HarddiskVolume3\...`）按反斜杠取段；空值返回 null。
+ * 空值返回 null。
  */
 export function processNameOf(processPath: string | null | undefined): string | null {
   if (!processPath) return null
-  const base = processPath.split(/[\\/]/).filter(Boolean).pop() || ''
+  const base = processPath.split('/').filter(Boolean).pop() || ''
   const name = base.replace(/\s+\([^)]*\)$/, '').trim()
   return name || null
 }
