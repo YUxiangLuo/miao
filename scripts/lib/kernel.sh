@@ -121,7 +121,7 @@ for target in "${targets[@]}"; do
   GOARCH="$target" GOOS=linux CGO_ENABLED=0 \
     "${go_command[@]}" build "${build_flags[@]}" -o "$artifacts/sing-box-$target" ./cmd/miao-kernel
   chmod 755 "$artifacts/sing-box-$target"
-  bun "$ROOT_DIR/scripts/pack-kernel.mjs" "$artifacts/sing-box-$target" "$target"
+  bun "$ROOT_DIR/scripts/lib/pack-kernel.mjs" "$artifacts/sing-box-$target" "$target"
 done
 if [[ "$build_rules" == true ]]; then
   echo "==> Downloading and compiling geo rule files..."
@@ -135,10 +135,10 @@ if [[ "$build_rules" == true ]]; then
     -o "$direct_list" \
     "https://raw.githubusercontent.com/Loyalsoldier/v2ray-rules-dat/${direct_rules_ref}/direct-list.txt"
 
-  bun "$ROOT_DIR/scripts/compile-direct-rules.mjs" "$direct_list" "$direct_json"
+  bun "$ROOT_DIR/scripts/lib/compile-direct-rules.mjs" "$direct_list" "$direct_json"
   "$artifacts/sing-box-host" rule-set compile "$direct_json" \
     -o "$artifacts/geosite-geolocation-cn.srs"
-  bun "$ROOT_DIR/scripts/release-artifacts.mjs" rules "$artifacts" "$sing_geoip_ref" "$direct_rules_ref"
+  bun "$ROOT_DIR/scripts/lib/release-artifacts.mjs" rules "$artifacts" "$sing_geoip_ref" "$direct_rules_ref"
 fi
 
 # Publish only after both the kernel and rules have built successfully.

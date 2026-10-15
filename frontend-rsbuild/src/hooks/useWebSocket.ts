@@ -2,7 +2,7 @@ import { useEffect, useRef, useCallback } from 'react'
 
 /**
  * 健壮的 WebSocket hook
- * - 指数退避重连（延迟封顶，无次数上限，桌面壳没有手动刷新手段）
+ * - 指数退避重连（延迟封顶，无次数上限）
  * - 页面可见性感知
  * - 正常/异常关闭区分处理
  */

@@ -16,13 +16,13 @@
 
 不注册代理服务端入站、endpoint、额外服务、证书签发或其他 DNS transport。手动 JSON 也只支持七种节点协议：读取/生成时跳过不支持的类型并告警，保留原始 JSON；内核 `check` 拒绝已移除类型。
 
-TUN 名为 `sing-tun`，启用 `auto_route`、`strict_route`，仅 Linux 写入 `auto_redirect: true`，`multi_queue` 默认关闭。内置 direct 使用 30 秒 TCP keepalive、15 秒间隔，帮助发现闲置连接失效，不保证远端连接永久存活。
+TUN 名为 `sing-tun`，启用 `auto_route`、`strict_route`，使用 `auto_redirect: true`，`multi_queue` 默认关闭。内置 direct 使用 30 秒 TCP keepalive、15 秒间隔，帮助发现闲置连接失效，不保证远端连接永久存活。
 
 `miao-kernel` 只包含 run/check/version 与 namespace 辅助入口，复用上游实现；运行时文件仍名为 `sing-box`。
 
 ## 补丁与回归
 
-- CLI context 隔离已由上游实现；保留 [create/check 注册表隔离回归](../scripts/patches/README.md)，不恢复旧功能补丁。
+- CLI context 隔离已由上游实现；[miao_context_test.go](../scripts/sing-box/tests/miao_context_test.go) 保留 create/check 两处注册表隔离回归。两者均须通过 `service.ExtendContext(globalCtx)` 复制可变注册表，同时保留取消语义；仅 `context.WithCancel` 会共享 manager，可能在 SIGHUP 重载时访问未启动的 AnyTLS client。测试使用 direct 和未选中的 AnyTLS，不使用 TUN/外网，也不并行修改 CLI 全局变量。
 - [shadowsocks2-halfclose.patch](../scripts/sing-box/shadowsocks2-halfclose.patch) 为经典 AEAD、AEAD-2022 客户端提供 `CloseWrite`：必要时先发送加密目的地址，再关闭底层写端并保留响应方向。不绕过加密层；不支持半关闭的底层传输退回完整关闭。
 - [miao_shadowsocks_test.go](../scripts/sing-box/tests/miao_shadowsocks_test.go) 使用 loopback TCP 和独立服务端，覆盖空请求、多帧、EOF 后响应、半关闭后写入失败、包装回退与错误传播；不承诺所有插件/复用都支持半关闭。
 
@@ -34,10 +34,10 @@ TUN 名为 `sing-tun`，启用 `auto_route`、`strict_route`，仅 Linux 写入 
 
 ```bash
 ./dev.sh kernel all                # 两架构内核与规则
-./dev.sh kernel amd64 --kernel-only # 仅本机内核
+./dev.sh kernel amd64 --kernel-only # 仅 amd64 内核
 ```
 
-默认同时更新规则，将上游分支解析为完整 SHA，并将来源和规则内容哈希写入 `rules.meta.json`。`SING_BOX_REF` 只能等于清单 SHA。
+默认同时更新规则，将上游分支解析为完整 SHA，并将来源和规则内容哈希写入 `rules.meta.json`。`--kernel-only` 跳过 host 规则编译器与规则更新；`SING_BOX_REF` 只能等于清单 SHA。
 
 流程为上游回归 → host 规则编译器 → 补丁与客户端命令 → 客户端回归 → 目标编译/压缩，全部成功才写入 `embedded/`。上游与客户端 Go 回归各重复 20 次，验证注册能力、含 TUN 配置及已移除出站的拒绝行为。
 
@@ -48,7 +48,7 @@ TUN 名为 `sing-tun`，启用 `auto_route`、`strict_route`，仅 Linux 写入 
 | 同名 `.meta.json` | 源码、工具链、能力、定制文件哈希、压缩前后大小与 SHA-256 |
 | `sing-box-host` | 未裁剪的规则编译器，不嵌入成品 |
 
-资源变更后须[重编 Miao](../DEV_NOTES.md#构建发布与部署)。启动时以纯 Rust 解压到同目录临时文件，校验完整帧、大小和 SHA-256，再设置权限并原子替换；失败保留旧内核，不清理缓存/配置。压缩只减少分发体积，8 MiB 解码窗口与启动峰值 RSS 须在 OpenWrt 验收。
+资源变更后须[重编 Miao](development.md#构建发布与部署)。启动时以纯 Rust 解压到同目录临时文件，校验完整帧、大小和 SHA-256，再设置权限并原子替换；失败保留旧内核，不清理缓存/配置。压缩只减少分发体积，8 MiB 解码窗口与启动峰值 RSS 须在 OpenWrt 验收。
 
 ## 升级与验收
 
@@ -56,13 +56,11 @@ TUN 名为 `sing-tun`，启用 `auto_route`、`strict_route`，仅 Linux 写入 
 2. 审查补丁冲突与依赖版本；上游已有等效修复时删除功能补丁，保留行为回归。
 3. 执行 `./dev.sh kernel all`、`./dev.sh check`、`./dev.sh audit`，核对两目标版本、清单与哈希。
 4. 在隔离环境验证 TUN/DNS、Clash、连续重载、退出清理与实际协议传输；OpenWrt 另需真机验收。编译、`version` 和解压测试不能替代网络验收。
-5. 本地保留对应源码与构建清单：`dist/vX.Y.Z/miao-embedded-sources.txt`、`miao-kernel-*.json`。这些辅助文件不上传 Release；仓库 tag 的源码包包含内核固定来源、补丁、构建脚本与许可。
+5. 本地保留对应源码，以及 `dist/vX.Y.Z/release-manifest.json` 中的内核、规则来源与哈希。该清单不上传 Release；仓库 tag 的源码包包含内核固定来源、补丁、构建脚本与许可。
 
 testing 曾重写历史：固定 SHA 不保证对象永久可下载，须保留可恢复的源码副本；对象失效时先恢复镜像，再改 repository，不回退到 testing HEAD。Git bundle 不包含 Go 模块依赖。
 
 ## 验证范围
-
-当前固定点和定制版本以 `source.json` 为准。内核重建包含上游与客户端 Go 回归各 20 次；实际网络验收仍须独立进行。
 
 `./dev.sh netns` 验证 Miao 与内核的控制流程、生成的 DNS/路由配置、TUN 创建及清理，不验证外部代理转发。完整 DNS、TCP/UDP、Shadowsocks 半关闭与 OpenWrt 实机验收需要专用环境；历史记录可通过 `git log -p -- docs/kernel.md` 查看。
 

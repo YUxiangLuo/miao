@@ -12,7 +12,7 @@
 
 ## 升级与卸载
 
-systemd Linux 在源码目录用 `sudo bash install.sh /path/to/miao-rust-linux-amd64` 安装或升级，arm64 替换文件名；会短暂断网。本机生产实例遵循[专用流程](../DEV_NOTES.md#arch-生产实例)。
+systemd Linux 在源码目录用 `sudo bash install.sh /path/to/miao-rust-linux-amd64` 安装或升级，arm64 替换文件名；会短暂断网。本机生产实例遵循[专用流程](development.md#arch-生产实例)。
 
 不传本地文件时，安装脚本下载最新 Release，并使用 GitHub 元数据中的 SHA-256 摘要校验，需要 curl 或 wget、jq、sha256sum。旧版面板依赖 `.sha256` 附件，迁移到新发布格式时首次使用新版安装脚本；之后可正常在面板自升级。
 

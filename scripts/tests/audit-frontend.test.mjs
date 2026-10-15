@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { spawnSync } from 'node:child_process'
 
-const audit = new URL('./audit-frontend.sh', import.meta.url).pathname
+const audit = new URL('../lib/audit-frontend.sh', import.meta.url).pathname
 
 function runAudit(failures, message) {
   const dir = mkdtempSync(join(tmpdir(), 'miao-audit-'))

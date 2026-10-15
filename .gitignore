@@ -1,50 +1,31 @@
+# Local settings and credentials
 /AGENTS.md
-.codex
+.codex/
 local.*
-# dependencies (bun install)
-node_modules
-
-# output
-out
-dist
-# rsbuild 构建产物（被 include_str!/include_bytes! 嵌进 core）
-/public/
-*.tgz
-
-# code coverage
-coverage
-*.lcov
-
-# logs
-logs
-_.log
-report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
-
-# dotenv environment variable files
 .env
-.env.development.local
-.env.test.local
-.env.production.local
-.env.local
-
-# caches
-.eslintcache
-.cache
-*.tsbuildinfo
-
-# IntelliJ based IDEs
-.idea
-
-# Finder (MacOS) folder config
+.env.*
+/frontend-rsbuild/*.local
+.idea/
 .DS_Store
+/frontend-rsbuild/.vscode/*
+!/frontend-rsbuild/.vscode/extensions.json
 
-
-# Added by cargo
-
-/target
-
-# Generated kernel and rule assets
-/embedded/*
-
-# Local release artifacts
+# Dependencies, generated assets and release output
+node_modules/
+/target/
+/public/
+/embedded/
+dist/
+out/
+*.tgz
 /miao-rust-linux-*
+
+# Test, build and runtime caches
+coverage/
+*.lcov
+*.log
+*.log.*
+logs/
+.cache/
+*.tsbuildinfo
+.rspack-profile-*/

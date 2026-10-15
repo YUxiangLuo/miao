@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { readFileSync, writeFileSync } from 'node:fs'
-import { customizationHash, readSource } from './sing-box/source.mjs'
+import { customizationHash, readSource } from '../sing-box/source.mjs'
 
 // Level 19 saves about 10% over 10; the decoder's window grows from 4 to 8 MiB.
 const compressionLevel = 19

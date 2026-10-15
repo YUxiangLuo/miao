@@ -47,7 +47,7 @@ systemd Linux 可[安装为服务](docs/platforms.md#升级与卸载)；OpenWrt 
 | --- | --- |
 | 配置订阅、节点、分流、定时刷新或 MCP | [配置参考](docs/config.md) |
 | 平台差异、升级、卸载、PWA | [平台说明](docs/platforms.md) |
-| 构建、测试、发布、生产部署 | [开发指南](DEV_NOTES.md) |
+| 构建、测试、发布、生产部署 | [开发指南](docs/development.md) |
 | 修改面板或内核 | [前端开发](frontend-rsbuild/README.md)、[内核维护](docs/kernel.md) |
 | 修改配置与运行逻辑 | [状态与事务](docs/runtime-state.md)、[Profile 路径](docs/profiles.md) |
 

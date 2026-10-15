@@ -26,7 +26,7 @@
 | `.last_proxy` / `.node_select` / `.max_multiplier`：显式选择偏好 | systemd Linux 启动 CWD（安装服务为 `/etc/miao`）；OpenWrt/非 systemd `R` | systemd Linux `P`；OpenWrt/非 systemd 该 Profile 运行目录 |
 | `node-bindings.json`：稳定节点 tag | 配置同目录 | 配置名为 `config.yaml` 时沿用同目录文件，其他名称使用 `P` |
 
-默认 易变层及 OpenWrt/非 systemd 的偏好在 tmpfs，进程重启保留、系统重启清空；稳定配置与节点绑定持久保存。默认 Profile 的 CWD 偏好规则为兼容保留，命名 Profile 不依赖 CWD。日志默认输出终端，可由 SDK 显式指定文件。
+默认易变层及 OpenWrt/非 systemd 的偏好在 tmpfs，进程重启保留、系统重启清空；稳定配置与节点绑定持久保存。默认 Profile 的 CWD 偏好规则为兼容保留，命名 Profile 不依赖 CWD。日志默认输出终端，可由 SDK 显式指定文件。
 
 ## 迁移
 
@@ -36,9 +36,9 @@
 
 ## SDK 与生命周期
 
-- `spawn_server(RuntimeOptions)` 不读取宿主 argv；`config_path: None` 只做默认发现。CLI/桌面共用参数解析器，支持 `--config PATH` / `--config=PATH`。
+- `spawn_server(RuntimeOptions)` 不读取宿主 argv；`config_path: None` 只做默认发现。CLI 参数解析器支持 `--config PATH` / `--config=PATH`。
 - `runtime_dir` 覆盖运行文件、默认偏好与默认易变层；显式 `volatile_path` / `log_path` 优先。调用方提供的目录不由 runtime 删除。
-- 临时 `--sub` 在 Unix 使用 `0700` 目录，由 `AppState` 持有，最后一个请求/后台任务引用释放后清理，启动失败同样释放。
+- 临时 `--sub` 使用 `0700` 目录，由 `AppState` 持有，最后一个请求/后台任务引用释放后清理，启动失败同样释放。
 - `ServerHandle::shutdown()` 等待服务与内核关闭；仅 drop 则异步停服，均不提前删使用中的目录。强杀、断电、exec 升级不保证清理，后续临时运行不会复用残留目录。
 
-测试注入隔离路径，见[开发检查](../DEV_NOTES.md#开发检查)。
+测试注入隔离路径，见[开发检查](development.md#测试隔离与维护约定)。

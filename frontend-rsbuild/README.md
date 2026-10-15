@@ -11,7 +11,7 @@ bun install --frozen-lockfile
 bun run dev
 ```
 
-开发服务监听 `127.0.0.1`，将 `/api`（含 WebSocket）代理到 `http://127.0.0.1:6161`；更换后端用 `MIAO_API=http://127.0.0.1:7000 bun run dev`。写操作使用隔离后端或 mock，遵守[生产实例限制](../DEV_NOTES.md#arch-生产实例)。
+开发服务监听 `127.0.0.1`，将 `/api`（含 WebSocket）代理到 `http://127.0.0.1:6161`；更换后端用 `MIAO_API=http://127.0.0.1:7000 bun run dev`。写操作使用隔离后端或 mock，遵守[生产实例限制](../docs/development.md#arch-生产实例)。
 
 ## 检查与测试
 
@@ -22,7 +22,7 @@ bun run test
 bun run build
 ```
 
-`test:watch` 用于调试，`preview` 预览产物；根目录 `./dev.sh check frontend` 冻结安装并执行全部前端检查和构建。升级 TypeScript 至少跑 lint、typecheck、test。
+`test:watch` 用于调试，`preview` 预览产物；根目录 `./dev.sh check frontend` 执行上面全部步骤。辅助脚本单独用 `./dev.sh check scripts` 检查。升级 TypeScript 至少跑 lint、typecheck、test。
 
 - API/Clash mock 使用 [testFixtures.ts](src/testFixtures.ts) 工厂，仅覆盖差异字段。App 集成测试 mock `/api/status|subs|nodes|rules|version` 与 Clash 端点；[setupTests.ts](src/setupTests.ts) 提供深色 `matchMedia` 和内存 `localStorage`。
 - 浏览器用 `agent-browser`，截图用 `agent-browser screenshot [--full] <path>`；`eval` 使用 IIFE。修改 React 受控输入须用原生 setter 并触发 input/change 事件。

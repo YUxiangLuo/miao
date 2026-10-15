@@ -1,8 +1,8 @@
 import { appendFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { packKernel, writePackedKernel } from './pack-kernel.mjs'
+import { packKernel, writePackedKernel } from '../lib/pack-kernel.mjs'
 
-const directory = fileURLToPath(new URL('../embedded/', import.meta.url))
+const directory = fileURLToPath(new URL('../../embedded/', import.meta.url))
 const [, , createdList] = process.argv
 mkdirSync(directory, { recursive: true })
 

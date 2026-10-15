@@ -74,4 +74,4 @@ generation 淘汰旧操作，attempt 淘汰同代旧 fetch，旧 future 析构�
 
 ## 回归测试
 
-覆盖旧启动/重载/watchdog、停止/关闭竞争、Ready 发布、空列表/缓存、前后台重试、提交边界、REST/MCP 一致性、偏好原字节恢复及双重失败报告。隔离要求与命令见[开发检查](../DEV_NOTES.md#开发检查)，浏览器使用 mock API。
+覆盖旧启动/重载/watchdog、停止/关闭竞争、Ready 发布、空列表/缓存、前后台重试、提交边界、REST/MCP 一致性、偏好原字节恢复及双重失败报告。隔离要求与命令见[开发检查](development.md#测试隔离与维护约定)，浏览器使用 mock API。

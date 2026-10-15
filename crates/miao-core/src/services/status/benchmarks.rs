@@ -1,5 +1,5 @@
 //! Manual microbenchmark of the status projection, excluding HTTP and kernel
-//! queries. Run in release mode with `--ignored --nocapture` (see DEV_NOTES.md).
+//! queries. Run in release mode with `--ignored --nocapture` (see docs/development.md).
 use super::{runtime_config_status, RuntimeConfigStatus};
 use crate::{models::Config, state::AppState, test_support::isolated_stopped_state};
 use std::{hint::black_box, time::Instant};

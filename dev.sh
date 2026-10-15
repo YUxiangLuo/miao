@@ -13,7 +13,7 @@ Usage: ./dev.sh <command> [arguments]
       Missing or stale kernel/rule assets are rebuilt automatically.
   kernel [amd64|arm64|all] [--kernel-only]
       Rebuild pinned kernels and rules; default host architecture.
-  check [all|core|frontend]
+  check [all|core|frontend|scripts]
       Lint, test and build checks; default all. Core needs no generated assets.
   test [--embedded] [cargo test arguments]
       Core tests, or core + CLI tests with prepared assets.
@@ -88,7 +88,7 @@ build() {
     done
   fi
   for arch in "${targets[@]}"; do
-    if ! bun scripts/release-artifacts.mjs resources "$arch"; then refresh=1; fi
+    if ! bun scripts/lib/release-artifacts.mjs resources "$arch"; then refresh=1; fi
   done
   frontend_build
   if (( refresh )); then
@@ -114,7 +114,7 @@ trap cleanup EXIT
 prepare_test_assets() {
   require bun
   if [[ -z "$created_files" ]]; then created_files=$(mktemp); fi
-  bun scripts/prepare-test-assets.mjs "$created_files"
+  bun scripts/tests/prepare-assets.mjs "$created_files"
 }
 core_check() {
   require cargo
@@ -128,8 +128,12 @@ frontend_check() {
   bun run --cwd frontend-rsbuild lint
   bun run --cwd frontend-rsbuild typecheck
   bun run --cwd frontend-rsbuild test
-  bun test scripts
   bun run --cwd frontend-rsbuild build
+}
+scripts_check() {
+  require bun shellcheck jq
+  shellcheck dev.sh install.sh remove.sh scripts/lib/*.sh scripts/tests/*.sh
+  bun test scripts/tests
 }
 
 # shellcheck source=scripts/lib/release.sh
@@ -137,7 +141,7 @@ source "$ROOT_DIR/scripts/lib/release.sh"
 command=${1:-help}
 if (( $# )); then shift; fi
 case "$command" in
-  help|-h|--help) usage ;;
+  help|-h|--help) no_args "$@"; usage ;;
   build) build "$@" ;;
   kernel)
     target=${1:-$(host_target)}
@@ -150,9 +154,9 @@ case "$command" in
     case "$scope" in
       core) core_check ;;
       frontend) frontend_check ;;
+      scripts) scripts_check ;;
       all)
-        require shellcheck
-        shellcheck dev.sh install.sh remove.sh scripts/*.sh scripts/lib/*.sh
+        scripts_check
         frontend_check
         core_check
         prepare_test_assets
@@ -173,14 +177,14 @@ case "$command" in
   audit)
     no_args "$@"; require bun cargo-audit
     audit_status=0
-    bash scripts/audit-frontend.sh || audit_status=1
+    bash scripts/lib/audit-frontend.sh || audit_status=1
     cargo audit || audit_status=1
     exit "$audit_status" ;;
   types)
     no_args "$@"; require cargo
     cargo test -p miao-core --locked --no-default-features --lib \
       models::typescript_contract::export_typescript_api_bindings -- --ignored --exact ;;
-  netns) exec bash scripts/test-netns.sh "$@" ;;
+  netns) exec bash scripts/tests/netns.sh "$@" ;;
   version) set_version "$@" ;;
   release) release "$@" ;;
   *) die "unknown command: $command (see ./dev.sh help)" ;;

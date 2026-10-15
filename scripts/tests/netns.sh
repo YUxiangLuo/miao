@@ -66,8 +66,8 @@ fi
 if [[ "${1:-}" == --help || "${1:-}" == -h ]]; then
   echo "Usage: ./dev.sh netns [path-to-miao-rust]"
   echo "Requires Linux, a real embedded kernel, Bun, iproute2, util-linux and root/sudo."
-  echo "Build first: cargo build --locked -p miao-cli (with generated assets prepared)."
-  echo "Default binary: target/debug/miao-rust. Overall timeout: 120 seconds."
+  echo "Build first: ./dev.sh build"
+  echo "Default binary: target/release/miao-rust. Overall timeout: 120 seconds."
   exit 0
 fi
 [[ $# -le 1 ]] || die "expected at most one binary path; see --help"
@@ -77,7 +77,7 @@ for tool in unshare mount ip bun timeout readlink realpath; do
 done
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-binary=$(realpath -e -- "${1:-$SCRIPT_DIR/../target/debug/miao-rust}")
+binary=$(realpath -e -- "${1:-$SCRIPT_DIR/../../target/release/miao-rust}")
 [[ -f "$binary" && -x "$binary" ]] || die "not an executable file: $binary"
 bun_binary=$(realpath -e -- "$(command -v bun)")
 host_net=$(readlink /proc/self/ns/net)
@@ -91,5 +91,5 @@ fi
 echo "==> Isolated kernel smoke test: $binary"
 exec "${elevate[@]}" timeout --signal=TERM --kill-after=10s 120s \
   unshare --net --mount --pid --fork --mount-proc --kill-child \
-  /bin/bash "$SCRIPT_DIR/test-netns.sh" --inside \
-  "$binary" "$bun_binary" "$SCRIPT_DIR/netns-smoke.mjs" "$host_net" "$host_mount"
+  /bin/bash "$SCRIPT_DIR/netns.sh" --inside \
+  "$binary" "$bun_binary" "$SCRIPT_DIR/netns.mjs" "$host_net" "$host_mount"

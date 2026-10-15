@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 import { createHash } from 'node:crypto'
-import { packKernel } from './pack-kernel.mjs'
+import { packKernel } from '../lib/pack-kernel.mjs'
 
 test('kernel package round-trips binary bytes and records both hashes', () => {
   const bytes = Buffer.alloc(300_000)

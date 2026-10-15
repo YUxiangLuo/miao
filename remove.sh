@@ -1,16 +1,5 @@
 #!/usr/bin/env bash
-# Miao 卸载:停止服务并清理所有相关文件
-#
-# 用法:
-#   curl -fsSL https://raw.githubusercontent.com/YUxiangLuo/miao/master/remove.sh | sudo bash -s -- -y
-#   或本地: sudo bash remove.sh [-y]
-#
-# 清理范围:
-#   - systemd 服务 miao.service
-#   - 二进制 /usr/local/bin/miao(含 .bak)
-#   - 配置目录 /etc/miao(config.yaml、普通 Linux 上的 .last_proxy / .node_select)
-#   - 运行时目录 /tmp/miao-sing-box(内嵌 sing-box、规则集、运行时配置、OpenWrt 上的 .last_proxy / .node_select)
-#   - 残留的 sing-box 进程与 sing-tun 网卡
+# Miao 独立卸载入口，可直接下载执行。
 set -euo pipefail
 
 BIN_PATH=/usr/local/bin/miao
@@ -20,18 +9,28 @@ UNIT_PATH=/etc/systemd/system/miao.service
 
 log() { echo "==> $*"; }
 
-if [[ "$(id -u)" -ne 0 ]]; then
-  echo "需要 root 权限,请用 sudo 运行" >&2
-  exit 1
-fi
+usage() {
+  cat <<'EOF'
+用法: sudo bash remove.sh [-y|--yes]
+  删除服务、二进制、/etc/miao、/tmp/miao-sing-box，清理残留内核和 TUN。
+  先备份配置；非交互执行必须传 -y，其他情况在终端确认。
+  -h, --help  显示帮助，无需 root。
+EOF
+}
 
 # 交互确认;-y/--yes 跳过。管道等非交互场景必须显式加 -y,否则拒绝执行
 skip_confirm=no
 for arg in "$@"; do
   case "$arg" in
     -y|--yes) skip_confirm=yes ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "未知参数: $arg" >&2; usage >&2; exit 1 ;;
   esac
 done
+if [[ "$(id -u)" -ne 0 ]]; then
+  echo "需要 root 权限,请用 sudo 运行" >&2
+  exit 1
+fi
 if [[ "$skip_confirm" != "yes" ]]; then
   echo "将删除 miao 服务、二进制、配置($CONFIG_DIR)与运行时文件。"
   # 先静默探测控制终端是否可用(仅探测时屏蔽 stderr,避免吞掉下面的提示语)

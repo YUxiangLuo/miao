@@ -1,10 +1,10 @@
 import { afterEach, expect, test } from 'bun:test'
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { packKernel, writePackedKernel } from './pack-kernel.mjs'
-import { customizationHash, readSource } from './sing-box/source.mjs'
-import { recordRules, stageRelease, validateResources, verifyRelease } from './release-artifacts.mjs'
+import { packKernel, writePackedKernel } from '../lib/pack-kernel.mjs'
+import { customizationHash, readSource } from '../sing-box/source.mjs'
+import { recordRules, stageRelease, validateResources, verifyRelease } from '../lib/release-artifacts.mjs'
 
 const roots = []
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }) })
@@ -35,10 +35,15 @@ test('release binds both architectures, sources and checksums to one commit/vers
   const { root, stage } = fixture()
   stageRelease(root, stage, commit, 'v1.2.3')
   verifyRelease(stage, commit, 'v1.2.3')
-  expect(readFileSync(join(stage, 'miao-embedded-sources.txt'), 'utf8')).toContain(`miao v1.2.3 ${commit}`)
+  expect(readdirSync(stage).sort()).toEqual(['miao-rust-linux-amd64', 'miao-rust-linux-arm64', 'release-manifest.json'])
+  const manifest = JSON.parse(readFileSync(join(stage, 'release-manifest.json'), 'utf8'))
+  expect(manifest.kernels.amd64.revision).toBe(readSource().revision)
+  expect(manifest.rules.sources).toEqual({ 'sing-geoip': 'b'.repeat(40), 'v2ray-rules-dat': 'c'.repeat(40) })
   expect(() => verifyRelease(stage, 'd'.repeat(40), 'v1.2.3')).toThrow('HEAD/version')
   expect(() => verifyRelease(stage, commit, 'v1.2.4')).toThrow('HEAD/version')
-  writeFileSync(join(stage, 'miao-rust-linux-arm64'), 'tampered')
+  const binary = readFileSync(join(stage, 'miao-rust-linux-arm64'))
+  binary[63] ^= 1
+  writeFileSync(join(stage, 'miao-rust-linux-arm64'), binary)
   expect(() => verifyRelease(stage, commit, 'v1.2.3')).toThrow('Staged asset changed')
 })
 
@@ -47,6 +52,24 @@ test('staging rejects the wrong architecture instead of packaging a native binar
   const amd64 = readFileSync(join(root, 'target/x86_64-unknown-linux-musl/release/miao-rust'))
   writeFileSync(join(root, 'target/aarch64-unknown-linux-musl/release/miao-rust'), amd64)
   expect(() => stageRelease(root, stage, commit, 'v1.2.3')).toThrow('Expected arm64 ELF')
+})
+
+test('publishing requires a complete current manifest, including kernel and rule provenance', () => {
+  const { root, stage } = fixture()
+  stageRelease(root, stage, commit, 'v1.2.3')
+  const path = join(stage, 'release-manifest.json')
+  const original = JSON.parse(readFileSync(path, 'utf8'))
+  for (const mutate of [
+    manifest => { manifest.schema_version = 1 },
+    manifest => { delete manifest.files['miao-rust-linux-arm64'] },
+    manifest => { manifest.kernels.arm64.revision = 'stale' },
+    manifest => { delete manifest.rules.files['geoip-cn.srs'] },
+  ]) {
+    const manifest = structuredClone(original)
+    mutate(manifest)
+    writeFileSync(path, JSON.stringify(manifest))
+    expect(() => verifyRelease(stage, commit, 'v1.2.3')).toThrow()
+  }
 })
 
 test('resource reuse rejects test stubs, changed customization and damaged bundles', () => {

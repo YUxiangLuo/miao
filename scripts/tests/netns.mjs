@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict'
 import { existsSync, readFileSync, readlinkSync } from 'node:fs'
 
-assert.equal(process.getuid(), 0, 'run through scripts/test-netns.sh')
+assert.equal(process.getuid(), 0, 'run through ./dev.sh netns')
 assert.equal(readlinkSync('/proc/self/ns/net'), readlinkSync('/proc/1/ns/net'))
 assert.equal(readFileSync('/proc/1/comm', 'utf8').trim(), 'bash', 'expected the isolated worker as PID 1')
 assert(existsSync('/run/miao-rust') && existsSync('/tmp/miao-smoke.yaml'), 'missing isolated fixtures')

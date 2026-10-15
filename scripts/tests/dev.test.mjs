@@ -12,8 +12,8 @@ function run(args, overrides = {}) {
   roots.push(root)
   mkdirSync(join(root, 'scripts/lib'), { recursive: true })
   mkdirSync(join(root, 'bin'))
-  copyFileSync(new URL('../dev.sh', import.meta.url), join(root, 'dev.sh'))
-  copyFileSync(new URL('./lib/release.sh', import.meta.url), join(root, 'scripts/lib/release.sh'))
+  copyFileSync(new URL('../../dev.sh', import.meta.url), join(root, 'dev.sh'))
+  copyFileSync(new URL('../lib/release.sh', import.meta.url), join(root, 'scripts/lib/release.sh'))
   writeFileSync(join(root, 'scripts/lib/kernel.sh'), 'printf "kernel %s\\n" "$*" >> "$LOG"\n')
   const log = join(root, 'calls')
   writeFileSync(log, '')
@@ -26,8 +26,8 @@ case "$tool:$*" in
   'git:rev-parse --verify '*) exit 1 ;;
   'git:remote get-url origin') echo 'git@github.com:example/miao.git' ;;
   'git:ls-remote '*) printf '%s' "\${REMOTE_TAG:-}" ;;
-  'bun:scripts/release-artifacts.mjs version') echo 1.2.3 ;;
-  'bun:scripts/release-artifacts.mjs verify '*) exit "\${VERIFY_STATUS:-0}" ;;
+  'bun:scripts/lib/release-artifacts.mjs version') echo 1.2.3 ;;
+  'bun:scripts/lib/release-artifacts.mjs verify '*) exit "\${VERIFY_STATUS:-0}" ;;
   'rustup:target list --installed') printf '%s\\n' x86_64-unknown-linux-musl aarch64-unknown-linux-musl ;;
   'gh:release view '*"--json assets"*)
     [[ \${EXISTING_ASSETS+x} ]] || exit 1
@@ -35,7 +35,7 @@ case "$tool:$*" in
   'gh:release upload '*) exit "\${UPLOAD_STATUS:-0}" ;;
 esac
 `
-  for (const name of ['git', 'bun', 'cargo', 'gh', 'rustup', 'zig', 'cargo-zigbuild', 'go', 'curl']) {
+  for (const name of ['git', 'bun', 'cargo', 'gh', 'rustup', 'zig', 'cargo-zigbuild', 'go', 'curl', 'shellcheck', 'jq']) {
     writeFileSync(join(root, 'bin', name), stub, { mode: 0o755 })
   }
   const result = Bun.spawnSync(['bash', join(root, 'dev.sh'), ...args], {
@@ -52,6 +52,17 @@ test('build rejects ambiguous targets and core checks do not need Bun or resourc
   expect(result.status).toBe(0)
   expect(result.calls.every(call => call.startsWith('cargo '))).toBe(true)
   expect(result.calls.filter(call => call.includes('--no-default-features'))).toHaveLength(2)
+})
+
+test('frontend and script checks run independently', () => {
+  const frontend = run(['check', 'frontend'])
+  expect(frontend.status).toBe(0)
+  expect(frontend.calls.every(call => call.startsWith('bun ') && call.includes('frontend-rsbuild'))).toBe(true)
+  const scripts = run(['check', 'scripts'])
+  expect(scripts.status).toBe(0)
+  expect(scripts.calls.some(call => call.startsWith('shellcheck '))).toBe(true)
+  expect(scripts.calls).toContain('bun test scripts/tests')
+  expect(scripts.calls.some(call => call.includes('frontend-rsbuild') || call.startsWith('cargo '))).toBe(false)
 })
 
 test('release preparation builds both musl targets with one kernel build and no remote writes', () => {

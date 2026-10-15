@@ -4,9 +4,9 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { spawnSync } from 'node:child_process'
 
-const preflight = readFileSync(new URL('../crates/miao-core/src/services/vps/common.sh', import.meta.url), 'utf8')
-const provision = readFileSync(new URL('../crates/miao-core/src/services/vps/provision.sh', import.meta.url), 'utf8')
-const probe = readFileSync(new URL('../crates/miao-core/src/services/vps/probe.sh', import.meta.url), 'utf8')
+const preflight = readFileSync(new URL('../../crates/miao-core/src/services/vps/common.sh', import.meta.url), 'utf8')
+const provision = readFileSync(new URL('../../crates/miao-core/src/services/vps/provision.sh', import.meta.url), 'utf8')
+const probe = readFileSync(new URL('../../crates/miao-core/src/services/vps/probe.sh', import.meta.url), 'utf8')
 const legacyConfig = 'listen: :543\nauth:\n  type: password\n  password: old-secret\nobfs:\n  type: salamander\n  salamander:\n    password: old-obfs\n'
 
 test('legacy probe requests migration without overwriting config or restarting', () => {

@@ -1,9 +1,5 @@
 #!/usr/bin/env bash
 # Miao 一键安装：下载最新 release 并注册为 systemd 服务（仅 Linux + systemd）
-#
-# 用法：
-#   curl -fsSL https://raw.githubusercontent.com/YUxiangLuo/miao/master/install.sh | sudo bash
-#   sudo bash install.sh /path/to/miao-binary   # 离线安装本地二进制
 # 重复运行即事务式升级：先下载并校验，最后才短暂停服替换；启动失败自动回滚。
 set -euo pipefail
 
@@ -18,6 +14,15 @@ RELEASE_API="https://api.github.com/repos/$REPO/releases/latest"
 REMOVE_SH_URL="https://raw.githubusercontent.com/$REPO/master/remove.sh"
 
 log() { echo "==> $*"; }
+
+usage() {
+  cat <<'EOF'
+用法: sudo bash install.sh [本地二进制]
+  不传文件时下载最新 Release；需要 curl 或 wget、jq、sha256sum。
+  传入本地文件可离线安装。安装/升级会短暂停服，失败时回滚。
+  -h, --help  显示帮助，无需 root。
+EOF
+}
 
 self_upgrade_pending() {
   [[ -e "$SELF_UPGRADE_BACKUP" || -e "$SELF_UPGRADE_PENDING" ]]
@@ -64,7 +69,7 @@ resolve_panel_port() {
 }
 
 download_release_binary() {
-  local name=$1 directory=$2 destination=$3 metadata url digest expected actual
+  local name=$1 directory=$2 destination=$3 metadata url digest expected actual tool
   for tool in jq sha256sum; do
     if ! command -v "$tool" >/dev/null 2>&1; then
       echo "缺少 $tool，请先安装后重试" >&2
@@ -91,6 +96,9 @@ download_release_binary() {
 
 # Sourcing exposes helpers without installing or touching services.
 if [[ ${BASH_SOURCE[0]:-$0} != "$0" ]]; then return 0; fi
+
+if [[ $# == 1 && ( $1 == --help || $1 == -h ) ]]; then usage; exit 0; fi
+if (( $# > 1 )) || [[ "$LOCAL_BIN" == -* ]]; then usage >&2; exit 1; fi
 
 PANEL_PORT=$(resolve_panel_port)
 

@@ -29,7 +29,7 @@ download() {
 }
 download_release_binary miao-rust-linux-amd64 "$FIXTURE" "$FIXTURE/candidate"
 `], {
-    env: { ...process.env, INSTALL_SCRIPT: fileURLToPath(new URL('../install.sh', import.meta.url)), FIXTURE: root },
+    env: { ...process.env, INSTALL_SCRIPT: fileURLToPath(new URL('../../install.sh', import.meta.url)), FIXTURE: root },
     stdout: 'pipe', stderr: 'pipe',
   })
   return { status: result.exitCode, calls: readFileSync(join(root, 'calls'), 'utf8').trim().split('\n'), root }
@@ -56,4 +56,26 @@ test('installer refuses a binary whose SHA256 differs from release metadata', ()
   const result = download([{ name, browser_download_url: 'https://example.com/v1.2.3/miao', digest: `sha256:${'a'.repeat(64)}` }])
   expect(result.status).not.toBe(0)
   expect(result.calls).toHaveLength(2)
+})
+
+test('installation and removal help and argument errors are handled before privilege checks', () => {
+  const root = mkdtempSync(join(tmpdir(), 'miao-entry-test-'))
+  roots.push(root)
+  const log = join(root, 'privilege-checks')
+  writeFileSync(log, '')
+  // Force a non-root identity even when the test runner is root. Accidental
+  // fallthrough must stop before any install/remove operation can run.
+  writeFileSync(join(root, 'id'), '#!/bin/sh\nprintf "checked\\n" >> "$ENTRY_LOG"\necho 1\n', { mode: 0o755 })
+  for (const script of ['install.sh', 'remove.sh']) {
+    const path = fileURLToPath(new URL(`../../${script}`, import.meta.url))
+    for (const [args, status] of [[['--help'], 0], [['-h'], 0], [['--unknown'], 1], [['--yes', '--unknown'], 1]]) {
+      const result = Bun.spawnSync(['bash', path, ...args], {
+        env: { ...process.env, PATH: `${root}:/usr/bin:/bin`, ENTRY_LOG: log },
+        stdout: 'pipe', stderr: 'pipe',
+      })
+      expect(result.exitCode).toBe(status)
+      expect(`${result.stdout}${result.stderr}`).toContain(script)
+    }
+  }
+  expect(readFileSync(log, 'utf8')).toBe('')
 })

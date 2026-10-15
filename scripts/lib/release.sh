@@ -8,7 +8,7 @@ set_version() {
   require bun cargo
   local version=${1#v}
   [[ "$version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || die "expected version vX.Y.Z"
-  bun scripts/release-artifacts.mjs version "$version"
+  bun scripts/lib/release-artifacts.mjs version "$version"
   # Resolve only the workspace version change, retaining existing dependency pins.
   cargo check -p miao-core --offline --no-default-features
   echo "==> Version updated locally. Review and commit Cargo.toml/Cargo.lock, then run ./dev.sh release"
@@ -25,7 +25,7 @@ release() {
   (( publish || ! draft )) || die "--draft requires --publish"
   require bun git
   clean_tree
-  version=$(bun scripts/release-artifacts.mjs version)
+  version=$(bun scripts/lib/release-artifacts.mjs version)
   tag="v$version"
   stage="$ROOT_DIR/dist/$tag"
   commit=$(git rev-parse HEAD)
@@ -36,12 +36,12 @@ release() {
     build all --refresh-kernel
     clean_tree
     [[ $(git rev-parse HEAD) == "$commit" ]] || die "HEAD changed during release build"
-    bun scripts/release-artifacts.mjs stage "$stage" "$commit" "$tag"
+    bun scripts/lib/release-artifacts.mjs stage "$stage" "$commit" "$tag"
     echo "==> Prepared $stage. Publish with: ./dev.sh release --publish"
     return
   fi
   require gh
-  bun scripts/release-artifacts.mjs verify "$stage" "$commit" "$tag"
+  bun scripts/lib/release-artifacts.mjs verify "$stage" "$commit" "$tag"
   repository=$(git remote get-url origin)
   case "$repository" in
     https://github.com/*) repository=${repository#https://github.com/} ;;

@@ -1,14 +1,11 @@
 import { createHash } from 'node:crypto'
 import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { customizationHash, readSource } from './sing-box/source.mjs'
+import { customizationHash, readSource } from '../sing-box/source.mjs'
 
 const targets = { amd64: ['x86_64-unknown-linux-musl', 62], arm64: ['aarch64-unknown-linux-musl', 183] }
 const ruleFiles = ['geoip-cn.srs', 'geosite-geolocation-cn.srs']
-const assetNames = [
-  ...Object.keys(targets).flatMap(target => [`miao-rust-linux-${target}`, `miao-rust-linux-${target}.sha256`, `miao-kernel-${target}.json`]),
-  'miao-embedded-sources.txt',
-]
+const assetNames = Object.keys(targets).map(target => `miao-rust-linux-${target}`)
 const sha256 = bytes => createHash('sha256').update(bytes).digest('hex')
 const json = path => JSON.parse(readFileSync(path, 'utf8'))
 const writeJson = (path, data) => writeFileSync(path, `${JSON.stringify(data, null, 2)}\n`)
@@ -20,16 +17,20 @@ export function version(root = '.') {
   return value
 }
 
-export function validateKernel(directory, target) {
+function validateKernelMetadata(metadata, target) {
   ensure(Object.hasOwn(targets, target), `Unsupported target: ${target}`)
-  const base = join(directory, `sing-box-${target}`)
-  const metadata = json(`${base}.meta.json`)
   ensure(metadata.schema_version === 1 && metadata.name === 'miao-kernel' && !metadata.test_stub, 'Real kernel required')
   ensure(metadata.target === target, 'Kernel target mismatch')
   for (const [key, value] of Object.entries(readSource())) {
     ensure(JSON.stringify(metadata[key]) === JSON.stringify(value), `Stale kernel ${key}`)
   }
   ensure(metadata.customization_sha256 === customizationHash(), 'Stale kernel customization')
+}
+
+export function validateKernel(directory, target) {
+  const base = join(directory, `sing-box-${target}`)
+  const metadata = json(`${base}.meta.json`)
+  validateKernelMetadata(metadata, target)
   const bytes = readFileSync(`${base}.zst`)
   ensure(bytes.length === metadata.compression.bytes && sha256(bytes) === metadata.compression.sha256, 'Kernel package checksum mismatch')
   return metadata
@@ -43,16 +44,25 @@ export function recordRules(directory, geoip, direct) {
   })
 }
 
-export function validateResources(root, target) {
-  const directory = join(root, 'embedded')
-  validateKernel(directory, target)
-  const rules = json(join(directory, 'rules.meta.json'))
+function validateRuleMetadata(rules) {
   ensure(['sing-geoip', 'v2ray-rules-dat'].every(name => /^[a-f0-9]{40}$/.test(rules.sources?.[name])), 'Missing rule source commits')
+  ensure(ruleFiles.every(name => /^[a-f0-9]{64}$/.test(rules.files?.[name])), 'Missing rule checksums')
+}
+
+function validateRules(directory) {
+  const rules = json(join(directory, 'rules.meta.json'))
+  validateRuleMetadata(rules)
   for (const name of ruleFiles) {
     const bytes = readFileSync(join(directory, name))
     ensure(bytes.length > 0 && sha256(bytes) === rules.files[name], `Rule checksum mismatch: ${name}`)
   }
   return rules
+}
+
+export function validateResources(root, target) {
+  const directory = join(root, 'embedded')
+  validateKernel(directory, target)
+  return validateRules(directory)
 }
 
 function validateBinary(path, target) {
@@ -64,47 +74,33 @@ function validateBinary(path, target) {
 
 export function stageRelease(root, directory, commit, tag) {
   ensure(/^[a-f0-9]{40}$/.test(commit) && tag === `v${version(root)}`, 'Release identity mismatch')
-  const rules = validateResources(root, 'amd64')
-  validateResources(root, 'arm64')
+  const rules = validateRules(join(root, 'embedded'))
+  const kernels = {}, files = {}
   mkdirSync(directory, { recursive: true })
   for (const [target, [triple]] of Object.entries(targets)) {
+    kernels[target] = validateKernel(join(root, 'embedded'), target)
     const binary = join(root, 'target', triple, 'release', 'miao-rust')
     const bytes = validateBinary(binary, target)
     const name = `miao-rust-linux-${target}`
     copyFileSync(binary, join(directory, name))
-    writeFileSync(join(directory, `${name}.sha256`), `${sha256(bytes)}  ${name}\n`)
-    copyFileSync(join(root, 'embedded', `sing-box-${target}.meta.json`), join(directory, `miao-kernel-${target}.json`))
+    files[name] = { bytes: bytes.length, sha256: sha256(bytes) }
   }
-  const source = readSource()
-  writeFileSync(join(directory, 'miao-embedded-sources.txt'), [
-    `miao ${tag} ${commit}`, `sing-box ${source.repository} ${source.revision}`,
-    `kernel-version ${source.version}`, `kernel-profile ${source.profile}`, `go ${source.go_version}`,
-    `build-tags ${source.build_tags.join(',')}`, `customization-sha256 ${customizationHash()}`,
-    ...Object.entries(rules.sources).map(([name, sha]) => `${name} ${sha}`),
-    ...Object.entries(rules.files).map(([name, sha]) => `${name} sha256:${sha}`),
-  ].join('\n') + '\n')
   writeJson(join(directory, 'release-manifest.json'), {
-    schema_version: 1, commit, tag,
-    files: Object.fromEntries(assetNames.map(name => {
-      const bytes = readFileSync(join(directory, name))
-      return [name, { bytes: bytes.length, sha256: sha256(bytes) }]
-    })),
+    schema_version: 2, commit, tag, files, kernels, rules,
   })
   verifyRelease(directory, commit, tag)
 }
 
 export function verifyRelease(directory, commit, tag) {
   const manifest = json(join(directory, 'release-manifest.json'))
-  ensure(manifest.schema_version === 1 && manifest.commit === commit && manifest.tag === tag, 'Staged release does not match HEAD/version; rebuild it')
+  ensure(manifest.schema_version === 2 && manifest.commit === commit && manifest.tag === tag, 'Staged release does not match HEAD/version or format; rebuild it')
   ensure(JSON.stringify(Object.keys(manifest.files).sort()) === JSON.stringify([...assetNames].sort()), 'Incomplete release manifest')
-  for (const name of assetNames) {
-    const bytes = readFileSync(join(directory, name))
-    ensure(bytes.length === manifest.files[name].bytes && sha256(bytes) === manifest.files[name].sha256, `Staged asset changed: ${name}`)
-  }
+  validateRuleMetadata(manifest.rules)
   for (const target of Object.keys(targets)) {
     const name = `miao-rust-linux-${target}`
+    validateKernelMetadata(manifest.kernels[target], target)
     const bytes = validateBinary(join(directory, name), target)
-    ensure(readFileSync(join(directory, `${name}.sha256`), 'utf8') === `${sha256(bytes)}  ${name}\n`, `Invalid checksum file: ${name}`)
+    ensure(bytes.length === manifest.files[name].bytes && sha256(bytes) === manifest.files[name].sha256, `Staged asset changed: ${name}`)
   }
 }
 
