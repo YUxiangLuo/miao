@@ -54,6 +54,8 @@ REST handler 只解析参数、调用 `services/commands/`，由 `responses.rs` 
 
 所有刷新共用 `refresh_subscriptions`。调度复用手动刷新路径，只负责计时、唤醒、退避，不另建拉取/提交逻辑，不写订阅刷新状态或改变启动重试预算；时间预算见[配置参考](config.md#定时刷新订阅)。`SubscriptionFetchReport` 在禁用/地区/倍率筛选前统计成功/失败来源及新鲜/缓存节点。
 
+调度先注册通知再读取计划；设置或订阅变更通知优先于到期计时，唤醒后重算计划，避免关闭定时刷新时仍执行旧计划。
+
 | `outcome` | 含义 |
 | --- | --- |
 | `not_requested` | 没有来源执行拉取 |

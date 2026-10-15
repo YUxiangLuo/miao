@@ -30,6 +30,7 @@ pub(super) fn spawn(state: Arc<AppState>) {
     tokio::spawn(run_scheduled_refreshes(
         state,
         RetryState::new(RETRY_BACKOFF.to_vec()),
+        Local::now,
     ));
 }
 
@@ -91,12 +92,12 @@ impl RetryState {
     }
 
     /// 记录一次可重试的失败并推进退避；返回是否还有重试预算。
-    fn on_failure(&mut self) -> bool {
+    fn on_failure(&mut self, now: DateTime<Local>) -> bool {
         self.retry_at = self
             .backoff
             .get(self.failures)
             .copied()
-            .map(|delay| Local::now() + chrono::Duration::from_std(delay).unwrap_or_default());
+            .map(|delay| now + chrono::Duration::from_std(delay).unwrap_or_default());
         self.failures = self.failures.saturating_add(1);
         self.retry_at.is_some()
     }
@@ -107,40 +108,19 @@ impl RetryState {
     }
 }
 
-async fn run_scheduled_refreshes(state: Arc<AppState>, mut retry: RetryState) {
-    loop {
-        let Some(scheduled) = next_target(&state).await else {
-            // 未启用/没有有效时刻：清空退避，只等配置或关闭唤醒。
-            retry.clear();
-            if !wait_for_event(&state, None).await {
-                info!("Scheduled refresh scheduler stopped");
-                return;
-            }
-            continue;
-        };
-
-        let (target, is_retry) = retry.target(scheduled);
-        let wait = (target - Local::now())
-            .to_std()
-            .unwrap_or_default()
-            .min(MAX_TICK);
-        if !wait_for_event(&state, Some(wait)).await {
-            info!("Scheduled refresh scheduler stopped");
-            return;
-        }
-        // 睡眠按块进行：到点或时钟跳变越过后触发；否则继续等待同一个绝对目标。
-        if Local::now() < target {
-            continue;
-        }
-        retry.begin(is_retry);
-
+async fn run_scheduled_refreshes(
+    state: Arc<AppState>,
+    mut retry: RetryState,
+    now: impl Fn() -> DateTime<Local>,
+) {
+    while wait_for_due_refresh(&state, &mut retry, &now).await {
         match fire(&state).await {
             FireOutcome::Succeeded | FireOutcome::Skipped => retry.on_success(),
             FireOutcome::Retryable => {
-                if retry.on_failure() {
+                if retry.on_failure(now()) {
                     let retry_in_secs = retry
                         .retry_at
-                        .map(|at| (at - Local::now()).num_seconds().max(0))
+                        .map(|at| (at - now()).num_seconds().max(0))
                         .unwrap_or(0);
                     warn!(
                         retry_in_secs,
@@ -155,45 +135,75 @@ async fn run_scheduled_refreshes(state: Arc<AppState>, mut retry: RetryState) {
             }
         }
     }
+    info!("Scheduled refresh scheduler stopped");
 }
 
 /// 下一次计划执行时刻；未启用或没有有效时刻时为 None。
-async fn next_target(state: &Arc<AppState>) -> Option<DateTime<Local>> {
+async fn next_target(
+    state: &Arc<AppState>,
+    now: impl Fn() -> DateTime<Local>,
+) -> Option<DateTime<Local>> {
     let schedule = state.stable_config.read().await.scheduled_refresh.clone();
     if !schedule.enabled {
         return None;
     }
-    schedule::next_run_at(&schedule::parse_times(&schedule.times), Local::now())
+    schedule::next_run_at(&schedule::parse_times(&schedule.times), now())
 }
 
-/// 等待配置变化、订阅变更、关闭信号或超时；返回 false 表示服务进入关闭流程。
-async fn wait_for_event(state: &Arc<AppState>, duration: Option<Duration>) -> bool {
-    // 先注册再检查状态，避免关闭通知在两者之间丢失。
-    let wake = state.scheduled_refresh_wake.notified();
-    let cancel = state.sub_refresh_cancel.notified();
-    tokio::pin!(wake);
-    tokio::pin!(cancel);
-    wake.as_mut().enable();
-    cancel.as_mut().enable();
-    if state.lifecycle.is_shutting_down() {
-        return false;
-    }
-    match duration {
-        Some(duration) => {
-            tokio::select! {
-                _ = &mut wake => {}
-                _ = &mut cancel => {}
-                _ = sleep(duration) => {}
+/// Only a due timer permits a refresh. Notifications invalidate the observed
+/// plan; shutdown returns false, including while the schedule is disabled.
+async fn wait_for_due_refresh(
+    state: &Arc<AppState>,
+    retry: &mut RetryState,
+    now: impl Fn() -> DateTime<Local>,
+) -> bool {
+    loop {
+        // Register before reading the schedule as well as the shutdown state.
+        // Otherwise enabling a disabled schedule could be lost before we wait.
+        let wake = state.scheduled_refresh_wake.notified();
+        let cancel = state.sub_refresh_cancel.notified();
+        tokio::pin!(wake);
+        tokio::pin!(cancel);
+        wake.as_mut().enable();
+        cancel.as_mut().enable();
+        if state.lifecycle.is_shutting_down() {
+            return false;
+        }
+
+        let target = next_target(state, &now)
+            .await
+            .map(|scheduled| retry.target(scheduled));
+        if target.is_none() {
+            retry.clear();
+        }
+        let timer = async {
+            match target {
+                Some((target, _)) => {
+                    sleep((target - now()).to_std().unwrap_or_default().min(MAX_TICK)).await;
+                }
+                None => std::future::pending::<()>().await,
+            }
+        };
+        tokio::select! {
+            // A setting change can coincide with the deadline. Re-read it
+            // before allowing a refresh based on the old enabled state.
+            biased;
+            _ = &mut wake => continue,
+            _ = &mut cancel => continue,
+            _ = timer => {}
+        }
+
+        if state.lifecycle.is_shutting_down() {
+            return false;
+        }
+        // Sleep in bounded chunks so clock/timezone changes are picked up.
+        if let Some((target, is_retry)) = target {
+            if now() >= target {
+                retry.begin(is_retry);
+                return true;
             }
         }
-        None => {
-            tokio::select! {
-                _ = &mut wake => {}
-                _ = &mut cancel => {}
-            }
-        }
     }
-    !state.lifecycle.is_shutting_down()
 }
 
 /// 触发一次定时刷新。复用面板手动刷新的业务路径（生成、校验、热应用、状态投影），
@@ -257,17 +267,18 @@ mod tests {
     #[test]
     fn retry_budget_walks_the_backoff_then_exhausts() {
         let mut retry = RetryState::new(vec![Duration::from_secs(1), Duration::from_secs(2)]);
+        let now = local(12, 0);
         assert!(retry.retry_at.is_none());
 
-        assert!(retry.on_failure());
+        assert!(retry.on_failure(now));
         assert!(retry.retry_at.is_some());
-        assert!(retry.on_failure());
-        assert!(!retry.on_failure(), "预算用尽后不再安排重试");
+        assert!(retry.on_failure(now));
+        assert!(!retry.on_failure(now), "预算用尽后不再安排重试");
         assert!(retry.retry_at.is_none());
-        assert!(!retry.on_failure());
+        assert!(!retry.on_failure(now));
 
         retry.on_success();
-        assert!(retry.on_failure(), "成功清零后重新获得完整预算");
+        assert!(retry.on_failure(now), "成功清零后重新获得完整预算");
         assert_eq!(retry.failures, 1);
     }
 
@@ -293,7 +304,11 @@ mod tests {
     async fn disabled_schedule_waits_for_events_and_stops_on_shutdown() {
         let (_root, state) = isolated_stopped_state(Config::default());
         let cloned = state.clone();
-        let task = tokio::spawn(run_scheduled_refreshes(cloned, RetryState::new(Vec::new())));
+        let task = tokio::spawn(run_scheduled_refreshes(
+            cloned,
+            RetryState::new(Vec::new()),
+            Local::now,
+        ));
 
         // 未启用：没有任何目标时刻，但循环应保持存活
         tokio::time::sleep(Duration::from_millis(20)).await;
@@ -308,16 +323,109 @@ mod tests {
             .expect("scheduler task joins");
     }
 
+    #[tokio::test(start_paused = true)]
+    async fn disabling_a_due_schedule_does_not_start_a_refresh() {
+        let (_root, state) = isolated_stopped_state(Config {
+            subs: vec!["http://127.0.0.1:9/unreachable".to_string()],
+            ..Config::default()
+        });
+        state.stable_config.write().await.scheduled_refresh = ScheduledRefresh {
+            enabled: true,
+            times: vec!["00:00".to_string()],
+        };
+        let start = tokio::time::Instant::now();
+        let now = move || local(12, 0) + chrono::Duration::from_std(start.elapsed()).unwrap();
+        let mut retry = RetryState::new(Vec::new());
+        retry.retry_at = Some(now() + chrono::Duration::seconds(1));
+        let task = run_scheduled_refreshes(state.clone(), retry, now);
+        tokio::pin!(task);
+        assert!(futures::poll!(&mut task).is_pending());
+        assert_eq!(state.sub_refresh_generation.load(Ordering::Relaxed), 0);
+
+        // Advance both clocks without polling the scheduler: the timer and the
+        // disabling notification will be ready together on its next poll.
+        tokio::time::advance(Duration::from_secs(1)).await;
+        state.stable_config.write().await.scheduled_refresh.enabled = false;
+        state.scheduled_refresh_wake.notify_waiters();
+        assert!(futures::poll!(&mut task).is_pending());
+        assert_eq!(state.sub_refresh_generation.load(Ordering::Relaxed), 0);
+
+        state.lifecycle.shutdown();
+        state.scheduled_refresh_wake.notify_waiters();
+        task.await;
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn schedule_change_during_target_calculation_is_not_lost() {
+        let (_root, state) = isolated_stopped_state(Config {
+            subs: vec!["http://127.0.0.1:9/unreachable".to_string()],
+            ..Config::default()
+        });
+        state.stable_config.write().await.scheduled_refresh = ScheduledRefresh {
+            enabled: true,
+            times: vec!["00:00".to_string()],
+        };
+        let changed = std::sync::atomic::AtomicBool::new(false);
+        let now = || {
+            // next_target has read the old schedule when it consults the clock.
+            // Simulate a concurrent settings commit before it starts waiting.
+            if !changed.swap(true, Ordering::Relaxed) {
+                state
+                    .stable_config
+                    .try_write()
+                    .unwrap()
+                    .scheduled_refresh
+                    .enabled = false;
+                state.scheduled_refresh_wake.notify_waiters();
+            }
+            local(12, 0)
+        };
+        let mut retry = RetryState::new(Vec::new());
+        retry.retry_at = Some(local(11, 0));
+        let task = run_scheduled_refreshes(state.clone(), retry, now);
+        tokio::pin!(task);
+        assert!(futures::poll!(&mut task).is_pending());
+        assert!(changed.load(Ordering::Relaxed));
+        assert_eq!(state.sub_refresh_generation.load(Ordering::Relaxed), 0);
+
+        state.lifecycle.shutdown();
+        state.scheduled_refresh_wake.notify_waiters();
+        task.await;
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn enabling_a_waiting_schedule_uses_its_new_deadline() {
+        let (_root, state) = isolated_stopped_state(Config::default());
+        let start = tokio::time::Instant::now();
+        let now = move || local(12, 0) + chrono::Duration::from_std(start.elapsed()).unwrap();
+        let mut retry = RetryState::new(Vec::new());
+        let wait = wait_for_due_refresh(&state, &mut retry, now);
+        tokio::pin!(wait);
+        assert!(futures::poll!(&mut wait).is_pending());
+
+        state.stable_config.write().await.scheduled_refresh = ScheduledRefresh {
+            enabled: true,
+            times: vec!["12:01".to_string()],
+        };
+        state.scheduled_refresh_wake.notify_waiters();
+        assert!(futures::poll!(&mut wait).is_pending());
+        // Crossing a bounded tick must neither fire early nor move the deadline.
+        tokio::time::advance(Duration::from_secs(30)).await;
+        assert!(futures::poll!(&mut wait).is_pending());
+        tokio::time::advance(Duration::from_secs(30)).await;
+        assert_eq!(futures::poll!(&mut wait), std::task::Poll::Ready(true));
+    }
+
     #[tokio::test]
     async fn next_target_reads_the_current_schedule() {
         let (_root, state) = isolated_stopped_state(Config::default());
-        assert!(next_target(&state).await.is_none());
+        assert!(next_target(&state, Local::now).await.is_none());
 
         state.stable_config.write().await.scheduled_refresh = ScheduledRefresh {
             enabled: true,
             times: vec!["00:00".to_string()],
         };
-        let target = next_target(&state)
+        let target = next_target(&state, Local::now)
             .await
             .expect("enabled schedule has target");
         // 目标是下一个 00:00，必然晚于当前本地时间
@@ -363,6 +471,7 @@ mod tests {
         let task = tokio::spawn(run_scheduled_refreshes(
             cloned,
             RetryState::due_now(vec![Duration::from_millis(20), Duration::from_millis(20)]),
+            Local::now,
         ));
 
         let deadline = std::time::Instant::now() + Duration::from_secs(5);
