@@ -20,7 +20,7 @@ Miao 将 sing-box 内核、分流规则和 Web 面板打包为单个可执行文
 
 ## 安装与启动
 
-从 [Release](https://github.com/YUxiangLuo/miao/releases/latest) 下载对应二进制。发布附件为两个架构的程序，源码 ZIP/TAR.GZ 由 GitHub 自动生成。
+从 [Release](https://github.com/YUxiangLuo/miao/releases/latest) 下载对应架构的程序和同名 `.sha256` 校验文件；源码 ZIP/TAR.GZ 由 GitHub 自动生成。
 
 | 主机架构（`uname -m`） | 下载文件 |
 | --- | --- |

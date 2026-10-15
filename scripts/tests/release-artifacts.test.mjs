@@ -35,7 +35,16 @@ test('release binds both architectures, sources and checksums to one commit/vers
   const { root, stage } = fixture()
   stageRelease(root, stage, commit, 'v1.2.3')
   verifyRelease(stage, commit, 'v1.2.3')
-  expect(readdirSync(stage).sort()).toEqual(['miao-rust-linux-amd64', 'miao-rust-linux-arm64', 'release-manifest.json'])
+  expect(readdirSync(stage).sort()).toEqual([
+    'miao-rust-linux-amd64', 'miao-rust-linux-amd64.sha256',
+    'miao-rust-linux-arm64', 'miao-rust-linux-arm64.sha256', 'release-manifest.json',
+  ])
+  for (const target of ['amd64', 'arm64']) {
+    const result = Bun.spawnSync(['sha256sum', '-c', `miao-rust-linux-${target}.sha256`], {
+      cwd: stage, stdout: 'pipe', stderr: 'pipe',
+    })
+    expect(result.exitCode).toBe(0)
+  }
   const manifest = JSON.parse(readFileSync(join(stage, 'release-manifest.json'), 'utf8'))
   expect(manifest.kernels.amd64.revision).toBe(readSource().revision)
   expect(manifest.rules.sources).toEqual({ 'sing-geoip': 'b'.repeat(40), 'v2ray-rules-dat': 'c'.repeat(40) })
@@ -45,6 +54,29 @@ test('release binds both architectures, sources and checksums to one commit/vers
   binary[63] ^= 1
   writeFileSync(join(stage, 'miao-rust-linux-arm64'), binary)
   expect(() => verifyRelease(stage, commit, 'v1.2.3')).toThrow('Staged asset changed')
+})
+
+test('publishing rejects missing, incorrect or malformed checksum files for either architecture', () => {
+  const { root, stage } = fixture()
+  stageRelease(root, stage, commit, 'v1.2.3')
+  for (const target of ['amd64', 'arm64']) {
+    const name = `miao-rust-linux-${target}`
+    const path = join(stage, `${name}.sha256`)
+    const original = readFileSync(path, 'utf8')
+    for (const content of [
+      `${'0'.repeat(64)}  ${name}\n`,
+      original.replace(name, 'other-binary'),
+      `${original}${original}`,
+      '',
+    ]) {
+      writeFileSync(path, content)
+      expect(() => verifyRelease(stage, commit, 'v1.2.3')).toThrow('Staged checksum changed')
+    }
+    rmSync(path)
+    expect(() => verifyRelease(stage, commit, 'v1.2.3')).toThrow()
+    writeFileSync(path, original)
+  }
+  expect(() => verifyRelease(stage, commit, 'v1.2.3')).not.toThrow()
 })
 
 test('staging rejects the wrong architecture instead of packaging a native binary twice', () => {

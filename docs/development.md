@@ -46,7 +46,7 @@ Miao 仅支持 Linux/OpenWrt amd64、arm64。Rust `miao-core` 管理配置、RES
 
 发布目标为 `origin` 唯一的 GitHub 推送地址，tag 检查、推送和附件上传使用同一仓库，需已登录 github.com 的 `gh`。已有同名远端 tag 必须指向同一提交；GitHub 查询失败时在推送前停止。`--draft` 创建或更新草稿，不能用于已公开的 Release；不加该参数时，已有草稿会在上传和附件清理成功后公开。
 
-Release 只上传 `miao-rust-linux-amd64`、`miao-rust-linux-arm64`，源码 ZIP/TAR.GZ 由 GitHub 根据 tag 自动生成。清单不上传。旧格式清单需重新执行 `release` 生成。重复发布会在两个二进制上传成功后删除该 Release 的其他附件。安装与自升级使用 [GitHub 生成的 SHA-256 摘要](https://docs.github.com/en/rest/releases/releases)，不再下载 `.sha256` 附件。
+Release 上传 `miao-rust-linux-amd64`、`miao-rust-linux-arm64` 及各自同名的 `.sha256` 文件，源码 ZIP/TAR.GZ 由 GitHub 根据 tag 自动生成。清单不上传。准备阶段按 `sha256sum` 标准格式生成校验文件，发布前核对其内容与二进制一致；旧暂存目录需重新执行 `release` 补齐。重复发布会在四个附件全部上传成功后删除该 Release 的其他附件。安装与自升级继续使用 [GitHub 生成的 SHA-256 摘要](https://docs.github.com/en/rest/releases/releases)，`.sha256` 附件供手动校验及旧版客户端升级使用。
 
 ### Arch 生产实例
 

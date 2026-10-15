@@ -43,6 +43,16 @@ test('installer downloads a pinned release URL and verifies its GitHub digest wi
   expect(readFileSync(join(result.root, 'candidate'), 'utf8')).toBe(binary)
 })
 
+test('installer uses the binary digest when checksum sidecars are also present', () => {
+  const result = download([
+    { name, browser_download_url: 'https://example.com/v1.2.3/miao', digest },
+    { name: `${name}.sha256`, browser_download_url: 'https://example.com/v1.2.3/miao.sha256', digest: null },
+  ])
+  expect(result.status).toBe(0)
+  expect(result.calls).toHaveLength(2)
+  expect(result.calls[1]).toBe('https://example.com/v1.2.3/miao')
+})
+
 test('installer rejects missing, duplicate or invalid digests before downloading a binary', () => {
   const asset = { name, browser_download_url: 'https://example.com/v1.2.3/miao', digest }
   for (const assets of [[], [asset, asset], [{ ...asset, digest: null }], [{ ...asset, digest: 'sha256:bad' }], [{ ...asset, digest: digest.replace('sha256', 'sha512') }]]) {

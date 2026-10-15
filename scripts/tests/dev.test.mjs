@@ -133,7 +133,7 @@ test('draft releases are published only after uploads, while --draft cannot over
   expect(rejected.calls.some(call => /^(git (push|tag) |gh release (create|upload|edit) )/.test(call))).toBe(false)
 })
 
-test('publishing uploads exactly two binaries to origin and leaves source archives to GitHub', () => {
+test('publishing uploads two binaries and their checksums and leaves source archives to GitHub', () => {
   const result = run(['release', '--publish', '--draft'])
   expect(result.status).toBe(0)
   const create = result.calls.find(call => call.startsWith('gh release create '))
@@ -141,15 +141,23 @@ test('publishing uploads exactly two binaries to origin and leaves source archiv
   expect(create).toContain('--verify-tag')
   expect(create).toContain('--draft')
   const files = create.split(' ').filter(arg => arg.includes('/dist/')).map(path => path.split('/').at(-1))
-  expect(files).toEqual(['miao-rust-linux-amd64', 'miao-rust-linux-arm64'])
+  expect(files).toEqual([
+    'miao-rust-linux-amd64', 'miao-rust-linux-amd64.sha256',
+    'miao-rust-linux-arm64', 'miao-rust-linux-arm64.sha256',
+  ])
   expect(result.calls.some(call => call.startsWith('cargo '))).toBe(false)
 })
 
-test('republishing removes auxiliary assets only after both binary uploads succeed', () => {
-  const env = { EXISTING_ASSETS: 'miao-rust-linux-amd64\nmiao-rust-linux-arm64\nchecksums.txt\nold metadata.json' }
+test('republishing preserves checksums and removes obsolete assets only after all uploads succeed', () => {
+  const env = { EXISTING_ASSETS: 'miao-rust-linux-amd64\nmiao-rust-linux-amd64.sha256\nmiao-rust-linux-arm64\nmiao-rust-linux-arm64.sha256\nchecksums.txt\nold metadata.json' }
   const result = run(['release', '--publish'], env)
   expect(result.status).toBe(0)
   const upload = result.calls.findIndex(call => call.startsWith('gh release upload '))
+  const files = result.calls[upload].split(' ').filter(arg => arg.includes('/dist/')).map(path => path.split('/').at(-1))
+  expect(files).toEqual([
+    'miao-rust-linux-amd64', 'miao-rust-linux-amd64.sha256',
+    'miao-rust-linux-arm64', 'miao-rust-linux-arm64.sha256',
+  ])
   const deletions = result.calls.filter(call => call.startsWith('gh release delete-asset '))
   expect(deletions).toHaveLength(2)
   expect(deletions.every(call => result.calls.indexOf(call) > upload)).toBe(true)

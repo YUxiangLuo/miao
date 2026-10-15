@@ -14,11 +14,11 @@
 repo=YUxiangLuo/miao
 asset=miao-rust-linux-amd64
 tag=$(gh release view --repo "$repo" --json tagName -q .tagName) &&
-digest=$(gh api "repos/$repo/releases/tags/$tag" --jq ".assets[] | select(.name == \"$asset\") | .digest") &&
-[[ "$digest" =~ ^sha256:[0-9a-fA-F]{64}$ ]] &&
-gh release download "$tag" --repo "$repo" --pattern "$asset" &&
-printf '%s  %s\n' "${digest#sha256:}" "$asset" | sha256sum -c -
+gh release download "$tag" --repo "$repo" --pattern "$asset" --pattern "$asset.sha256" &&
+sha256sum -c "$asset.sha256"
 ```
+
+也可用浏览器下载同一 Release 的程序和同名 `.sha256` 文件，放在同一目录后执行 `sha256sum -c miao-rust-linux-amd64.sha256`。
 
 校验显示 `OK` 后，按 [README](../README.md#安装与启动) 启动。OpenWrt 缺少 `gh` 时可在另一台电脑完成下载与校验，再传入设备。
 
@@ -32,7 +32,7 @@ printf '%s  %s\n' "${digest#sha256:}" "$asset" | sha256sum -c -
 
 systemd Linux 在源码目录用 `sudo bash install.sh /path/to/miao-rust-linux-amd64` 安装或升级，arm64 替换文件名；会短暂断网。本机生产实例遵循[专用流程](development.md#arch-生产实例)。
 
-不传本地文件时，安装脚本下载最新 Release，并使用 GitHub 元数据中的 SHA-256 摘要校验，需要 curl 或 wget、jq、sha256sum。旧版面板依赖 `.sha256` 附件，迁移到新发布格式时首次使用新版安装脚本；之后可正常在面板自升级。
+不传本地文件时，安装脚本下载最新 Release，并使用 GitHub 元数据中的 SHA-256 摘要校验，需要 curl 或 wget、jq、sha256sum。当前应用内升级也使用该摘要；Release 同时提供 `.sha256` 附件，供手动校验及旧版面板升级使用。
 
 在源码目录执行 `sudo bash remove.sh` 卸载，`-y` 跳过确认。它会删除服务、程序及升级残留、`/etc/miao`、运行目录及残留内核/TUN，**先备份配置**。
 

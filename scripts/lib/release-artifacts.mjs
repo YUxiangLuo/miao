@@ -7,6 +7,7 @@ const targets = { amd64: ['x86_64-unknown-linux-musl', 62], arm64: ['aarch64-unk
 const ruleFiles = ['geoip-cn.srs', 'geosite-geolocation-cn.srs']
 const assetNames = Object.keys(targets).map(target => `miao-rust-linux-${target}`)
 const sha256 = bytes => createHash('sha256').update(bytes).digest('hex')
+const checksumLine = (name, digest) => `${digest}  ${name}\n`
 const json = path => JSON.parse(readFileSync(path, 'utf8'))
 const writeJson = (path, data) => writeFileSync(path, `${JSON.stringify(data, null, 2)}\n`)
 const ensure = (condition, message) => { if (!condition) throw new Error(message) }
@@ -84,6 +85,7 @@ export function stageRelease(root, directory, commit, tag) {
     const name = `miao-rust-linux-${target}`
     copyFileSync(binary, join(directory, name))
     files[name] = { bytes: bytes.length, sha256: sha256(bytes) }
+    writeFileSync(join(directory, `${name}.sha256`), checksumLine(name, files[name].sha256))
   }
   writeJson(join(directory, 'release-manifest.json'), {
     schema_version: 2, commit, tag, files, kernels, rules,
@@ -101,6 +103,7 @@ export function verifyRelease(directory, commit, tag) {
     validateKernelMetadata(manifest.kernels[target], target)
     const bytes = validateBinary(join(directory, name), target)
     ensure(bytes.length === manifest.files[name].bytes && sha256(bytes) === manifest.files[name].sha256, `Staged asset changed: ${name}`)
+    ensure(readFileSync(join(directory, `${name}.sha256`), 'utf8') === checksumLine(name, manifest.files[name].sha256), `Staged checksum changed: ${name}.sha256`)
   }
 }
 
