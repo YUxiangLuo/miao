@@ -1,6 +1,7 @@
 import { useCallback, useRef, useState } from 'react'
 import type { useAppData } from './useAppData'
 import { RequestInterruptedError } from './request'
+import { mutationFeedback } from './mutationFeedback'
 import type { VpsDeployRequest, VpsDeployResponse } from '../types/api'
 
 export interface VpsTask {
@@ -30,9 +31,9 @@ export function useVpsDeployment({ apiCall, fetchNodes, clearDelays, showToast }
       update({ phase: 'syncing', message: payload.message || '部署接口已确认完成，正在同步节点列表。' })
       const nodes = await fetchNodes()
       clearDelays()
-      const message = `${payload.message || '部署接口已确认完成'}${nodes === null ? '；节点列表尚未同步，请稍后检查列表，勿重复部署。' : ''}`
-      update({ phase: 'success', message, finishedAt: Date.now() })
-      showToast(message, 'success')
+      const feedback = mutationFeedback(payload.message || '部署接口已确认完成', nodes, '部署')
+      update({ phase: 'success', message: feedback.message, finishedAt: Date.now() })
+      showToast(feedback.message, feedback.tone)
       return true
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)

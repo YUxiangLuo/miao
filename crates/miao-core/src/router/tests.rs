@@ -662,6 +662,82 @@ async fn router_node_select_is_idempotent_when_state_matches() {
     let json = response_json(response).await;
     assert_eq!(json["success"], true);
     assert_eq!(json["message"], "Node select unchanged");
+    assert_eq!(json["data"]["requested"], "manual");
+    assert_eq!(json["data"]["node_select"], "manual");
+    assert_eq!(json["data"]["changed"], false);
+    assert_eq!(json["data"]["runtime_updated"], false);
+}
+
+#[tokio::test]
+async fn router_setting_results_preserve_structured_command_data() {
+    let (_root, state) = crate::test_support::isolated_stopped_state(Config::default());
+    let app = build_router(state.clone());
+    for (endpoint, body, field, expected) in [
+        (
+            "/api/route-mode",
+            json!({"route_mode":"global"}),
+            "route_mode",
+            json!("global"),
+        ),
+        (
+            "/api/max-multiplier",
+            json!({"max_multiplier":"2.5"}),
+            "max_multiplier",
+            json!("2.5"),
+        ),
+        (
+            "/api/max-multiplier",
+            json!({"max_multiplier":null}),
+            "max_multiplier",
+            serde_json::Value::Null,
+        ),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(json_request("POST", endpoint, body))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let json = response_json(response).await;
+        assert_eq!(json["success"], true);
+        assert_eq!(json["data"][field], expected);
+        assert_eq!(json["data"]["changed"], true);
+        for flag in ["runtime_updated", "started", "reloaded", "restarted"] {
+            assert_eq!(json["data"][flag], false);
+        }
+    }
+    assert!(state.sing_process.lock().await.is_none());
+}
+
+#[tokio::test]
+#[cfg(unix)]
+async fn router_node_select_reports_requested_and_effective_strategy_on_fallback() {
+    use std::os::unix::fs::PermissionsExt;
+    let (_root, state) = crate::test_support::isolated_stopped_state(Config {
+        nodes: vec![json!({"type":"trojan", "tag":"manual", "server":"127.0.0.1", "server_port":443, "password":"fixture"}).to_string()],
+        ..Config::default()
+    });
+    let kernel = state.runtime_paths.runtime_dir.join("sing-box");
+    tokio::fs::write(&kernel, b"#!/bin/sh\n[ \"$1\" = check ]\n")
+        .await
+        .unwrap();
+    std::fs::set_permissions(&kernel, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let app = build_router(state.clone());
+    let response = app
+        .oneshot(json_request(
+            "POST",
+            "/api/node-select",
+            json!({"node_select":"fastest_jp"}),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = response_json(response).await;
+    assert_eq!(json["data"]["requested"], "fastest_jp");
+    assert_eq!(json["data"]["node_select"], "manual");
+    assert_eq!(json["data"]["changed"], true);
+    assert_eq!(json["data"]["runtime_updated"], false);
+    assert!(state.sing_process.lock().await.is_none());
 }
 
 #[tokio::test]

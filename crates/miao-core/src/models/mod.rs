@@ -72,6 +72,10 @@ mod typescript_contract {
 
         push_decl::<RouteMode>(&mut output, &config);
         push_decl::<NodeSelect>(&mut output, &config);
+        push_decl::<crate::services::commands::service::RuntimeUpdateResult>(&mut output, &config);
+        push_decl::<crate::services::commands::service::RouteModeResult>(&mut output, &config);
+        push_decl::<crate::services::commands::service::MaxMultiplierResult>(&mut output, &config);
+        push_decl::<crate::services::commands::service::NodeSelectResult>(&mut output, &config);
         push_decl::<RuntimePhase>(&mut output, &config);
         push_decl::<SubscriptionFailureKind>(&mut output, &config);
         push_decl::<SubscriptionFetchOutcome>(&mut output, &config);

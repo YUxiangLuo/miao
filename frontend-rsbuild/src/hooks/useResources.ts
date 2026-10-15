@@ -3,6 +3,11 @@ import { fetchJson } from './request'
 import { useLatestRequest } from './useLatestRequest'
 import type { ApiResponse, NodeInfo, RuleInfo, StatusData, SubStatus, VersionInfo } from '../types/api'
 
+export type ResourceReadResult<T> =
+  | { status: 'success'; data: T }
+  | { status: 'error'; error: string }
+  | { status: 'superseded' }
+
 // 未拿到首个响应前的占位状态。vps_supported: true 与历史上的 undefined 等价
 // （消费方判断 `!== false`）；platform 兜底与 ruleFieldOptions 的默认参数一致。
 const INITIAL_STATUS: StatusData = {
@@ -33,11 +38,11 @@ function useResource<T>(path: string, initial: T) {
   const [failures, setFailures] = useState(0)
   const [error, setError] = useState('')
   const { begin } = useLatestRequest()
-  const refresh = useCallback(async (): Promise<T | null> => {
+  const refresh = useCallback(async (): Promise<ResourceReadResult<T>> => {
     const request = begin()
     try {
       const payload = await fetchJson<ApiResponse<T>>(path, { signal: request.signal })
-      if (!request.isCurrent()) return null
+      if (!request.isCurrent()) return { status: 'superseded' }
       if (!payload.success || payload.data == null) throw new Error(payload.message || '请求失败')
       const next = payload.data
       // Stable references let memoized rules and lists survive health polling.
@@ -45,13 +50,13 @@ function useResource<T>(path: string, initial: T) {
       setLoaded(true)
       setFailures(0)
       setError('')
-      return next
+      return { status: 'success', data: next }
     } catch (cause) {
-      if (request.isCurrent()) {
-        setFailures(count => count + 1)
-        setError(cause instanceof Error ? cause.message : String(cause))
-      }
-      return null
+      if (!request.isCurrent()) return { status: 'superseded' }
+      const message = cause instanceof Error ? cause.message : String(cause)
+      setFailures(count => count + 1)
+      setError(message)
+      return { status: 'error', error: message }
     } finally {
       if (request.isCurrent()) setSettled(true)
     }

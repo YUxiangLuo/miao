@@ -17,8 +17,8 @@ it('retains cached nodes on read failure and clears the error only after success
     .mockResolvedValueOnce(response({ success: true, data: [] }))
   rs.stubGlobal('fetch', fetch)
   const { result } = renderHook(() => useNodes())
-  await act(async () => { await result.current.fetchNodes() })
-  await act(async () => { await result.current.fetchNodes() })
+  await act(async () => { expect(await result.current.fetchNodes()).toEqual({ status: 'success', data: [node] }) })
+  await act(async () => { expect(await result.current.fetchNodes()).toEqual({ status: 'error', error: 'connection lost' }) })
   expect(result.current.nodes).toEqual([node])
   expect(result.current.nodesError).toBe('connection lost')
   await act(async () => { await result.current.fetchNodes() })
@@ -34,7 +34,10 @@ it('does not publish an error from an obsolete list request', async () => {
   let previous!: Promise<unknown>
   act(() => { previous = result.current.fetchNodes() })
   await act(async () => { await result.current.fetchNodes() })
-  await act(async () => { old.resolve(response({ success: false, message: 'obsolete error' })); await previous })
+  await act(async () => {
+    old.resolve(response({ success: false, message: 'obsolete error' }))
+    expect(await previous).toEqual({ status: 'superseded' })
+  })
   expect(result.current.nodesError).toBe('')
   expect(result.current.nodesAvailable).toBe(true)
 })

@@ -7,6 +7,14 @@ export type RouteMode = "rule" | "global";
 
 export type NodeSelect = "manual" | "fastest_hk" | "fastest_jp" | "fastest_tw" | "fastest_sg" | "fastest_us";
 
+export type RuntimeUpdateResult = { runtime_updated: boolean, started: boolean, reloaded: boolean, restarted: boolean, };
+
+export type RouteModeResult = { route_mode: RouteMode, changed: boolean, runtime_updated: boolean, started: boolean, reloaded: boolean, restarted: boolean, };
+
+export type MaxMultiplierResult = { max_multiplier: string | null, changed: boolean, runtime_updated: boolean, started: boolean, reloaded: boolean, restarted: boolean, };
+
+export type NodeSelectResult = { node_select: NodeSelect, requested: NodeSelect, changed: boolean, runtime_updated: boolean, started: boolean, reloaded: boolean, restarted: boolean, };
+
 export type RuntimePhase = "initializing" | "extracting" | "validating" | "fetching_subscriptions" | "starting" | "ready" | "refreshing_subscriptions" | "applying_config" | "reloading" | "stopping" | "stopped" | "failed";
 
 export type SubscriptionFailureKind = "network" | "http" | "timeout" | "parse";

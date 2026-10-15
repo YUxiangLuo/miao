@@ -4,10 +4,11 @@ import { useApi } from './useApi'
 import { useVpsDeployment } from './useVpsDeployment'
 import { RequestInterruptedError } from './request'
 import type { NodeInfo } from '../types/api'
+import type { ResourceReadResult } from './useResources'
 
 afterEach(() => { rs.unstubAllGlobals() })
 
-function setup(fetchNodes = rs.fn<() => Promise<NodeInfo[] | null>>().mockResolvedValue([])) {
+function setup(fetchNodes = rs.fn<() => Promise<ResourceReadResult<NodeInfo[]>>>().mockResolvedValue({ status: 'success', data: [] })) {
   const clearDelays = rs.fn()
   const showToast = rs.fn().mockReturnValue(1)
   return { ...renderHook(() => useVpsDeployment({ ...useApi(), fetchNodes, clearDelays, showToast })), fetchNodes }
@@ -18,10 +19,10 @@ const ok = () => new Response(JSON.stringify({ success: true, message: '部署�
 
 it('keeps the request locked through list synchronization and retains only non-secret task data', async () => {
   let resolveRequest!: (response: Response) => void
-  let resolveNodes!: (nodes: NodeInfo[]) => void
+  let resolveNodes!: (nodes: ResourceReadResult<NodeInfo[]>) => void
   const fetch = rs.fn(() => new Promise<Response>(resolve => { resolveRequest = resolve }))
   rs.stubGlobal('fetch', fetch)
-  const { result } = setup(rs.fn(() => new Promise<NodeInfo[]>(resolve => { resolveNodes = resolve })))
+  const { result } = setup(rs.fn(() => new Promise<ResourceReadResult<NodeInfo[]>>(resolve => { resolveNodes = resolve })))
   let pending!: Promise<boolean>
   act(() => { pending = result.current.handleDeployVps(request) })
   expect(result.current.vpsTasks[0].phase).toBe('waiting')
@@ -30,7 +31,7 @@ it('keeps the request locked through list synchronization and retains only non-s
   expect(result.current.vpsTasks[0].phase).toBe('syncing')
   expect(result.current.vpsDeploying).toBe(true)
   await act(async () => { expect(await result.current.handleDeployVps(request)).toBe(false) })
-  await act(async () => { resolveNodes([]); await pending })
+  await act(async () => { resolveNodes({ status: 'success', data: [] }); await pending })
   expect(result.current.vpsTasks[0].phase).toBe('success')
   expect(result.current.vpsDeploying).toBe(false)
   expect(JSON.stringify(result.current.vpsTasks)).not.toContain(request.password)
@@ -39,13 +40,13 @@ it('keeps the request locked through list synchronization and retains only non-s
 
 it('does not misreport an unsynchronized list as a failed deployment and retains the latest ten records', async () => {
   rs.stubGlobal('fetch', rs.fn(async () => ok()))
-  const { result } = setup(rs.fn().mockResolvedValue(null))
+  const { result } = setup(rs.fn().mockResolvedValue({ status: 'error', error: '读取失败' }))
   for (let i = 1; i <= 11; i++) {
     await act(async () => { await result.current.handleDeployVps({ ...request, ip: `203.0.113.${i}` }) })
   }
   expect(result.current.vpsTasks).toHaveLength(10)
   expect(result.current.vpsTasks[0]).toMatchObject({ host: '203.0.113.11', phase: 'success' })
-  expect(result.current.vpsTasks[0].message).toContain('节点列表尚未同步')
+  expect(result.current.vpsTasks[0].message).toContain('列表尚未同步')
   expect(result.current.vpsTasks[9].host).toBe('203.0.113.2')
 })
 

@@ -5,12 +5,18 @@ import { buildNodeRequest } from '../nodeForm'
 import { waitForUpgrade } from './upgrade'
 import { RequestInterruptedError } from './request'
 import { useVpsDeployment } from './useVpsDeployment'
+import { mutationFeedback } from './mutationFeedback'
+import type { ResourceReadResult } from './useResources'
+import type { ToastTone } from './useApi'
 import type { useAppData } from './useAppData'
 import type {
   NodeRequest,
   RouteModeRequest,
   MaxMultiplierRequest,
   NodeSelectRequest,
+  NodeSelectResult,
+  RouteModeResult,
+  MaxMultiplierResult,
   LastProxy,
   SubRequest,
   SubBatchRequest,
@@ -69,6 +75,11 @@ export function useAppActions(data: AppData) {
   } = data
   const requestedNodeSelect = status.requested_node_select || status.node_select || 'manual'
 
+  const showMutationResult = useCallback((message: string, read: ResourceReadResult<unknown>, action: string, tone?: ToastTone) => {
+    const feedback = mutationFeedback(message, read, action, tone)
+    showToast(feedback.message, feedback.tone)
+  }, [showToast])
+
   const openConfirm = useCallback((title: string, message: string, onConfirm: () => void) => {
     setConfirmState({ open: true, title, message, onConfirm })
   }, [setConfirmState])
@@ -94,7 +105,7 @@ export function useAppActions(data: AppData) {
     if (nextMode === status.route_mode) return
 
     try {
-      await apiCall(
+      await apiCall<RouteModeResult>(
         'route-mode',
         { method: 'POST', body: JSON.stringify({ route_mode: nextMode } satisfies RouteModeRequest) },
         'routeMode'
@@ -136,7 +147,7 @@ export function useAppActions(data: AppData) {
     if (nextMultiplier === (status.max_multiplier ?? null)) return
 
     try {
-      await apiCall(
+      await apiCall<MaxMultiplierResult>(
         'max-multiplier',
         { method: 'POST', body: JSON.stringify({ max_multiplier: nextMultiplier } satisfies MaxMultiplierRequest) },
         'maxMultiplier'
@@ -161,15 +172,23 @@ export function useAppActions(data: AppData) {
     if (nextSelect === requestedNodeSelect) return
 
     try {
-      const payload = await apiCall(
+      const payload = await apiCall<NodeSelectResult>(
         'node-select',
         { method: 'POST', body: JSON.stringify({ node_select: nextSelect } satisfies NodeSelectRequest) },
         'nodeSelect'
       )
       clearDelays()
-      await fetchStatus()
+      const read = await fetchStatus()
       await fetchProxies()
-      if (payload.message !== '该地区没有可用节点，已切回手动选择') {
+      if (!payload.data) {
+        showToast('节点选择请求已处理，请查看当前策略', 'info')
+      } else if (payload.data.requested !== 'manual' && payload.data.node_select === 'manual') {
+        // The status hook already presents its warning. Use the command result
+        // when status could not be read or did not provide a warning.
+        if (read.status !== 'success' || !read.data.warning) {
+          showToast('请求的地区暂无可用节点，当前使用手动选择', 'info')
+        }
+      } else {
         showToast('节点选择已更新', 'success')
       }
     } catch (error) {
@@ -214,14 +233,14 @@ export function useAppActions(data: AppData) {
     try {
       await apiCall('subs', { method: 'POST', body: JSON.stringify({ url: trimmed } satisfies SubRequest) }, 'addSub')
       clearDelays()
-      await fetchSubs()
-      showToast('订阅地址已保存，请查看节点获取状态', 'success')
+      const read = await fetchSubs()
+      showMutationResult('订阅地址已保存，请查看节点获取状态', read, '添加')
       return true
     } catch (error) {
       showToast(errorMessage(error), 'error')
       return false
     }
-  }, [apiCall, clearDelays, fetchSubs, showToast])
+  }, [apiCall, clearDelays, fetchSubs, showToast, showMutationResult])
 
   // 扫描本机 clash-verge-rev 的订阅（只读）；失败/未安装都返回 null，由调用方提示
   const scanClashVerge = useCallback(async (): Promise<VergeImportResult | null> => {
@@ -241,18 +260,18 @@ export function useAppActions(data: AppData) {
         'importVerge'
       )
       clearDelays()
-      await fetchSubs()
-      showToast(response.data
+      const read = await fetchSubs()
+      showMutationResult(response.data
         ? `已新增 ${response.data.added} 条订阅地址，跳过 ${response.data.skipped} 条已有订阅。请查看节点获取状态。`
-        : '订阅导入请求已完成，请查看订阅列表和节点获取状态。', response.data?.added ? 'success' : 'info')
+        : '订阅导入请求已完成，请查看订阅列表和节点获取状态。', read, '导入', response.data?.added ? 'success' : 'info')
       return true
     } catch (error) {
       showToast(errorMessage(error), 'error')
       return false
     }
-  }, [apiCall, clearDelays, fetchSubs, showToast])
+  }, [apiCall, clearDelays, fetchSubs, showToast, showMutationResult])
 
-  const deleteResource = useCallback(async (endpoint: string, body: SubRequest | DeleteNodeRequest | DeleteRuleRequest, action: string, refresh: () => Promise<unknown>, label: string) => {
+  const deleteResource = useCallback(async (endpoint: string, body: SubRequest | DeleteNodeRequest | DeleteRuleRequest, action: string, refresh: () => Promise<ResourceReadResult<unknown>>, label: string) => {
     if (deleting.current.has(action)) return
     deleting.current.add(action)
     setPendingDeletes(new Set(deleting.current))
@@ -260,14 +279,14 @@ export function useAppActions(data: AppData) {
       await apiCall(endpoint, { method: 'DELETE', body: JSON.stringify(body) }, action)
       const result = await refresh()
       if (endpoint !== 'rules') clearDelays()
-      showToast(`${label}已删除${result === null ? '；列表尚未同步，请重新读取列表，勿重复删除。' : ''}`, result === null ? 'info' : 'success')
+      showMutationResult(`${label}已删除`, result, '删除')
     } catch (error) {
       showToast(errorMessage(error), 'error')
     } finally {
       deleting.current.delete(action)
       setPendingDeletes(new Set(deleting.current))
     }
-  }, [apiCall, clearDelays, showToast])
+  }, [apiCall, clearDelays, showToast, showMutationResult])
 
   const handleDeleteSubscription = useCallback((url: string) => deleteResource('subs', { url }, 'deleteSub', fetchSubs, '订阅'), [deleteResource, fetchSubs])
 
@@ -309,14 +328,14 @@ export function useAppActions(data: AppData) {
         { method: 'POST', body: JSON.stringify({ sub, name, disabled } satisfies SetNodeDisabledRequest) },
         'toggleSubNode'
       )
-      await fetchSubs()
-      showToast(disabled ? `已禁用节点 ${name}` : `已启用节点 ${name}`, 'success')
+      const read = await fetchSubs()
+      showMutationResult(disabled ? `已禁用节点 ${name}` : `已启用节点 ${name}`, read, '操作')
       return true
     } catch (error) {
       showToast(errorMessage(error), 'error')
       return false
     }
-  }, [apiCall, fetchSubs, showToast])
+  }, [apiCall, fetchSubs, showToast, showMutationResult])
 
   const handleAddNode = useCallback(async () => {
     let payload: NodeRequest
@@ -329,15 +348,15 @@ export function useAppActions(data: AppData) {
 
     try {
       await apiCall('nodes', { method: 'POST', body: JSON.stringify(payload) }, 'addNode')
-      await fetchNodes()
+      const read = await fetchNodes()
       clearDelays()
-      showToast('节点已添加', 'success')
+      showMutationResult('节点已添加', read, '添加')
       return true
     } catch (error) {
       showToast(errorMessage(error), 'error')
       return false
     }
-  }, [nodeForm, nodeType, apiCall, clearDelays, fetchNodes, showToast])
+  }, [nodeForm, nodeType, apiCall, clearDelays, fetchNodes, showToast, showMutationResult])
 
   const handleImportNodes = useCallback(async (payloads: NodeRequest[]) => {
     if (!payloads?.length) return
@@ -350,9 +369,9 @@ export function useAppActions(data: AppData) {
       )
       const result = response.data || { added: [], failed: [] }
       if (result.added.length > 0) {
-        await fetchNodes()
+        const read = await fetchNodes()
         clearDelays()
-        showToast(`已添加 ${result.added.length} 个节点`, 'success')
+        showMutationResult(`已添加 ${result.added.length} 个节点`, read, '导入')
       }
       if (result.failed.length > 0) {
         const failures = result.failed.map((item) => `${item.tag}: ${item.message}`)
@@ -364,7 +383,7 @@ export function useAppActions(data: AppData) {
     } catch (error) {
       showToast(errorMessage(error), 'error')
     }
-  }, [apiCall, clearDelays, fetchNodes, showToast])
+  }, [apiCall, clearDelays, fetchNodes, showToast, showMutationResult])
 
   const handleDeleteNode = useCallback((tag: string) => deleteResource('nodes', { tag }, 'deleteNode', fetchNodes, '节点'), [deleteResource, fetchNodes])
 
@@ -403,7 +422,8 @@ export function useAppActions(data: AppData) {
     }
 
     if (!versionInfo.has_update) {
-      const fresh = await fetchVersion()
+      const read = await fetchVersion()
+      const fresh = read.status === 'success' ? read.data : undefined
       if (fresh?.has_update) {
         showToast(`发现新版本 ${fresh.latest}`, 'success')
       } else if (!fresh?.latest) {
@@ -456,14 +476,14 @@ export function useAppActions(data: AppData) {
   const handleAddRule = useCallback(async ({ field, value, target }: RuleRequest): Promise<boolean> => {
     try {
       await apiCall('rules', { method: 'POST', body: JSON.stringify({ field, value, target } satisfies RuleRequest) }, 'addRule')
-      await fetchRules()
-      showToast('规则已添加', 'success')
+      const read = await fetchRules()
+      showMutationResult('规则已添加', read, '添加')
       return true
     } catch (error) {
       showToast(errorMessage(error), 'error')
       return false
     }
-  }, [apiCall, fetchRules, showToast])
+  }, [apiCall, fetchRules, showToast, showMutationResult])
 
   const handleDeleteRule = useCallback((rule: RuleInfo) => deleteResource('rules', { index: rule.index, raw: rule.raw }, 'deleteRule', fetchRules, '规则'), [deleteResource, fetchRules])
 

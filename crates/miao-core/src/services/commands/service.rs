@@ -156,6 +156,7 @@ pub async fn stop_service(state: Arc<AppState>) -> CommandResult {
 }
 
 #[derive(Debug, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub struct RuntimeUpdateResult {
     pub runtime_updated: bool,
     pub started: bool,
@@ -175,7 +176,9 @@ impl From<RuntimeUpdate> for RuntimeUpdateResult {
 }
 
 #[derive(Debug, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub struct RouteModeResult {
+    #[cfg_attr(test, ts(type = "RouteMode"))]
     pub route_mode: &'static str,
     pub changed: bool,
     #[serde(flatten)]
@@ -212,6 +215,7 @@ pub async fn set_route_mode(
 }
 
 #[derive(Debug, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub struct MaxMultiplierResult {
     pub max_multiplier: Option<String>,
     pub changed: bool,
@@ -259,8 +263,11 @@ pub async fn set_max_multiplier(
 }
 
 #[derive(Debug, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub struct NodeSelectResult {
+    #[cfg_attr(test, ts(type = "NodeSelect"))]
     pub node_select: &'static str,
+    #[cfg_attr(test, ts(type = "NodeSelect"))]
     pub requested: &'static str,
     pub changed: bool,
     #[serde(skip)]

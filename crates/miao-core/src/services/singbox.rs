@@ -12,6 +12,7 @@ use crate::state::lifecycle::KernelOperation;
 use crate::state::{AppState, SingBoxProcess};
 
 mod embedded;
+mod readiness;
 pub use embedded::extract_sing_box_to;
 
 pub const CLASH_API_HOST: &str = "127.0.0.1:6262";
@@ -233,116 +234,18 @@ pub async fn reload_sing_internal(state: &Arc<AppState>) -> AppResult<()> {
     Ok(())
 }
 
-#[cfg(all(unix, not(test)))]
+#[cfg(unix)]
 async fn wait_for_sing_box_reload_ready(
     state: &Arc<AppState>,
     expected_generation: u64,
     expected_pid: u32,
 ) -> AppResult<()> {
-    const PROBE_INTERVAL: Duration = Duration::from_millis(25);
-    const RELOAD_SETTLE_TIME: Duration = Duration::from_millis(500);
-    const RELOAD_TIMEOUT: Duration = Duration::from_secs(8);
-    const CLASH_PROBE_TIMEOUT: Duration = Duration::from_millis(250);
-
-    let started = Instant::now();
-    let mut consecutive_ready = 0u8;
-    loop {
-        sleep(PROBE_INTERVAL).await;
-        let mut lock = state.sing_process.lock().await;
-        if !start_still_current(state, expected_generation) {
-            return Err(AppError::message("sing-box reload was cancelled"));
-        }
-        let Some(process) = lock.as_mut() else {
-            return Err(AppError::message("sing-box exited during reload"));
-        };
-        if process.child.id() != Some(expected_pid) {
-            return Err(AppError::message(
-                "sing-box process changed unexpectedly during reload",
-            ));
-        }
-        if let Some(status) = process
-            .child
-            .try_wait()
-            .map_err(|e| AppError::context("Failed to check sing-box reload status", e))?
-        {
-            *lock = None;
-            return Err(AppError::message(format!(
-                "sing-box exited during reload with code {}",
-                status.code().unwrap_or(-1)
-            )));
-        }
-        drop(lock);
-
-        let tun_ready = {
-            #[cfg(target_os = "linux")]
-            {
-                std::path::Path::new("/sys/class/net/sing-tun").exists()
-            }
-            #[cfg(not(target_os = "linux"))]
-            {
-                true
-            }
-        };
-        let clash_ready = if started.elapsed() >= RELOAD_SETTLE_TIME {
-            state
-                .http_client
-                .get(clash_api_url("/version"))
-                .timeout(CLASH_PROBE_TIMEOUT)
-                .send()
-                .await
-                .is_ok_and(|response| response.status().is_success())
-        } else {
-            false
-        };
-
-        if tun_ready && clash_ready {
-            consecutive_ready += 1;
-            if consecutive_ready >= 2 {
-                return Ok(());
-            }
-        } else {
-            consecutive_ready = 0;
-        }
-
-        if started.elapsed() >= RELOAD_TIMEOUT {
-            return Err(AppError::message(
-                "sing-box data plane did not become ready within 8 seconds after reload",
-            ));
-        }
-    }
-}
-
-#[cfg(all(unix, test))]
-async fn wait_for_sing_box_reload_ready(
-    state: &Arc<AppState>,
-    expected_generation: u64,
-    expected_pid: u32,
-) -> AppResult<()> {
-    sleep(Duration::from_millis(50)).await;
-    let mut lock = state.sing_process.lock().await;
-    if !start_still_current(state, expected_generation) {
-        return Err(AppError::message("sing-box reload was cancelled"));
-    }
-    let Some(process) = lock.as_mut() else {
-        return Err(AppError::message("sing-box exited during reload"));
-    };
-    if process.child.id() != Some(expected_pid) {
-        return Err(AppError::message(
-            "sing-box process changed unexpectedly during reload",
-        ));
-    }
-    if let Some(status) = process
-        .child
-        .try_wait()
-        .map_err(|e| AppError::context("Failed to check sing-box reload status", e))?
-    {
-        *lock = None;
-        return Err(AppError::message(format!(
-            "sing-box exited during reload with code {}",
-            status.code().unwrap_or(-1)
-        )));
-    }
-    Ok(())
+    readiness::wait_for_ready(
+        state,
+        expected_generation,
+        readiness::Operation::Reload { pid: expected_pid },
+    )
+    .await
 }
 
 /// Final publication shares the process lock with Stop and status polling.
@@ -463,114 +366,10 @@ async fn spawn_and_probe_sing_box(
     wait_for_sing_box_ready(state, expected_generation).await
 }
 
-#[cfg(not(test))]
 async fn wait_for_sing_box_ready(state: &Arc<AppState>, expected_generation: u64) -> AppResult<()> {
-    const PROBE_INTERVAL: Duration = Duration::from_millis(25);
-    const MIN_STABLE_TIME: Duration = Duration::from_millis(100);
-    // 3s was enough on desktops; OpenWrt auto_redirect + a slow Clash bind
-    // can miss that window and get the child killed while it is still coming up.
-    const STARTUP_TIMEOUT: Duration = Duration::from_secs(8);
-    const CLASH_PROBE_TIMEOUT: Duration = Duration::from_millis(250);
-
-    let started = Instant::now();
-    let mut consecutive_ready = 0u8;
-    loop {
-        sleep(PROBE_INTERVAL).await;
-        let mut lock = state.sing_process.lock().await;
-        if !start_still_current(state, expected_generation) {
-            return Err(AppError::message("sing-box start was cancelled"));
-        }
-        let Some(proc) = lock.as_mut() else {
-            return Err(AppError::message("sing-box start was cancelled"));
-        };
-        if let Some(exit_status) = proc
-            .child
-            .try_wait()
-            .map_err(|e| AppError::context("Failed to check sing-box startup status", e))?
-        {
-            *lock = None;
-            #[cfg(windows)]
-            cleanup_stale_tun_adapter();
-            let code = exit_status.code().unwrap_or(-1);
-            return Err(AppError::message(format!(
-                "sing-box exited during startup with code {code}"
-            )));
-        }
-        drop(lock);
-
-        let tun_ready = {
-            #[cfg(target_os = "linux")]
-            {
-                std::path::Path::new("/sys/class/net/sing-tun").exists()
-            }
-            #[cfg(not(target_os = "linux"))]
-            {
-                true
-            }
-        };
-        let clash_ready = if started.elapsed() >= MIN_STABLE_TIME {
-            state
-                .http_client
-                .get(clash_api_url("/version"))
-                .timeout(CLASH_PROBE_TIMEOUT)
-                .send()
-                .await
-                .is_ok_and(|response| response.status().is_success())
-        } else {
-            false
-        };
-
-        if tun_ready && clash_ready {
-            consecutive_ready += 1;
-            if consecutive_ready >= 2 {
-                info!(
-                    elapsed_ms = started.elapsed().as_millis(),
-                    "sing-box data plane is ready"
-                );
-                return Ok(());
-            }
-        } else {
-            consecutive_ready = 0;
-        }
-
-        if started.elapsed() >= STARTUP_TIMEOUT {
-            terminate_failed_start(state, expected_generation).await;
-            return Err(AppError::message(
-                "sing-box process started but its data plane did not become ready within 8 seconds",
-            ));
-        }
-    }
+    readiness::wait_for_ready(state, expected_generation, readiness::Operation::Start).await
 }
 
-/// Hermetic transaction tests use a minimal fake child without a Clash API or
-/// TUN device. Production builds use the data-plane probe above.
-#[cfg(test)]
-async fn wait_for_sing_box_ready(state: &Arc<AppState>, expected_generation: u64) -> AppResult<()> {
-    sleep(Duration::from_millis(50)).await;
-    let mut lock = state.sing_process.lock().await;
-    if !start_still_current(state, expected_generation) {
-        return Err(AppError::message("sing-box start was cancelled"));
-    }
-    let Some(proc) = lock.as_mut() else {
-        return Err(AppError::message("sing-box start was cancelled"));
-    };
-    if let Some(exit_status) = proc
-        .child
-        .try_wait()
-        .map_err(|e| AppError::context("Failed to check sing-box startup status", e))?
-    {
-        *lock = None;
-        return Err(AppError::message(format!(
-            "sing-box exited during startup with code {}",
-            exit_status.code().unwrap_or(-1)
-        )));
-    }
-    Ok(())
-}
-
-/// 非测试构建的超时清理（wait_for_sing_box_ready），外加 unix 测试直接调用。
-/// Windows 的 test 构建两端都被裁掉，故用 any(not(test), unix) 而非无条件编译。
-#[cfg(any(not(test), unix))]
 async fn terminate_failed_start(state: &Arc<AppState>, expected_generation: u64) {
     let mut lock = state.sing_process.lock().await;
     if state.lifecycle.snapshot().generation != expected_generation {

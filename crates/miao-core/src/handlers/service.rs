@@ -3,6 +3,7 @@ use crate::models::{
     ScheduledRefreshRequest, ScheduledRefreshStatus, StatusData,
 };
 use crate::responses::{command_reply, command_result, HandlerResult};
+use crate::services::commands::service::{MaxMultiplierResult, NodeSelectResult, RouteModeResult};
 use crate::services::commands::{self, CommandReply, CommandResult};
 use crate::state::AppState;
 use axum::{extract::State, response::Json};
@@ -31,28 +32,22 @@ pub async fn stop_service(State(state): State<Arc<AppState>>) -> HandlerResult {
 pub async fn set_route_mode(
     State(state): State<Arc<AppState>>,
     Json(req): Json<RouteModeRequest>,
-) -> HandlerResult {
-    command_result(without_data(
-        commands::service::set_route_mode(state, req).await,
-    ))
+) -> HandlerResult<RouteModeResult> {
+    command_result(commands::service::set_route_mode(state, req).await)
 }
 
 pub async fn set_max_multiplier(
     State(state): State<Arc<AppState>>,
     Json(req): Json<MaxMultiplierRequest>,
-) -> HandlerResult {
-    command_result(without_data(
-        commands::service::set_max_multiplier(state, req).await,
-    ))
+) -> HandlerResult<MaxMultiplierResult> {
+    command_result(commands::service::set_max_multiplier(state, req).await)
 }
 
 pub async fn set_node_select(
     State(state): State<Arc<AppState>>,
     Json(req): Json<NodeSelectRequest>,
-) -> HandlerResult {
-    command_result(without_data(
-        commands::service::set_node_select(state, req).await,
-    ))
+) -> HandlerResult<NodeSelectResult> {
+    command_result(commands::service::set_node_select(state, req).await)
 }
 
 pub async fn get_scheduled_refresh(
@@ -65,7 +60,7 @@ pub async fn set_scheduled_refresh(
     State(state): State<Arc<AppState>>,
     Json(req): Json<ScheduledRefreshRequest>,
 ) -> HandlerResult {
-    // 与其它设置类端点一致：REST 只回消息，完整状态由 GET 读取（MCP 仍返回 data）。
+    // 定时刷新写入仍只回消息，完整状态由 GET 读取（MCP 仍返回 data）。
     let result = without_data(commands::settings::set_scheduled_refresh(state, req).await);
     command_result(result)
 }
