@@ -26,10 +26,11 @@ Runs the local equivalent of the GitHub Actions quality workflow.
 Commands:
   frontend         Audit, lint, typecheck, test, build the panel and test scripts
   kernel [target]  gofmt check and build the pinned kernel (default: amd64 arm64)
-  rust             Rust fmt, clippy, tests and cargo-audit
+  rust             Core fmt, clippy, tests and audit; no generated assets or Bun
+  rust-embedded    Core + CLI clippy/tests with assets (build frontend first)
   desktop          cargo check -p miao-desktop (Linux/WebKitGTK; not part of `all`)
-  all              frontend + kernel + rust (default)
-  quick            frontend + rust, reusing the existing embedded kernel
+  all              frontend + kernel + rust + rust-embedded (default)
+  quick            frontend + rust + rust-embedded, reusing the existing kernel
   help             Show this help
 
 Environment:
@@ -102,19 +103,27 @@ kernel() {
 
 rust() {
   require cargo
-  require bun
-  bun scripts/prepare-test-assets.mjs "$created_files"
   echo "==> Rust: fmt"
   cargo fmt --all -- --check
-  echo "==> Rust: clippy"
-  cargo clippy --locked --all-targets --all-features -- -D warnings
-  echo "==> Rust: test"
-  cargo test --locked --all-targets
+  echo "==> Rust core: clippy without embedded assets"
+  cargo clippy -p miao-core --locked --no-default-features --all-targets -- -D warnings
+  echo "==> Rust core: test without embedded assets"
+  ./scripts/test-rust.sh
   if [[ "${CI_SKIP_AUDIT:-0}" != 1 ]]; then
     require cargo-audit
     echo "==> Rust: audit"
     cargo audit
   fi
+}
+
+rust_embedded() {
+  require cargo
+  require bun
+  bun scripts/prepare-test-assets.mjs "$created_files"
+  echo "==> Rust core + CLI: clippy with embedded assets"
+  cargo clippy --locked --all-targets --all-features -- -D warnings
+  echo "==> Rust core + CLI: test with embedded assets"
+  cargo test --locked --all-targets
 }
 
 desktop() {
@@ -135,6 +144,9 @@ case "$command" in
   rust)
     rust
     ;;
+  rust-embedded)
+    rust_embedded
+    ;;
   desktop)
     desktop
     ;;
@@ -142,10 +154,12 @@ case "$command" in
     frontend
     kernel
     rust
+    rust_embedded
     ;;
   quick)
     frontend
     rust
+    rust_embedded
     ;;
   help|-h|--help)
     usage

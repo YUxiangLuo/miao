@@ -1,4 +1,6 @@
-use axum::http::{header::CONTENT_TYPE, HeaderValue, StatusCode};
+#[cfg(feature = "embedded-assets")]
+use axum::http::header::CONTENT_TYPE;
+use axum::http::{HeaderValue, StatusCode};
 use serde_json::json;
 use tower::ServiceExt;
 
@@ -11,6 +13,7 @@ use crate::{
 };
 
 #[tokio::test]
+#[cfg(feature = "embedded-assets")]
 async fn router_serves_index_page() {
     let app = test_app(Config {
         port: None,
@@ -33,6 +36,7 @@ async fn router_serves_index_page() {
 }
 
 #[tokio::test]
+#[cfg(feature = "embedded-assets")]
 async fn router_serves_favicon_with_svg_content_type() {
     let app = test_app(Config {
         port: None,
@@ -59,6 +63,39 @@ async fn router_serves_favicon_with_svg_content_type() {
     );
     let body = response_text(response).await;
     assert!(body.contains("<svg"));
+}
+
+#[tokio::test]
+#[cfg(not(feature = "embedded-assets"))]
+async fn router_reports_missing_assets_without_affecting_the_api() {
+    let app = test_app(Config::default()).await;
+    for path in [
+        "/",
+        "/favicon.svg",
+        "/manifest.webmanifest",
+        "/sw.js",
+        "/icon-192.png",
+        "/icon-512.png",
+        "/icon-maskable-512.png",
+    ] {
+        let response = app
+            .clone()
+            .oneshot(empty_request("GET", path))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(
+            response.headers()[axum::http::header::CACHE_CONTROL],
+            "no-store"
+        );
+        assert!(response_text(response).await.contains("embedded-assets"));
+    }
+    let response = app
+        .oneshot(empty_request("GET", "/api/status"))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response_json(response).await["success"], true);
 }
 
 #[tokio::test]

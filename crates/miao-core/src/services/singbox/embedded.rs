@@ -20,48 +20,31 @@ struct EmbeddedKernel {
     metadata: &'static str,
 }
 
-macro_rules! embedded_kernel {
-    ($name:literal) => {
-        EmbeddedKernel {
-            compressed: include_bytes!(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/../../embedded/",
-                $name,
-                ".zst"
-            )),
-            metadata: include_str!(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/../../embedded/",
-                $name,
-                ".meta.json"
-            )),
-        }
-    };
+#[cfg(feature = "embedded-assets")]
+mod bundle;
+
+struct EmbeddedAssets {
+    kernel: EmbeddedKernel,
+    ip_rules: &'static [u8],
+    site_rules: &'static [u8],
 }
 
-#[cfg(all(windows, target_arch = "x86_64"))]
-const KERNEL: EmbeddedKernel = embedded_kernel!("sing-box-windows-amd64.exe");
-
-#[cfg(all(windows, target_arch = "aarch64"))]
-compile_error!("Windows arm64 is not supported yet");
-
-#[cfg(all(not(windows), target_arch = "x86_64"))]
-const KERNEL: EmbeddedKernel = embedded_kernel!("sing-box-amd64");
-
-#[cfg(all(not(windows), target_arch = "aarch64"))]
-const KERNEL: EmbeddedKernel = embedded_kernel!("sing-box-arm64");
-
-#[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
-compile_error!("Unsupported architecture: only x86_64 and aarch64 are supported");
-
-const IP_RULE_BINARY: &[u8] = include_bytes!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../../embedded/geoip-cn.srs"
-));
-const SITE_RULE_BINARY: &[u8] = include_bytes!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../../embedded/geosite-geolocation-cn.srs"
-));
+fn bundled_assets() -> AppResult<EmbeddedAssets> {
+    #[cfg(feature = "embedded-assets")]
+    {
+        Ok(EmbeddedAssets {
+            kernel: bundle::KERNEL,
+            ip_rules: bundle::IP_RULE_BINARY,
+            site_rules: bundle::SITE_RULE_BINARY,
+        })
+    }
+    #[cfg(not(feature = "embedded-assets"))]
+    {
+        Err(AppError::message(
+            "This build does not include the kernel or rule assets; enable the embedded-assets feature",
+        ))
+    }
+}
 
 #[derive(Deserialize)]
 struct KernelMetadata {
@@ -168,6 +151,8 @@ fn unpack_kernel(compressed: &[u8], metadata: &str, path: &Path) -> AppResult<()
 }
 
 pub fn extract_sing_box_to(directory: &Path) -> AppResult<PathBuf> {
+    // Reject missing bundles before touching an existing runtime directory.
+    let assets = bundled_assets()?;
     fs::create_dir_all(directory)
         .map_err(|err| AppError::context("Failed to create sing-box home directory", err))?;
     // Runtime configs contain subscription credentials. As before, correct
@@ -177,11 +162,11 @@ pub fn extract_sing_box_to(directory: &Path) -> AppResult<PathBuf> {
     }
     let path = directory.join(sing_box_file_name());
     info!(?path, "Extracting embedded kernel");
-    unpack_kernel(KERNEL.compressed, KERNEL.metadata, &path)?;
+    unpack_kernel(assets.kernel.compressed, assets.kernel.metadata, &path)?;
 
     for (name, bytes) in [
-        ("chinaip.srs", IP_RULE_BINARY),
-        ("chinasite.srs", SITE_RULE_BINARY),
+        ("chinaip.srs", assets.ip_rules),
+        ("chinasite.srs", assets.site_rules),
     ] {
         let path = directory.join(name);
         if path.exists() {
@@ -273,7 +258,36 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(feature = "embedded-assets"))]
+    fn missing_bundle_cannot_create_or_overwrite_runtime_files() {
+        let directory = tempfile::tempdir().unwrap();
+        let absent = directory.path().join("absent");
+        assert!(extract_sing_box_to(&absent)
+            .unwrap_err()
+            .to_string()
+            .contains("embedded-assets"));
+        assert!(!absent.exists());
+        for name in [
+            sing_box_file_name(),
+            "chinaip.srs",
+            "chinasite.srs",
+            "cache.db",
+        ] {
+            fs::write(directory.path().join(name), b"keep existing bytes").unwrap();
+        }
+        assert!(extract_sing_box_to(directory.path()).is_err());
+        for entry in fs::read_dir(directory.path()).unwrap() {
+            assert_eq!(
+                fs::read(entry.unwrap().path()).unwrap(),
+                b"keep existing bytes"
+            );
+        }
+    }
+
+    #[test]
+    #[cfg(feature = "embedded-assets")]
     fn bundled_asset_decodes_and_preserves_runtime_cache() {
+        use super::bundle::{IP_RULE_BINARY, KERNEL, SITE_RULE_BINARY};
         // CI and local builds use real kernels; fresh-clone tests may use
         // inert assets. Check Bun -> Rust interoperability without execution.
         let directory = tempfile::tempdir().unwrap();

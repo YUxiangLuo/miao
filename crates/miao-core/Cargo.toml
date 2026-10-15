@@ -4,6 +4,11 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[features]
+default = ["embedded-assets"]
+# Disable for core-only development; CLI/desktop keep the default bundle.
+embedded-assets = []
+
 [dependencies]
 axum = { version = "0.8", features = ["macros", "ws"] }
 tokio = { version = "1.0", features = ["full"] }

@@ -7,6 +7,27 @@ permissions:
   contents: read
 
 jobs:
+  rust-core:
+    name: Rust core without generated assets
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy,rustfmt
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Lint core
+        run: cargo clippy -p miao-core --locked --no-default-features --all-targets -- -D warnings
+
+      - name: Test core without Bun, frontend, or kernel artifacts
+        run: ./scripts/test-rust.sh
+
   frontend:
     name: Frontend quality
     runs-on: ubuntu-latest

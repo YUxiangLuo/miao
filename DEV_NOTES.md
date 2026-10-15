@@ -17,16 +17,21 @@ Linux/OpenWrt CLI 与保留的 Windows 桌面源码共用 `miao-core` 和 React 
 
 ## 开发检查
 
-在仓库根目录执行，需要 Bun、Rust；完整构建另需 Go、Git、curl，依赖审计需 `cargo-audit`。
+在仓库根目录执行。核心检查只需 Rust，前端需 Bun；完整构建另需 Go、Git、curl，依赖审计需 `cargo-audit`。
 
 ```bash
-./scripts/ci.sh quick   # 前端、脚本、Rust 检查，复用已有内核
+./scripts/test-rust.sh  # 核心测试，无需 public/、embedded/ 或 Bun
+./scripts/ci.sh quick   # 前端、脚本、两种 Rust 构建检查，复用已有内核
 ./scripts/ci.sh all     # 加上 amd64/arm64 内核重建与 Go 回归
 ```
 
-可单独运行 `frontend`、`kernel [target]`、`rust`、`desktop` 子命令；`CI_SKIP_AUDIT=1` 跳过联网审计。只跑 Rust 测试用 `./scripts/test-rust.sh`：先构建前端，仅为缺失资源创建测试桩，结束后清理；不覆盖真实内核。直接运行 Cargo 须先准备嵌入资源。
+可单独运行 `frontend`、`kernel [target]`、`rust`、`rust-embedded`、`desktop`；`CI_SKIP_AUDIT=1` 跳过联网审计。`rust` 检查不带资源的核心；`rust-embedded` 在前端已构建后检查完整 core + cli。`quick`、`all` 均覆盖两种构建。
 
-- 默认检查覆盖 core + cli；不要用 `cargo test --workspace`，它会额外构建桌面壳和 WebKit。
+`./scripts/test-rust.sh` 等价于 `cargo test -p miao-core --locked --no-default-features --all-targets`，可追加测试过滤参数；API 类型生成也走此模式。不带资源时面板返回 503，内核提取返回明确错误，不写入假资源。`embedded-assets` 默认开启，CLI、桌面和发布构建仍嵌入完整资源。
+
+需要资源集成测试时用 `./scripts/test-rust.sh --embedded`：构建前端，仅为缺失资源创建测试桩，结束后清理，不覆盖真实内核。资源测试覆盖页面/PWA 与内核解包；普通 Cargo 默认构建仍须先准备资源。
+
+- 默认 Cargo 检查覆盖 core + cli；不要用 `cargo test --workspace`，它会额外构建桌面壳和 WebKit。
 - 测试用临时目录、假内核、localhost 订阅；`spawn_server` 设置 `skip_extract: true`，注入隔离配置、运行目录与 `volatile_path`，不得读写生产目录或启动真实 TUN。网络验收用独立网络命名空间或专用机器。
 - 修改 shell 跑 `shellcheck`，修改 workflow 跑 `actionlint`；前端约定见[检查与测试](frontend-rsbuild/README.md#检查与测试)。
 
