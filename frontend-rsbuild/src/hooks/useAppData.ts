@@ -36,9 +36,10 @@ export function useAppData() {
 
   const { toasts, showToast, dismissToast } = useToast()
   const { status, statusLoaded, statusFailures, statusSettled, fetchStatus } = useStatus()
-  const { subs, subsLoaded, subsAvailable, subsError, fetchSubs } = useSubs()
-  const { nodes, nodesLoaded, nodesAvailable, nodesError, fetchNodes } = useNodes()
-  const { rules, rulesLoaded, rulesError, fetchRules } = useRules()
+  const revision = status.data_revision ?? 0
+  const { subs, subsLoaded, subsAvailable, subsCurrent, subsError, fetchSubs } = useSubs(revision)
+  const { nodes, nodesLoaded, nodesAvailable, nodesCurrent, nodesError, fetchNodes } = useNodes(revision)
+  const { rules, rulesLoaded, rulesCurrent, rulesError, fetchRules } = useRules(revision)
   const { proxies, primaryGroupName, primaryGroup, fetchProxies } = useProxies(status)
 
   const refreshAfterUncertainWrite = useCallback(() => {
@@ -127,6 +128,7 @@ export function useAppData() {
     && !backendUnreachable
     && !status.initializing
     && !status.ready
+    && subsCurrent && nodesCurrent && rulesCurrent
     && subsAvailable && nodesAvailable
     && !subsError && !nodesError && !rulesError
     && subs.length === 0
@@ -152,12 +154,11 @@ export function useAppData() {
   const lastRevision = useRef<number | undefined>(undefined)
   useEffect(() => {
     if (!statusLoaded) return
-    const revision = status.data_revision ?? 0
     if (lastRevision.current !== undefined && lastRevision.current !== revision) {
       configTasks.forEach(task => { void task() })
     }
     lastRevision.current = revision
-  }, [statusLoaded, status.data_revision, configTasks])
+  }, [statusLoaded, revision, configTasks])
 
   usePolling(configTasks, statusLoaded, CONFIG_POLL_INTERVAL)
   usePolling(pollingTasks)

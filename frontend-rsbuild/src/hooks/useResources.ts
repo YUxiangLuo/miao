@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import { fetchJson } from './request'
 import { useLatestRequest } from './useLatestRequest'
 import type { ApiResponse, NodeInfo, RuleInfo, StatusData, SubStatus, VersionInfo } from '../types/api'
@@ -31,14 +31,22 @@ const INITIAL_STATUS: StatusData = {
   mcp: false,
 }
 
-function useResource<T>(path: string, initial: T) {
+function useResource<T>(path: string, initial: T, revision = 0) {
   const [data, setData] = useState(initial)
+  const revisionRef = useRef(revision)
+  revisionRef.current = revision
+  // Cached emptiness is authoritative only for the revision read successfully.
+  // Do not invalidate it on ordinary polls or an individual read retry.
+  const [readRevision, setReadRevision] = useState<number>()
   const [loaded, setLoaded] = useState(false)
   const [settled, setSettled] = useState(false)
   const [failures, setFailures] = useState(0)
   const [error, setError] = useState('')
   const { begin } = useLatestRequest()
   const refresh = useCallback(async (): Promise<ResourceReadResult<T>> => {
+    // Retained action callbacks use the revision at request start, not at
+    // callback creation or response completion.
+    const requestRevision = revisionRef.current
     const request = begin()
     try {
       const payload = await fetchJson<ApiResponse<T>>(path, { signal: request.signal })
@@ -48,6 +56,7 @@ function useResource<T>(path: string, initial: T) {
       // Stable references let memoized rules and lists survive health polling.
       setData(previous => JSON.stringify(previous) === JSON.stringify(next) ? previous : next)
       setLoaded(true)
+      setReadRevision(requestRevision)
       setFailures(0)
       setError('')
       return { status: 'success', data: next }
@@ -61,7 +70,7 @@ function useResource<T>(path: string, initial: T) {
       if (request.isCurrent()) setSettled(true)
     }
   }, [path, begin])
-  return { data, loaded, settled, failures, error, refresh }
+  return { data, loaded, settled, failures, error, refresh, current: readRevision === revision }
 }
 
 export function useStatus() {
@@ -80,19 +89,19 @@ export function useStatus() {
   }
 }
 
-export function useSubs() {
-  const resource = useResource<SubStatus[]>('/api/subs', [])
-  return { subs: resource.data, subsLoaded: resource.settled, subsAvailable: resource.loaded, subsError: resource.error, fetchSubs: resource.refresh }
+export function useSubs(revision = 0) {
+  const resource = useResource<SubStatus[]>('/api/subs', [], revision)
+  return { subs: resource.data, subsLoaded: resource.settled, subsAvailable: resource.loaded, subsCurrent: resource.current, subsError: resource.error, fetchSubs: resource.refresh }
 }
 
-export function useNodes() {
-  const resource = useResource<NodeInfo[]>('/api/nodes', [])
-  return { nodes: resource.data, nodesLoaded: resource.settled, nodesAvailable: resource.loaded, nodesError: resource.error, fetchNodes: resource.refresh }
+export function useNodes(revision = 0) {
+  const resource = useResource<NodeInfo[]>('/api/nodes', [], revision)
+  return { nodes: resource.data, nodesLoaded: resource.settled, nodesAvailable: resource.loaded, nodesCurrent: resource.current, nodesError: resource.error, fetchNodes: resource.refresh }
 }
 
-export function useRules() {
-  const resource = useResource<RuleInfo[]>('/api/rules', [])
-  return { rules: resource.data, rulesLoaded: resource.settled, rulesError: resource.error, fetchRules: resource.refresh }
+export function useRules(revision = 0) {
+  const resource = useResource<RuleInfo[]>('/api/rules', [], revision)
+  return { rules: resource.data, rulesLoaded: resource.settled, rulesCurrent: resource.current, rulesError: resource.error, fetchRules: resource.refresh }
 }
 
 const INITIAL_VERSION: VersionInfo = {

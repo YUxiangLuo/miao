@@ -79,9 +79,9 @@ export function useApi(onUncertain?: () => void) {
       if (!payload.success) throw new Error(payload.message || '请求失败')
       return payload
     } catch (error) {
-      if (error instanceof RequestInterruptedError) {
+      if (error instanceof RequestInterruptedError || error instanceof TypeError) {
         onUncertain?.()
-        throw new RequestInterruptedError('请求已取消或超时，操作结果未知；请刷新状态确认，勿直接重复操作')
+        throw new RequestInterruptedError('请求中断或网络异常，操作结果未知；请刷新状态确认，勿直接重复操作')
       }
       throw error
     } finally {

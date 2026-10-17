@@ -202,6 +202,13 @@ pub(super) async fn start_prepared_local_runtime(
 /// 持锁执行的本地初始化。返回 true = 内核已用本地材料快速启动，订阅需改为
 /// 后台刷新；false = 无配置或本地材料未能启动（订阅拉取在锁外进行）。
 pub(super) async fn initialize_runtime_locked(config: &Config, state: &Arc<AppState>) -> bool {
+    // Initialization may acquire the transaction lock after shutdown has stopped
+    // the kernel. Do not replace that terminal status with a startup failure.
+    if !state.lifecycle.snapshot().should_run {
+        state.initializing.store(false, Ordering::Relaxed);
+        return false;
+    }
+
     if config.subs.is_empty() && config.nodes.is_empty() {
         info!("No subscriptions or nodes configured, waiting for onboarding");
 

@@ -24,12 +24,15 @@ export function useProxies(status: Pick<StatusData, 'ready'>) {
   const [proxies, setProxies] = useState<ClashProxies>({})
   const clashApiBase = CLASH_API_BASE
   const { begin, cancel } = useLatestRequest()
+  const readyRef = useRef(status.ready)
+  readyRef.current = status.ready
 
   const fetchProxies = useCallback(async () => {
+    if (!readyRef.current) return
     const request = begin()
     try {
       const payload = await fetchJson<ClashProxiesPayload>(`${clashApiBase}/proxies`, { signal: request.signal })
-      if (request.isCurrent()) setProxies(payload.proxies || {})
+      if (readyRef.current && request.isCurrent()) setProxies(payload.proxies || {})
     } catch {
       // Keep the last snapshot through transient failures.
     }

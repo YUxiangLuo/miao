@@ -42,6 +42,29 @@ it('does not publish an error from an obsolete list request', async () => {
   expect(result.current.nodesAvailable).toBe(true)
 })
 
+it('uses the request-start revision even through a retained refresh callback', async () => {
+  const pending = deferred()
+  const fetchMock = rs.fn().mockResolvedValue(response({ success: true, data: [] }))
+  rs.stubGlobal('fetch', fetchMock)
+  const { result, rerender } = renderHook(({ revision }) => useNodes(revision), { initialProps: { revision: 1 } })
+  const retained = result.current.fetchNodes
+  await act(async () => { await retained() })
+  rerender({ revision: 2 })
+  await act(async () => { await result.current.fetchNodes() })
+  expect(result.current.nodesCurrent).toBe(true)
+  await act(async () => { await retained() })
+  expect(result.current.nodesCurrent).toBe(true)
+
+  fetchMock.mockImplementationOnce(() => pending.promise)
+  let inFlight!: Promise<unknown>
+  act(() => { inFlight = retained() })
+  rerender({ revision: 3 })
+  await act(async () => { pending.resolve(response({ success: true, data: [] })); await inFlight })
+  expect(result.current.nodesCurrent).toBe(false)
+  await act(async () => { await retained() })
+  expect(result.current.nodesCurrent).toBe(true)
+})
+
 it('keeps the latest status when an older response arrives last',async()=>{
  const old=deferred(),fresh=deferred(); rs.stubGlobal('fetch',rs.fn().mockImplementationOnce(()=>old.promise).mockImplementationOnce(()=>fresh.promise));
  const {result}=renderHook(()=>useStatus());let a!:Promise<unknown>,b!:Promise<unknown>;
@@ -64,6 +87,45 @@ it('discards measurements after their generation is cleared',async()=>{
  act(()=>{a=result.current.testDelay('/api/clash','old-node')});act(()=>result.current.clearDelays());
  await act(async()=>{old.resolve(response({delay:123}));await a});
  expect(result.current.delays['old-node']).toBeUndefined();
+})
+
+it('gates fresh and retained proxy callbacks while stopped and allows restart', async () => {
+  const fetchMock = rs.fn(async () => response({ proxies: { proxy: { type: 'Selector', all: ['node'], now: 'node' } } }))
+  rs.stubGlobal('fetch', fetchMock)
+  const { result, rerender } = renderHook(({ ready }) => useProxies({ ready }), { initialProps: { ready: true } })
+  const retained = result.current.fetchProxies
+  rerender({ ready: false })
+  await act(async () => { await retained(); await result.current.fetchProxies() })
+  expect(result.current.proxies).toEqual({})
+  expect(fetchMock).not.toHaveBeenCalled()
+  rerender({ ready: true })
+  await act(async () => { await retained() })
+  expect(result.current.primaryGroup?.now).toBe('node')
+})
+
+it.each([false, true])('waits for revised configuration before onboarding (new node: %s)', async (hasNode) => {
+  rs.useFakeTimers()
+  let revision = 1
+  let pending = deferred()
+  rs.stubGlobal('fetch', rs.fn(async (input: string) => {
+    if (input === '/api/status') return response({ success: true, data: statusMock({ ready: false, data_revision: revision }) })
+    if (input === '/api/nodes' && revision === 2) return pending.promise
+    return response({ success: true, data: input === '/api/version' ? {} : [] })
+  }))
+  const { result } = renderHook(() => useAppData())
+  await act(async () => { await rs.advanceTimersByTimeAsync(0) })
+  expect(result.current.needsOnboarding).toBe(true)
+  revision = 2
+  await act(async () => { await result.current.fetchStatus() })
+  expect(result.current.needsOnboarding).toBe(false)
+  const nodes = hasNode ? [nodeMock({ tag: 'new-node' })] : []
+  await act(async () => { pending.resolve(response({ success: true, data: nodes })); await rs.advanceTimersByTimeAsync(0) })
+  expect(result.current.needsOnboarding).toBe(!hasNode)
+  pending = deferred()
+  await act(async () => { await rs.advanceTimersByTimeAsync(30_000) })
+  expect(result.current.needsOnboarding).toBe(!hasNode)
+  await act(async () => { pending.resolve(response({ success: true, data: nodes })); await rs.advanceTimersByTimeAsync(0) })
+  expect(result.current.needsOnboarding).toBe(!hasNode)
 })
 
 it('times out a stuck initial read and recovers through polling', async () => {

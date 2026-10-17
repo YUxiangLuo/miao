@@ -64,13 +64,28 @@ describe('useApi pending actions', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
+  it('reconciles a lost POST response without retrying the write', async () => {
+    const reconcile = rs.fn()
+    const fetchMock = rs.fn().mockRejectedValue(new TypeError('Failed to fetch'))
+    rs.stubGlobal('fetch', fetchMock)
+    const { result } = renderHook(() => useApi(reconcile))
+    await act(async () => {
+      await expect(result.current.apiCall('nodes', { method: 'POST' }, 'saveNode')).rejects.toThrow('操作结果未知')
+    })
+    expect(reconcile).toHaveBeenCalledTimes(1)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(result.current.pendingActions.size).toBe(0)
+  })
+
   it('preserves a server rejection message and clears pending', async () => {
     rs.stubGlobal('fetch', rs.fn(async () => new Response(JSON.stringify({ success: false, message: '节点不可用' }), { status: 400 })))
-    const { result } = renderHook(() => useApi())
+    const reconcile = rs.fn()
+    const { result } = renderHook(() => useApi(reconcile))
     await act(async () => {
       await expect(result.current.apiCall('nodes', { method: 'POST' }, 'saveNode')).rejects.toThrow('节点不可用')
     })
     expect(result.current.pendingActions.size).toBe(0)
+    expect(reconcile).not.toHaveBeenCalled()
   })
 
   it('tracks different actions independently', async () => {
