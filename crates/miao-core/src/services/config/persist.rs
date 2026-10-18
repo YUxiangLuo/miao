@@ -632,6 +632,10 @@ impl SubNodesReadModel {
 }
 
 impl SubNodesSnapshot {
+    pub(super) fn fingerprint(&self) -> AppResult<String> {
+        Ok(sha256_hex(&serde_json::to_vec(self)?))
+    }
+
     /// 快照能否服务于当前订阅列表
     pub fn matches_subs(&self, subs: &[String]) -> bool {
         self.subs == subs
@@ -686,10 +690,11 @@ pub async fn save_sub_nodes_snapshot(
     snapshot: &SubNodesSnapshot,
 ) -> AppResult<()> {
     let mut cached = state.sub_nodes_cache.write().await;
-    save_sub_nodes_snapshot_at(sub_nodes_snapshot_path(state), snapshot).await?;
+    // The runtime transaction has already accepted this material. Disk is a
+    // best-effort replica, not the commit point of the in-memory read model.
     *cached = Some(Arc::new(SubNodesReadModel::new(snapshot.clone())));
     state.data_revision.fetch_add(1, Ordering::Relaxed);
-    Ok(())
+    save_sub_nodes_snapshot_at(sub_nodes_snapshot_path(state), snapshot).await
 }
 
 async fn save_sub_nodes_snapshot_at(path: &Path, snapshot: &SubNodesSnapshot) -> AppResult<()> {
@@ -713,12 +718,30 @@ pub async fn read_sub_nodes_snapshot(state: &AppState) -> Option<Arc<SubNodesRea
     // replace a freshly committed in-memory snapshot.
     let mut cached = state.sub_nodes_cache.write().await;
     if cached.is_none() {
-        *cached = read_sub_nodes_snapshot_at(sub_nodes_snapshot_path(state))
+        *cached = read_compatible_sub_nodes_snapshot(state)
             .await
             .map(SubNodesReadModel::new)
             .map(Arc::new);
     }
     cached.clone()
+}
+
+async fn read_compatible_sub_nodes_snapshot(state: &AppState) -> Option<SubNodesSnapshot> {
+    let snapshot = read_sub_nodes_snapshot_at(sub_nodes_snapshot_path(state)).await?;
+    let bindings = match super::bindings::load_bindings(state).await {
+        Ok(bindings) => bindings,
+        Err(err) => {
+            warn!(error = %err, "Cannot verify subscription snapshot against runtime bindings");
+            return None;
+        }
+    };
+    if let Some(expected) = bindings.and_then(|bindings| bindings.subscription_snapshot_sha256) {
+        if snapshot.fingerprint().ok().as_ref() != Some(&expected) {
+            warn!("Ignoring subscription snapshot from a different accepted runtime transaction");
+            return None;
+        }
+    }
+    Some(snapshot)
 }
 
 async fn read_sub_nodes_snapshot_at(path: &Path) -> Option<SubNodesSnapshot> {

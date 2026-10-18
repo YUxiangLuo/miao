@@ -37,6 +37,84 @@ async fn wait_for_slow_retry(state: &Arc<crate::state::AppState>) {
 }
 
 #[tokio::test]
+async fn ready_kernel_with_failed_foreground_refresh_still_needs_subscription_recovery() {
+    let (subscription, _calls) = eventually_available_subscription_server(usize::MAX).await;
+    let config = manual_config(subscription);
+    let (state, root) = local_startup_test_state(config.clone(), "ready-with-failed-refresh").await;
+    assert!(initialize_runtime_locked(&config, &state).await);
+    assert!(
+        !crate::services::config::refresh_subscriptions_foreground(&state)
+            .await
+            .unwrap()
+            .fetch_succeeded
+    );
+    assert!(state.lifecycle.snapshot().ready);
+    let outcome = crate::runtime::recover_data_plane_once(&state).await;
+    singbox::stop_sing_internal(&state).await;
+    let _ = tokio::fs::remove_dir_all(root).await;
+    assert_eq!(outcome, crate::runtime::RecoveryOutcome::RetrySubscriptions);
+}
+
+#[tokio::test]
+async fn local_kernel_recovery_keeps_retrying_failed_subscriptions() {
+    local_recovery_keeps_retrying(true).await;
+}
+
+#[tokio::test]
+async fn background_kernel_recovery_keeps_retrying_failed_subscriptions() {
+    local_recovery_keeps_retrying(false).await;
+}
+
+async fn local_recovery_keeps_retrying(initial_failure: bool) {
+    let (subscription, calls) = eventually_available_subscription_server(usize::MAX).await;
+    let config = manual_config(subscription);
+    let (state, root) = local_startup_test_state(config.clone(), "recovery-retry-boundary").await;
+    if initial_failure {
+        let script = crate::test_support::FAKE_KERNEL.replace(
+            "miao_ack() {",
+            "if [ ! -e first-run-failed ]; then touch first-run-failed; exit 1; fi\nmiao_ack() {",
+        );
+        tokio::fs::write(state.runtime_paths.runtime_dir.join("sing-box"), script)
+            .await
+            .unwrap();
+    } else {
+        assert!(initialize_runtime_locked(&config, &state).await);
+        singbox::stop_sing_internal(&state).await; // keep intent; force the background activation branch
+    }
+    let initializing = state.clone();
+    let task = tokio::spawn(async move {
+        if initial_failure {
+            crate::runtime::startup::initialize_runtime(config, initializing, false).await;
+        } else {
+            crate::runtime::startup::refresh_subscriptions_in_background(&config, &initializing)
+                .await;
+        }
+    });
+    tokio::time::timeout(std::time::Duration::from_secs(4), async {
+        while !state.lifecycle.snapshot().ready {
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .unwrap();
+    let recovered_at = calls.load(Ordering::Relaxed);
+    tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+    let later_calls = calls.load(Ordering::Relaxed);
+    let recovery_ended = task.is_finished();
+    state.lifecycle.shutdown();
+    state.next_sub_refresh();
+    singbox::stop_sing_internal(&state).await;
+    task.abort();
+    let _ = task.await;
+    let _ = tokio::fs::remove_dir_all(root).await;
+    assert!(
+        later_calls > recovered_at,
+        "local data-plane recovery must not terminate subscription recovery"
+    );
+    assert!(!recovery_ended);
+}
+
+#[tokio::test]
 async fn exhausted_startup_retries_preserve_manual_runtime_and_later_recover_quietly() {
     use axum::{http::StatusCode, routing::get, Router};
 
@@ -191,6 +269,52 @@ async fn stopping_service_interrupts_the_slow_retry_wait() {
         state.subscription_refresh.snapshot(),
         crate::models::SubscriptionRefreshStatus::default()
     );
+    let _ = tokio::fs::remove_dir_all(root).await;
+}
+
+#[tokio::test]
+async fn recovery_ownership_and_queued_handoffs_do_not_block_upgrade_drain() {
+    let (subscription, calls) = eventually_available_subscription_server(usize::MAX).await;
+    let config = manual_config(subscription);
+    let (state, root) = local_startup_test_state(config.clone(), "upgrade-slow-recovery").await;
+    assert!(initialize_runtime_locked(&config, &state).await);
+    let background_state = state.clone();
+    let background = tokio::spawn(async move {
+        crate::runtime::startup::refresh_subscriptions_with_slow_retry_interval(
+            &config,
+            &background_state,
+            std::time::Duration::from_secs(60),
+        )
+        .await;
+    });
+    wait_for_slow_retry(&state).await;
+    let queued_state = state.clone();
+    let queued = tokio::spawn(async move {
+        crate::runtime::retry_recovered_subscriptions(&queued_state).await;
+    });
+    let quiescence = tokio::time::timeout(
+        std::time::Duration::from_secs(1),
+        state.quiesce_for_upgrade(),
+    )
+    .await
+    .expect("sleeping/queued recovery owners are not active writes")
+    .unwrap();
+    assert!(!background.is_finished() && !queued.is_finished());
+    drop(quiescence);
+    assert!(
+        crate::services::commands::service::stop_service(state.clone())
+            .await
+            .is_ok()
+    );
+    tokio::time::timeout(std::time::Duration::from_secs(1), background)
+        .await
+        .unwrap()
+        .unwrap();
+    tokio::time::timeout(std::time::Duration::from_secs(1), queued)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(calls.load(Ordering::Relaxed), FAST_REQUESTS);
     let _ = tokio::fs::remove_dir_all(root).await;
 }
 

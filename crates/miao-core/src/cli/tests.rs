@@ -252,7 +252,7 @@ async fn exercise_subscription_startup(body: &'static str, expected_mode: &str) 
     std::fs::create_dir_all(&runtime_dir).unwrap();
     // Real initialization/HTTP/generation, but never a real kernel or TUN.
     let kernel = runtime_dir.join("sing-box");
-    std::fs::write(&kernel, b"#!/bin/sh\nif [ \"$1\" = check ]; then exit 0; fi\nif [ \"$1\" = run ]; then trap ':' HUP; while :; do sleep 1; done; fi\nexit 1\n").unwrap();
+    std::fs::write(&kernel, crate::test_support::FAKE_KERNEL).unwrap();
     std::fs::set_permissions(&kernel, std::fs::Permissions::from_mode(0o755)).unwrap();
     prepared.options.bind_port = Some(0);
     prepared.options.skip_extract = true;

@@ -22,6 +22,7 @@ TUN 名为 `sing-tun`，启用 `auto_route`、`strict_route`，使用 `auto_redi
 
 ## 补丁与回归
 
+- [miao_activation.go](../scripts/sing-box/miao_activation.go) 为父子进程增加激活回执。父进程在启动/SIGHUP 前写入唯一请求 ID 与配置 SHA-256；内核在读取配置前捕获请求，校验实际读取字节，并且仅在实例 `Start()` 成功后原子发布带 PID 的回执。控制面必须同时验证回执、进程存活及 TUN/Clash 健康，旧监听器不能提前完成新事务。[miao_activation_test.go](../scripts/sing-box/tests/miao_activation_test.go) 覆盖旧请求、哈希不匹配及真实子进程的成功/拒绝重载；命令钩子与固定上游不匹配时构建立即失败。
 - CLI context 隔离已由上游实现；[miao_context_test.go](../scripts/sing-box/tests/miao_context_test.go) 保留 create/check 两处注册表隔离回归。两者均须通过 `service.ExtendContext(globalCtx)` 复制可变注册表，同时保留取消语义；仅 `context.WithCancel` 会共享 manager，可能在 SIGHUP 重载时访问未启动的 AnyTLS client。测试使用 direct 和未选中的 AnyTLS，不使用 TUN/外网，也不并行修改 CLI 全局变量。
 - [shadowsocks2-halfclose.patch](../scripts/sing-box/shadowsocks2-halfclose.patch) 为经典 AEAD、AEAD-2022 客户端提供 `CloseWrite`：必要时先发送加密目的地址，再关闭底层写端并保留响应方向。不绕过加密层；不支持半关闭的底层传输退回完整关闭。
 - [miao_shadowsocks_test.go](../scripts/sing-box/tests/miao_shadowsocks_test.go) 使用 loopback TCP 和独立服务端，覆盖空请求、多帧、EOF 后响应、半关闭后写入失败、包装回退与错误传播；不承诺所有插件/复用都支持半关闭。

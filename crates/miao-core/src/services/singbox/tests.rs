@@ -110,9 +110,15 @@ async fn reload_keeps_the_existing_process() {
     use crate::models::RuntimePhase;
     use std::time::Instant;
 
-    let state = crate::test_support::app_state(crate::models::Config::default());
+    let (_root, state) = crate::test_support::isolated_stopped_state(Default::default());
+    state.lifecycle.request_running(true);
+    std::fs::write(&state.runtime_paths.active_config, "{}").unwrap();
+    super::activation::Activation::prepare(&state)
+        .await
+        .unwrap();
     let child = tokio::process::Command::new("sh")
-        .args(["-c", "trap ':' HUP; while :; do sleep 1; done"])
+        .args(["-c", crate::test_support::FAKE_KERNEL])
+        .current_dir(&state.runtime_paths.runtime_dir)
         .kill_on_drop(true)
         .spawn()
         .expect("spawn reload-aware child");

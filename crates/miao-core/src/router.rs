@@ -110,7 +110,7 @@ async fn finish_mutations_after_disconnect(
     // preserves headers/extensions (including route captures) for the handler.
     let (parts, body) = tokio::select! {
         biased;
-        _ = state.lifecycle.wait_for_shutdown() => return shutting_down_response(),
+        _ = state.lifecycle.wait_for_shutdown() => return shutting_down_response(&state),
         result = tokio::time::timeout(
             REQUEST_BODY_TIMEOUT,
             <(Parts, Bytes)>::from_request(request, &state),
@@ -126,19 +126,14 @@ async fn finish_mutations_after_disconnect(
     // Shutdown may have begun just as the last body chunk arrived. Admission
     // still checks the terminal flag under the same lock as shutdown.
     let Some(guard) = state.begin_mutation() else {
-        return shutting_down_response();
+        return shutting_down_response(&state);
     };
     let request = Request::from_parts(parts, Body::from(body));
 
     // Dropping the JoinHandle detaches the task; it does not abort the accepted
     // operation. The guard stays in that task so shutdown waits for both REST
     // writes and MCP POST requests, including work outside config_update.
-    match tokio::spawn(async move {
-        let _guard = guard;
-        next.run(request).await
-    })
-    .await
-    {
+    match tokio::spawn(async move { guard.scope(next.run(request)).await }).await {
         Ok(response) => response,
         Err(error) => {
             tracing::error!(%error, "Mutation request task failed");
@@ -151,10 +146,14 @@ async fn finish_mutations_after_disconnect(
     }
 }
 
-fn shutting_down_response() -> Response {
+fn shutting_down_response(state: &AppState) -> Response {
     crate::responses::status_error::<()>(
         StatusCode::SERVICE_UNAVAILABLE,
-        "Service is shutting down",
+        if state.lifecycle.is_shutting_down() {
+            "Service is shutting down"
+        } else {
+            "Service is preparing an upgrade"
+        },
     )
     .into_response()
 }

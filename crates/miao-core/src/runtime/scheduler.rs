@@ -209,6 +209,9 @@ async fn wait_for_due_refresh(
 /// 触发一次定时刷新。复用面板手动刷新的业务路径（生成、校验、热应用、状态投影），
 /// 失败不向调用方返回 HTTP 错误，只把结果映射成是否退避重试。
 async fn fire(state: &Arc<AppState>) -> FireOutcome {
+    let Some(_mutation) = state.begin_mutation() else {
+        return FireOutcome::Skipped;
+    };
     if state.initializing.load(Ordering::Relaxed) {
         info!("Scheduled refresh deferred: initialization is still in progress");
         return FireOutcome::Retryable;
@@ -248,6 +251,9 @@ async fn fire(state: &Arc<AppState>) -> FireOutcome {
         }
     }
 }
+
+#[cfg(test)]
+mod shutdown_tests;
 
 #[cfg(test)]
 mod tests {

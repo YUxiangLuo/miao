@@ -66,10 +66,7 @@ async fn local_startup_test_state(
     let runtime_dir = root.join("runtime");
     tokio::fs::create_dir_all(&runtime_dir).await.unwrap();
     let kernel = runtime_dir.join("sing-box");
-    tokio::fs::write(
-            &kernel,
-            b"#!/bin/sh\nif [ \"$1\" = check ]; then exit 0; fi\nif [ \"$1\" = run ]; then trap ':' HUP; while :; do sleep 1; done; fi\nexit 1\n",
-        )
+    tokio::fs::write(&kernel, crate::test_support::FAKE_KERNEL)
         .await
         .unwrap();
     std::fs::set_permissions(&kernel, std::fs::Permissions::from_mode(0o755)).unwrap();
@@ -637,7 +634,7 @@ async fn recovery_starts_compatible_cache_when_subscription_fetch_fails() {
     .await
     .expect("cache recovery must finish");
 
-    assert!(recovered);
+    assert_eq!(recovered, super::RecoveryOutcome::RetrySubscriptions);
     assert!(state.lifecycle.snapshot().ready);
     let active = tokio::fs::read_to_string(&state.runtime_paths.active_config)
         .await
@@ -679,7 +676,7 @@ async fn recovery_activates_manuals_when_fetch_fails_and_nothing_is_running() {
     .await
     .expect("manual recovery must finish");
 
-    assert!(recovered);
+    assert_eq!(recovered, super::RecoveryOutcome::RetrySubscriptions);
     assert!(state.lifecycle.snapshot().ready);
     let active = tokio::fs::read_to_string(&state.runtime_paths.active_config)
         .await

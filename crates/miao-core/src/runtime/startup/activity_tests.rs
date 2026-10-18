@@ -30,7 +30,10 @@ async fn unavailable_data_plane_defers_to_an_in_flight_foreground_operation() {
     let state = crate::test_support::app_state(config);
     let generation = state.next_sub_refresh();
     let _foreground = state.subscription_refresh.foreground(generation);
-    assert!(!recover_data_plane_once(&state).await);
+    assert_eq!(
+        recover_data_plane_once(&state).await,
+        RecoveryOutcome::RetryDataPlane
+    );
     assert!(
         state.sub_status.lock().await.is_empty(),
         "recovery must not start competing HTTP requests"

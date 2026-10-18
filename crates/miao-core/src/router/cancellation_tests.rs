@@ -39,7 +39,9 @@ async fn fixture() -> (tempfile::TempDir, Arc<AppState>) {
     };
     let (root, state) = isolated_stopped_state(config.clone());
     let binary = state.runtime_paths.runtime_dir.join("sing-box");
-    tokio::fs::write(&binary, b"#!/bin/sh\nif [ \"$1\" = check ]; then exit 0; fi\ntrap ':' HUP\nwhile :; do sleep 0.02; done\n").await.unwrap();
+    tokio::fs::write(&binary, crate::test_support::FAKE_KERNEL)
+        .await
+        .unwrap();
     std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755)).unwrap();
     let generated = gen_config_from_nodes(&config, &state, vec![])
         .await
@@ -303,6 +305,84 @@ async fn shutdown_rejects_new_rest_and_mcp_writes_but_allows_status_reads() {
         .unwrap();
     assert!(response.status().is_success());
     assert_eq!(response_json(response).await["data"]["phase"], "stopped");
+}
+
+#[tokio::test]
+async fn http_upgrade_handoff_exempts_its_own_middleware_registration() {
+    use tower::ServiceExt;
+    let (_root, state) = isolated_stopped_state(Config::default());
+    let app = axum::Router::new()
+        .route(
+            "/handoff",
+            axum::routing::post(
+                |axum::extract::State(state): axum::extract::State<Arc<AppState>>| async move {
+                    let _quiescence = state.quiesce_for_upgrade().await.unwrap();
+                    axum::http::StatusCode::OK
+                },
+            ),
+        )
+        .route_layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            super::finish_mutations_after_disconnect,
+        ))
+        .with_state(state);
+    let response = timeout(
+        Duration::from_secs(1),
+        app.oneshot(crate::test_support::empty_request("POST", "/handoff")),
+    )
+    .await
+    .expect("upgrade must not wait for its own request")
+    .unwrap();
+    assert_eq!(response.status(), axum::http::StatusCode::OK);
+}
+
+#[tokio::test]
+async fn upgrade_quiescence_rejects_rest_and_mcp_writes_then_reopens_on_failure() {
+    use crate::test_support::{empty_request, json_request, response_json};
+    use tower::ServiceExt;
+    let (_root, state) = isolated_stopped_state(Config {
+        mcp: true,
+        ..Default::default()
+    });
+    let quiescence = state.quiesce_for_upgrade().await.unwrap();
+    let app = super::build_router(state.clone());
+    for uri in ["/api/mcp", "/mcp"] {
+        let response = app
+            .clone()
+            .oneshot(json_request(
+                "POST",
+                uri,
+                serde_json::json!({"enabled":false}),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(
+            response.status(),
+            axum::http::StatusCode::SERVICE_UNAVAILABLE
+        );
+        assert_eq!(
+            response_json(response).await["message"],
+            "Service is preparing an upgrade"
+        );
+    }
+    assert!(app
+        .clone()
+        .oneshot(empty_request("GET", "/api/status"))
+        .await
+        .unwrap()
+        .status()
+        .is_success());
+    drop(quiescence); // e.g. install/verification failure; not a terminal shutdown
+    let response = app
+        .oneshot(json_request(
+            "POST",
+            "/api/mcp",
+            serde_json::json!({"enabled":false}),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response_json(response).await["success"], true);
+    assert!(!state.config.read().await.mcp);
 }
 
 #[tokio::test]

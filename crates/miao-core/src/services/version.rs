@@ -141,7 +141,18 @@ pub fn mark_upgrade_healthy() {
 
 fn mark_upgrade_healthy_at(current_exe: &Path) {
     let pending = upgrade_pending_path(current_exe);
-    if !pending.exists() {
+    let Ok(bytes) = fs::read(&pending) else {
+        return;
+    };
+    let Ok(marker) = serde_json::from_slice::<UpgradePending>(&bytes) else {
+        return;
+    };
+    // A delayed health observer must never acknowledge another boot or an
+    // upgrade that this process has just installed but has not exec'd yet.
+    if marker.state != "booting"
+        || marker.boot_pid != Some(std::process::id())
+        || parse_semver_tag(&marker.expected_version) != parse_semver_tag(&current_version())
+    {
         return;
     }
     let backup = std::path::PathBuf::from(format!("{}.bak", current_exe.display()));
@@ -518,9 +529,22 @@ pub async fn upgrade_binary(state: &Arc<AppState>) -> AppResult<String> {
         .map_err(|e| AppError::context("Failed to sync staged binary", e))?;
     let _ = tokio::fs::remove_file(temp_path).await;
 
-    // Network and verification stay outside the lifecycle lock. Installation
-    // and delayed exec are serialized with config activation and service I/O.
+    // Close admission and drain all OTHER accepted writes before taking the
+    // transaction lock. The shared request lease survives into delayed exec,
+    // so shutdown still waits for this handoff without making us await ourselves.
+    let quiescence = match state.quiesce_for_upgrade().await {
+        Ok(quiescence) => quiescence,
+        Err(err) => {
+            let _ = fs::remove_file(&staged_path);
+            return Err(err);
+        }
+    };
     let lifecycle_guard = state.config_update.clone().lock_owned().await;
+    if state.lifecycle.is_shutting_down() {
+        let _ = fs::remove_file(&staged_path);
+        return Err(AppError::message("Upgrade cancelled by shutdown"));
+    }
+    state.next_sub_refresh();
     let was_running = is_sing_box_running(state).await;
 
     info!("Stopping sing-box before upgrade...");
@@ -575,14 +599,30 @@ pub async fn upgrade_binary(state: &Arc<AppState>) -> AppResult<String> {
 
     let new_version = release.tag_name.clone();
     tokio::spawn(async move {
+        let state = guard.0.clone();
         let _guard = guard;
+        let _quiescence = quiescence;
         let _lifecycle_guard = lifecycle_guard;
         sleep(Duration::from_millis(500)).await;
 
         // 内嵌文件的刷新由新进程启动时的 extract_sing_box 无条件重释放保证,此处无需清理
 
         let args: Vec<String> = std::env::args().collect();
-        let err = exec_replace(std::process::Command::new(&current_exe).args(&args[1..]));
+        let result = state.lifecycle.with_upgrade_handoff(|| {
+            exec_replace(std::process::Command::new(&current_exe).args(&args[1..]))
+        });
+        let Some(err) = result else {
+            // Shutdown won after installation but before exec. Do not replace
+            // its process out from under it; restore the on-disk old executable.
+            match fs::rename(&backup_path, &current_exe) {
+                Ok(()) => {
+                    let _ = fs::remove_file(upgrade_pending_path(&current_exe));
+                }
+                Err(err) => error!(%err, "Failed to restore cancelled upgrade backup"),
+            }
+            info!("Upgrade handoff cancelled by shutdown");
+            return;
+        };
 
         error!("Failed to exec new binary: {}", err);
         error!("Attempting to restore from backup...");
@@ -591,7 +631,16 @@ pub async fn upgrade_binary(state: &Arc<AppState>) -> AppResult<String> {
             let _ = fs::remove_file(upgrade_pending_path(&current_exe));
             let _ = set_executable(&current_exe);
             error!("Restored from backup, restarting with old version...");
-            let _ = exec_replace(std::process::Command::new(&current_exe).args(&args[1..]));
+            if state
+                .lifecycle
+                .with_upgrade_handoff(|| {
+                    exec_replace(std::process::Command::new(&current_exe).args(&args[1..]))
+                })
+                .is_none()
+            {
+                info!("Restored upgrade backup; shutdown cancelled fallback exec");
+                return;
+            }
         }
         let diag = format!(
             "miao upgrade failure: exec and backup restore both failed.\nbinary: {:?}\nbackup: {}\n",

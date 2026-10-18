@@ -10,6 +10,7 @@ use crate::models::RuntimePhase;
 use crate::state::lifecycle::KernelOperation;
 use crate::state::{AppState, SingBoxProcess};
 
+mod activation;
 mod embedded;
 mod readiness;
 pub use embedded::extract_sing_box_to;
@@ -156,7 +157,7 @@ pub async fn reload_sing_internal(state: &Arc<AppState>) -> AppResult<()> {
     use nix::sys::signal::{kill, Signal};
     use nix::unistd::Pid;
 
-    let (pid, generation, signal) = {
+    let (pid, generation, activation, signal) = {
         let mut lock = state.sing_process.lock().await;
         if !state.lifecycle.snapshot().should_run {
             return Err(AppError::message("sing-box reload was cancelled"));
@@ -188,11 +189,19 @@ pub async fn reload_sing_internal(state: &Arc<AppState>) -> AppResult<()> {
             state.lifecycle.finish(generation, RuntimePhase::Failed);
             return Err(AppError::message("sing-box process ID is unavailable"));
         };
+        let activation = match activation::Activation::prepare(state).await {
+            Ok(activation) => activation,
+            Err(err) => {
+                state.lifecycle.finish(generation, RuntimePhase::Failed);
+                return Err(err);
+            }
+        };
         // Signal while owning the slot; Stop cannot replace/reap this PID
         // between inspection and SIGHUP delivery.
         (
             pid,
             generation,
+            activation,
             kill(Pid::from_raw(pid as i32), Signal::SIGHUP),
         )
     };
@@ -206,7 +215,7 @@ pub async fn reload_sing_internal(state: &Arc<AppState>) -> AppResult<()> {
         )));
     }
 
-    if let Err(err) = wait_for_sing_box_reload_ready(state, generation, pid).await {
+    if let Err(err) = wait_for_sing_box_reload_ready(state, generation, pid, &activation).await {
         state.lifecycle.finish(generation, RuntimePhase::Failed);
         return Err(err);
     }
@@ -222,11 +231,13 @@ async fn wait_for_sing_box_reload_ready(
     state: &Arc<AppState>,
     expected_generation: u64,
     expected_pid: u32,
+    activation: &activation::Activation,
 ) -> AppResult<()> {
     readiness::wait_for_ready(
         state,
         expected_generation,
         readiness::Operation::Reload { pid: expected_pid },
+        activation,
     )
     .await
 }
@@ -254,6 +265,10 @@ async fn publish_kernel_ready(state: &AppState, generation: u64) -> AppResult<()
     if !state.lifecycle.finish(generation, RuntimePhase::Ready) {
         return Err(AppError::message("sing-box operation was cancelled"));
     }
+    // A repaired data plane proves this boot healthy even when subscription
+    // recovery will keep retrying forever. Covers startup, manual recovery,
+    // rollback and watchdog starts at the same authoritative Ready boundary.
+    crate::services::version::mark_upgrade_healthy();
     Ok(())
 }
 
@@ -286,8 +301,10 @@ async fn spawn_and_probe_sing_box(
 
     info!(binary = ?sing_box_path, config = ?config_path, "Starting sing-box");
 
+    let activation = activation::Activation::prepare(state).await?;
     let mut command = tokio::process::Command::new(&sing_box_path);
     command
+        .env(activation::DIRECTORY_ENV, sing_box_home)
         .current_dir(sing_box_home)
         .arg("run")
         .arg("-c")
@@ -335,11 +352,13 @@ async fn spawn_and_probe_sing_box(
     });
     drop(lock);
 
-    wait_for_sing_box_ready(state, expected_generation).await
-}
-
-async fn wait_for_sing_box_ready(state: &Arc<AppState>, expected_generation: u64) -> AppResult<()> {
-    readiness::wait_for_ready(state, expected_generation, readiness::Operation::Start).await
+    readiness::wait_for_ready(
+        state,
+        expected_generation,
+        readiness::Operation::Start,
+        &activation,
+    )
+    .await
 }
 
 async fn terminate_failed_start(state: &Arc<AppState>, expected_generation: u64) {

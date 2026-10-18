@@ -5,6 +5,10 @@ pub(super) async fn initialize_runtime(
     state: Arc<AppState>,
     extract_runtime: bool,
 ) {
+    let Some(local_initialization) = state.begin_mutation() else {
+        state.initializing.store(false, Ordering::Relaxed);
+        return;
+    };
     if extract_runtime {
         let extraction_generation = state.lifecycle.snapshot().generation;
         let _activity = state
@@ -46,27 +50,33 @@ pub(super) async fn initialize_runtime(
     // config_update 只覆盖本地启核。订阅 HTTP 一律在锁外拉取。
     let needs_background_refresh = {
         let _config_update = state.config_update.lock().await;
-        initialize_runtime_locked(&config, &state).await
+        let refresh = initialize_runtime_locked(&config, &state).await;
+        // Ready publication confirms a real data plane. Empty configurations
+        // and an explicit Stop are settled too; confirm under this lease/lock,
+        // before a concurrent installer can create a new pending marker.
+        if startup_is_settled(&state).await && !state.lifecycle.is_shutting_down() {
+            crate::services::version::mark_upgrade_healthy();
+        }
+        refresh
     };
-
-    // An upgraded binary is healthy only after extraction and the expected
-    // data plane have settled. Empty configurations have no data plane yet;
-    // local cache/snapshot/manual starts have already passed readiness here.
-    if startup_is_settled(&state).await {
-        crate::services::version::mark_upgrade_healthy();
-    }
+    drop(local_initialization); // Never keep an admission lease over retry sleeps.
 
     if needs_background_refresh {
         refresh_subscriptions_in_background(&config, &state).await;
-    } else if should_retry_failed_startup(&state).await {
-        let settled = recover_data_plane_once(&state).await;
-        if !settled && should_retry_failed_startup(&state).await {
-            retry_failed_startup(&state).await;
+    } else {
+        match recover_data_plane_once(&state).await {
+            RecoveryOutcome::Complete => {}
+            RecoveryOutcome::RetrySubscriptions => retry_recovered_subscriptions(&state).await,
+            RecoveryOutcome::RetryDataPlane => retry_failed_startup(&state).await,
         }
     }
     // Configuration can be removed while a failed startup fetch is in flight,
     // including between the initial checkpoint and the retry guard above.
-    if startup_is_settled(&state).await {
+    let Some(_confirmation) = state.begin_mutation() else {
+        return;
+    };
+    let _config_update = state.config_update.lock().await;
+    if startup_is_settled(&state).await && !state.lifecycle.is_shutting_down() {
         crate::services::version::mark_upgrade_healthy();
     }
 }
@@ -333,6 +343,9 @@ pub(super) async fn refresh_subscriptions_with_slow_retry_interval(
     state: &Arc<AppState>,
     slow_retry_interval: Duration,
 ) {
+    // This owner spans retry sleeps, but is NOT a mutation lease. Waiting
+    // entrants must recheck completion rather than launch a duplicate fetch.
+    let _owner = state.subscription_recovery.background.lock().await;
     let mut refresh_generation = state.sub_refresh_generation.load(Ordering::Relaxed);
     let mut retry = SubFetchRetry::Startup;
     let mut delay = STARTUP_RECOVERY_INITIAL_DELAY;
@@ -464,10 +477,11 @@ async fn resume_after_foreground_refresh(
         info!("Subscriptions changed while foreground refresh superseded startup recovery");
         return None;
     }
-    if current_generation != 0
-        && state.sub_refresh_success_generation.load(Ordering::Relaxed) == current_generation
+    if state.subscription_recovery.is_complete(current_generation)
+        || (current_generation != 0
+            && state.sub_refresh_success_generation.load(Ordering::Relaxed) == current_generation)
     {
-        info!("Foreground subscription refresh succeeded; startup recovery is complete");
+        info!("Subscription recovery already completed for this generation");
         return None;
     }
 
@@ -484,8 +498,19 @@ async fn background_subscription_refresh_once(
     retry: SubFetchRetry,
     quiet: bool,
 ) -> BackgroundRefreshStep {
+    let _attempt = state.subscription_recovery.attempt.lock().await;
+    let Some(_mutation) = state.begin_mutation() else {
+        return if state.lifecycle.is_shutting_down() {
+            BackgroundRefreshStep::Finished
+        } else {
+            BackgroundRefreshStep::Retry
+        };
+    };
     if state.sub_refresh_generation.load(Ordering::Relaxed) != refresh_generation {
         return BackgroundRefreshStep::Superseded;
+    }
+    if state.subscription_recovery.is_complete(refresh_generation) {
+        return BackgroundRefreshStep::Finished;
     }
     if !state.lifecycle.snapshot().should_run {
         info!("Service stopped before background refresh; skipping");
@@ -527,30 +552,27 @@ async fn background_subscription_refresh_once(
     .await
     {
         Ok(outcome) => match outcome.effect {
-            RefreshEffect::Activated => {
-                info!("sing-box activated refreshed subscriptions");
+            RefreshEffect::Activated | RefreshEffect::SkippedUnchanged => {
+                // Kernel activation and subscription acceptance are independent.
+                // A manual/cache rebuild can succeed with every source offline.
+                let pending = !current.subs.is_empty() && !fetch_report.accepted_response();
                 save_config_cache(state).await;
-                *state.config_warning.lock().await =
-                    if !current.node_select.is_manual() && outcome.node_select.is_manual() {
-                        Some(REGION_FALLBACK.to_string())
-                    } else {
-                        None
-                    };
-                spawn_restore_last_proxy(state);
-                BackgroundRefreshStep::Finished
-            }
-            RefreshEffect::SkippedUnchanged => {
-                // This also upgrades a one-time legacy cache marker to a
-                // verified manifest after the freshly generated bytes match
-                // the validated running cache.
-                save_config_cache(state).await;
-                *state.config_warning.lock().await =
-                    if !current.node_select.is_manual() && outcome.node_select.is_manual() {
-                        Some(REGION_FALLBACK.to_string())
-                    } else {
-                        None
-                    };
-                BackgroundRefreshStep::Finished
+                *state.config_warning.lock().await = if pending {
+                    Some(ALL_SUBS_FAILED_KEEP_CACHE.to_string())
+                } else if !current.node_select.is_manual() && outcome.node_select.is_manual() {
+                    Some(REGION_FALLBACK.to_string())
+                } else {
+                    None
+                };
+                if outcome.effect == RefreshEffect::Activated {
+                    spawn_restore_last_proxy(state);
+                }
+                if pending {
+                    BackgroundRefreshStep::Retry
+                } else {
+                    state.subscription_recovery.complete(refresh_generation);
+                    BackgroundRefreshStep::Finished
+                }
             }
             RefreshEffect::KeptRunningOnTotalFailure => {
                 warn!("{ALL_SUBS_FAILED_KEEP_CACHE}");
@@ -581,6 +603,7 @@ async fn background_subscription_refresh_once(
             // publish an unactivated empty snapshot or retry it as a failure.
             *state.config_warning.lock().await =
                 Some(crate::services::config::SUBS_NO_USABLE_KEEP_CACHE.to_string());
+            state.subscription_recovery.complete(refresh_generation);
             BackgroundRefreshStep::Finished
         }
         Err(err) => {
@@ -621,24 +644,43 @@ pub(super) fn next_startup_recovery_delay(current: Duration) -> Duration {
         .min(STARTUP_RECOVERY_MAX_DELAY)
 }
 
-/// One fetch-outside-lock + install-under-lock attempt. Returns true when the
-/// data plane is ready or the service is no longer desired.
-pub(crate) async fn recover_data_plane_once(state: &Arc<AppState>) -> bool {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum RecoveryOutcome {
+    Complete,
+    RetryDataPlane,
+    /// The kernel is ready, but no authoritative subscription response landed.
+    RetrySubscriptions,
+}
+
+/// One bounded fetch/install attempt. Its registration spans network I/O and
+/// commit, but not the outer retry sleep, so upgrade can drain without hanging
+/// forever on an offline subscription.
+pub(crate) async fn recover_data_plane_once(state: &Arc<AppState>) -> RecoveryOutcome {
+    use RecoveryOutcome::*;
+    // Acquire before config_update and this attempt's mutation lease. An
+    // admitted HTTP caller still retains its request lease while waiting.
+    // Reuse the preceding attempt's committed result when ownership transfers.
+    let _attempt = state.subscription_recovery.attempt.lock().await;
+    let Some(_mutation) = state.begin_mutation() else {
+        return if state.lifecycle.is_shutting_down() {
+            Complete
+        } else {
+            RetryDataPlane
+        };
+    };
     if !should_retry_failed_startup(state).await {
-        return true;
-    }
-    if is_sing_box_running(state).await && state.lifecycle.snapshot().ready {
-        return true;
+        return recovery_after_concurrent_change(state).await;
     }
 
     let (config, refresh_generation) = {
         let _config_update = state.config_update.lock().await;
-        // Defer unavailable-data-plane recovery too. Capture configuration and
-        // generation under the transaction lock so a later foreground start
-        // necessarily supersedes this fetch rather than sharing its generation.
-        if state.subscription_refresh.foreground_in_flight() {
-            return false;
+        if !state.lifecycle.snapshot().should_run {
+            return Complete;
         }
+        if state.subscription_refresh.foreground_in_flight() {
+            return RetryDataPlane;
+        }
+        state.subscription_recovery.invalidate();
         (
             state.config_with_preferences().await,
             state.sub_refresh_generation.load(Ordering::Relaxed),
@@ -647,24 +689,22 @@ pub(crate) async fn recover_data_plane_once(state: &Arc<AppState>) -> bool {
     let nodes =
         fetch_sub_nodes_if_current(&config, state, SubFetchRetry::Startup, refresh_generation)
             .await;
-
+    let accepted_response = nodes.report.accepted_response();
     let _config_update = state.config_update.lock().await;
     if !state.lifecycle.snapshot().should_run {
-        return true;
+        return Complete;
     }
-    if state.sub_refresh_generation.load(Ordering::Relaxed) != refresh_generation {
-        info!("Startup recovery was superseded by a foreground subscription operation");
-        return state.lifecycle.snapshot().ready && is_sing_box_running(state).await;
-    }
-
     let current = state.config_with_preferences().await;
-    if current.subs != config.subs {
-        info!("Subscriptions changed during startup recovery; discarding stale fetch");
-        return state.lifecycle.snapshot().ready && is_sing_box_running(state).await;
+    if state.sub_refresh_generation.load(Ordering::Relaxed) != refresh_generation
+        || current.subs != config.subs
+    {
+        info!("Startup recovery was superseded; discarding stale fetch");
+        return recovery_after_concurrent_change(state).await;
     }
     if state.lifecycle.snapshot().ready && is_sing_box_running(state).await {
-        return true;
+        return recovery_after_concurrent_change(state).await;
     }
+    let pending = !current.subs.is_empty() && !accepted_response;
 
     match refresh_subscriptions(
         &current,
@@ -675,31 +715,30 @@ pub(crate) async fn recover_data_plane_once(state: &Arc<AppState>) -> bool {
     .await
     {
         Ok(outcome) => match outcome.effect {
-            RefreshEffect::Activated => {
-                info!(?outcome.runtime_update, "Initial data plane recovered in the background");
-                save_config_cache(state).await;
-                *state.config_warning.lock().await =
-                    if !current.node_select.is_manual() && outcome.node_select.is_manual() {
+            RefreshEffect::Activated | RefreshEffect::SkippedUnchanged => {
+                if state.lifecycle.snapshot().ready && is_sing_box_running(state).await {
+                    save_config_cache(state).await;
+                    *state.config_warning.lock().await = if pending {
+                        Some(ALL_SUBS_FAILED_KEEP_CACHE.to_string())
+                    } else if !current.node_select.is_manual() && outcome.node_select.is_manual() {
                         Some(REGION_FALLBACK.to_string())
                     } else {
                         None
                     };
-                spawn_restore_last_proxy(state);
-                return true;
-            }
-            RefreshEffect::SkippedUnchanged => {
-                if state.lifecycle.snapshot().ready && is_sing_box_running(state).await {
-                    save_config_cache(state).await;
-                    return true;
+                    spawn_restore_last_proxy(state);
+                    return if pending {
+                        RetrySubscriptions
+                    } else {
+                        state.subscription_recovery.complete(refresh_generation);
+                        Complete
+                    };
                 }
                 warn!("Startup recovery produced unchanged bytes without a ready data plane");
             }
             RefreshEffect::KeptRunningOnTotalFailure => {
-                warn!("Startup recovery still cannot fetch any subscription nodes");
                 *state.config_warning.lock().await = Some(ALL_SUBS_FAILED_RETRY.to_string());
             }
             RefreshEffect::KeptRunningOnValidationFailure => {
-                error!("Startup recovery generated an invalid configuration");
                 *state.config_warning.lock().await = Some(STARTUP_VALIDATION_RETRY.to_string());
             }
         },
@@ -709,7 +748,18 @@ pub(crate) async fn recover_data_plane_once(state: &Arc<AppState>) -> bool {
         }
     }
     if try_start_compatible_cache(&current, state).await {
-        return true;
+        if current.subs.is_empty() {
+            return Complete;
+        }
+        *state.config_warning.lock().await = Some(
+            if pending {
+                ALL_SUBS_FAILED_KEEP_CACHE
+            } else {
+                REFRESH_FAILED_KEEP_CACHE
+            }
+            .to_string(),
+        );
+        return RetrySubscriptions;
     }
     let runtime = state.lifecycle.snapshot();
     if !runtime.ready {
@@ -717,7 +767,35 @@ pub(crate) async fn recover_data_plane_once(state: &Arc<AppState>) -> bool {
             .lifecycle
             .finish(runtime.generation, RuntimePhase::Failed);
     }
-    false
+    RetryDataPlane
+}
+
+/// Another operation may repair the kernel without committing a subscription
+/// response. Only its committed-success generation can retire network recovery.
+async fn recovery_after_concurrent_change(state: &Arc<AppState>) -> RecoveryOutcome {
+    let runtime = state.lifecycle.snapshot();
+    let config = state.config.read().await;
+    if !runtime.should_run || (config.subs.is_empty() && config.nodes.is_empty()) {
+        return RecoveryOutcome::Complete;
+    }
+    if !runtime.ready {
+        return RecoveryOutcome::RetryDataPlane;
+    }
+    let generation = state.sub_refresh_generation.load(Ordering::Relaxed);
+    if !config.subs.is_empty()
+        && !state.subscription_recovery.is_complete(generation)
+        && (generation == 0
+            || state.sub_refresh_success_generation.load(Ordering::Relaxed) != generation)
+    {
+        RecoveryOutcome::RetrySubscriptions
+    } else {
+        RecoveryOutcome::Complete
+    }
+}
+
+pub(crate) async fn retry_recovered_subscriptions(state: &Arc<AppState>) {
+    let config = state.config_with_preferences().await;
+    refresh_subscriptions_in_background(&config, state).await;
 }
 
 /// Keep repairing an unavailable initial data plane without blocking panel
@@ -729,8 +807,13 @@ pub(super) async fn retry_failed_startup(state: &Arc<AppState>) {
         let generation = state.sub_refresh_generation.load(Ordering::Relaxed);
         state.subscription_refresh.wait_to_retry(generation, delay);
         tokio::time::sleep(delay).await;
-        if recover_data_plane_once(state).await {
-            return;
+        match recover_data_plane_once(state).await {
+            RecoveryOutcome::Complete => return,
+            RecoveryOutcome::RetrySubscriptions => {
+                retry_recovered_subscriptions(state).await;
+                return;
+            }
+            RecoveryOutcome::RetryDataPlane => {}
         }
         delay = next_startup_recovery_delay(delay);
     }
@@ -738,3 +821,5 @@ pub(super) async fn retry_failed_startup(state: &Arc<AppState>) {
 
 #[cfg(test)]
 mod activity_tests;
+#[cfg(test)]
+mod recovery_tests;

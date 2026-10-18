@@ -2,7 +2,7 @@
   "repository": "https://github.com/SagerNet/sing-box.git",
   "revision": "dfb80349bf5779ec0a3f834c9ec2794345bff8f0",
   "go_version": "1.27.1",
-  "version": "1.15.0-alpha.12+miao.12.dfb80349",
+  "version": "1.15.0-alpha.12+miao.13.dfb80349",
   "profile": "miao-client-v2",
   "build_tags": ["with_quic", "with_clash_api", "with_utls"],
   "node_protocols": ["anytls", "hysteria2", "shadowsocks", "trojan", "tuic", "vless", "vmess"],

@@ -68,6 +68,10 @@ pub async fn gen_config_from_fetch(
 ) -> AppResult<GenConfigOutcome> {
     let mut outcome = build_prepared(config, state, fetched.nodes.clone()).await?;
     outcome.subscription_fetch = Some(fetched.report);
+    outcome.node_bindings.subscription_snapshot_sha256 = Some(
+        SubNodesSnapshot::from_fetched_nodes(config.subs.clone(), fetched.nodes.clone())
+            .fingerprint()?,
+    );
     // Includes successful empty sources: an old snapshot must not resurrect
     // nodes intentionally removed by a provider on the next local edit.
     outcome.fresh_sub_nodes = Some(fetched.nodes);
@@ -255,6 +259,12 @@ pub async fn gen_config_from_nodes(
 ) -> AppResult<GenConfigOutcome> {
     let fresh = (!nodes.is_empty()).then(|| nodes.clone());
     let mut outcome = build_prepared(config, state, nodes).await?;
+    if let Some(nodes) = &fresh {
+        outcome.node_bindings.subscription_snapshot_sha256 = Some(
+            SubNodesSnapshot::from_fetched_nodes(config.subs.clone(), nodes.clone())
+                .fingerprint()?,
+        );
+    }
     outcome.fresh_sub_nodes = fresh;
     Ok(outcome)
 }

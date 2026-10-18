@@ -10,6 +10,8 @@ use crate::models::{Config, GitHubRelease, NodeMultiplier, NodeSelect, StableCon
 use crate::paths::RuntimePaths;
 
 pub mod lifecycle;
+mod mutations;
+mod recovery;
 mod subscriptions;
 use subscriptions::SubscriptionRefresh;
 
@@ -46,6 +48,7 @@ pub struct AppState {
     /// 定时刷新配置/开关变化或服务关闭时唤醒调度循环重算（见 `runtime::scheduler`）。
     pub scheduled_refresh_wake: Notify,
     pub subscription_refresh: SubscriptionRefresh,
+    pub(crate) subscription_recovery: recovery::SubscriptionRecovery,
     /// Latest foreground refresh generation that accepted a subscription
     /// response (including an empty list) and committed it. A foreground request can complete using only
     /// manual nodes after its subscription fetch failed; that must not cancel
@@ -70,12 +73,6 @@ pub struct AppState {
 }
 
 impl AppState {
-    pub(crate) fn begin_mutation(self: &Arc<Self>) -> Option<MutationGuard> {
-        self.lifecycle
-            .register_mutation()
-            .then(|| MutationGuard(self.clone()))
-    }
-
     pub(crate) fn with_profile(
         stable: StableConfig,
         config: Config,
@@ -161,6 +158,7 @@ impl AppState {
             sub_refresh_cancel: Notify::new(),
             scheduled_refresh_wake: Notify::new(),
             subscription_refresh: SubscriptionRefresh::default(),
+            subscription_recovery: recovery::SubscriptionRecovery::default(),
             sub_refresh_success_generation: AtomicU64::new(0),
             sub_status: Mutex::new(HashMap::new()),
             sub_nodes_cache: RwLock::new(None),
@@ -201,16 +199,6 @@ impl AppState {
         config.node_select = *self.node_select_preference.read().await;
         config.max_multiplier = *self.max_multiplier_preference.read().await;
         config
-    }
-}
-
-/// Owned by the write task, not the HTTP connection. Unwinding also retires
-/// the task, so an error or panic cannot strand graceful shutdown.
-pub(crate) struct MutationGuard(Arc<AppState>);
-
-impl Drop for MutationGuard {
-    fn drop(&mut self) {
-        self.0.lifecycle.finish_mutation();
     }
 }
 

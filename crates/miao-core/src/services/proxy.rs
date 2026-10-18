@@ -101,12 +101,16 @@ async fn load_last_proxy(path: &Path) -> Option<LastProxy> {
 /// 连续两次运行配置激活会各派生一个任务；旧任务在落地前发现自己监护的代次
 /// 已被取代即放弃，避免陈旧的 PUT 覆盖更新那次启动的选择。
 pub fn spawn_restore_last_proxy(state: &Arc<AppState>) {
+    let Some(mutation) = state.begin_mutation() else {
+        return;
+    };
     let generation = state.lifecycle.snapshot().generation;
     let selection = state
         .proxy_selection_generation
         .load(std::sync::atomic::Ordering::Relaxed);
     let state = state.clone();
     tokio::spawn(async move {
+        let _mutation = mutation;
         restore_last_proxy_if_current(&state, generation, selection).await;
     });
 }

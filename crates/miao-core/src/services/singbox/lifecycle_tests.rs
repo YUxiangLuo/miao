@@ -10,7 +10,9 @@ async fn fixture() -> (tempfile::TempDir, Arc<AppState>) {
     let runtime = root.path().join("runtime");
     tokio::fs::create_dir_all(&runtime).await.unwrap();
     let binary = runtime.join("sing-box");
-    tokio::fs::write(&binary, b"#!/bin/sh\nif [ \"$1\" = check ]; then exit 0; fi\ntrap ':' HUP\nwhile :; do sleep 0.02; done\n").await.unwrap();
+    tokio::fs::write(&binary, crate::test_support::FAKE_KERNEL)
+        .await
+        .unwrap();
     std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755)).unwrap();
     let config = Config {
         nodes: vec![serde_json::json!({"type":"trojan", "tag":"manual", "server":"192.0.2.1", "server_port":443, "password":"fixture"}).to_string()],
@@ -146,6 +148,53 @@ async fn rollback_of_a_live_but_unhealthy_child_requires_a_new_probe() {
     assert!(status.ready);
     assert_eq!(status.phase, RuntimePhase::Ready);
     stop_sing_internal(&state).await;
+}
+
+#[tokio::test]
+async fn healthy_old_listener_cannot_complete_a_delayed_config_reload() {
+    let (_root, state) = fixture().await;
+    let script = crate::test_support::FAKE_KERNEL.replace(
+        "trap 'miao_ack' HUP",
+        "trap 'touch reload-seen; while [ ! -f finish-reload ]; do sleep 0.02; done; miao_ack' HUP",
+    );
+    tokio::fs::write(state.runtime_paths.runtime_dir.join("sing-box"), script)
+        .await
+        .unwrap();
+    start_sing_internal(&state).await.unwrap();
+    let pid = kernel_status(&state).await.pid;
+    let other = state.clone();
+    let applying = tokio::spawn(async move {
+        crate::services::config::apply_route_mode(&other, RouteMode::Global).await
+    });
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while !state.runtime_paths.runtime_dir.join("reload-seen").exists() {
+            sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .unwrap();
+    // The test network probe stays healthy, just like the previous instance
+    // during a slow in-process precheck. Wait beyond the old 500ms heuristic.
+    sleep(Duration::from_millis(700)).await;
+    let prematurely_finished = applying.is_finished();
+    let before_ack = kernel_status(&state).await;
+    let before_commit = state.config.read().await.route_mode;
+    tokio::fs::write(state.runtime_paths.runtime_dir.join("finish-reload"), "")
+        .await
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(2), applying)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    let after_ack = kernel_status(&state).await;
+    stop_sing_internal(&state).await;
+    assert!(!prematurely_finished);
+    assert!(before_ack.running && !before_ack.ready);
+    assert_eq!(before_commit, RouteMode::Rule);
+    assert!(after_ack.ready);
+    assert_eq!(after_ack.pid, pid);
+    assert_eq!(state.config.read().await.route_mode, RouteMode::Global);
 }
 
 #[tokio::test]

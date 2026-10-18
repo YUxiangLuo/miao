@@ -107,9 +107,14 @@ pub async fn start_service(state: Arc<AppState>) -> CommandResult {
         // it again only while publishing a current result.
         drop(activity);
         drop(config_update);
-        if crate::runtime::recover_data_plane_once(&state).await && state.lifecycle.snapshot().ready
-        {
-            crate::services::version::mark_upgrade_healthy();
+        let recovery = crate::runtime::recover_data_plane_once(&state).await;
+        if state.lifecycle.snapshot().ready {
+            if recovery == crate::runtime::RecoveryOutcome::RetrySubscriptions {
+                let recovering = state.clone();
+                tokio::spawn(async move {
+                    crate::runtime::retry_recovered_subscriptions(&recovering).await
+                });
+            }
             return Ok(success_no_data("sing-box recovered successfully"));
         }
         return Err(command_error(

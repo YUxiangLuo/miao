@@ -83,6 +83,7 @@ pub(super) async fn wait_for_ready(
     state: &Arc<AppState>,
     generation: u64,
     operation: Operation,
+    activation: &activation::Activation,
 ) -> AppResult<()> {
     #[cfg(not(test))]
     let mut probe = SystemProbe {
@@ -92,10 +93,10 @@ pub(super) async fn wait_for_ready(
     #[cfg(test)]
     let mut probe = tests::ReadyProbe;
 
-    wait_with_probe(state, generation, operation, &mut probe).await
+    wait_with_activation(state, generation, operation, &mut probe, Some(activation)).await
 }
 
-async fn check_process(state: &AppState, generation: u64, operation: Operation) -> AppResult<()> {
+async fn check_process(state: &AppState, generation: u64, operation: Operation) -> AppResult<u32> {
     let mut slot = state.sing_process.lock().await;
     if !start_still_current(state, generation) {
         return Err(AppError::message(operation.cancelled()));
@@ -137,20 +138,37 @@ async fn check_process(state: &AppState, generation: u64, operation: Operation) 
             status.code().unwrap_or(-1)
         )));
     }
-    Ok(())
+    slot.as_ref()
+        .and_then(|process| process.child.id())
+        .ok_or_else(|| AppError::message(operation.cancelled()))
 }
 
+#[cfg(test)]
 async fn wait_with_probe(
     state: &Arc<AppState>,
     generation: u64,
     operation: Operation,
     probe: &mut impl DataPlaneProbe,
 ) -> AppResult<()> {
+    wait_with_activation(state, generation, operation, probe, None).await
+}
+
+async fn wait_with_activation(
+    state: &Arc<AppState>,
+    generation: u64,
+    operation: Operation,
+    probe: &mut impl DataPlaneProbe,
+    activation: Option<&activation::Activation>,
+) -> AppResult<()> {
     let started = Instant::now();
     let mut consecutive_ready = 0u8;
     loop {
         sleep(PROBE_INTERVAL).await;
-        check_process(state, generation, operation).await?;
+        let pid = check_process(state, generation, operation).await?;
+        let acknowledged = match activation {
+            Some(activation) => activation.acknowledged(pid).await,
+            None => true, // Probe-loop unit tests only; controller always supplies a request.
+        };
 
         let tun_ready = probe.tun_ready();
         let clash_ready = if started.elapsed() >= operation.settle_time() {
@@ -158,7 +176,7 @@ async fn wait_with_probe(
         } else {
             false
         };
-        if tun_ready && clash_ready {
+        if acknowledged && tun_ready && clash_ready {
             consecutive_ready += 1;
             if consecutive_ready >= 2 {
                 if matches!(operation, Operation::Start) {

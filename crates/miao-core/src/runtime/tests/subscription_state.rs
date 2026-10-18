@@ -25,11 +25,17 @@ async fn empty_response_without_a_replacement_keeps_runtime_without_network_retr
     let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
     let (state, root) = local_startup_test_state(cfg.clone(), "empty-no-replacement").await;
     assert!(!initialize_runtime_locked(&cfg, &state).await);
-    assert!(super::super::startup::recover_data_plane_once(&state).await);
+    assert_eq!(
+        super::super::startup::recover_data_plane_once(&state).await,
+        crate::runtime::RecoveryOutcome::Complete
+    );
     let pid = singbox::kernel_status(&state).await.pid;
     let old_bytes = tokio::fs::read(&state.runtime_paths.active_config)
         .await
         .unwrap();
+    // The first recovery already committed successfully. Exercise a NEW
+    // recovery generation instead of scheduling a duplicate of that success.
+    state.next_sub_refresh();
     tokio::time::timeout(
         std::time::Duration::from_secs(1),
         super::super::refresh_subscriptions_in_background(&cfg, &state),

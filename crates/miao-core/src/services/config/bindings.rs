@@ -25,6 +25,11 @@ pub struct NodeTagBinding {
 pub struct NodeTagBindings {
     pub version: u32,
     pub bindings: Vec<NodeTagBinding>,
+    /// Binds local subscription material to the accepted runtime transaction.
+    /// An old snapshot left by a best-effort write failure must not be reused
+    /// after restart. None preserves compatibility with pre-fingerprint files.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subscription_snapshot_sha256: Option<String>,
 }
 
 impl Default for NodeTagBindings {
@@ -32,6 +37,7 @@ impl Default for NodeTagBindings {
         Self {
             version: BINDINGS_VERSION,
             bindings: Vec::new(),
+            subscription_snapshot_sha256: None,
         }
     }
 }
@@ -81,7 +87,7 @@ fn affinity_key(node: &FetchedNode) -> String {
     sha256_parts(&[&bytes])
 }
 
-async fn load_bindings(state: &AppState) -> AppResult<Option<NodeTagBindings>> {
+pub(super) async fn load_bindings(state: &AppState) -> AppResult<Option<NodeTagBindings>> {
     let bytes = match tokio::fs::read(&state.runtime_paths.node_bindings).await {
         Ok(bytes) => bytes,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),

@@ -49,6 +49,7 @@ struct Inner {
     next_activity: u64,
     activity: Option<u64>,
     shutting_down: bool,
+    quiescing: bool,
     active_mutations: usize,
 }
 
@@ -97,7 +98,7 @@ impl RuntimeLifecycle {
     /// before shutdown can observe an empty set; later writes are rejected.
     pub(super) fn register_mutation(&self) -> bool {
         let mut inner = self.inner.lock().unwrap();
-        if inner.shutting_down {
+        if inner.shutting_down || inner.quiescing {
             return false;
         }
         inner.active_mutations += 1;
@@ -107,23 +108,54 @@ impl RuntimeLifecycle {
     pub(super) fn finish_mutation(&self) {
         let mut inner = self.inner.lock().unwrap();
         inner.active_mutations -= 1;
-        if inner.active_mutations == 0 {
-            self.mutations_finished.notify_waiters();
-        }
+        self.mutations_finished.notify_waiters();
     }
 
     /// Call after shutdown closes admission, without holding config_update:
     /// accepted requests may still need that lock to commit or roll back.
     pub(crate) async fn wait_for_mutations(&self) {
+        self.wait_for_mutations_except(0).await;
+    }
+
+    pub(super) async fn wait_for_mutations_except(&self, exempt: usize) {
         loop {
             let finished = self.mutations_finished.notified();
             tokio::pin!(finished);
             finished.as_mut().enable();
-            if self.inner.lock().unwrap().active_mutations == 0 {
+            if self.inner.lock().unwrap().active_mutations == exempt {
                 return;
             }
             finished.await;
         }
+    }
+
+    pub(super) fn quiesce_mutations(&self) -> bool {
+        let mut inner = self.inner.lock().unwrap();
+        if inner.shutting_down || inner.quiescing {
+            return false;
+        }
+        inner.quiescing = true;
+        true
+    }
+
+    pub(super) fn resume_mutations(&self) {
+        self.inner.lock().unwrap().quiescing = false;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn mutations_allowed(&self) -> bool {
+        let inner = self.inner.lock().unwrap();
+        !inner.shutting_down && !inner.quiescing
+    }
+
+    /// No await in this critical section. Either shutdown wins and prevents
+    /// exec, or successful exec replaces the process before shutdown begins.
+    pub(crate) fn with_upgrade_handoff<T>(&self, action: impl FnOnce() -> T) -> Option<T> {
+        let inner = self.inner.lock().unwrap();
+        if inner.shutting_down || !inner.quiescing {
+            return None;
+        }
+        Some(action())
     }
 
     /// The controller calls this while holding the process slot lock, before

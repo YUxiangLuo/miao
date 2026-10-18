@@ -61,6 +61,11 @@ pub async fn edit_subscriptions<T>(
     mutate: impl FnOnce(&mut Vec<String>) -> Result<T, String>,
 ) -> Result<(T, RuntimeUpdate, crate::models::SubscriptionFetchReport), ConfigMutationError> {
     let guard = state.config_update.lock().await;
+    // A queued refresh may acquire this lock after shutdown retired the old
+    // generation. It must not mint a fresh generation and escape cancellation.
+    if state.lifecycle.is_shutting_down() {
+        return Err(ConfigMutationError::Superseded);
+    }
     let before = state.config_with_preferences().await;
     let mut candidate = before.clone();
     let value = mutate(&mut candidate.subs).map_err(ConfigMutationError::Rejected)?;
@@ -78,7 +83,9 @@ pub async fn edit_subscriptions<T>(
     )
     .await;
     let _guard = state.config_update.lock().await;
-    if state.sub_refresh_generation.load(Ordering::Relaxed) != generation {
+    if state.lifecycle.is_shutting_down()
+        || state.sub_refresh_generation.load(Ordering::Relaxed) != generation
+    {
         return Err(ConfigMutationError::Superseded);
     }
     let old_config = state.config.read().await.clone();

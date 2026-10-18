@@ -44,12 +44,9 @@ async fn refresh_commit_failure_fixture(
     tokio::fs::create_dir_all(&volatile_path).await.unwrap();
 
     let fake_kernel = runtime_dir.join("sing-box");
-    tokio::fs::write(
-        &fake_kernel,
-        b"#!/bin/sh\nif [ \"$1\" = check ]; then exit 0; fi\nif [ \"$1\" = run ]; then trap ':' HUP; while :; do sleep 1; done; fi\nexit 1\n",
-    )
-    .await
-    .unwrap();
+    tokio::fs::write(&fake_kernel, crate::test_support::FAKE_KERNEL)
+        .await
+        .unwrap();
     std::fs::set_permissions(&fake_kernel, std::fs::Permissions::from_mode(0o755)).unwrap();
 
     let config = Config {
@@ -193,10 +190,7 @@ async fn persistent_save_failure_reactivates_previous_runtime_and_restores_bindi
     tokio::fs::create_dir_all(&config_path).await.unwrap();
 
     let fake_kernel = runtime_dir.join("sing-box");
-    tokio::fs::write(
-            &fake_kernel,
-            b"#!/bin/sh\nif [ \"$1\" = check ]; then exit 0; fi\nif [ \"$1\" = run ]; then trap ':' HUP; while :; do sleep 1; done; fi\nexit 1\n",
-        )
+    tokio::fs::write(&fake_kernel, crate::test_support::FAKE_KERNEL)
         .await
         .unwrap();
     std::fs::set_permissions(&fake_kernel, std::fs::Permissions::from_mode(0o755)).unwrap();
@@ -288,10 +282,7 @@ async fn unchanged_runtime_bytes_still_start_a_missing_desired_process() {
     let volatile_path = root.join("volatile.yaml");
     tokio::fs::create_dir_all(&runtime_dir).await.unwrap();
     let fake_kernel = runtime_dir.join("sing-box");
-    tokio::fs::write(
-            &fake_kernel,
-            b"#!/bin/sh\nif [ \"$1\" = check ]; then exit 0; fi\nif [ \"$1\" = run ]; then trap ':' HUP; while :; do sleep 1; done; fi\nexit 1\n",
-        )
+    tokio::fs::write(&fake_kernel, crate::test_support::FAKE_KERNEL)
         .await
         .unwrap();
     std::fs::set_permissions(&fake_kernel, std::fs::Permissions::from_mode(0o755)).unwrap();
@@ -345,10 +336,7 @@ async fn config_update_lock_serializes_overlapping_node_adds() {
     let volatile_path = root.join("volatile.yaml");
     tokio::fs::create_dir_all(&runtime_dir).await.unwrap();
     let fake_kernel = runtime_dir.join("sing-box");
-    tokio::fs::write(
-            &fake_kernel,
-            b"#!/bin/sh\nif [ \"$1\" = check ]; then exit 0; fi\nif [ \"$1\" = run ]; then trap ':' HUP; while :; do sleep 1; done; fi\nexit 1\n",
-        )
+    tokio::fs::write(&fake_kernel, crate::test_support::FAKE_KERNEL)
         .await
         .unwrap();
     std::fs::set_permissions(&fake_kernel, std::fs::Permissions::from_mode(0o755)).unwrap();
@@ -368,6 +356,9 @@ async fn config_update_lock_serializes_overlapping_node_adds() {
         )
         .unwrap(),
     );
+    regenerate_without_restart_runtime(&old_config, &state, SubSource::SnapshotOrLocal)
+        .await
+        .unwrap();
     start_sing_internal(&state).await.unwrap();
 
     let add = |state: Arc<AppState>, tag: &'static str| async move {

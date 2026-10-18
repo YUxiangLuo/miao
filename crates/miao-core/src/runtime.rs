@@ -320,13 +320,13 @@ mod scheduler;
 mod startup;
 
 use startup::initialize_runtime;
-pub(crate) use startup::recover_data_plane_once;
 #[cfg(test)]
 use startup::{
     initialize_runtime_locked, refresh_subscriptions_in_background, retry_failed_startup,
 };
 #[cfg(test)]
 use startup::{prepare_compatible_startup_cache, startup_is_settled};
+pub(crate) use startup::{recover_data_plane_once, retry_recovered_subscriptions, RecoveryOutcome};
 
 async fn request_shutdown(handle: &mut ServerHandle) {
     if let Some(tx) = handle.init_cancel.take() {

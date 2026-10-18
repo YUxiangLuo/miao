@@ -14,6 +14,8 @@ use crate::{
     state::AppState,
 };
 
+pub const FAKE_KERNEL: &str = include_str!("test_support/fake-kernel.sh");
+
 /// Normalize test thread names to compact filesystem-safe components.
 fn safe_test_path_component(raw: &str) -> String {
     raw.chars()

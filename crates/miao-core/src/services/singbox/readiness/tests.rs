@@ -146,6 +146,22 @@ mod controller {
     }
 
     #[tokio::test(start_paused = true)]
+    async fn healthy_old_instance_without_an_activation_ack_times_out() {
+        let (_root, state, _, pid) = fixture().await;
+        std::fs::write(&state.runtime_paths.active_config, "{}").unwrap();
+        let activation = activation::Activation::prepare(&state).await.unwrap();
+        let generation = state.lifecycle.begin(KernelOperation::Reload);
+        let mut probe = ScriptedProbe::new(true, true, &[]);
+        let operation = Operation::Reload { pid };
+        let result =
+            wait_with_activation(&state, generation, operation, &mut probe, Some(&activation))
+                .await;
+        reap(&state).await;
+        assert_eq!(result.unwrap_err().to_string(), operation.timeout());
+        assert!(!state.lifecycle.snapshot().ready);
+    }
+
+    #[tokio::test(start_paused = true)]
     async fn a_failed_observation_resets_the_success_streak() {
         let (_root, state, generation, _) = fixture().await;
         let mut probe = ScriptedProbe::new(true, true, &[true, false, true, true]);

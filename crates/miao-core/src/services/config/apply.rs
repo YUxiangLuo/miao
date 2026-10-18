@@ -406,6 +406,8 @@ mod edit_tests;
 #[cfg(test)]
 mod rollback_tests;
 #[cfg(test)]
+mod snapshot_tests;
+#[cfg(test)]
 mod transaction_tests;
 
 #[cfg(test)]

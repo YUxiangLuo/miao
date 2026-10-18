@@ -53,10 +53,58 @@ fn pending_upgrade_rolls_back_only_after_an_unhealthy_second_boot() {
     assert!(upgrade_requires_rollback(&executable).unwrap());
 
     mark_upgrade_healthy_at(&executable);
+    assert!(
+        backup.exists(),
+        "another boot cannot acknowledge the failed boot"
+    );
+    write_upgrade_pending(
+        &upgrade_pending_path(&executable),
+        &UpgradePending {
+            expected_version: current_version(),
+            state: "booting".to_string(),
+            boot_pid: Some(std::process::id()),
+        },
+    )
+    .unwrap();
+    mark_upgrade_healthy_at(&executable);
     assert!(!backup.exists());
     assert!(!upgrade_pending_path(&executable).exists());
     assert!(executable.exists());
     let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn health_confirmation_preserves_unowned_and_unbooted_upgrade_markers() {
+    let root = tempfile::tempdir().unwrap();
+    let executable = root.path().join("miao");
+    let backup = executable.with_extension("bak");
+    let pending = upgrade_pending_path(&executable);
+    std::fs::write(&backup, "previous executable").unwrap();
+    let current = current_version();
+    for (version, state, pid) in [
+        (current.as_str(), "installed", None),
+        (current.as_str(), "installed", Some(std::process::id())),
+        ("v999.0.0", "booting", Some(std::process::id())),
+        (current.as_str(), "booting", Some(u32::MAX)),
+        (current.as_str(), "booting", None),
+    ] {
+        write_upgrade_pending(
+            &pending,
+            &UpgradePending {
+                expected_version: version.to_string(),
+                state: state.to_string(),
+                boot_pid: pid,
+            },
+        )
+        .unwrap();
+        let before = std::fs::read(&pending).unwrap();
+        mark_upgrade_healthy_at(&executable);
+        assert_eq!(std::fs::read(&pending).unwrap(), before);
+        assert!(backup.exists());
+    }
+    std::fs::write(&pending, "incomplete JSON").unwrap();
+    mark_upgrade_healthy_at(&executable);
+    assert!(pending.exists() && backup.exists());
 }
 
 #[test]
