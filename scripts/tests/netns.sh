@@ -40,11 +40,28 @@ custom_rules:
   - '{"domain_suffix":"dormant.example","outbound":"gone-node"}'
 YAML
 
+  # Exercise the real VPS handler without contacting a remote machine. The
+  # second SSH call models remote work completed before its response arrives.
+  mkdir -p /tmp/mock-bin
+  cat > /tmp/mock-bin/ssh <<'SH'
+#!/bin/sh
+cat > /dev/null
+if [ ! -f /tmp/ssh-probed ]; then
+  touch /tmp/ssh-probed
+  exit 10
+fi
+touch /tmp/vps-provisioned
+while [ ! -f /tmp/finish-vps ]; do sleep 0.02; done
+exit 0
+SH
+  chmod +x /tmp/mock-bin/ssh
+
   smoke_pid=''
   # shellcheck disable=SC2329 # Called by the EXIT trap inside this worker branch.
   cleanup() {
     local result=$1
     trap - EXIT
+    touch /tmp/finish-vps
     if [[ -n "$smoke_pid" ]]; then
       kill -TERM "$smoke_pid" 2>/dev/null || true
       wait "$smoke_pid" || true
@@ -57,7 +74,7 @@ YAML
   trap 'cleanup "$?"' EXIT
   trap 'exit 130' INT
   trap 'exit 143' TERM
-  /run/miao-rust --config /tmp/miao-smoke.yaml > /tmp/miao-smoke.log 2>&1 &
+  PATH="/tmp/mock-bin:$PATH" /run/miao-rust --config /tmp/miao-smoke.yaml > /tmp/miao-smoke.log 2>&1 &
   smoke_pid=$!
   /run/bun /run/netns-smoke.mjs "$smoke_pid"
   exit 0

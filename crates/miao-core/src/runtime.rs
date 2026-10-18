@@ -288,13 +288,7 @@ pub(crate) async fn spawn_resolved(
             .with_graceful_shutdown(async move {
                 let _ = shutdown_rx.await;
                 info!("Shutting down, stopping sing-box...");
-                state_for_shutdown.lifecycle.shutdown();
-                state_for_shutdown.next_sub_refresh();
-                state_for_shutdown.scheduled_refresh_wake.notify_waiters();
-                // Let the current config transaction drain, but its rollback
-                // and later HTTP start requests may no longer revive the kernel.
-                let _config_update = state_for_shutdown.config_update.lock().await;
-                stop_sing_internal(&state_for_shutdown).await;
+                shutdown_runtime(&state_for_shutdown).await;
             })
             .await?;
         Ok(())
@@ -308,6 +302,18 @@ pub(crate) async fn spawn_resolved(
         shutdown_tx: Some(shutdown_tx),
         server_task: Some(server_task),
     })
+}
+
+pub(crate) async fn shutdown_runtime(state: &Arc<AppState>) {
+    state.lifecycle.shutdown();
+    state.next_sub_refresh();
+    state.scheduled_refresh_wake.notify_waiters();
+    // A disconnected write can still be doing SSH/network work outside the
+    // transaction lock. Drain it before taking that lock or declaring shutdown
+    // complete. Terminal lifecycle intent prevents rollback from restarting.
+    state.lifecycle.wait_for_mutations().await;
+    let _config_update = state.config_update.lock().await;
+    stop_sing_internal(state).await;
 }
 
 mod scheduler;

@@ -39,6 +39,6 @@
 - `spawn_server(RuntimeOptions)` 不读取宿主 argv；`config_path: None` 只做默认发现。CLI 参数解析器支持 `--config PATH` / `--config=PATH`。
 - `runtime_dir` 覆盖运行文件、默认偏好与默认易变层；显式 `volatile_path` / `log_path` 优先。调用方提供的目录不由 runtime 删除。
 - 临时 `--sub` 使用 `0700` 目录，由 `AppState` 持有，最后一个请求/后台任务引用释放后清理，启动失败同样释放。
-- `ServerHandle::shutdown()` 等待服务与内核关闭；仅 drop 则异步停服，均不提前删使用中的目录。强杀、断电、exec 升级不保证清理，后续临时运行不会复用残留目录。
+- `ServerHandle::shutdown()` 等待已接收的 HTTP 写任务（含客户端已断连的任务）收尾、服务与内核关闭；仅 drop 则异步执行同一关闭流程，均不提前删使用中的目录。强杀、断电、exec 升级不保证清理，后续临时运行不会复用残留目录。
 
 测试注入隔离路径，见[开发检查](development.md#测试隔离与维护约定)。

@@ -39,6 +39,8 @@ pub enum RuntimeActivity {
 #[derive(Default)]
 pub struct RuntimeLifecycle {
     inner: Mutex<Inner>,
+    shutdown_started: tokio::sync::Notify,
+    mutations_finished: tokio::sync::Notify,
 }
 
 #[derive(Default)]
@@ -47,6 +49,7 @@ struct Inner {
     next_activity: u64,
     activity: Option<u64>,
     shutting_down: bool,
+    active_mutations: usize,
 }
 
 impl RuntimeLifecycle {
@@ -76,6 +79,51 @@ impl RuntimeLifecycle {
         inner.snapshot.should_run = false;
         inner.snapshot.generation += 1;
         inner.activity = None;
+        self.shutdown_started.notify_waiters();
+    }
+
+    /// Request-body reception can be cancelled before any write is admitted.
+    /// Register before checking the terminal flag to avoid missing shutdown.
+    pub(crate) async fn wait_for_shutdown(&self) {
+        let shutdown = self.shutdown_started.notified();
+        tokio::pin!(shutdown);
+        shutdown.as_mut().enable();
+        if !self.is_shutting_down() {
+            shutdown.await;
+        }
+    }
+
+    /// Admission and shutdown share a lock: every accepted write is counted
+    /// before shutdown can observe an empty set; later writes are rejected.
+    pub(super) fn register_mutation(&self) -> bool {
+        let mut inner = self.inner.lock().unwrap();
+        if inner.shutting_down {
+            return false;
+        }
+        inner.active_mutations += 1;
+        true
+    }
+
+    pub(super) fn finish_mutation(&self) {
+        let mut inner = self.inner.lock().unwrap();
+        inner.active_mutations -= 1;
+        if inner.active_mutations == 0 {
+            self.mutations_finished.notify_waiters();
+        }
+    }
+
+    /// Call after shutdown closes admission, without holding config_update:
+    /// accepted requests may still need that lock to commit or roll back.
+    pub(crate) async fn wait_for_mutations(&self) {
+        loop {
+            let finished = self.mutations_finished.notified();
+            tokio::pin!(finished);
+            finished.as_mut().enable();
+            if self.inner.lock().unwrap().active_mutations == 0 {
+                return;
+            }
+            finished.await;
+        }
     }
 
     /// The controller calls this while holding the process slot lock, before

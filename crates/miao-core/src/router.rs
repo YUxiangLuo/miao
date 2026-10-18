@@ -1,6 +1,11 @@
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
 use axum::{
+    body::{Body, Bytes},
+    extract::{FromRequest, Request, State},
+    http::{request::Parts, StatusCode},
+    middleware::{self, Next},
+    response::{IntoResponse, Response},
     routing::{any, delete, get, post},
     Router,
 };
@@ -29,6 +34,8 @@ use crate::handlers::{
     version::get_version,
 };
 use crate::state::AppState;
+
+const REQUEST_BODY_TIMEOUT: Duration = Duration::from_secs(30);
 
 pub fn build_router(app_state: Arc<AppState>) -> Router {
     let router = Router::new()
@@ -77,8 +84,83 @@ pub fn build_router(app_state: Arc<AppState>) -> Router {
         .route("/api/upgrade", post(upgrade))
         .route("/api/vps/deploy", post(deploy_vps));
 
-    router.with_state(app_state)
+    router
+        .layer(middleware::from_fn_with_state(
+            app_state.clone(),
+            finish_mutations_after_disconnect,
+        ))
+        .with_state(app_state)
+}
+
+/// A reload can interrupt the very HTTP connection that requested it. Once a
+/// complete write request is admitted, keep its transaction alive through
+/// commit or rollback even if Hyper drops the response future. Receiving an
+/// incomplete body, read-only polling and WebSocket streams remain cancellable.
+async fn finish_mutations_after_disconnect(
+    State(state): State<Arc<AppState>>,
+    request: Request,
+    next: Next,
+) -> Response {
+    if request.method().is_safe() {
+        return next.run(request).await;
+    }
+
+    // Buffer with Axum's usual body limit before detaching. A slow/incomplete
+    // upload has not started a write and must not keep shutdown waiting. Parts
+    // preserves headers/extensions (including route captures) for the handler.
+    let (parts, body) = tokio::select! {
+        biased;
+        _ = state.lifecycle.wait_for_shutdown() => return shutting_down_response(),
+        result = tokio::time::timeout(
+            REQUEST_BODY_TIMEOUT,
+            <(Parts, Bytes)>::from_request(request, &state),
+        ) => match result {
+            Ok(Ok(buffered)) => buffered,
+            Ok(Err(response)) => return response,
+            Err(_) => return crate::responses::status_error::<()>(
+                StatusCode::REQUEST_TIMEOUT,
+                "Request body timed out",
+            ).into_response(),
+        }
+    };
+    // Shutdown may have begun just as the last body chunk arrived. Admission
+    // still checks the terminal flag under the same lock as shutdown.
+    let Some(guard) = state.begin_mutation() else {
+        return shutting_down_response();
+    };
+    let request = Request::from_parts(parts, Body::from(body));
+
+    // Dropping the JoinHandle detaches the task; it does not abort the accepted
+    // operation. The guard stays in that task so shutdown waits for both REST
+    // writes and MCP POST requests, including work outside config_update.
+    match tokio::spawn(async move {
+        let _guard = guard;
+        next.run(request).await
+    })
+    .await
+    {
+        Ok(response) => response,
+        Err(error) => {
+            tracing::error!(%error, "Mutation request task failed");
+            crate::responses::status_error::<()>(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Mutation request task failed",
+            )
+            .into_response()
+        }
+    }
+}
+
+fn shutting_down_response() -> Response {
+    crate::responses::status_error::<()>(
+        StatusCode::SERVICE_UNAVAILABLE,
+        "Service is shutting down",
+    )
+    .into_response()
 }
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod cancellation_tests;

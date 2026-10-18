@@ -1,7 +1,9 @@
 // Invoked only by netns.sh after namespace isolation and fixture setup.
 import assert from 'node:assert/strict'
-import { existsSync, readFileSync, readlinkSync } from 'node:fs'
+import { existsSync, readFileSync, readlinkSync, writeFileSync } from 'node:fs'
 import { createSocket } from 'node:dgram'
+import { createConnection } from 'node:net'
+import { once } from 'node:events'
 
 assert.equal(process.getuid(), 0, 'run through ./dev.sh netns')
 assert.equal(readlinkSync('/proc/self/ns/net'), readlinkSync('/proc/1/ns/net'))
@@ -98,6 +100,105 @@ async function stopAndCheck() {
   assert.equal(existsSync('/sys/class/net/sing-tun'), false, 'TUN removed after stop')
 }
 
+async function reloadWithDisconnectedClient(mode, expectedPid) {
+  const body = JSON.stringify({ route_mode: mode })
+  const socket = createConnection({ host: '127.0.0.1', port: 6161 })
+  try {
+    await once(socket, 'connect')
+    socket.write(`POST /api/route-mode HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: ${Buffer.byteLength(body)}\r\n\r\n${body}`)
+    const deadline = Date.now() + 5000
+    let phase
+    while (Date.now() < deadline) {
+      phase = (await request('status')).phase
+      if (phase === 'reloading') break
+      await Bun.sleep(5)
+    }
+    assert.equal(phase, 'reloading', 'disconnect while readiness and commit are pending')
+    socket.destroy()
+    const current = await waitReady()
+    assert.equal(current.pid, expectedPid)
+    // A no-op request waits for the first transaction to finish committing.
+    const repeat = await request('route-mode', { route_mode: mode })
+    assert.equal(repeat.changed, false, 'disconnected request committed its configuration')
+    assert.equal(repeat.runtime_updated, false)
+    assert.equal((await request('status')).route_mode, mode)
+    await checkRules(mode)
+    console.log(`PASS disconnected ${mode} reload completes and keeps kernel PID`)
+  } finally {
+    socket.destroy()
+  }
+}
+
+function serviceAlive() {
+  try {
+    // Bash may not have reaped its background child while running this script.
+    return readFileSync(`/proc/${servicePid}/stat`, 'utf8').split(') ')[1][0] !== 'Z'
+  } catch (error) {
+    if (error.code === 'ENOENT') return false
+    throw error
+  }
+}
+
+async function shutdownWithDisconnectedVps() {
+  const body = JSON.stringify({ ip: '203.0.113.10', password: 'isolated-test-password' })
+  const socket = createConnection({ host: '127.0.0.1', port: 6161 })
+  try {
+    await once(socket, 'connect')
+    socket.write(`POST /api/vps/deploy HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: ${Buffer.byteLength(body)}\r\n\r\n${body}`)
+    const provisionDeadline = Date.now() + 5000
+    while (!existsSync('/tmp/vps-provisioned') && Date.now() < provisionDeadline) await Bun.sleep(10)
+    assert(existsSync('/tmp/vps-provisioned'), 'VPS request reached remote work outside config_update')
+    socket.destroy()
+    await Bun.sleep(50)
+    process.kill(servicePid, 'SIGTERM')
+    // During draining the listener can still answer, but writes must be rejected.
+    let response
+    const shutdownDeadline = Date.now() + 3000
+    do {
+      response = await fetch('http://127.0.0.1:6161/api/mcp', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: false }), signal: AbortSignal.timeout(1000),
+      })
+      if (response.status === 503) break
+      await Bun.sleep(10)
+    } while (Date.now() < shutdownDeadline)
+    assert.equal(response.status, 503, 'shutdown closes admission to new writes')
+    assert.equal((await response.json()).message, 'Service is shutting down')
+    await Bun.sleep(100)
+    assert(serviceAlive(), 'shutdown must wait for the disconnected VPS request')
+    const before = Bun.YAML.parse(readFileSync('/tmp/miao-smoke.yaml', 'utf8'))
+    assert.equal(before.nodes.length, 1, 'VPS local commit is still pending')
+  } finally {
+    socket.destroy()
+    writeFileSync('/tmp/finish-vps', '')
+  }
+  const deadline = Date.now() + 5000
+  while (serviceAlive() && Date.now() < deadline) await Bun.sleep(20)
+  assert(!serviceAlive(), 'service exits after the accepted write finishes')
+  const saved = Bun.YAML.parse(readFileSync('/tmp/miao-smoke.yaml', 'utf8'))
+  assert(saved.nodes.some(node => JSON.parse(node).server === '203.0.113.10'), 'VPS node committed before process exit')
+  assert.equal(existsSync('/sys/class/net/sing-tun'), false, 'shutdown removes TUN')
+  console.log('PASS SIGTERM drains disconnected VPS write, rejects later writes and removes TUN')
+}
+
+async function shutdownWithIncompleteBody() {
+  const socket = createConnection({ host: '127.0.0.1', port: 6161 })
+  try {
+    await once(socket, 'connect')
+    const receiving = once(socket, 'data', { signal: AbortSignal.timeout(2000) })
+    socket.write('POST /api/mcp HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: 17\r\nExpect: 100-continue\r\n\r\n')
+    const [interim] = await receiving
+    assert.equal(interim.toString(), 'HTTP/1.1 100 Continue\r\n\r\n', 'server started receiving the body')
+    socket.write('{')
+    // The completed VPS request must drain, while this unfinished upload must
+    // be cancelled. Keep its client open through the entire process shutdown.
+    await shutdownWithDisconnectedVps()
+    console.log('PASS incomplete POST does not delay SIGTERM shutdown')
+  } finally {
+    socket.destroy()
+  }
+}
+
 const first = await waitReady()
 assert(existsSync('/sys/class/net/sing-tun'), 'TUN created on startup')
 await checkRules('rule')
@@ -114,6 +215,10 @@ for (const mode of ['global', 'rule']) {
   console.log(`PASS reload ${mode}, same kernel PID`)
 }
 
+for (const mode of ['global', 'rule']) {
+  await reloadWithDisconnectedClient(mode, first.pid)
+}
+
 const fallback = await request('node-select', { node_select: 'fastest_jp' })
 assert.equal(fallback.requested, 'fastest_jp')
 assert.equal(fallback.node_select, 'manual')
@@ -128,5 +233,5 @@ assert.notEqual(restarted.pid, first.pid)
 assert(existsSync('/sys/class/net/sing-tun'), 'TUN recreated after restart')
 await checkRules('rule')
 console.log(`PASS restart ready, new kernel PID ${restarted.pid}`)
-await stopAndCheck()
+await shutdownWithIncompleteBody()
 console.log('REAL KERNEL SMOKE PASS')

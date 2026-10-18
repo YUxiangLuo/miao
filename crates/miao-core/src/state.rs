@@ -70,6 +70,12 @@ pub struct AppState {
 }
 
 impl AppState {
+    pub(crate) fn begin_mutation(self: &Arc<Self>) -> Option<MutationGuard> {
+        self.lifecycle
+            .register_mutation()
+            .then(|| MutationGuard(self.clone()))
+    }
+
     pub(crate) fn with_profile(
         stable: StableConfig,
         config: Config,
@@ -198,6 +204,16 @@ impl AppState {
     }
 }
 
+/// Owned by the write task, not the HTTP connection. Unwinding also retires
+/// the task, so an error or panic cannot strand graceful shutdown.
+pub(crate) struct MutationGuard(Arc<AppState>);
+
+impl Drop for MutationGuard {
+    fn drop(&mut self) {
+        self.0.lifecycle.finish_mutation();
+    }
+}
+
 /// 因出口节点不存在而在生成配置时改为阻断的规则；沿用历史类型名。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SkippedRule {
@@ -222,6 +238,29 @@ pub struct VersionCache {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn shutdown_waits_for_all_registered_mutations_and_closes_admission() {
+        let (_root, state) = crate::test_support::isolated_stopped_state(Config::default());
+        let first = state.begin_mutation().unwrap();
+        let second = state.begin_mutation().unwrap();
+        state.lifecycle.shutdown();
+        assert!(state.begin_mutation().is_none());
+        let draining = state.clone();
+        let mut wait = tokio::spawn(async move { draining.lifecycle.wait_for_mutations().await });
+        drop(first);
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(30), &mut wait)
+                .await
+                .is_err()
+        );
+        drop(second);
+        tokio::time::timeout(std::time::Duration::from_secs(1), wait)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(state.begin_mutation().is_none());
+    }
 
     #[test]
     fn app_state_new_creates_valid_instance() {
