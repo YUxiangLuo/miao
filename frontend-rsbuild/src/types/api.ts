@@ -94,7 +94,7 @@ export type NodeInfo = { tag: string, server: string, server_port: number, node_
 
 export type RuleInfo = { index: number, field?: string, value?: string, target?: string,
 /**
- * 出口节点不存在,生成配置时被跳过(未生效)
+ * 兼容字段：出口节点不存在，原出口暂停使用，匹配流量已改为阻断。
  */
 skipped: boolean, raw: string, };
 

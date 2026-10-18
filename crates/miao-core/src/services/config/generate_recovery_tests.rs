@@ -136,7 +136,57 @@ async fn failed_sources_keep_nodes_but_successful_empty_sources_replace_them() {
         1,
         "local edits must not resurrect removed nodes"
     );
+    for outcome in [&empty, &local] {
+        let runtime: serde_json::Value = serde_json::from_slice(&outcome.bytes).unwrap();
+        assert_eq!(
+            runtime["route"]["rules"][2],
+            serde_json::json!({"domain":"example.com","action":"reject"})
+        );
+        assert_eq!(
+            runtime["dns"]["rules"][0],
+            serde_json::json!({"domain":"example.com","action":"reject"})
+        );
+    }
+    mode.store(0, Ordering::Relaxed);
+    let restored = gen_config(&config, &state, SubFetchRetry::None)
+        .await
+        .unwrap();
+    assert!(restored.skipped_rules.is_empty());
+    let runtime: serde_json::Value = serde_json::from_slice(&restored.bytes).unwrap();
+    assert_eq!(
+        runtime["route"]["rules"][2],
+        serde_json::json!({"domain":"example.com","outbound":"node-b"})
+    );
     server.abort();
+}
+
+#[tokio::test]
+async fn cache_startup_restores_missing_outbound_diagnostics() {
+    let config = Config {
+        nodes: vec![r#"{"type":"trojan","tag":"manual-a","server":"a.example","server_port":443,"password":"test"}"#.to_string()],
+        custom_rules: vec![r#"{"domain":"example.com","outbound":"gone"}"#.to_string()],
+        ..Config::default()
+    };
+    let state = app_state(config.clone());
+    let blocked = build_prepared(&config, &state, vec![]).await.unwrap();
+    tokio::fs::create_dir_all(&state.runtime_paths.runtime_dir)
+        .await
+        .unwrap();
+    tokio::fs::write(&state.runtime_paths.active_config, &blocked.bytes)
+        .await
+        .unwrap();
+    publish_cached_rule_diagnostics(&config, &state).await;
+    assert_eq!(*state.skipped_rules.lock().await, blocked.skipped_rules);
+    let mut restored_config = config.clone();
+    restored_config.nodes.push(r#"{"type":"trojan","tag":"gone","server":"b.example","server_port":443,"password":"test"}"#.to_string());
+    let restored = build_prepared(&restored_config, &state, vec![])
+        .await
+        .unwrap();
+    tokio::fs::write(&state.runtime_paths.active_config, &restored.bytes)
+        .await
+        .unwrap();
+    publish_cached_rule_diagnostics(&restored_config, &state).await;
+    assert!(state.skipped_rules.lock().await.is_empty());
 }
 
 #[tokio::test]

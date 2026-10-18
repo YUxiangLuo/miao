@@ -62,7 +62,7 @@ fn collect_manual_outbounds_preserves_hysteria2_without_default_bandwidth() {
 }
 
 #[test]
-fn filter_rules_skips_only_rules_with_missing_outbound() {
+fn missing_outbound_rules_block_in_place_and_recover_without_changing_raw_rules() {
     let available: HashSet<String> = ["proxy", "direct", "node-a"]
         .into_iter()
         .map(str::to_string)
@@ -75,11 +75,16 @@ fn filter_rules_skips_only_rules_with_missing_outbound() {
         "not-json".to_string(),
     ];
 
-    let (kept, skipped) = filter_rules_with_missing_outbound(&rules, &available);
+    let (kept, skipped) = block_rules_with_missing_outbound(&rules, &available);
 
-    // 失效规则与无法解析的规则都会在生成阶段跳过；原始配置仍保持不变
-    assert_eq!(kept.len(), 3);
-    assert!(!kept.iter().any(|r| r.contains("gone-node")));
+    assert_eq!(kept.len(), 4);
+    assert_eq!(kept[0], json!({"process_name":"curl","action":"reject"}));
+    for index in 1..4 {
+        assert_eq!(
+            kept[index],
+            serde_json::from_str::<serde_json::Value>(&rules[index]).unwrap()
+        );
+    }
     assert_eq!(
         skipped,
         vec![SkippedRule {
@@ -87,10 +92,45 @@ fn filter_rules_skips_only_rules_with_missing_outbound() {
             description: "process_name=curl → gone-node".to_string(),
         }]
     );
+    let mut restored = available;
+    restored.insert("gone-node".to_string());
+    let (recovered, warnings) = block_rules_with_missing_outbound(&rules, &restored);
+    assert!(warnings.is_empty());
+    assert_eq!(
+        recovered[0],
+        serde_json::from_str::<serde_json::Value>(&rules[0]).unwrap()
+    );
 }
 
 #[test]
-fn build_sing_box_config_skips_rules_with_missing_node() {
+fn missing_outbound_blocking_preserves_compound_and_logical_matchers() {
+    let matchers = [
+        json!({"domain_suffix":["example.com"],"network":"tcp","port":443,"invert":true}),
+        json!({"type":"logical","mode":"and","rules":[{"domain":"example.com"},{"process_name":"curl"}]}),
+        json!({"ip_cidr":"192.0.2.0/24","source_ip_cidr":"10.0.0.0/8"}),
+    ];
+    for matcher in matchers {
+        let mut original = matcher.clone();
+        original["outbound"] = json!("gone-node");
+        original["override_address"] = json!("127.0.0.1");
+        original["override_port"] = json!(8443);
+        original["udp_timeout"] = json!("1m");
+        original["tls_fragment"] = json!(true);
+        let raw = vec![original.to_string()];
+        let (blocked, warnings) = block_rules_with_missing_outbound(&raw, &HashSet::new());
+        let mut expected = matcher;
+        expected["action"] = json!("reject");
+        assert_eq!(blocked, vec![expected]);
+        assert_eq!(warnings[0].raw, raw[0]);
+        let (restored, warnings) =
+            block_rules_with_missing_outbound(&raw, &HashSet::from(["gone-node".to_string()]));
+        assert_eq!(restored, vec![original]);
+        assert!(warnings.is_empty());
+    }
+}
+
+#[test]
+fn build_sing_box_config_blocks_rules_with_missing_node() {
     let config = Config {
         port: None,
         subs: vec![],
@@ -118,6 +158,14 @@ fn build_sing_box_config_skips_rules_with_missing_node() {
 
     let rules = built["route"]["rules"].as_array().unwrap();
     let rules_json = serde_json::to_string(rules).unwrap();
+    assert_eq!(
+        rules[2],
+        json!({"process_path":"/opt/app/run","action":"reject"})
+    );
+    assert_eq!(
+        built["dns"]["rules"][0],
+        json!({"process_path":"/opt/app/run","action":"reject"})
+    );
     assert!(!rules_json.contains("已消失节点"));
     assert!(rules_json.contains("manual-a"));
     let dns_json = serde_json::to_string(&built["dns"]).unwrap();
@@ -133,6 +181,37 @@ fn build_sing_box_config_skips_rules_with_missing_node() {
         "process_path=/opt/app/run → 已消失节点"
     );
     assert_eq!(skipped[0].raw, config.custom_rules[0]);
+}
+
+#[test]
+fn blocked_dns_rules_do_not_broaden_connection_only_matchers() {
+    let config = Config {
+        custom_rules: vec![
+            r#"{"domain":"example.com","port":443,"outbound":"gone"}"#.to_string(),
+            r#"{"process_name":"curl","network":"tcp","outbound":"gone"}"#.to_string(),
+            r#"{"ip_cidr":"192.0.2.0/24","outbound":"gone"}"#.to_string(),
+        ],
+        ..Config::default()
+    };
+    let (built, blocked, _) = build_sing_box_config(
+        &config,
+        vec!["manual-a".to_string()],
+        vec![json!({"type":"direct","tag":"manual-a"})],
+        vec![],
+        vec![],
+    )
+    .unwrap();
+    assert_eq!(blocked.len(), 3);
+    for (index, raw) in config.custom_rules.iter().enumerate() {
+        let mut expected: serde_json::Value = serde_json::from_str(raw).unwrap();
+        expected.as_object_mut().unwrap().remove("outbound");
+        expected["action"] = json!("reject");
+        assert_eq!(built["route"]["rules"][index + 2], expected);
+    }
+    assert_eq!(
+        built["dns"]["rules"],
+        json!([{"rule_set":["chinasite"],"action":"route","server":"local"}])
+    );
 }
 
 #[test]

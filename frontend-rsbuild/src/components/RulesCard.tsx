@@ -21,7 +21,7 @@ const RuleRow = memo(function RuleRow({ rule, onDelete, disabled, active }: Rule
   const display = describeRule(rule)
   return (
     <div
-      className={classNames('list-row', 'rule-row', display.structured && display.target && 'has-target', rule.skipped && 'skipped', active && 'rule-active')}
+      className={classNames('list-row', 'rule-row', display.structured && display.target && 'has-target', rule.skipped && 'blocked', active && 'rule-active')}
       title={active ? '该规则正在匹配连接' : undefined}
     >
       <div className="list-row-content">
@@ -52,9 +52,9 @@ const RuleRow = memo(function RuleRow({ rule, onDelete, disabled, active }: Rule
       <span className="rule-status-slot">
         {rule.skipped ? (
           <span
-            className="rule-skipped-icon"
-            title="出口节点不存在,该规则未生效;请删除后重新添加"
-            aria-label="规则未生效"
+            className="rule-blocked-icon"
+            title="出口节点不存在，匹配此规则的流量已阻断；节点恢复后自动恢复原出口"
+            aria-label="出口缺失，已阻断"
           >
             <TriangleAlert size={ICON.xs} />
           </span>

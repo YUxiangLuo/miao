@@ -3,7 +3,7 @@ use super::apply::{
     no_usable_nodes_warning, persist_config_without_usable_nodes_at, ConfigApplyMode,
     ConfigMutationError, RuntimeUpdate,
 };
-use super::builder::{build_sing_box_config, filter_rules_with_missing_outbound, tun_inbound};
+use super::builder::{block_rules_with_missing_outbound, build_sing_box_config, tun_inbound};
 use super::generate::{collect_manual_outbounds, runtime_config_node_tags};
 use super::persist::save_config_to;
 use crate::{

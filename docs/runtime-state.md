@@ -42,7 +42,7 @@ REST handler 只解析参数、调用 `services/commands/`，由 `responses.rs` 
 | active `config.json`、node bindings | `RuntimeCheckpoint` 严格快照，不可读则拒绝编辑；激活失败恢复两者，运行态恢复失败仍尝试 bindings |
 | 稳定/易变/effective 配置 | `commit_generated` 编辑时提交完整候选，刷新时只提交 effective selection；持久化失败回滚运行态，不发布候选诊断 |
 | requested 偏好 | 独立文件与内存事务，不混入地区回退值 |
-| 订阅快照、倍率选项、跳过规则、告警、运行缓存 | 接受配置后才发布；派生快照/缓存写盘 best-effort |
+| 订阅快照、倍率选项、缺失出口阻断规则、告警、运行缓存 | 接受配置后才发布；派生快照/缓存写盘 best-effort |
 
 候选先通过限时 10 秒的 `sing-box check` 再激活；`SubSource` 只接收本地快照/预拉取材料。回滚持锁但不联网，依次用内存快照、`config.json.cache`、本地订阅快照/手动节点；内核已死先 check 再启动，拒绝空 cache。材料不足保留可用运行态并报错，不持锁拉订阅。
 

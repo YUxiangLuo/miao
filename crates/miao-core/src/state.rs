@@ -55,7 +55,7 @@ pub struct AppState {
     pub sub_nodes_cache: RwLock<Option<Arc<crate::services::config::SubNodesReadModel>>>,
     pub data_revision: AtomicU64,
     pub config_warning: Mutex<Option<String>>,
-    /// 最近一次生成配置时因出口节点不存在而被跳过的自定义规则,用于面板告警与规则列表标记
+    /// 最近一次生成配置时因出口节点不存在而改为阻断的规则；沿用历史字段名。
     pub skipped_rules: Mutex<Vec<SkippedRule>>,
     /// 最近一次成功生成配置时，从完整节点池识别出的倍率选项。
     pub available_multipliers: RwLock<Vec<NodeMultiplier>>,
@@ -198,7 +198,7 @@ impl AppState {
     }
 }
 
-/// 因出口节点不存在而在生成配置时被跳过的自定义规则
+/// 因出口节点不存在而在生成配置时改为阻断的规则；沿用历史类型名。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SkippedRule {
     /// 配置文件中的规则原文,用于与规则列表条目对应

@@ -147,6 +147,7 @@ pub(super) async fn try_start_compatible_cache(config: &Config, state: &Arc<AppS
                     mark_legacy_cache_used(state).await;
                 }
                 publish_runtime_multiplier_options(config, state).await;
+                publish_cached_rule_diagnostics(config, state).await;
                 spawn_restore_last_proxy(state);
                 true
             }
@@ -237,6 +238,7 @@ pub(super) async fn initialize_runtime_locked(config: &Config, state: &Arc<AppSt
                             mark_legacy_cache_used(state).await;
                         }
                         publish_runtime_multiplier_options(config, state).await;
+                        publish_cached_rule_diagnostics(config, state).await;
                         spawn_restore_last_proxy(state);
                         state
                             .initializing

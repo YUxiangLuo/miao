@@ -284,7 +284,7 @@ pub struct RuleInfo {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[cfg_attr(test, ts(optional))]
     pub target: Option<String>,
-    /// 出口节点不存在,生成配置时被跳过(未生效)
+    /// 兼容字段：出口节点不存在，原出口暂停使用，匹配流量已改为阻断。
     pub skipped: bool,
     pub raw: String,
 }

@@ -265,7 +265,7 @@ describe('RulesCard', () => {
     await openNodeTargets(user)
     await user.click(screen.getByRole('radio', { name: /香港节点/ }))
     // 选中节点目标后提示节点失效风险
-    expect(screen.getByText(/节点被删除或改名后/)).toBeInTheDocument()
+    expect(screen.getByText(/出口节点消失或被禁用后，匹配此规则的流量将被阻断/)).toBeInTheDocument()
 
     await user.type(screen.getByLabelText('规则值'), 'example.com')
     await user.click(screen.getByRole('button', { name: '添加规则' }))
@@ -356,7 +356,7 @@ describe('RulesCard', () => {
     expect(inactiveRow.querySelector('.rule-status-slot')).toBeEmptyDOMElement()
   })
 
-  it('marks skipped rules with a warning icon and dims the row', () => {
+  it('marks missing outbound rules as blocking traffic', () => {
     renderCard({
       rules: [
         { index: 0, field: 'process_name', value: 'nginx', target: 'ghost-node', skipped: true, raw: '{"process_name":"nginx","action":"route","outbound":"ghost-node"}' },
@@ -364,11 +364,11 @@ describe('RulesCard', () => {
       ],
     })
 
-    const icon = screen.getByLabelText('规则未生效')
-    expect(icon).toHaveAttribute('title', expect.stringContaining('未生效'))
-    expect(icon.closest('.list-row')).toHaveClass('skipped')
+    const icon = screen.getByLabelText('出口缺失，已阻断')
+    expect(icon).toHaveAttribute('title', expect.stringContaining('匹配此规则的流量已阻断'))
+    expect(icon.closest('.list-row')).toHaveClass('blocked')
     expect(icon.parentElement).toHaveClass('rule-status-slot')
-    // 正常规则不带失效标记
-    expect(screen.getByText('t.co').closest('.list-row')).not.toHaveClass('skipped')
+    // 正常规则不带出口缺失标记
+    expect(screen.getByText('t.co').closest('.list-row')).not.toHaveClass('blocked')
   })
 })

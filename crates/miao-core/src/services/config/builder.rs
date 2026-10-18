@@ -115,23 +115,23 @@ fn summarize_rule_matcher(rule: &serde_json::Value) -> String {
     "自定义规则".to_string()
 }
 
-/// 跳过引用不存在出口节点的自定义规则,返回(保留的规则, 失效规则的告警描述)。
-/// 节点可能因订阅刷新改名或消失;跳过而非写入,避免 sing-box check 失败卡死所有配置变更。
+/// 缺失出口的规则在原位置改为拒绝，保留原文以便节点恢复后恢复路由。
 #[cfg(test)]
-pub(super) fn filter_rules_with_missing_outbound(
+pub(super) fn block_rules_with_missing_outbound(
     custom_rules: &[String],
     available_outbounds: &HashSet<String>,
-) -> (Vec<String>, Vec<SkippedRule>) {
+) -> (Vec<serde_json::Value>, Vec<SkippedRule>) {
     let parsed = ParsedCustomRules::parse(custom_rules);
     let (kept, skipped) =
-        filter_parsed_rules_with_missing_outbound(parsed.rules, available_outbounds);
-    (kept.into_iter().map(|rule| rule.raw).collect(), skipped)
+        block_parsed_rules_with_missing_outbound(parsed.rules, available_outbounds);
+    (kept.into_iter().map(|rule| rule.value).collect(), skipped)
 }
 
 #[derive(Clone, Debug)]
 struct ParsedCustomRule {
     raw: String,
     value: serde_json::Value,
+    blocked: bool,
 }
 
 /// Keep the raw compatibility format alongside its parsed value throughout
@@ -141,6 +141,13 @@ pub(super) struct ParsedCustomRules {
 }
 
 impl ParsedCustomRules {
+    pub(super) fn missing_outbound_diagnostics(
+        self,
+        available: &HashSet<String>,
+    ) -> Vec<SkippedRule> {
+        block_parsed_rules_with_missing_outbound(self.rules, available).1
+    }
+
     pub(super) fn parse(custom_rules: &[String]) -> Self {
         Self {
             rules: custom_rules
@@ -149,6 +156,7 @@ impl ParsedCustomRules {
                     Ok(value) => Some(ParsedCustomRule {
                         raw: raw.clone(),
                         value,
+                        blocked: false,
                     }),
                     Err(err) => {
                         warn!(rule = %raw, error = %err, "Failed to parse custom rule");
@@ -172,30 +180,54 @@ impl ParsedCustomRules {
     }
 }
 
-fn filter_parsed_rules_with_missing_outbound(
+fn block_parsed_rules_with_missing_outbound(
     custom_rules: Vec<ParsedCustomRule>,
     available_outbounds: &HashSet<String>,
 ) -> (Vec<ParsedCustomRule>, Vec<SkippedRule>) {
     let mut kept = Vec::with_capacity(custom_rules.len());
     let mut skipped = Vec::new();
 
-    for rule in custom_rules {
+    for mut rule in custom_rules {
         let missing = rule.value.get("outbound").and_then(|value| {
             let outbound = value.as_str()?;
             (!available_outbounds.contains(outbound))
                 .then(|| (summarize_rule_matcher(&rule.value), outbound.to_string()))
         });
 
-        match missing {
-            Some((summary, outbound)) => {
-                warn!(rule = %rule.raw, outbound = %outbound, "Skipping custom rule with missing outbound node");
-                skipped.push(SkippedRule {
-                    raw: rule.raw,
-                    description: format!("{summary} → {outbound}"),
-                });
+        if let Some((summary, outbound)) = missing {
+            warn!(rule = %rule.raw, outbound = %outbound, "Blocking custom rule with missing outbound node");
+            skipped.push(SkippedRule {
+                raw: rule.raw.clone(),
+                description: format!("{summary} → {outbound}"),
+            });
+            // Strip only route action options from the pinned kernel's
+            // RouteActionOptions, preserving every matcher (including logical
+            // rules, invert and compound conditions). Reject has no outbound.
+            let value = rule
+                .value
+                .as_object_mut()
+                .expect("outbound belongs to an object");
+            for key in [
+                "outbound",
+                "override_address",
+                "override_port",
+                "network_strategy",
+                "fallback_delay",
+                "udp_disable_domain_unmapping",
+                "udp_connect",
+                "udp_timeout",
+                "tls_fragment",
+                "tls_fragment_fallback_delay",
+                "tls_record_fragment",
+                "tls_spoof",
+                "tls_spoof_method",
+            ] {
+                value.remove(key);
             }
-            None => kept.push(rule),
+            value.insert("action".to_string(), serde_json::json!("reject"));
+            rule.blocked = true;
         }
+        kept.push(rule);
     }
 
     (kept, skipped)
@@ -282,12 +314,12 @@ pub(super) fn build_sing_box_config_with_multipliers(
         automatic_members
     };
 
-    // 规则引用不存在的节点会让 sing-box check 失败;生成时跳过这些规则并留痕告警
+    // 缺失出口改为拒绝，防止流量落入后续直连或默认代理规则。
     let mut available_outbounds: HashSet<String> = node_names.iter().cloned().collect();
     available_outbounds.insert("proxy".to_string());
     available_outbounds.insert("direct".to_string());
     let (custom_rules, skipped_rules) =
-        filter_parsed_rules_with_missing_outbound(parsed_rules.rules, &available_outbounds);
+        block_parsed_rules_with_missing_outbound(parsed_rules.rules, &available_outbounds);
 
     let mut sing_box_config = get_config_template();
     apply_proxy_group(&mut sing_box_config, effective_select, &group_names);
@@ -408,6 +440,13 @@ fn derive_custom_dns_rules(
         let Some(rule) = parsed_rule.value.as_object() else {
             continue;
         };
+        if parsed_rule.blocked {
+            if let Some(mut dns_rule) = mirrored_dns_matchers(rule) {
+                dns_rule.insert("action".to_string(), serde_json::json!("reject"));
+                dns_rules.push(serde_json::Value::Object(dns_rule));
+            }
+            continue;
+        }
         if rule
             .get("action")
             .and_then(serde_json::Value::as_str)

@@ -19,8 +19,8 @@ pub use apply::{
 };
 pub use generate::{
     collect_manual_outbounds, fetch_sub_nodes_if_current, gen_config_from_nodes,
-    known_rule_targets, publish_generation_diagnostics, publish_runtime_multiplier_options,
-    subscription_source_id, GenConfigOutcome, SubFetchRetry,
+    known_rule_targets, publish_cached_rule_diagnostics, publish_generation_diagnostics,
+    publish_runtime_multiplier_options, subscription_source_id, GenConfigOutcome, SubFetchRetry,
 };
 pub use persist::{
     cache_compatibility, has_config_cache, load_max_multiplier_preference,

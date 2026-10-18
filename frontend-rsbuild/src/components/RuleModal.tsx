@@ -239,7 +239,7 @@ export function RuleModal({ open, loading, onClose, onSubmit, nodeNames = [], de
                     {filteredNodes.length === 0 && <div className="rule-node-empty">没有找到这个节点</div>}
                   </div>
                 </>}
-                {isNodeTarget && <div className="rule-node-warning"><TriangleAlert size={ICON.xs} aria-hidden="true" /><span>节点被删除或改名后，此规则会暂停生效；节点恢复后自动生效。</span></div>}
+                {isNodeTarget && <div className="rule-node-warning"><TriangleAlert size={ICON.xs} aria-hidden="true" /><span>出口节点消失或被禁用后，匹配此规则的流量将被阻断；节点恢复后自动恢复原出口。</span></div>}
               </div>}
             </div>
           </section>

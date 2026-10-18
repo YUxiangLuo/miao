@@ -644,6 +644,26 @@ pub async fn publish_runtime_multiplier_options(config: &Config, state: &AppStat
     *state.available_multipliers.write().await = multipliers.into_iter().collect();
 }
 
+/// Cached runtime bytes already enforce blocking; restore the matching panel
+/// diagnostics as well, including startup without a subscription refresh.
+pub async fn publish_cached_rule_diagnostics(config: &Config, state: &AppState) {
+    let Ok(bytes) = tokio::fs::read(&state.runtime_paths.active_config).await else {
+        return;
+    };
+    let Ok(runtime) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
+        return;
+    };
+    let available = runtime["outbounds"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|outbound| outbound["tag"].as_str().map(str::to_string))
+        .collect();
+    *state.skipped_rules.lock().await =
+        ParsedCustomRules::parse(&config.custom_rules).missing_outbound_diagnostics(&available);
+    state.data_revision.fetch_add(1, Ordering::Relaxed);
+}
+
 pub fn collect_manual_outbounds(config: &Config) -> (Vec<serde_json::Value>, Vec<String>) {
     use crate::services::node_parser::parse_node_json;
 
@@ -1070,15 +1090,20 @@ mod tests {
             assert_eq!(outcome.skipped_rules[0].raw, dormant);
             let rules = generated["route"]["rules"].as_array().unwrap();
             assert_eq!(
-                &rules[2..5],
-                &[direct.clone(), tcp_only.clone(), direct.clone()]
+                &rules[2..6],
+                &[
+                    json!({"domain_suffix":"dormant.example","action":"reject"}),
+                    direct.clone(),
+                    tcp_only.clone(),
+                    direct.clone()
+                ]
             );
             assert_eq!(
                 rules.len(),
                 if route_mode == RouteMode::Global {
-                    5
+                    6
                 } else {
-                    8
+                    9
                 }
             );
 
@@ -1086,13 +1111,20 @@ mod tests {
             let expected_dns = json!({
                 "domain_suffix": "direct.example", "action": "route", "server": "local"
             });
-            assert_eq!(&dns_rules[..2], &[expected_dns.clone(), expected_dns]);
+            assert_eq!(
+                &dns_rules[..3],
+                &[
+                    json!({"domain_suffix":"dormant.example","action":"reject"}),
+                    expected_dns.clone(),
+                    expected_dns
+                ]
+            );
             assert_eq!(
                 dns_rules.len(),
                 if route_mode == RouteMode::Global {
-                    2
-                } else {
                     3
+                } else {
+                    4
                 }
             );
         }

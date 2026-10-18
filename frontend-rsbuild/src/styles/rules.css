@@ -67,10 +67,7 @@
 .rule-row > .icon-button {
     grid-column: 4;
 }
-.rule-row.skipped .list-row-content {
-    opacity: var(--o-dim);
-}
-.rule-skipped-icon {
+.rule-blocked-icon {
     flex: 0 0 auto;
     display: inline-flex;
     align-items: center;

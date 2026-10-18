@@ -70,7 +70,7 @@ pub async fn runtime_warnings(state: &AppState) -> Vec<RuntimeWarning> {
         warnings.push(RuntimeWarning {
             code: "custom_rule_outbound_missing",
             message: format!(
-                "{} 条自定义规则因出口节点不存在已跳过: {}",
+                "{} 条自定义规则因出口节点不存在已阻断匹配流量: {}",
                 skipped_rules.len(),
                 skipped_rules
                     .iter()
@@ -115,7 +115,7 @@ mod tests {
         assert_eq!(warnings[1].code, "custom_rule_outbound_missing");
         assert_eq!(
             legacy_warning(&warnings).as_deref(),
-            Some("配置降级;1 条自定义规则因出口节点不存在已跳过: domain=a.example → gone")
+            Some("配置降级;1 条自定义规则因出口节点不存在已阻断匹配流量: domain=a.example → gone")
         );
     }
 }

@@ -18,7 +18,8 @@ const CACHE_MANIFEST_VERSION: u32 = 1;
 /// cached bytes. Package releases alone do not invalidate a healthy cache.
 /// Version 2 excludes informational pseudo-nodes from subscription outbounds.
 // Version 3 derives regional candidates from current metadata, not stable tags.
-const RUNTIME_CONFIG_SCHEMA_VERSION: u32 = 3;
+// Version 4 rejects traffic matching a custom rule whose outbound is missing.
+const RUNTIME_CONFIG_SCHEMA_VERSION: u32 = 4;
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 struct CacheManifest {
@@ -86,6 +87,11 @@ pub async fn cache_compatibility(state: &AppState, config: &Config) -> CacheComp
     let manifest_bytes = match tokio::fs::read(&state.runtime_paths.cache_manifest).await {
         Ok(bytes) => bytes,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            if !config.custom_rules.is_empty() {
+                return CacheCompatibility::Incompatible(
+                    "legacy cache cannot prove missing-outbound blocking".to_string(),
+                );
+            }
             return CacheCompatibility::Legacy;
         }
         Err(err) => {
@@ -1150,6 +1156,51 @@ mod tests {
             CacheCompatibility::Incompatible(_)
         ));
         let _ = tokio::fs::remove_dir_all(&state.runtime_paths.runtime_dir).await;
+    }
+
+    #[tokio::test]
+    async fn caches_from_before_missing_outbound_blocking_are_rejected() {
+        use super::{cache_compatibility, save_config_cache, CacheCompatibility};
+        use crate::{models::Config, test_support::app_state};
+
+        let config = Config {
+            custom_rules: vec![r#"{"domain":"example.com","outbound":"gone"}"#.to_string()],
+            ..Config::default()
+        };
+        let state = app_state(config.clone());
+        tokio::fs::create_dir_all(&state.runtime_paths.runtime_dir)
+            .await
+            .unwrap();
+        tokio::fs::write(&state.runtime_paths.active_config, br#"{"outbounds":[]}"#)
+            .await
+            .unwrap();
+        save_config_cache(&state).await;
+        assert_eq!(
+            cache_compatibility(&state, &config).await,
+            CacheCompatibility::Verified
+        );
+        let bytes = tokio::fs::read(&state.runtime_paths.cache_manifest)
+            .await
+            .unwrap();
+        let mut manifest: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        manifest["runtime_schema_version"] = serde_json::json!(3);
+        tokio::fs::write(
+            &state.runtime_paths.cache_manifest,
+            serde_json::to_vec(&manifest).unwrap(),
+        )
+        .await
+        .unwrap();
+        assert!(matches!(
+            cache_compatibility(&state, &config).await,
+            CacheCompatibility::Incompatible(_)
+        ));
+        tokio::fs::remove_file(&state.runtime_paths.cache_manifest)
+            .await
+            .unwrap();
+        assert!(matches!(
+            cache_compatibility(&state, &config).await,
+            CacheCompatibility::Incompatible(_)
+        ));
     }
 
     #[tokio::test]

@@ -1,6 +1,7 @@
 // Invoked only by netns.sh after namespace isolation and fixture setup.
 import assert from 'node:assert/strict'
 import { existsSync, readFileSync, readlinkSync } from 'node:fs'
+import { createSocket } from 'node:dgram'
 
 assert.equal(process.getuid(), 0, 'run through ./dev.sh netns')
 assert.equal(readlinkSync('/proc/self/ns/net'), readlinkSync('/proc/1/ns/net'))
@@ -46,20 +47,46 @@ async function checkRules(mode) {
   assert.equal(files.length, 1, 'exactly one isolated runtime config')
   const config = await Bun.file(`/tmp/miao-sing-box/${files[0]}`).json()
   const routeRules = config.route.rules
-  assert.deepEqual(routeRules.slice(2, 5), [
+  assert.deepEqual(routeRules.slice(2, 6), [
     { domain_suffix: 'direct.example', outbound: 'direct' },
     { domain_suffix: 'pinned.example', outbound: 'smoke-node' },
     { domain_suffix: 'tcp.example', network: 'tcp', outbound: 'smoke-node' },
+    { domain_suffix: 'dormant.example', action: 'reject' },
   ])
-  assert.equal(routeRules.length, mode === 'global' ? 5 : 8)
+  assert.equal(routeRules.length, mode === 'global' ? 6 : 9)
   const dnsRules = config.dns.rules
-  assert.deepEqual(dnsRules.slice(0, 2), [
+  assert.deepEqual(dnsRules.slice(0, 3), [
     { domain_suffix: 'direct.example', action: 'route', server: 'local' },
     { domain_suffix: 'pinned.example', action: 'route', server: 'custom-node-dns-1' },
+    { domain_suffix: 'dormant.example', action: 'reject' },
   ])
-  assert.equal(dnsRules.length, mode === 'global' ? 2 : 3)
+  assert.equal(dnsRules.length, mode === 'global' ? 3 : 4)
   assert(config.dns.servers.some(server => server.tag === 'custom-node-dns-1' && server.detour === 'smoke-node'))
-  console.log(`PASS ${mode} route/DNS rules, including skipped missing target`)
+  const rules = await request('rules')
+  assert(rules.some(rule => rule.target === 'gone-node' && rule.skipped))
+  const status = await request('status')
+  assert(status.warnings.some(warning => warning.code === 'custom_rule_outbound_missing' && warning.message.includes('已阻断')))
+  await checkBlockedDns()
+  console.log(`PASS ${mode} route/DNS rules, including blocked missing target`)
+}
+
+async function checkBlockedDns() {
+  // Send through TUN DNS hijacking. The missing-node policy must answer REFUSED
+  // locally instead of attempting the unreachable default upstream resolver.
+  const query = Buffer.from('4d490100000100000000000007646f726d616e74076578616d706c650000010001', 'hex')
+  const socket = createSocket('udp4')
+  try {
+    const reply = await new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error('Missing-node DNS was not rejected')), 3000)
+      socket.once('error', error => { clearTimeout(timeout); reject(error) })
+      socket.once('message', message => { clearTimeout(timeout); resolve(message) })
+      socket.send(query, 53, '8.8.8.8')
+    })
+    assert.equal(reply.readUInt16BE(0), 0x4d49)
+    assert.equal(reply[3] & 0x0f, 5, 'missing-node DNS returns REFUSED')
+  } finally {
+    socket.close()
+  }
 }
 
 async function stopAndCheck() {
