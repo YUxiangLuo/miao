@@ -1,6 +1,6 @@
 <div align="center">
   <img src="frontend-rsbuild/public/icon.svg" width="72" alt="Miao logo" />
-  <h1>Miao</h1>
+  <h1>MiaoBox</h1>
   <p><strong>开箱即用的透明代理</strong></p>
   <p>
     <a href="https://github.com/YUxiangLuo/miao/releases/latest"><img src="https://img.shields.io/github/v/release/YUxiangLuo/miao?style=flat-square" alt="Release" /></a>
