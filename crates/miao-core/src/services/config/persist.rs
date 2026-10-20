@@ -19,7 +19,8 @@ const CACHE_MANIFEST_VERSION: u32 = 1;
 /// Version 2 excludes informational pseudo-nodes from subscription outbounds.
 // Version 3 derives regional candidates from current metadata, not stable tags.
 // Version 4 rejects traffic matching a custom rule whose outbound is missing.
-const RUNTIME_CONFIG_SCHEMA_VERSION: u32 = 4;
+// Version 5 bootstraps subscription DNS/connections independently of the default proxy.
+const RUNTIME_CONFIG_SCHEMA_VERSION: u32 = 5;
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 struct CacheManifest {
@@ -87,6 +88,11 @@ pub async fn cache_compatibility(state: &AppState, config: &Config) -> CacheComp
     let manifest_bytes = match tokio::fs::read(&state.runtime_paths.cache_manifest).await {
         Ok(bytes) => bytes,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            if !config.subs.is_empty() {
+                return CacheCompatibility::Incompatible(
+                    "legacy cache cannot prove subscription bootstrap routing".to_string(),
+                );
+            }
             if !config.custom_rules.is_empty() {
                 return CacheCompatibility::Incompatible(
                     "legacy cache cannot prove missing-outbound blocking".to_string(),
@@ -1207,6 +1213,50 @@ mod tests {
             .unwrap();
         let mut manifest: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
         manifest["runtime_schema_version"] = serde_json::json!(3);
+        tokio::fs::write(
+            &state.runtime_paths.cache_manifest,
+            serde_json::to_vec(&manifest).unwrap(),
+        )
+        .await
+        .unwrap();
+        assert!(matches!(
+            cache_compatibility(&state, &config).await,
+            CacheCompatibility::Incompatible(_)
+        ));
+        tokio::fs::remove_file(&state.runtime_paths.cache_manifest)
+            .await
+            .unwrap();
+        assert!(matches!(
+            cache_compatibility(&state, &config).await,
+            CacheCompatibility::Incompatible(_)
+        ));
+    }
+
+    #[tokio::test]
+    async fn caches_without_subscription_bootstrap_are_rejected() {
+        use super::{cache_compatibility, save_config_cache, CacheCompatibility};
+        use crate::models::Config;
+
+        let config = Config {
+            subs: vec!["https://subscription.example/sub".into()],
+            ..Default::default()
+        };
+        let (_root, state) = crate::test_support::isolated_stopped_state(config.clone());
+        tokio::fs::write(&state.runtime_paths.active_config, br#"{"outbounds":[]}"#)
+            .await
+            .unwrap();
+        save_config_cache(&state).await;
+        assert_eq!(
+            cache_compatibility(&state, &config).await,
+            CacheCompatibility::Verified
+        );
+        let mut manifest: serde_json::Value = serde_json::from_slice(
+            &tokio::fs::read(&state.runtime_paths.cache_manifest)
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        manifest["runtime_schema_version"] = serde_json::json!(4);
         tokio::fs::write(
             &state.runtime_paths.cache_manifest,
             serde_json::to_vec(&manifest).unwrap(),

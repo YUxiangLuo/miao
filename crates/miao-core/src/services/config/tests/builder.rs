@@ -1,6 +1,55 @@
 use super::*;
 
 #[test]
+fn subscription_bootstrap_survives_a_dead_default_without_overriding_custom_rules() {
+    for route_mode in [RouteMode::Rule, RouteMode::Global] {
+        let config = Config {
+            route_mode,
+            subs: vec![
+                "https://SUB.example:8443/path?token=secret".into(),
+                "http://sub.example/another".into(),
+                "http://198.51.100.9/sub".into(),
+                "https://[2001:db8::1]/sub".into(),
+                "https://pinned.example/sub".into(),
+                "https://blocked.example/sub".into(),
+                "not a URL".into(),
+            ],
+            custom_rules: vec![
+                r#"{"domain":"pinned.example","outbound":"manual"}"#.into(),
+                r#"{"domain":"blocked.example","outbound":"gone"}"#.into(),
+            ],
+            ..Default::default()
+        };
+        let (built, _, _) = build_sing_box_config(
+            &config,
+            vec!["manual".into()],
+            vec![json!({"type":"trojan", "tag":"manual", "server":"192.0.2.1", "server_port":9, "password":"fixture"})],
+            vec![],
+            vec![],
+        ).unwrap();
+        assert_eq!(built["route"]["final"], "proxy");
+        let rules = built["route"]["rules"].as_array().unwrap();
+        assert_eq!(rules[2]["outbound"], "manual");
+        assert_eq!(rules[3]["action"], "reject");
+        assert_eq!(
+            rules[4],
+            json!({
+                "domain":["blocked.example", "pinned.example", "sub.example"], "ip_cidr":["198.51.100.9/32", "2001:db8::1/128"],
+                "action":"route", "outbound":"direct"
+            })
+        );
+        let dns = built["dns"]["rules"].as_array().unwrap();
+        assert_eq!(dns[0]["domain"], "pinned.example");
+        assert_eq!(dns[1]["action"], "reject");
+        assert_eq!(
+            dns[2],
+            json!({"domain":["blocked.example", "pinned.example", "sub.example"], "action":"route", "server":"local"})
+        );
+        assert!(!built.to_string().contains("token=secret"));
+    }
+}
+
+#[test]
 fn build_sing_box_config_renames_duplicate_outbound_tags() {
     let config = Config {
         port: None,

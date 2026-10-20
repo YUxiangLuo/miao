@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashSet};
 use tracing::warn;
 
 use crate::error::{AppError, AppResult};
@@ -327,7 +327,7 @@ pub(super) fn build_sing_box_config_with_multipliers(
         arr.extend(outbounds);
     }
 
-    apply_route_mode(&mut sing_box_config, config.route_mode, &custom_rules);
+    apply_route_mode(&mut sing_box_config, config, &custom_rules);
 
     Ok((sing_box_config, skipped_rules, effective_select))
 }
@@ -474,11 +474,13 @@ fn apply_dns_route_mode(
     sing_box_config: &mut serde_json::Value,
     route_mode: RouteMode,
     custom_rules: &[ParsedCustomRule],
+    subscription_dns: Option<serde_json::Value>,
 ) {
     let Some(dns_servers) = sing_box_config["dns"]["servers"].as_array_mut() else {
         return;
     };
-    let custom_dns_rules = derive_custom_dns_rules(custom_rules, dns_servers);
+    let mut custom_dns_rules = derive_custom_dns_rules(custom_rules, dns_servers);
+    custom_dns_rules.extend(subscription_dns);
     let Some(dns_rules) = sing_box_config["dns"]["rules"].as_array_mut() else {
         return;
     };
@@ -493,13 +495,17 @@ fn apply_dns_route_mode(
 
 fn apply_route_mode(
     sing_box_config: &mut serde_json::Value,
-    route_mode: RouteMode,
+    config: &Config,
     custom_rules: &[ParsedCustomRule],
 ) {
+    let (subscription_route, subscription_dns) = subscription_bootstrap_rules(&config.subs);
     if let Some(rules) = sing_box_config["route"]["rules"].as_array_mut() {
         // 两种模式下自定义规则都优先生效
-        let insertions = custom_rules.iter().map(|rule| rule.value.clone());
-        match route_mode {
+        let insertions = custom_rules
+            .iter()
+            .map(|rule| rule.value.clone())
+            .chain(subscription_route);
+        match config.route_mode {
             RouteMode::Rule => {
                 // Preserve the mandatory pre-routing actions, then let user rules take
                 // precedence over the built-in direct/proxy split rules.
@@ -514,7 +520,56 @@ fn apply_route_mode(
         }
     }
 
-    apply_dns_route_mode(sing_box_config, route_mode, custom_rules);
+    apply_dns_route_mode(
+        sing_box_config,
+        config.route_mode,
+        custom_rules,
+        subscription_dns,
+    );
+}
+
+/// A locally valid node can start TUN while its remote server is unreachable.
+/// Subscription DNS and connections must not depend on that default proxy to
+/// obtain replacement nodes. Explicit user rules still take precedence.
+fn subscription_bootstrap_rules(
+    subscriptions: &[String],
+) -> (Option<serde_json::Value>, Option<serde_json::Value>) {
+    let mut domains = BTreeSet::new();
+    let mut addresses = BTreeSet::new();
+    for subscription in subscriptions {
+        let Ok(url) = url::Url::parse(subscription) else {
+            continue;
+        };
+        if !matches!(url.scheme(), "http" | "https") {
+            continue;
+        }
+        match url.host() {
+            Some(url::Host::Domain(domain)) => {
+                domains.insert(domain.to_owned());
+            }
+            Some(url::Host::Ipv4(ip)) => {
+                addresses.insert(format!("{ip}/32"));
+            }
+            Some(url::Host::Ipv6(ip)) => {
+                addresses.insert(format!("{ip}/128"));
+            }
+            None => {}
+        }
+    }
+    if domains.is_empty() && addresses.is_empty() {
+        return (None, None);
+    }
+    let mut route = serde_json::json!({"action":"route", "outbound":"direct"});
+    let dns = if domains.is_empty() {
+        None
+    } else {
+        route["domain"] = serde_json::json!(domains);
+        Some(serde_json::json!({"domain":domains, "action":"route", "server":"local"}))
+    };
+    if !addresses.is_empty() {
+        route["ip_cidr"] = serde_json::json!(addresses);
+    }
+    (Some(route), dns)
 }
 
 pub(super) fn tun_inbound() -> serde_json::Value {

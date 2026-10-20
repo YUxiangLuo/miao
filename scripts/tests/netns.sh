@@ -18,6 +18,7 @@ if [[ "${1:-}" == --inside ]]; then
   cp -- "$1" /run/miao-rust
   cp -- "$2" /run/bun
   cp -- "$3" /run/netns-smoke.mjs
+  cp -- "$(dirname "$3")/netns-subscription.mjs" /run/netns-subscription.mjs
   mount -t tmpfs -o size=256m tmpfs /tmp
   mount -t sysfs sysfs /sys
   cd /tmp
@@ -77,6 +78,9 @@ SH
   PATH="/tmp/mock-bin:$PATH" /run/miao-rust --config /tmp/miao-smoke.yaml > /tmp/miao-smoke.log 2>&1 &
   smoke_pid=$!
   /run/bun /run/netns-smoke.mjs "$smoke_pid"
+  wait "$smoke_pid"
+  smoke_pid=''
+  /run/bun /run/netns-subscription.mjs
   exit 0
 fi
 
