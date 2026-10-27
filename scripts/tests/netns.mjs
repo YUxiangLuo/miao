@@ -59,11 +59,11 @@ async function checkRules(mode) {
   const dnsRules = config.dns.rules
   assert.deepEqual(dnsRules.slice(0, 3), [
     { domain_suffix: 'direct.example', action: 'route', server: 'local' },
-    { domain_suffix: 'pinned.example', action: 'route', server: 'custom-node-dns-1' },
+    { domain_suffix: 'pinned.example', action: 'route', server: 'custom-node-dns:smoke-node' },
     { domain_suffix: 'dormant.example', action: 'reject' },
   ])
   assert.equal(dnsRules.length, mode === 'global' ? 3 : 4)
-  assert(config.dns.servers.some(server => server.tag === 'custom-node-dns-1' && server.detour === 'smoke-node'))
+  assert(config.dns.servers.some(server => server.tag === 'custom-node-dns:smoke-node' && server.detour === 'smoke-node'))
   const rules = await request('rules')
   assert(rules.some(rule => rule.target === 'gone-node' && rule.skipped))
   const status = await request('status')

@@ -416,7 +416,11 @@ fn dns_server_for_outbound(
                 return server.clone();
             }
 
-            let server = format!("custom-node-dns-{}", node_dns_servers.len() + 1);
+            // sing-box persists DNS answers by server tag. An ordinal would
+            // let B inherit A's cached answers when A disappears or rules move.
+            // Use an injective node-based tag in a new namespace so even old
+            // numeric tags cannot collide with a node named "1".
+            let server = format!("custom-node-dns:{node}");
             dns_servers.push(serde_json::json!({
                 "type": "https",
                 "tag": server,

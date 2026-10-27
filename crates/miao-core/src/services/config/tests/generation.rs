@@ -406,7 +406,7 @@ fn build_sing_box_config_mirrors_safe_custom_rules_to_dns() {
     let dns_servers = built["dns"]["servers"].as_array().unwrap();
     let node_servers: Vec<_> = dns_servers
         .iter()
-        .filter(|server| server["tag"] == "custom-node-dns-1")
+        .filter(|server| server["tag"] == "custom-node-dns:manual-a")
         .collect();
     assert_eq!(node_servers.len(), 1);
     assert_eq!(node_servers[0]["type"], "https");
@@ -416,11 +416,47 @@ fn build_sing_box_config_mirrors_safe_custom_rules_to_dns() {
     let dns_rules = built["dns"]["rules"].as_array().unwrap();
     assert_eq!(dns_rules.len(), 4);
     assert_eq!(dns_rules[0]["domain_keyword"], "openai");
-    assert_eq!(dns_rules[0]["server"], "custom-node-dns-1");
+    assert_eq!(dns_rules[0]["server"], "custom-node-dns:manual-a");
     assert_eq!(dns_rules[1]["domain_suffix"], json!(["example.com"]));
-    assert_eq!(dns_rules[1]["server"], "custom-node-dns-1");
+    assert_eq!(dns_rules[1]["server"], "custom-node-dns:manual-a");
     assert_eq!(dns_rules[2]["process_name"], "curl");
     assert_eq!(dns_rules[2]["server"], "local");
     assert_eq!(dns_rules[3]["rule_set"], json!(["chinasite"]));
     assert!(dns_rules.iter().all(|rule| rule.get("port").is_none()));
+}
+
+#[test]
+fn dns_cache_identity_survives_rule_reordering_and_other_nodes_disappearing() {
+    let a = r#"{"source_ip_cidr":"192.168.50.101/32","outbound":"employee-a"}"#;
+    let b = r#"{"source_ip_cidr":"192.168.50.102/32","outbound":"employee-b"}"#;
+    let mut b_server = None;
+    for (rules, nodes) in [
+        (vec![a, b], vec!["employee-a", "employee-b"]),
+        (vec![b, a], vec!["employee-a", "employee-b"]),
+        (vec![a, b], vec!["employee-b"]),
+    ] {
+        let config = Config {
+            custom_rules: rules.into_iter().map(str::to_string).collect(),
+            ..Default::default()
+        };
+        let outbounds = nodes
+            .iter()
+            .map(|tag| json!({"type":"direct", "tag":tag}))
+            .collect();
+        let (built, _, _) = build_sing_box_config(
+            &config,
+            nodes.into_iter().map(str::to_string).collect(),
+            outbounds,
+            vec![],
+            vec![],
+        )
+        .unwrap();
+        let server = built["dns"]["servers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|server| server["detour"] == "employee-b")
+            .unwrap();
+        assert_eq!(b_server.get_or_insert_with(|| server.clone()), server);
+    }
 }
