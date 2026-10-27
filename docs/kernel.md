@@ -63,7 +63,7 @@ testing 曾重写历史：固定 SHA 不保证对象永久可下载，须保留�
 
 ## 验证范围
 
-`./dev.sh netns` 验证 Miao 与内核的控制流程、生成的 DNS/路由配置、TUN 创建及清理，不验证外部代理转发。完整 DNS、TCP/UDP、Shadowsocks 半关闭与 OpenWrt 实机验收需要专用环境；历史记录可通过 `git log -p -- docs/kernel.md` 查看。
+`./dev.sh netns` 验证 Miao 与内核的控制流程、TUN 创建及清理，并在隔离网络中用两个客户端和两个真实 VLESS 服务端验证工作室按来源 IP 分配出口、TCP/UDP、国内直连和每个节点的 DoH。服务端由 `embedded/sing-box-host` 提供，所有目标及证书均为本地测试材料。它不验证公网线路、其他协议或 OpenWrt 真机；这些仍需要专用环境。历史记录可通过 `git log -p -- docs/kernel.md` 查看。
 
 ## 来源与许可
 

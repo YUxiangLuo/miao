@@ -416,7 +416,11 @@ fn dns_server_for_outbound(
                 return server.clone();
             }
 
-            let server = format!("custom-node-dns-{}", node_dns_servers.len() + 1);
+            // sing-box persists DNS answers by server tag. An ordinal would
+            // let B inherit A's cached answers when A disappears or rules move.
+            // Use an injective node-based tag in a new namespace so even old
+            // numeric tags cannot collide with a studio node named "1".
+            let server = format!("custom-node-dns:{node}");
             dns_servers.push(serde_json::json!({
                 "type": "https",
                 "tag": server,
@@ -490,7 +494,9 @@ fn apply_dns_route_mode(
         // still active, so its derived DNS policy must remain active too.
         dns_rules.clear();
     }
-    dns_rules.splice(0..0, custom_dns_rules);
+    // Keep domestic DNS ahead of source-IP bindings, just like data routing.
+    // Otherwise one employee's missing/remote node would also capture China DNS.
+    dns_rules.extend(custom_dns_rules);
 }
 
 fn apply_route_mode(
@@ -500,24 +506,16 @@ fn apply_route_mode(
 ) {
     let (subscription_route, subscription_dns) = subscription_bootstrap_rules(&config.subs);
     if let Some(rules) = sing_box_config["route"]["rules"].as_array_mut() {
-        // 两种模式下自定义规则都优先生效
-        let insertions = custom_rules
-            .iter()
-            .map(|rule| rule.value.clone())
-            .chain(subscription_route);
-        match config.route_mode {
-            RouteMode::Rule => {
-                // Preserve the mandatory pre-routing actions, then let user rules take
-                // precedence over the built-in direct/proxy split rules.
-                let insertion_index = rules.len().min(2);
-                rules.splice(insertion_index..insertion_index, insertions);
-            }
-            RouteMode::Global => {
-                // 全局模式只裁掉内置分流规则,自定义规则(如内网直连)仍然生效
-                rules.truncate(2);
-                rules.extend(insertions);
-            }
+        if config.route_mode == RouteMode::Global {
+            // Explicit global mode still removes the built-in direct split.
+            // Sniffing and DNS hijacking must precede all terminal rules.
+            rules.truncate(2);
         }
+        // Studio policy: private/China destinations bypass employee bindings.
+        // Custom rules retain their own order and precede only the subscription
+        // fallback and final proxy; explicit subscription overrides still work.
+        rules.extend(custom_rules.iter().map(|rule| rule.value.clone()));
+        rules.extend(subscription_route);
     }
 
     apply_dns_route_mode(

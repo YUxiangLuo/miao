@@ -1099,8 +1099,9 @@ mod tests {
             assert_eq!(outcome.skipped_rules.len(), 1);
             assert_eq!(outcome.skipped_rules[0].raw, dormant);
             let rules = generated["route"]["rules"].as_array().unwrap();
+            let custom_start = if route_mode == RouteMode::Rule { 5 } else { 2 };
             assert_eq!(
-                &rules[2..6],
+                &rules[custom_start..custom_start + 4],
                 &[
                     json!({"domain_suffix":"dormant.example","action":"reject"}),
                     direct.clone(),
@@ -1121,8 +1122,9 @@ mod tests {
             let expected_dns = json!({
                 "domain_suffix": "direct.example", "action": "route", "server": "local"
             });
+            let custom_dns_start = usize::from(route_mode == RouteMode::Rule);
             assert_eq!(
-                &dns_rules[..3],
+                &dns_rules[custom_dns_start..custom_dns_start + 3],
                 &[
                     json!({"domain_suffix":"dormant.example","action":"reject"}),
                     expected_dns.clone(),

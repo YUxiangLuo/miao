@@ -339,7 +339,7 @@ pub(super) fn tools_catalog() -> JsonValue {
         },
         {
             "name": "set_route_mode",
-            "description": "设置路由模式：rule 使用内置国内直连/国外代理分流；global 关闭内置地域分流，但自定义规则仍优先生效。写入易变层；热重载内核，可能短暂影响连接。",
+            "description": "设置路由模式：rule 先将内网和中国大陆直连，再匹配自定义规则，其余走默认代理；global 移除内置直连分流，仍保留自定义规则。写入易变层；热重载内核，可能短暂影响连接。",
             "inputSchema": {
                 "type": "object",
                 "properties": { "mode": { "type": "string", "enum": ["rule", "global"] } },
@@ -350,13 +350,13 @@ pub(super) fn tools_catalog() -> JsonValue {
         },
         {
             "name": "list_rules",
-            "description": "列出自定义规则的 index、结构化 field/value/target、原始 JSON 和是否因目标节点缺失而被跳过。内置地域规则不在此列表。无副作用。",
+            "description": "列出自定义规则的 index、结构化 field/value/target、原始 JSON 和是否因目标节点缺失而被改为阻断。内置地域规则不在此列表。无副作用。",
             "inputSchema": empty_schema(),
             "annotations": read_only(),
         },
         {
             "name": "add_rule",
-            "description": "添加一条面板支持的单条件自定义规则。target 可为 proxy、direct、reject 或当前存在/保留的节点 tag；自定义规则在 rule/global 两种模式下都优先。会校验并应用运行时配置。",
+            "description": "添加一条面板支持的单条件自定义规则。target 可为 proxy、direct、reject 或当前存在/保留的节点 tag；rule 模式先直连内网和中国大陆，再按添加顺序匹配自定义规则；global 模式移除内置直连分流。source_ip_cidr 可将指定内网 IP 绑定到指定出口。会校验并应用运行时配置。",
             "inputSchema": {
                 "type": "object",
                 "properties": {

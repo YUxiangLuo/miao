@@ -35,7 +35,7 @@ const VALUE_HELP: Record<string, string> = {
   domain_keyword: '例如 google，会匹配域名中包含 google 的网站。',
   process_name: '填写应用的可执行文件名，或从下方直接选择。',
   process_path: '填写应用可执行文件的完整路径。',
-  ip_cidr: '例如 192.168.0.0/16。', source_ip_cidr: '例如 192.168.1.0/24。',
+  ip_cidr: '例如 192.168.0.0/16。', source_ip_cidr: '单台电脑例如 192.168.1.101/32，整个网段例如 192.168.1.0/24。分流模式下，国内和内网仍然直连。',
   port: '填写 1–65535 之间的端口号。', port_range: '例如 1000:2000。',
   protocol: '选择连接使用的协议。',
 }
@@ -158,7 +158,7 @@ export function RuleModal({ open, loading, onClose, onSubmit, nodeNames = [], de
         <header className="rule-modal-header">
           <div className="rule-modal-heading">
             <ListFilter size={ICON.lg} className="icon-accent" aria-hidden="true" />
-            <div><h3 id={titleId}>添加自定义规则</h3><p>指定网站或应用，选择它的连接方式</p></div>
+            <div><h3 id={titleId}>添加自定义规则</h3><p>指定内网设备、网站或应用，选择它的连接方式</p></div>
           </div>
           <button className="icon-button" onClick={onClose} title="关闭 (Esc)" aria-label="关闭规则对话框"><X size={ICON.md} /></button>
         </header>
@@ -245,7 +245,7 @@ export function RuleModal({ open, loading, onClose, onSubmit, nodeNames = [], de
           </section>
 
           <div className="rule-effect" aria-live="polite"><span>规则效果</span><p>{preview || '填写上方内容后，这里会显示规则的效果。'}</p></div>
-          <p className="rule-priority-note">自定义规则优先于默认分流，在全局模式下也会生效。</p>
+          <p className="rule-priority-note">分流模式：内网和中国大陆先直连，再匹配自定义规则；其余流量使用默认出口。全局模式不保留内置直连规则。</p>
         </fieldset>
 
         <footer className="rule-modal-footer">

@@ -7,7 +7,7 @@ die() { echo "netns: $*" >&2; exit 1; }
 
 if [[ "${1:-}" == --inside ]]; then
   shift
-  [[ $# == 5 && $EUID == 0 && $$ == 1 ]] || die "internal worker requires a new root PID namespace"
+  [[ $# == 6 && $EUID == 0 && $$ == 1 ]] || die "internal worker requires a new root PID namespace"
   [[ $(readlink /proc/self/ns/net) != "$4" ]] || die "network namespace was not isolated"
   [[ $(readlink /proc/self/ns/mnt) != "$5" ]] || die "mount namespace was not isolated"
 
@@ -19,6 +19,8 @@ if [[ "${1:-}" == --inside ]]; then
   cp -- "$2" /run/bun
   cp -- "$3" /run/netns-smoke.mjs
   cp -- "$(dirname "$3")/netns-subscription.mjs" /run/netns-subscription.mjs
+  cp -- "$(dirname "$3")/netns-studio.mjs" /run/netns-studio.mjs
+  cp -- "$6" /run/sing-box-host
   mount -t tmpfs -o size=256m tmpfs /tmp
   mount -t sysfs sysfs /sys
   cd /tmp
@@ -81,19 +83,20 @@ SH
   wait "$smoke_pid"
   smoke_pid=''
   /run/bun /run/netns-subscription.mjs
+  /run/bun /run/netns-studio.mjs
   exit 0
 fi
 
 if [[ "${1:-}" == --help || "${1:-}" == -h ]]; then
   echo "Usage: ./dev.sh netns [path-to-miao-rust]"
-  echo "Requires Linux, a real embedded kernel, Bun, iproute2, util-linux and root/sudo."
+  echo "Requires Linux, embedded/sing-box-host, a real embedded kernel, Bun, curl, OpenSSL, iproute2, util-linux and root/sudo."
   echo "Build first: ./dev.sh build"
   echo "Default binary: target/release/miao-rust. Overall timeout: 120 seconds."
   exit 0
 fi
 [[ $# -le 1 ]] || die "expected at most one binary path; see --help"
 [[ $(uname -s) == Linux ]] || die "Linux namespaces are required"
-for tool in unshare mount ip bun timeout readlink realpath; do
+for tool in unshare mount ip bun curl openssl sysctl timeout readlink realpath; do
   command -v "$tool" >/dev/null || die "missing required tool: $tool"
 done
 
@@ -101,6 +104,9 @@ SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 binary=$(realpath -e -- "${1:-$SCRIPT_DIR/../../target/release/miao-rust}")
 [[ -f "$binary" && -x "$binary" ]] || die "not an executable file: $binary"
 bun_binary=$(realpath -e -- "$(command -v bun)")
+kernel_server="$SCRIPT_DIR/../../embedded/sing-box-host"
+[[ -x "$kernel_server" ]] || die "missing host kernel for studio fixtures; run ./dev.sh kernel first"
+kernel_server=$(realpath -e -- "$kernel_server")
 host_net=$(readlink /proc/self/ns/net)
 host_mount=$(readlink /proc/self/ns/mnt)
 elevate=()
@@ -113,4 +119,4 @@ echo "==> Isolated kernel smoke test: $binary"
 exec "${elevate[@]}" timeout --signal=TERM --kill-after=10s 120s \
   unshare --net --mount --pid --fork --mount-proc --kill-child \
   /bin/bash "$SCRIPT_DIR/netns.sh" --inside \
-  "$binary" "$bun_binary" "$SCRIPT_DIR/netns.mjs" "$host_net" "$host_mount"
+  "$binary" "$bun_binary" "$SCRIPT_DIR/netns.mjs" "$host_net" "$host_mount" "$kernel_server"

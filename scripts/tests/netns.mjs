@@ -49,7 +49,8 @@ async function checkRules(mode) {
   assert.equal(files.length, 1, 'exactly one isolated runtime config')
   const config = await Bun.file(`/tmp/miao-sing-box/${files[0]}`).json()
   const routeRules = config.route.rules
-  assert.deepEqual(routeRules.slice(2, 6), [
+  const customStart = mode === 'global' ? 2 : 5
+  assert.deepEqual(routeRules.slice(customStart, customStart + 4), [
     { domain_suffix: 'direct.example', outbound: 'direct' },
     { domain_suffix: 'pinned.example', outbound: 'smoke-node' },
     { domain_suffix: 'tcp.example', network: 'tcp', outbound: 'smoke-node' },
@@ -57,13 +58,14 @@ async function checkRules(mode) {
   ])
   assert.equal(routeRules.length, mode === 'global' ? 6 : 9)
   const dnsRules = config.dns.rules
-  assert.deepEqual(dnsRules.slice(0, 3), [
+  const customDnsStart = mode === 'global' ? 0 : 1
+  assert.deepEqual(dnsRules.slice(customDnsStart, customDnsStart + 3), [
     { domain_suffix: 'direct.example', action: 'route', server: 'local' },
-    { domain_suffix: 'pinned.example', action: 'route', server: 'custom-node-dns-1' },
+    { domain_suffix: 'pinned.example', action: 'route', server: 'custom-node-dns:smoke-node' },
     { domain_suffix: 'dormant.example', action: 'reject' },
   ])
   assert.equal(dnsRules.length, mode === 'global' ? 3 : 4)
-  assert(config.dns.servers.some(server => server.tag === 'custom-node-dns-1' && server.detour === 'smoke-node'))
+  assert(config.dns.servers.some(server => server.tag === 'custom-node-dns:smoke-node' && server.detour === 'smoke-node'))
   const rules = await request('rules')
   assert(rules.some(rule => rule.target === 'gone-node' && rule.skipped))
   const status = await request('status')

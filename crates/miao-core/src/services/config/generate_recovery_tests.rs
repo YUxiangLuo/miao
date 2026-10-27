@@ -139,11 +139,11 @@ async fn failed_sources_keep_nodes_but_successful_empty_sources_replace_them() {
     for outcome in [&empty, &local] {
         let runtime: serde_json::Value = serde_json::from_slice(&outcome.bytes).unwrap();
         assert_eq!(
-            runtime["route"]["rules"][2],
+            runtime["route"]["rules"][5],
             serde_json::json!({"domain":"example.com","action":"reject"})
         );
         assert_eq!(
-            runtime["dns"]["rules"][0],
+            runtime["dns"]["rules"][1],
             serde_json::json!({"domain":"example.com","action":"reject"})
         );
     }
@@ -154,7 +154,7 @@ async fn failed_sources_keep_nodes_but_successful_empty_sources_replace_them() {
     assert!(restored.skipped_rules.is_empty());
     let runtime: serde_json::Value = serde_json::from_slice(&restored.bytes).unwrap();
     assert_eq!(
-        runtime["route"]["rules"][2],
+        runtime["route"]["rules"][5],
         serde_json::json!({"domain":"example.com","outbound":"node-b"})
     );
     server.abort();

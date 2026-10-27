@@ -29,20 +29,22 @@ fn subscription_bootstrap_survives_a_dead_default_without_overriding_custom_rule
         ).unwrap();
         assert_eq!(built["route"]["final"], "proxy");
         let rules = built["route"]["rules"].as_array().unwrap();
-        assert_eq!(rules[2]["outbound"], "manual");
-        assert_eq!(rules[3]["action"], "reject");
+        let custom_start = if route_mode == RouteMode::Rule { 5 } else { 2 };
+        assert_eq!(rules[custom_start]["outbound"], "manual");
+        assert_eq!(rules[custom_start + 1]["action"], "reject");
         assert_eq!(
-            rules[4],
+            rules[custom_start + 2],
             json!({
                 "domain":["blocked.example", "pinned.example", "sub.example"], "ip_cidr":["198.51.100.9/32", "2001:db8::1/128"],
                 "action":"route", "outbound":"direct"
             })
         );
         let dns = built["dns"]["rules"].as_array().unwrap();
-        assert_eq!(dns[0]["domain"], "pinned.example");
-        assert_eq!(dns[1]["action"], "reject");
+        let custom_dns_start = usize::from(route_mode == RouteMode::Rule);
+        assert_eq!(dns[custom_dns_start]["domain"], "pinned.example");
+        assert_eq!(dns[custom_dns_start + 1]["action"], "reject");
         assert_eq!(
-            dns[2],
+            dns[custom_dns_start + 2],
             json!({"domain":["blocked.example", "pinned.example", "sub.example"], "action":"route", "server":"local"})
         );
         assert!(!built.to_string().contains("token=secret"));

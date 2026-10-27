@@ -159,11 +159,11 @@ fn build_sing_box_config_blocks_rules_with_missing_node() {
     let rules = built["route"]["rules"].as_array().unwrap();
     let rules_json = serde_json::to_string(rules).unwrap();
     assert_eq!(
-        rules[2],
+        rules[5],
         json!({"process_path":"/opt/app/run","action":"reject"})
     );
     assert_eq!(
-        built["dns"]["rules"][0],
+        built["dns"]["rules"][1],
         json!({"process_path":"/opt/app/run","action":"reject"})
     );
     assert!(!rules_json.contains("已消失节点"));
@@ -206,7 +206,7 @@ fn blocked_dns_rules_do_not_broaden_connection_only_matchers() {
         let mut expected: serde_json::Value = serde_json::from_str(raw).unwrap();
         expected.as_object_mut().unwrap().remove("outbound");
         expected["action"] = json!("reject");
-        assert_eq!(built["route"]["rules"][index + 2], expected);
+        assert_eq!(built["route"]["rules"][index + 5], expected);
     }
     assert_eq!(
         built["dns"]["rules"],
@@ -310,14 +310,112 @@ fn build_sing_box_config_merges_nodes_and_valid_custom_rules() {
     assert_eq!(rules.len(), 6);
     assert_eq!(rules[0]["action"], "sniff");
     assert_eq!(rules[1]["action"], "hijack-dns");
-    assert_eq!(rules[2]["domain_suffix"][0], "example.com");
-    assert_eq!(rules[3]["ip_is_private"], true);
+    assert_eq!(rules[2]["ip_is_private"], true);
+    assert_eq!(rules[5]["domain_suffix"][0], "example.com");
 
     let dns_rules = built["dns"]["rules"].as_array().unwrap();
     assert_eq!(dns_rules.len(), 2);
-    assert_eq!(dns_rules[0]["domain_suffix"], json!(["example.com"]));
-    assert_eq!(dns_rules[0]["server"], "cfdns");
-    assert_eq!(dns_rules[1]["rule_set"], json!(["chinasite"]));
+    assert_eq!(dns_rules[0]["rule_set"], json!(["chinasite"]));
+    assert_eq!(dns_rules[1]["domain_suffix"], json!(["example.com"]));
+    assert_eq!(dns_rules[1]["server"], "cfdns");
+}
+
+#[test]
+fn source_ip_bindings_preserve_domestic_bypass_and_use_each_nodes_dns() {
+    let config = Config {
+        custom_rules: vec![
+            r#"{"source_ip_cidr":"192.168.50.101/32","action":"route","outbound":"employee-a"}"#
+                .into(),
+            r#"{"source_ip_cidr":"192.168.50.102/32","action":"route","outbound":"employee-b"}"#
+                .into(),
+            r#"{"source_ip_cidr":"192.168.50.103/32","action":"route","outbound":"gone"}"#.into(),
+        ],
+        ..Default::default()
+    };
+    let (built, blocked, _) = build_sing_box_config(
+        &config,
+        vec!["employee-a".into(), "employee-b".into()],
+        vec![
+            json!({"type":"vless", "tag":"employee-a", "server":"192.0.2.1", "server_port":443}),
+            json!({"type":"vless", "tag":"employee-b", "server":"192.0.2.2", "server_port":443}),
+        ],
+        vec![],
+        vec![],
+    )
+    .unwrap();
+
+    // A plain UI/API source-IP binding must never capture domestic/private
+    // traffic, even when its node is absent. Preserve first-match custom order.
+    assert_eq!(
+        built["route"]["rules"],
+        json!([
+            {"action":"sniff"},
+            {"protocol":"dns", "action":"hijack-dns"},
+            {"ip_is_private":true, "action":"route", "outbound":"direct"},
+            {"rule_set":["chinasite"], "action":"route", "outbound":"direct"},
+            {"rule_set":["chinaip"], "action":"route", "outbound":"direct"},
+            {"source_ip_cidr":"192.168.50.101/32", "action":"route", "outbound":"employee-a"},
+            {"source_ip_cidr":"192.168.50.102/32", "action":"route", "outbound":"employee-b"},
+            {"source_ip_cidr":"192.168.50.103/32", "action":"reject"}
+        ])
+    );
+    assert_eq!(built["route"]["final"], "proxy");
+    assert_eq!(blocked.len(), 1);
+    assert_eq!(
+        built["dns"]["rules"],
+        json!([
+            {"rule_set":["chinasite"], "action":"route", "server":"local"},
+            {"source_ip_cidr":"192.168.50.101/32", "action":"route", "server":"custom-node-dns:employee-a"},
+            {"source_ip_cidr":"192.168.50.102/32", "action":"route", "server":"custom-node-dns:employee-b"},
+            {"source_ip_cidr":"192.168.50.103/32", "action":"reject"}
+        ])
+    );
+    for (server, outbound) in [
+        ("custom-node-dns:employee-a", "employee-a"),
+        ("custom-node-dns:employee-b", "employee-b"),
+    ] {
+        assert!(built["dns"]["servers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|value| value["tag"] == server && value["detour"] == outbound));
+    }
+}
+
+#[test]
+fn dns_cache_identity_survives_rule_reordering_and_other_nodes_disappearing() {
+    let a = r#"{"source_ip_cidr":"192.168.50.101/32","outbound":"employee-a"}"#;
+    let b = r#"{"source_ip_cidr":"192.168.50.102/32","outbound":"employee-b"}"#;
+    let mut b_server = None;
+    for (rules, nodes) in [
+        (vec![a, b], vec!["employee-a", "employee-b"]),
+        (vec![b, a], vec!["employee-a", "employee-b"]),
+        (vec![a, b], vec!["employee-b"]),
+    ] {
+        let config = Config {
+            custom_rules: rules.into_iter().map(str::to_string).collect(),
+            ..Default::default()
+        };
+        let outbounds = nodes
+            .iter()
+            .map(|tag| json!({"type":"direct", "tag":tag}))
+            .collect();
+        let (built, _, _) = build_sing_box_config(
+            &config,
+            nodes.into_iter().map(str::to_string).collect(),
+            outbounds,
+            vec![],
+            vec![],
+        )
+        .unwrap();
+        let server = built["dns"]["servers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|server| server["detour"] == "employee-b")
+            .unwrap();
+        assert_eq!(b_server.get_or_insert_with(|| server.clone()), server);
+    }
 }
 
 #[test]
@@ -406,7 +504,7 @@ fn build_sing_box_config_mirrors_safe_custom_rules_to_dns() {
     let dns_servers = built["dns"]["servers"].as_array().unwrap();
     let node_servers: Vec<_> = dns_servers
         .iter()
-        .filter(|server| server["tag"] == "custom-node-dns-1")
+        .filter(|server| server["tag"] == "custom-node-dns:manual-a")
         .collect();
     assert_eq!(node_servers.len(), 1);
     assert_eq!(node_servers[0]["type"], "https");
@@ -415,12 +513,12 @@ fn build_sing_box_config_mirrors_safe_custom_rules_to_dns() {
 
     let dns_rules = built["dns"]["rules"].as_array().unwrap();
     assert_eq!(dns_rules.len(), 4);
-    assert_eq!(dns_rules[0]["domain_keyword"], "openai");
-    assert_eq!(dns_rules[0]["server"], "custom-node-dns-1");
-    assert_eq!(dns_rules[1]["domain_suffix"], json!(["example.com"]));
-    assert_eq!(dns_rules[1]["server"], "custom-node-dns-1");
-    assert_eq!(dns_rules[2]["process_name"], "curl");
-    assert_eq!(dns_rules[2]["server"], "local");
-    assert_eq!(dns_rules[3]["rule_set"], json!(["chinasite"]));
+    assert_eq!(dns_rules[0]["rule_set"], json!(["chinasite"]));
+    assert_eq!(dns_rules[1]["domain_keyword"], "openai");
+    assert_eq!(dns_rules[1]["server"], "custom-node-dns:manual-a");
+    assert_eq!(dns_rules[2]["domain_suffix"], json!(["example.com"]));
+    assert_eq!(dns_rules[2]["server"], "custom-node-dns:manual-a");
+    assert_eq!(dns_rules[3]["process_name"], "curl");
+    assert_eq!(dns_rules[3]["server"], "local");
     assert!(dns_rules.iter().all(|rule| rule.get("port").is_none()));
 }

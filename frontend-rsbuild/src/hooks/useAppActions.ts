@@ -131,14 +131,14 @@ export function useAppActions(data: AppData) {
     if (nextMode === 'global') {
       openConfirm(
         '切换为全局代理',
-        '未命中自定义规则的流量将走代理（含国内站点）；自定义规则仍优先生效。切换时服务会短暂中断。',
+        '关闭内网和国内直连分流，按自定义规则选择出口，其余流量走默认代理（含国内站点）。切换时服务会短暂中断。',
         () => handleSetRouteMode('global')
       )
       return
     }
     openConfirm(
       '切换为分流模式',
-      '按内置规则分流，通常国内直连、国外走代理；自定义规则仍优先生效。切换时服务会短暂中断。',
+      '内网和中国大陆先直连，再匹配自定义规则；其余流量使用默认代理。切换时服务会短暂中断。',
       () => handleSetRouteMode('rule')
     )
   }, [status.route_mode, openConfirm, handleSetRouteMode])

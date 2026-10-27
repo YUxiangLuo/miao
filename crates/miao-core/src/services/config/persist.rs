@@ -20,7 +20,8 @@ const CACHE_MANIFEST_VERSION: u32 = 1;
 // Version 3 derives regional candidates from current metadata, not stable tags.
 // Version 4 rejects traffic matching a custom rule whose outbound is missing.
 // Version 5 bootstraps subscription DNS/connections independently of the default proxy.
-const RUNTIME_CONFIG_SCHEMA_VERSION: u32 = 5;
+// Version 6 puts domestic/private bypass first and binds DNS cache tags to nodes.
+const RUNTIME_CONFIG_SCHEMA_VERSION: u32 = 6;
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 struct CacheManifest {
@@ -95,7 +96,8 @@ pub async fn cache_compatibility(state: &AppState, config: &Config) -> CacheComp
             }
             if !config.custom_rules.is_empty() {
                 return CacheCompatibility::Incompatible(
-                    "legacy cache cannot prove missing-outbound blocking".to_string(),
+                    "legacy cache cannot prove studio routing order or missing-outbound blocking"
+                        .to_string(),
                 );
             }
             return CacheCompatibility::Legacy;
@@ -1188,7 +1190,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn caches_from_before_missing_outbound_blocking_are_rejected() {
+    async fn caches_with_obsolete_custom_rule_policies_are_rejected() {
         use super::{cache_compatibility, save_config_cache, CacheCompatibility};
         use crate::{models::Config, test_support::app_state};
 
@@ -1212,17 +1214,21 @@ mod tests {
             .await
             .unwrap();
         let mut manifest: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
-        manifest["runtime_schema_version"] = serde_json::json!(3);
-        tokio::fs::write(
-            &state.runtime_paths.cache_manifest,
-            serde_json::to_vec(&manifest).unwrap(),
-        )
-        .await
-        .unwrap();
-        assert!(matches!(
-            cache_compatibility(&state, &config).await,
-            CacheCompatibility::Incompatible(_)
-        ));
+        // v3 skipped missing nodes; v5 put custom rules before domestic bypass.
+        // Neither policy may survive a cold start into the studio branch.
+        for version in [3, 5] {
+            manifest["runtime_schema_version"] = serde_json::json!(version);
+            tokio::fs::write(
+                &state.runtime_paths.cache_manifest,
+                serde_json::to_vec(&manifest).unwrap(),
+            )
+            .await
+            .unwrap();
+            assert!(matches!(
+                cache_compatibility(&state, &config).await,
+                CacheCompatibility::Incompatible(_)
+            ));
+        }
         tokio::fs::remove_file(&state.runtime_paths.cache_manifest)
             .await
             .unwrap();
