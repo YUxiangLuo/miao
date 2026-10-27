@@ -26,6 +26,8 @@ function dnsAnswer(query, address) {
 }
 
 const role = process.argv[2]
+// master keeps custom rules first; the studio branch bypasses domestic traffic.
+const domesticFirst = role !== '--custom-first'
 if (role === '--upstream') {
   const sockets = []
   for (const [port, label] of [[8080, 'direct'], [8081, 'employee-a'], [8082, 'employee-b']]) {
@@ -126,8 +128,8 @@ if (role === '--upstream') {
   const http = (client, ip, hostname) => command(...httpCommand(client, ip, hostname))
   const udp = (client, ip) => command('ip', 'netns', 'exec', client, '/run/bun', '/run/netns-studio.mjs', '--udp', ip)
   const dns = (client, domain) => JSON.parse(command('ip', 'netns', 'exec', client, '/run/bun', '/run/netns-studio.mjs', '--dns', domain))
-  function blockedHttp(client) {
-    const result = Bun.spawnSync(httpCommand(client, '1.1.1.2'), { stdout: 'pipe', stderr: 'pipe' })
+  function blockedHttp(client, ip = '1.1.1.2') {
+    const result = Bun.spawnSync(httpCommand(client, ip), { stdout: 'pipe', stderr: 'pipe' })
     assert.notEqual(result.exitCode, 0, 'failed pinned node must not fall back to another exit')
   }
   const uuid = '7a965829-1c77-4607-a131-24a523787af3'
@@ -196,14 +198,14 @@ if (role === '--upstream') {
     for (const [index, client] of ['employee-a', 'employee-b'].entries()) {
       assert.equal(http(client, '1.1.1.2'), client)
       assert.equal(udp(client, '1.1.1.2'), client)
-      assert.equal(http(client, '223.5.5.6'), 'direct')
-      assert.equal(udp(client, '223.5.5.6'), 'direct')
-      assert.equal(http(client, '1.1.1.2', 'www.baidu.com'), 'direct')
-      assert.equal(http(client, '10.10.10.10'), 'direct')
-      assert.deepEqual(dns(client, 'www.baidu.com'), { rcode: 0, answer: '1.1.1.3' })
+      assert.equal(http(client, '223.5.5.6'), domesticFirst ? 'direct' : client)
+      assert.equal(udp(client, '223.5.5.6'), domesticFirst ? 'direct' : client)
+      assert.equal(http(client, '1.1.1.2', 'www.baidu.com'), domesticFirst ? 'direct' : client)
+      assert.equal(http(client, '10.10.10.10'), domesticFirst ? 'direct' : client)
+      assert.deepEqual(dns(client, 'www.baidu.com'), { rcode: 0, answer: domesticFirst ? '1.1.1.3' : `1.1.1.${10 + index}` })
       // Same domain through both clients also catches cross-node DNS cache reuse.
       assert.deepEqual(dns(client, 'overseas.example'), { rcode: 0, answer: `1.1.1.${10 + index}` })
-      console.log(`PASS ${client}: pinned TCP/UDP/DNS, domestic domain/IP/DNS and private IP bypass`)
+      console.log(`PASS ${client}: pinned TCP/UDP/DNS and expected domestic/private policy`)
     }
     await api('proxy/switch', { group: 'proxy', name: 'employee-b' })
     assert.equal(http('employee-a', '1.1.1.2'), 'employee-a')
@@ -213,18 +215,21 @@ if (role === '--upstream') {
     await stop(nodeA)
     blockedHttp('employee-a')
     assert.equal(http('employee-b', '1.1.1.2'), 'employee-b')
-    assert.equal(http('employee-a', '223.5.5.6'), 'direct')
-    console.log('PASS unreachable node A does not fall back or affect B/domestic traffic')
+    if (domesticFirst) assert.equal(http('employee-a', '223.5.5.6'), 'direct')
+    else assert.equal(http('employee-b', '223.5.5.6'), 'employee-b')
+    console.log('PASS unreachable node A does not fall back or affect B')
 
     await api('nodes', { tag: 'employee-a' }, 'DELETE')
     blockedHttp('employee-a')
     assert.deepEqual(dns('employee-a', 'overseas.example'), { rcode: 5, answer: null })
-    assert.deepEqual(dns('employee-a', 'www.baidu.com'), { rcode: 0, answer: '1.1.1.3' })
-    assert.equal(http('employee-a', '223.5.5.6'), 'direct')
-    assert.equal(http('employee-a', '10.10.10.10'), 'direct')
+    assert.deepEqual(dns('employee-a', 'www.baidu.com'), domesticFirst ? { rcode: 0, answer: '1.1.1.3' } : { rcode: 5, answer: null })
+    if (domesticFirst) assert.equal(http('employee-a', '223.5.5.6'), 'direct')
+    else assert.equal(http('employee-b', '223.5.5.6'), 'employee-b')
+    if (domesticFirst) assert.equal(http('employee-a', '10.10.10.10'), 'direct')
+    else blockedHttp('employee-a', '223.5.5.6')
     assert.equal(http('employee-b', '1.1.1.2'), 'employee-b')
     assert.deepEqual(dns('employee-b', 'overseas.example'), { rcode: 0, answer: '1.1.1.11' })
-    console.log('PASS missing A blocks foreign data/DNS while domestic/private access and B survive')
+    console.log('PASS missing A blocks its data/DNS; B retains its own DNS cache and exit')
 
     startNode(0, 'node-a-restored')
     // Deleted tags stay reserved: the add-node API deliberately prevents a new
@@ -243,10 +248,10 @@ if (role === '--upstream') {
     assert.equal(http('employee-a', '223.5.5.6'), 'employee-a')
     assert.deepEqual(dns('employee-a', 'www.qq.com'), { rcode: 0, answer: '1.1.1.10' })
     await api('route-mode', { route_mode: 'rule' })
-    assert.equal(http('employee-a', '223.5.5.6'), 'direct')
-    assert.deepEqual(dns('employee-a', 'www.qq.com'), { rcode: 0, answer: '1.1.1.3' })
-    console.log('PASS explicit global mode and return to studio split apply to data and DNS')
-    console.log('STUDIO GATEWAY PASS')
+    assert.equal(http('employee-a', '223.5.5.6'), domesticFirst ? 'direct' : 'employee-a')
+    assert.deepEqual(dns('employee-a', 'www.qq.com'), { rcode: 0, answer: domesticFirst ? '1.1.1.3' : '1.1.1.10' })
+    console.log('PASS explicit global mode and return to branch routing policy apply to data and DNS')
+    console.log(domesticFirst ? 'STUDIO GATEWAY PASS' : 'CUSTOM-FIRST GATEWAY DNS CACHE PASS')
   } catch (error) {
     for (const path of logs) if (existsSync(path)) console.error(`${path}\n${readFileSync(path, 'utf8').split('\n').slice(-35).join('\n')}`)
     throw error
