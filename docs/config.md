@@ -72,6 +72,21 @@ custom_rules:
 
 底层手动配置使用 sing-box 的 `type: socks`、`version: '5'`、`username` 和 `password` 字段。标准 SOCKS5 的 UDP 转发仍取决于服务端与网络是否支持；添加节点并不代表已验证 UDP。支持 SOCKS5 的内核版本从 `miao.15` 开始，旧版本需先升级。
 
+### 后台配置前置代理
+
+手动节点的原始 JSON 会保留 `detour`。需要经已有节点连接 SOCKS5 服务时，可在 `config.yaml` 的对应节点中添加该字段：
+
+```yaml
+nodes:
+  - '{"type":"socks","tag":"业务出口","server":"proxy.example.com","server_port":1080,"version":"5","username":"user","password":"password","detour":"前置节点"}'
+```
+
+`前置节点` 须替换为已存在且启用的具体节点 tag。链路为「网关 → 前置节点 → SOCKS5 出口 → 目标网站」。前置不要填包含当前节点的 `proxy` 选择器，也不能引用自身或形成循环。能否使用 UDP 还取决于前置节点和 SOCKS5 服务端的支持。
+
+目前仅通过配置文件管理 `detour`，面板表单、添加/批量导入 API 和节点列表不提供该字段。修改文件不会更新运行进程的内存配置；维护时停止 Miao 后落盘，再启动主程序，避免旧面板保存时覆盖手工修改。需要延后切换时先保存独立的待生效配置。
+
+面板与 MCP 的手动测速允许 8 秒完成探测，HTTP 请求保留 10 秒上限，为链式代理的额外握手留出时间。
+
 ## 状态保存与节点选择
 
 稳定配置、易变状态和偏好分别保存，文件用途与位置见 [Profile](profiles.md#文件位置)。地区回退为 `manual` 不覆盖用户请求的策略，后续刷新继续尝试；具体手动节点由 `.last_proxy` 恢复。

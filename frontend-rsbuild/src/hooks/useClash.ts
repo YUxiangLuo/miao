@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { CLASH_API_BASE, DELAY_TEST_URL } from '../utils'
+import { CLASH_API_BASE, DELAY_TEST_TIMEOUT_MS, DELAY_TEST_URL } from '../utils'
 import { useWebSocket } from './useWebSocket'
 import { fetchJson } from './request'
 import { useLatestRequest } from './useLatestRequest'
@@ -182,7 +182,7 @@ export function useDelays() {
     let delay = -1
     try {
       const payload = await fetchJson<ClashDelay>(
-        `${clashApiBase}/proxies/${encodeURIComponent(nodeName)}/delay?timeout=3000&url=${DELAY_TEST_URL}`,
+        `${clashApiBase}/proxies/${encodeURIComponent(nodeName)}/delay?timeout=${DELAY_TEST_TIMEOUT_MS}&url=${DELAY_TEST_URL}`,
         { signal: controller.signal },
       )
       delay = payload.delay > 0 ? payload.delay : -1

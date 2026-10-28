@@ -252,7 +252,7 @@ if (role === '--upstream') {
     assert.deepEqual(dns('employee-b', 'overseas.example'), { rcode: 0, answer: '1.1.1.11' })
     console.log('PASS missing A blocks its data/DNS; B retains its own DNS cache and exit')
 
-    startNode(0, 'node-a-restored')
+    const restoredNodeA = startNode(0, 'node-a-restored')
     // Deleted tags stay reserved: the add-node API deliberately prevents a new
     // same-name node from taking over dormant bindings. Restore the original
     // local configuration instead, preserving the source and its credentials.
@@ -272,6 +272,33 @@ if (role === '--upstream') {
     assert.equal(http('employee-a', '223.5.5.6'), domesticFirst ? 'direct' : 'employee-a')
     assert.deepEqual(dns('employee-a', 'www.qq.com'), { rcode: 0, answer: domesticFirst ? '1.1.1.3' : '1.1.1.10' })
     console.log('PASS explicit global mode and return to branch routing policy apply to data and DNS')
+
+    // A loopback-only SOCKS server is unreachable from the gateway itself.
+    // Successful forwarding proves the raw detour survives configuration
+    // generation and uses the VLESS upstream, rather than connecting directly.
+    const privateSocks = JSON.parse(readFileSync('/tmp/studio-node-1.json', 'utf8'))
+    Object.assign(privateSocks.inbounds[0], { listen: '127.0.0.1', listen_port: 10003 })
+    writeFileSync('/tmp/studio-socks-private.json', JSON.stringify(privateSocks))
+    spawn(['ip', 'netns', 'exec', 'studio-upstream', '/run/sing-box-host', 'run', '-c', '/tmp/studio-socks-private.json'], 'socks-private')
+    await stop(app)
+    const chained = Bun.YAML.parse(readFileSync('/tmp/studio.yaml', 'utf8'))
+    chained.nodes = nodes.map(node => JSON.stringify(node.tag === 'employee-b'
+      ? { ...node, server: '127.0.0.1', server_port: 10003, detour: 'employee-a' }
+      : node))
+    writeFileSync('/tmp/studio.yaml', Bun.YAML.stringify(chained))
+    await startApp('gateway-detour')
+    assert.equal(http('employee-b', '1.1.1.2'), 'employee-b')
+    assert.equal(udp('employee-b', '1.1.1.2'), 'employee-b')
+    assert.deepEqual(dns('employee-b', 'chained.example'), { rcode: 0, answer: '1.1.1.11' })
+    await api('route-mode', { route_mode: 'global' })
+    await api('route-mode', { route_mode: 'rule' })
+    assert.equal(http('employee-b', '1.1.1.2'), 'employee-b')
+    assert.equal(http('employee-b', '223.5.5.6'), domesticFirst ? 'direct' : 'employee-b')
+    await stop(restoredNodeA)
+    blockedHttp('employee-b')
+    startNode(0, 'node-a-detour-restored')
+    await until(() => { try { return http('employee-b', '1.1.1.2') === 'employee-b' } catch { return false } }, 'SOCKS detour did not recover with its upstream')
+    console.log('PASS file-configured SOCKS5 detour carries TCP/UDP/DNS, survives saves, and blocks when its upstream fails')
     console.log(domesticFirst ? 'STUDIO GATEWAY PASS' : 'CUSTOM-FIRST GATEWAY DNS CACHE PASS')
   } catch (error) {
     for (const path of logs) if (existsSync(path)) console.error(`${path}\n${readFileSync(path, 'utf8').split('\n').slice(-35).join('\n')}`)
