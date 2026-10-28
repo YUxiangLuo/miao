@@ -1,4 +1,4 @@
-// Two LAN clients, two real VLESS servers and controlled Internet/DNS endpoints.
+// Two LAN clients, real VLESS/SOCKS5 servers and controlled Internet/DNS endpoints.
 // Only netns.sh may invoke this: all addresses, certificates and processes are
 // confined to its private network/mount/PID namespaces. No public traffic.
 import assert from 'node:assert/strict'
@@ -171,7 +171,9 @@ if (role === '--upstream') {
     await until(() => existsSync('/tmp/studio-upstream-ready'), 'studio endpoints did not start')
     for (const index of [0, 1]) {
       writeFileSync(`/tmp/studio-node-${index}.json`, JSON.stringify({
-        inbounds: [{ type: 'vless', listen: '192.0.2.1', listen_port: 10001 + index, users: [{ uuid }] }],
+        inbounds: [index === 0
+          ? { type: 'vless', listen: '192.0.2.1', listen_port: 10001, users: [{ uuid }] }
+          : { type: 'socks', listen: '192.0.2.1', listen_port: 10002, users: [{ username: 'employee-b', password: 'fixture-pass' }] }],
         outbounds: [{ type: 'direct', tag: 'direct' }],
         route: { rules: [
           { port: 443, action: 'route', outbound: 'direct', override_port: 8441 + index },
@@ -184,7 +186,10 @@ if (role === '--upstream') {
     }
     const nodeA = startNode(0, 'node-a')
     startNode(1, 'node-b')
-    const nodes = ['employee-a', 'employee-b'].map((tag, index) => ({ type: 'vless', tag, server: '192.0.2.1', server_port: 10001 + index, uuid }))
+    const nodes = [
+      { type: 'vless', tag: 'employee-a', server: '192.0.2.1', server_port: 10001, uuid },
+      { type: 'socks', tag: 'employee-b', server: '192.0.2.1', server_port: 10002, version: '5', username: 'employee-b', password: 'fixture-pass' },
+    ]
     writeFileSync('/tmp/studio.yaml', Bun.YAML.stringify({ nodes: nodes.map(node => JSON.stringify(node)), route_mode: 'rule' }))
     async function startApp(name) {
       // Trust only a fixture certificate in this test process tree, not on the host.
@@ -207,6 +212,22 @@ if (role === '--upstream') {
       assert.deepEqual(dns(client, 'overseas.example'), { rcode: 0, answer: `1.1.1.${10 + index}` })
       console.log(`PASS ${client}: pinned TCP/UDP/DNS and expected domestic/private policy`)
     }
+    await stop(app)
+    const authConfig = Bun.YAML.parse(readFileSync('/tmp/studio.yaml', 'utf8'))
+    authConfig.nodes = nodes.map(node => JSON.stringify(node.tag === 'employee-b' ? { ...node, password: 'wrong-password' } : node))
+    writeFileSync('/tmp/studio.yaml', Bun.YAML.stringify(authConfig))
+    await startApp('gateway-bad-socks-auth')
+    blockedHttp('employee-b')
+    assert.equal(http('employee-a', '1.1.1.2'), 'employee-a')
+    if (domesticFirst) assert.equal(http('employee-b', '223.5.5.6'), 'direct')
+    await stop(app)
+    authConfig.nodes = nodes.map(node => JSON.stringify(node))
+    writeFileSync('/tmp/studio.yaml', Bun.YAML.stringify(authConfig))
+    await startApp('gateway-socks-auth-restored')
+    assert.equal(http('employee-b', '1.1.1.2'), 'employee-b')
+    assert.equal(udp('employee-b', '1.1.1.2'), 'employee-b')
+    console.log('PASS SOCKS5 authentication failure blocks its device without fallback; restored credentials recover TCP/UDP')
+
     await api('proxy/switch', { group: 'proxy', name: 'employee-b' })
     assert.equal(http('employee-a', '1.1.1.2'), 'employee-a')
     assert.deepEqual(dns('employee-a', 'after-switch.example'), { rcode: 0, answer: '1.1.1.10' })

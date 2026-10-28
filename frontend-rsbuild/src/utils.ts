@@ -18,6 +18,7 @@ export interface NodeForm {
   tag: string
   server: string
   server_port: number
+  username: string
   password: string
   uuid: string
   alter_id: number
@@ -46,6 +47,7 @@ export const EMPTY_NODE_FORM: NodeForm = {
   tag: '',
   server: '',
   server_port: 443,
+  username: '',
   password: '',
   uuid: '',
   alter_id: 0,
@@ -79,6 +81,7 @@ export const NODE_TYPE_OPTIONS: NodeTypeOption[] = [
   { value: 'hysteria2', label: 'Hysteria2' },
   { value: 'anytls', label: 'AnyTLS' },
   { value: 'ss', label: 'Shadowsocks' },
+  { value: 'socks', label: 'SOCKS5' },
   { value: 'vmess', label: 'VMess' },
   { value: 'vless', label: 'VLESS' },
   { value: 'trojan', label: 'Trojan' },
@@ -96,6 +99,7 @@ const NODE_CAPABILITIES: Record<NodeType, NodeCapabilities> = {
   hysteria2: { password: true, uuid: false, transport: false, tlsToggle: false },
   anytls:    { password: true, uuid: false, transport: false, tlsToggle: false },
   ss:        { password: true, uuid: false, transport: false, tlsToggle: false },
+  socks:     { password: false, uuid: false, transport: false, tlsToggle: false },
   vmess:     { password: false, uuid: true, transport: true, tlsToggle: true },
   vless:     { password: false, uuid: true, transport: true, tlsToggle: true },
   trojan:    { password: true, uuid: false, transport: true, tlsToggle: false },
@@ -167,7 +171,7 @@ export const TUIC_UDP_RELAY_OPTIONS: SelectOption[] = [
 
 export function nodeTypeDefaults(type: string): Partial<NodeForm> {
   return {
-    tls_enabled: !['ss', 'vmess'].includes(type),
+    tls_enabled: !['ss', 'socks', 'vmess'].includes(type),
     cipher: '2022-blake3-aes-128-gcm',
     vmess_cipher: 'auto',
     sni: '',

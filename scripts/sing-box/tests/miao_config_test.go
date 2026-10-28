@@ -16,6 +16,8 @@ func TestMiaoClientConfigurations(t *testing.T) {
 	// Synthetic credentials and loopback destinations only. check() constructs
 	// the configuration without starting listeners, TUN or proxy connections.
 	cases := map[string]string{
+		"socks5":        `{"type":"socks","version":"5","username":"test-user","password":"test-password"}`,
+		"socks5-noauth": `{"type":"socks","version":"5"}`,
 		"shadowsocks":   `{"type":"shadowsocks","method":"aes-128-gcm","password":"test"}`,
 		"vmess":         `{"type":"vmess","uuid":"00000000-0000-4000-8000-000000000001","security":"auto"}`,
 		"vless":         `{"type":"vless","uuid":"00000000-0000-4000-8000-000000000001"}`,
@@ -102,7 +104,7 @@ func TestMiaoClientCommands(t *testing.T) {
 }
 
 func TestMiaoRemovedOutboundsFailBeforeStart(t *testing.T) {
-	for _, protocol := range []string{"socks", "http", "ssh", "tor", "snell", "shadowtls", "hysteria", "wireguard", "tailcat"} {
+	for _, protocol := range []string{"http", "ssh", "tor", "snell", "shadowtls", "hysteria", "wireguard", "tailcat"} {
 		t.Run(protocol, func(t *testing.T) {
 			miaoContextFixture(t)
 			config := `{"outbounds":[{"type":"` + protocol + `","tag":"removed","server":"127.0.0.1","server_port":1}]}`

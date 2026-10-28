@@ -70,7 +70,7 @@ sudo bash install.sh ./target/release/miao-rust
 
 `netns` 需要真实内核、Bun、curl、OpenSSL、iproute2、util-linux、sysctl 和 root/sudo；须先构建待测程序，并通过 `./dev.sh kernel` 准备本机架构的 `embedded/sing-box-host`。它在独立网络/挂载/PID 命名空间验证启动、重载、规则/DNS 配置、策略回退、停止与 TUN 清理。对端命名空间模拟 DNS 和订阅服务器，验证分流/全局模式冷启动时，失效手动节点不妨碍订阅失败后的自动恢复与手动刷新。
 
-工作室验收使用两个客户端命名空间和两个真实 VLESS 服务端，检查来源 IP 绑定、TCP/UDP 转发、国内域名/IP/内网直连、每个节点的海外 DoH、切换默认节点、节点失联/删除/恢复，以及 rule/global 热切换。DoH 证书在隔离环境临时生成，仅由测试 Miao 进程信任。总超时 120 秒，退出销毁环境；不接触公网，不代表真实线路带宽或 OpenWrt 真机验收。
+工作室验收使用两个客户端命名空间、一个真实 VLESS 服务端和一个带认证的 SOCKS5 服务端，检查来源 IP 绑定、TCP/UDP 转发、国内域名/IP/内网直连、每个节点的海外 DoH、切换默认节点、节点失联/删除/恢复，以及 rule/global 热切换。DoH 证书在隔离环境临时生成，仅由测试 Miao 进程信任。总超时 120 秒，退出销毁环境；不接触公网，不代表真实线路带宽或 OpenWrt 真机验收。
 
 状态查询微基准：`cargo test -p miao-core --locked --no-default-features --release benchmark_status_projection -- --ignored --nocapture`。只测空配置及 100/10000 个节点和规则的内部状态投影，不含 HTTP/内核查询；耗时不作为测试断言。
 

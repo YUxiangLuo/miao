@@ -28,7 +28,7 @@ diff --git a/include/registry.go b/include/registry.go
 index fbb398d..76a1b30 100644
 --- a/include/registry.go
 +++ b/include/registry.go
-@@ -13,36 +13,17 @@ import (
+@@ -13,36 +13,18 @@ import (
  	C "github.com/sagernet/sing-box/constant"
  	"github.com/sagernet/sing-box/dns"
  	"github.com/sagernet/sing-box/dns/transport"
@@ -51,7 +51,7 @@ index fbb398d..76a1b30 100644
  	"github.com/sagernet/sing-box/protocol/shadowsocks"
 -	"github.com/sagernet/sing-box/protocol/shadowtls"
 -	"github.com/sagernet/sing-box/protocol/snell"
--	"github.com/sagernet/sing-box/protocol/socks"
+ 	"github.com/sagernet/sing-box/protocol/socks"
 -	"github.com/sagernet/sing-box/protocol/ssh"
 -	"github.com/sagernet/sing-box/protocol/tor"
  	"github.com/sagernet/sing-box/protocol/trojan"
@@ -65,7 +65,7 @@ index fbb398d..76a1b30 100644
  	E "github.com/sagernet/sing/common/exceptions"
  )
  
-@@ -52,30 +33,7 @@ func Context(ctx context.Context) context.Context {
+@@ -52,30 +34,7 @@ func Context(ctx context.Context) context.Context {
  
  func InboundRegistry() *inbound.Registry {
  	registry := inbound.NewRegistry()
@@ -96,7 +96,7 @@ index fbb398d..76a1b30 100644
  	return registry
  }
  
-@@ -83,92 +41,39 @@ func OutboundRegistry() *outbound.Registry {
+@@ -83,92 +42,40 @@ func OutboundRegistry() *outbound.Registry {
  	registry := outbound.NewRegistry()
  
  	direct.RegisterOutbound(registry)
@@ -107,7 +107,7 @@ index fbb398d..76a1b30 100644
  	group.RegisterSelector(registry)
  	group.RegisterURLTest(registry)
  
--	socks.RegisterOutbound(registry)
+ 	socks.RegisterOutbound(registry)
 -	http.RegisterOutbound(registry)
  	shadowsocks.RegisterOutbound(registry)
 -	snell.RegisterOutbound(registry)

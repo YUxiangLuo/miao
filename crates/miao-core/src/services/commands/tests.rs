@@ -4,6 +4,34 @@ use axum::{extract::State, http::StatusCode, Json};
 use serde_json::{json, Value};
 use std::sync::{atomic::Ordering, Arc};
 
+#[test]
+fn socks5_manual_request_preserves_authentication_without_tls() {
+    let mut request = NodeRequest {
+        node_type: Some("socks".to_string()),
+        tag: "socks5".to_string(),
+        server: "proxy.example.com".to_string(),
+        server_port: 1080,
+        username: Some(" user ".to_string()),
+        password: Some(" p ".to_string()),
+        ..NodeRequest::default()
+    };
+    crate::validation::Validator::validate_node_request(&request).unwrap();
+    let outbound = nodes::build_node_value(&request, "socks");
+    assert_eq!(
+        outbound,
+        json!({
+            "type": "socks", "tag": "socks5", "server": "proxy.example.com", "server_port": 1080,
+            "version": "5", "username": " user ", "password": " p "
+        })
+    );
+    crate::services::node_parser::parse_node_json(&outbound.to_string()).unwrap();
+    request.username = None;
+    request.password = None;
+    let anonymous = nodes::build_node_value(&request, "socks");
+    assert!(anonymous.get("username").is_none());
+    assert!(anonymous.get("password").is_none());
+}
+
 async fn tool(state: &Arc<crate::state::AppState>, name: &str, args: Value) -> Value {
     let request = json!({"jsonrpc":"2.0", "id":1, "method":"tools/call",
         "params":{"name":name, "arguments":args}});

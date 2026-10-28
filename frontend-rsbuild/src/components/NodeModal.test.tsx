@@ -25,6 +25,16 @@ function renderModal(props = {}) {
 }
 
 describe('manual node submission', () => {
+  it('shows optional SOCKS5 credentials and accepts short protocol-valid passwords', async () => {
+    const user = userEvent.setup()
+    renderModal({ nodeType: 'socks', form: { ...EMPTY_NODE_FORM, tag: 'SOCKS5', server: 'proxy.example.com', username: 'u', password: 'p' } })
+    await user.click(screen.getByRole('button', { name: '手动填写' }))
+    expect(screen.getByLabelText('用户名（可选）')).toHaveValue('u')
+    expect(screen.getByLabelText('密码（可选）')).toHaveAttribute('type', 'password')
+    expect(screen.queryByLabelText('SNI')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '添加 SOCKS5 节点' })).toBeEnabled()
+  })
+
   it.each([0, -1, 1.5, 65536])('blocks invalid port %s with an inline error before submitting', async (port) => {
     const user = userEvent.setup()
     const onSubmit = rs.fn()
@@ -213,7 +223,7 @@ describe('NodeModal link import', () => {
     await user.click(input)
     await user.paste('trojan://password123@tj.example.com:443#好节点\nnot-a-link\nanytls://password123@any.example.com:443')
 
-    expect(screen.getByText('不支持的链接类型: not-a-link')).toBeInTheDocument()
+    expect(screen.getByText(/不支持的链接类型/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '添加 2 个节点' })).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: '添加 2 个节点' }))

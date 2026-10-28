@@ -229,6 +229,22 @@ describe('parseShareLink', () => {
 })
 
 describe('parseShareLinks', () => {
+  it('parses named SOCKS5 URLs and preserves encoded credentials', () => {
+    expect(parseShareLink('socks5://user%40name:p%3Aa%25ss@proxy.example.com:1080#美国')).toMatchObject({
+      nodeType: 'socks', tag: '美国', formPatch: { username: 'user@name', password: 'p:a%ss', server: 'proxy.example.com', server_port: 1080, tls_enabled: false },
+    })
+    expect(parseShareLink('socks://[2001:db8::1]:1080')).toMatchObject({ nodeType: 'socks', formPatch: { username: '', password: '', server: '2001:db8::1' } })
+    expect(() => parseShareLink('socks5://user:pass@example.com:1080?tls=true')).toThrow(/TLS/)
+  })
+
+  it('imports colon-form SOCKS5 nodes with distinct names and literal passwords', () => {
+    const parsed = parseShareLinks('proxy.example.com:7085:user1:p://a@ss%\n[2001:db8::1]:7085:user2:pass2')
+    expect(parsed).toMatchObject([
+      { ok: true, parsed: { tag: 'SOCKS5 节点 1', formPatch: { username: 'user1', password: 'p://a@ss%', server_port: 7085 } } },
+      { ok: true, parsed: { tag: 'SOCKS5 节点 2', formPatch: { username: 'user2', password: 'pass2', server: '2001:db8::1' } } },
+    ])
+  })
+
   it('parses multiple lines, skipping blanks and collecting errors', () => {
     const results = parseShareLinks(`
       hysteria2://pass123@a.example.com:443#节点一

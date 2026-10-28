@@ -15,7 +15,7 @@ use super::yaml::{
 pub(super) fn is_supported_node_type(node_type: &str) -> bool {
     matches!(
         node_type,
-        "hysteria2" | "anytls" | "ss" | "vmess" | "vless" | "trojan" | "tuic"
+        "hysteria2" | "anytls" | "ss" | "socks5" | "vmess" | "vless" | "trojan" | "tuic"
     )
 }
 pub(super) fn parse_single_node(node: &Value) -> Result<(String, JsonValue), String> {
@@ -26,6 +26,30 @@ pub(super) fn parse_single_node(node: &Value) -> Result<(String, JsonValue), Str
     let port = get_port(node)?;
 
     let outbound = match typ.as_str() {
+        "socks5" => {
+            if get_bool(node, "tls") {
+                return Err("SOCKS5 TLS is not supported".to_string());
+            }
+            let username = node
+                .get("username")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            let password = node
+                .get("password")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            crate::validation::Validator::socks5_auth(username, password)?;
+            let mut obj = base_outbound("socks", name, server, port);
+            obj.insert("version".to_string(), json!("5"));
+            if !username.is_empty() {
+                obj.insert("username".to_string(), json!(username));
+                obj.insert("password".to_string(), json!(password));
+            }
+            if node.get("udp").and_then(Value::as_bool) == Some(false) {
+                obj.insert("network".to_string(), json!("tcp"));
+            }
+            JsonValue::Object(obj)
+        }
         "hysteria2" => {
             let password = get_required_str(node, "password")?;
             let mut obj = base_outbound("hysteria2", name, server, port);

@@ -123,6 +123,20 @@ fn build_transport(req: &NodeRequest) -> Option<JsonValue> {
 
 pub(crate) fn build_node_value(req: &NodeRequest, node_type: &str) -> JsonValue {
     match node_type {
+        "socks" => {
+            let mut obj = base_outbound("socks", req);
+            obj.insert("version".to_string(), json!("5"));
+            if req
+                .username
+                .as_deref()
+                .is_some_and(|value| !value.is_empty())
+            {
+                // SOCKS authentication is byte-oriented: preserve whitespace.
+                insert_optional_string(&mut obj, "username", req.username.as_deref());
+                insert_optional_string(&mut obj, "password", req.password.as_deref());
+            }
+            JsonValue::Object(obj)
+        }
         "anytls" => {
             let mut obj = base_outbound("anytls", req);
             obj.insert("password".to_string(), json!(request_password(req)));

@@ -26,6 +26,15 @@ export function buildNodeRequest(nodeType: NodeType, form: NodeForm): NodeReques
 
   if (caps.password) assertValid(validatePassword(form.password.trim()))
   if (caps.uuid) assertValid(validateUuid(form.uuid))
+  if (nodeType === 'socks') {
+    if (Boolean(form.username) !== Boolean(form.password)) {
+      throw new Error('SOCKS5 用户名和密码须同时填写，或同时留空')
+    }
+    const encoder = new TextEncoder()
+    if (encoder.encode(form.username).length > 255 || encoder.encode(form.password).length > 255) {
+      throw new Error('SOCKS5 用户名和密码各不能超过 255 字节')
+    }
+  }
 
   if (caps.transport) {
     assertValid(validateTransport(
@@ -57,6 +66,13 @@ export function buildNodeRequest(nodeType: NodeType, form: NodeForm): NodeReques
 
   if (caps.password) payload.password = form.password.trim()
   if (caps.uuid) payload.uuid = form.uuid.trim()
+  if (nodeType === 'socks') {
+    if (form.username) {
+      payload.username = form.username
+      payload.password = form.password
+    }
+    return payload
+  }
 
   if (nodeType === 'ss') {
     payload.cipher = form.cipher

@@ -12,6 +12,7 @@ pub(crate) static VALID_NODE_TYPES: &[&str] = &[
     "hysteria2",
     "anytls",
     "ss",
+    "socks",
     "vmess",
     "vless",
     "trojan",
@@ -83,6 +84,20 @@ impl Validator {
         let node_type = req.node_type.as_deref().unwrap_or("hysteria2");
         Self::node_type(node_type)?;
 
+        if node_type == "socks" {
+            Self::socks5_auth(
+                req.username.as_deref().unwrap_or_default(),
+                req.password.as_deref().unwrap_or_default(),
+            )?;
+            if req.tls_enabled == Some(true)
+                || non_empty(&req.sni).is_some()
+                || req.skip_cert_verify == Some(true)
+                || non_empty(&req.client_fingerprint).is_some()
+                || req.alpn.as_ref().is_some_and(|items| !items.is_empty())
+            {
+                return Err("SOCKS5 节点不支持 TLS 配置".to_string());
+            }
+        }
         if matches!(node_type, "hysteria2" | "anytls" | "ss" | "trojan" | "tuic") {
             Self::password(req.password.as_deref().unwrap_or_default())?;
         }
@@ -404,6 +419,19 @@ impl Validator {
             return Err("UUID 格式无效".to_string());
         }
 
+        Ok(())
+    }
+
+    pub fn socks5_auth(username: &str, password: &str) -> Result<(), String> {
+        if username.is_empty() && password.is_empty() {
+            return Ok(());
+        }
+        if username.is_empty() || password.is_empty() {
+            return Err("SOCKS5 用户名和密码须同时填写，或同时留空".to_string());
+        }
+        if username.len() > 255 || password.len() > 255 {
+            return Err("SOCKS5 用户名和密码各不能超过 255 字节".to_string());
+        }
         Ok(())
     }
 

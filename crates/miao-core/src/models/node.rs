@@ -42,6 +42,8 @@ pub struct NodeRequest {
     pub server: String,
     pub server_port: u16,
     #[serde(default)]
+    pub username: Option<String>,
+    #[serde(default)]
     pub password: Option<String>,
     #[serde(default)]
     pub uuid: Option<String>,

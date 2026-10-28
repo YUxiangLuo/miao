@@ -9,7 +9,7 @@
 | 类别 | 能力 |
 | --- | --- |
 | 入站 | TUN，省略已弃用的 `stack` 字段，默认 GoTUN；保留 system 栈供手动诊断回退 |
-| 节点出站 | Shadowsocks、VMess、VLESS、Trojan、AnyTLS、Hysteria2、TUIC，及其传输、TLS/uTLS、Reality、复用、Shadowsocks 插件 |
+| 节点出站 | SOCKS5、Shadowsocks、VMess、VLESS、Trojan、AnyTLS、Hysteria2、TUIC，及各协议支持的传输、TLS/uTLS、Reality、复用、Shadowsocks 插件 |
 | 内部出站 | direct、selector、urltest |
 | DNS | UDP、HTTPS、local（隐式兜底） |
 | 控制与缓存 | Clash API、cache_file |

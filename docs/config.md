@@ -64,6 +64,14 @@ custom_rules:
 
 从主分支切换后，旧运行配置缓存会被拒绝复用，并从手动节点/订阅快照重建，以应用新的路由顺序。已有持久或易变的 `global` 选择不会被自动改回 `rule`，部署时须确认当前模式。
 
+## SOCKS5 手动节点
+
+面板「添加节点 → 手动填写」选择 SOCKS5，填写服务器和端口；用户名、密码同时填写或同时留空（无认证）。凭据按原文保存，支持 1–255 字节，不使用其他协议的最短密码限制。
+
+「分享链接」也支持 `socks5://user:password@proxy.example.com:1080#节点名称`、`socks://` 和 `proxy.example.com:1080:user:password`（每行一条）。链接中的特殊字符须进行 URL 编码；IPv6 地址用方括号包围。无名称的 SOCKS5 条目按本批次行号命名。Clash YAML 订阅支持 `type: socks5`，不支持 SOCKS5 over TLS；显式 `udp: false` 只启用 TCP。
+
+底层手动配置使用 sing-box 的 `type: socks`、`version: '5'`、`username` 和 `password` 字段。标准 SOCKS5 的 UDP 转发仍取决于服务端与网络是否支持；添加节点并不代表已验证 UDP。支持 SOCKS5 的内核版本从 `miao.15` 开始，旧版本需先升级。
+
 ## 状态保存与节点选择
 
 稳定配置、易变状态和偏好分别保存，文件用途与位置见 [Profile](profiles.md#文件位置)。地区回退为 `manual` 不覆盖用户请求的策略，后续刷新继续尝试；具体手动节点由 `.last_proxy` 恢复。

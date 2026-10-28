@@ -1,9 +1,9 @@
-// 节点分享链接解析:hysteria2 / ss / vmess / vless / trojan / tuic / anytls
+// 节点分享链接解析:hysteria2 / ss / socks5 / vmess / vless / trojan / tuic / anytls
 // 解析结果映射为 EMPTY_NODE_FORM 的字段补丁,交由 buildNodeRequest 统一校验
 import type { NodeType } from './types/api'
 import type { NodeForm } from './utils'
 
-const SUPPORTED_SCHEMES = ['hysteria2', 'hy2', 'ss', 'vmess', 'vless', 'trojan', 'tuic', 'anytls']
+const SUPPORTED_SCHEMES = ['hysteria2', 'hy2', 'ss', 'socks5', 'socks', 'vmess', 'vless', 'trojan', 'tuic', 'anytls']
 
 /** 单条链接的解析产物：协议 + 表单补丁 + 名称 */
 export interface ParsedShareLink {
@@ -262,6 +262,13 @@ function parseAnytls(url: URL): ParsedShareLink {
 export function parseShareLink(line: string): ParsedShareLink {
   const text = String(line || '').trim()
   if (!text) throw new Error('链接不能为空')
+  if (!/^[a-z][a-z0-9+.-]*:\/\//iu.test(text)) {
+    const match = /^(\[[^\]]+\]|[^\s:]+):(\d+):([^:]+):(.+)$/u.exec(text)
+    if (!match) throw new Error('不支持的链接类型；请填写分享链接或 SOCKS5 地址:端口:用户名:密码')
+    const [, host, port, username, password] = match
+    const parsed = parseShareLink(`socks5://${encodeURIComponent(username)}:${encodeURIComponent(password)}@${host}:${port}`)
+    return parsed
+  }
   const scheme = text.split('://')[0].toLowerCase()
   if (!SUPPORTED_SCHEMES.includes(scheme)) {
     throw new Error(`不支持的链接类型: ${scheme || '无法识别'}`)
@@ -284,6 +291,20 @@ export function parseShareLink(line: string): ParsedShareLink {
         return parseTuic(url)
       case 'anytls':
         return parseAnytls(url)
+      case 'socks':
+      case 'socks5':
+        if (boolParam(url.searchParams.get('tls')) || url.searchParams.get('security') === 'tls') {
+          throw new Error('SOCKS5 节点不支持 TLS 配置')
+        }
+        return {
+          nodeType: 'socks',
+          formPatch: {
+            username: decodeURIComponent(url.username),
+            password: decodeURIComponent(url.password),
+            tls_enabled: false,
+          },
+          tag: tagFromUrl(url, 'SOCKS5 节点'),
+        }
       default:
         throw new Error(`不支持的链接类型: ${scheme}`)
     }
@@ -305,9 +326,13 @@ export function parseShareLinks(text: string): ShareLinkResult[] {
     .split('\n')
     .map((line) => line.trim())
     .filter(Boolean)
-    .map((line): ShareLinkResult => {
+    .map((line, index): ShareLinkResult => {
       try {
-        return { line, ok: true, parsed: parseShareLink(line) }
+        const parsed = parseShareLink(line)
+        if (parsed.nodeType === 'socks' && parsed.tag === 'SOCKS5 节点') {
+          parsed.tag = `SOCKS5 节点 ${index + 1}`
+        }
+        return { line, ok: true, parsed }
       } catch (error) {
         return { line, ok: false, error: error instanceof Error ? error.message : String(error) }
       }

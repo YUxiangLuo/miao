@@ -168,7 +168,6 @@ fn parse_node_json_extracts_valid_node() {
 #[test]
 fn manual_json_rejects_removed_protocols_with_a_clear_error() {
     for protocol in [
-        "socks",
         "http",
         "ssh",
         "tor",
@@ -188,7 +187,26 @@ fn manual_json_rejects_removed_protocols_with_a_clear_error() {
 }
 
 #[test]
-fn manual_json_preserves_all_seven_protocols_and_their_extra_options() {
+fn socks5_clash_import_preserves_auth_and_tcp_only_option() {
+    let result = parse_clash_proxies(
+        "proxies:\n- {name: socks-auth, type: socks5, server: proxy.example.com, port: 1080, username: ' user ', password: ' p ', udp: false}\n- {name: socks-anonymous, type: socks5, server: proxy.example.com, port: 1080}\n- {name: socks-tls, type: socks5, server: proxy.example.com, port: 1080, tls: true}\n- {name: socks-missing-password, type: socks5, server: proxy.example.com, port: 1080, username: user}",
+    ).unwrap();
+    assert_eq!(result.nodes.len(), 2);
+    assert_eq!(result.errors.len(), 2);
+    let authenticated = &result.nodes[0].1;
+    assert_eq!(authenticated["type"], "socks");
+    assert_eq!(authenticated["version"], "5");
+    assert_eq!(authenticated["username"], " user ");
+    assert_eq!(authenticated["password"], " p ");
+    assert_eq!(authenticated["network"], "tcp");
+    let (_, manual) = parse_node_json(&authenticated.to_string()).unwrap();
+    assert_eq!(&manual, authenticated);
+    assert!(result.nodes[1].1.get("username").is_none());
+    assert!(result.nodes[1].1.get("network").is_none());
+}
+
+#[test]
+fn manual_json_preserves_supported_protocols_and_their_extra_options() {
     for protocol in [
         "shadowsocks",
         "vmess",

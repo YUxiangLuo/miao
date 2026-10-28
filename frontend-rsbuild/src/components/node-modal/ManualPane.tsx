@@ -88,7 +88,7 @@ export function ManualPane({ nodeType, setNodeType, form, setForm, loading, onSu
   const requiresUuid = caps.uuid
   const supportsTransport = caps.transport
   const showsTlsToggle = caps.tlsToggle
-  const showsTlsFields = nodeType !== 'ss' && (!showsTlsToggle || form.tls_enabled || form.reality_public_key.trim())
+  const showsTlsFields = !['ss', 'socks'].includes(nodeType) && (!showsTlsToggle || form.tls_enabled || form.reality_public_key.trim())
   const pathTransport = ['ws', 'http', 'h2'].includes(form.transport_type)
   const handleNodeTypeChange = (event: ChangeEvent<HTMLSelectElement>) => {
     const value = event.target.value as NodeType
@@ -150,10 +150,16 @@ export function ManualPane({ nodeType, setNodeType, form, setForm, loading, onSu
         />
       </div>
 
-      {requiresPassword && (
+      {nodeType === 'socks' && (
+        <div className="form-grid single">
+          <TextField label="用户名（可选）" autoComplete="off" placeholder="无认证时与密码一起留空" {...bindField('username')} />
+        </div>
+      )}
+
+      {(requiresPassword || nodeType === 'socks') && (
         <div className="form-grid single">
           <TextField
-            label="密码"
+            label={nodeType === 'socks' ? '密码（可选）' : '密码'}
             type="password"
             autoComplete="new-password"
             placeholder="密码"
@@ -180,7 +186,7 @@ export function ManualPane({ nodeType, setNodeType, form, setForm, loading, onSu
         </div>
       )}
 
-      <details className="advanced-details">
+      {nodeType !== 'socks' && <details className="advanced-details">
         <summary>高级选项</summary>
         <div className="advanced-details-body">
           {nodeType === 'vmess' && (
@@ -300,7 +306,7 @@ export function ManualPane({ nodeType, setNodeType, form, setForm, loading, onSu
             </div>
           )}
         </div>
-      </details>
+      </details>}
       </fieldset>
 
       {validationError && <p className="manual-node-error" role="alert">{validationError}</p>}

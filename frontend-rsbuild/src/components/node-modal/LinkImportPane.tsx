@@ -122,7 +122,7 @@ export function LinkImportPane({ onImport, loading }: LinkImportPaneProps) {
         value={text}
         disabled={importing}
         onChange={(event) => { setText(event.target.value); setResultMessage('') }}
-        placeholder={'粘贴节点分享链接,每行一条\n支持 hysteria2 / hy2 / ss / vmess / vless / trojan / tuic / anytls'}
+        placeholder={'粘贴节点分享链接,每行一条\n支持 hysteria2 / hy2 / ss / socks5 / vmess / vless / trojan / tuic / anytls\nSOCKS5 也可填写 地址:端口:用户名:密码'}
         aria-label="节点分享链接"
       />
 

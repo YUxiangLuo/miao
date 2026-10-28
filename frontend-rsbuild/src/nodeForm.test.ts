@@ -7,6 +7,19 @@ function form(overrides = {}) {
 }
 
 describe('buildNodeRequest', () => {
+  it('preserves SOCKS5 credentials and excludes stale TLS and transport fields', () => {
+    expect(buildNodeRequest('socks', form({ tag: 'socks-node', server: 'proxy.example.com', username: ' user ', password: ' p ', transport_type: 'ws', client_fingerprint: 'chrome' }))).toEqual({
+      node_type: 'socks', tag: 'socks-node', server: 'proxy.example.com', server_port: 443, username: ' user ', password: ' p ',
+    })
+    expect(buildNodeRequest('socks', form({ tag: 'no-auth', server: 'proxy.example.com' }))).not.toHaveProperty('password')
+  })
+
+  it('validates SOCKS5 credential pairs and byte lengths', () => {
+    for (const fields of [{ username: 'user' }, { password: 'p' }, { username: '中'.repeat(86), password: 'p' }, { username: 'u', password: 'p'.repeat(256) }]) {
+      expect(() => buildNodeRequest('socks', form({ tag: 'test', server: 'proxy.example.com', ...fields }))).toThrow(/SOCKS5/)
+    }
+  })
+
   it('builds and trims a Hysteria2 request', () => {
     const payload = buildNodeRequest('hysteria2', form({
       tag: '  香港节点  ',

@@ -192,6 +192,34 @@ fn test_hysteria2_obfs_request_validation() {
 }
 
 #[test]
+fn socks5_auth_uses_paired_credentials_and_rfc1929_byte_limits() {
+    let mut request = NodeRequest {
+        node_type: Some("socks".to_string()),
+        tag: "socks5".to_string(),
+        server: "proxy.example.com".to_string(),
+        server_port: 1080,
+        ..NodeRequest::default()
+    };
+    assert!(Validator::validate_node_request(&request).is_ok());
+    request.username = Some("u".to_string());
+    assert!(Validator::validate_node_request(&request).is_err());
+    request.password = Some("p".to_string());
+    assert!(Validator::validate_node_request(&request).is_ok());
+    request.username = Some("中".repeat(85));
+    assert!(Validator::validate_node_request(&request).is_ok());
+    request.username = Some("中".repeat(86));
+    assert!(Validator::validate_node_request(&request).is_err());
+    request.username = Some("u".to_string());
+    request.password = Some("p".repeat(256));
+    assert!(Validator::validate_node_request(&request).is_err());
+    request.password = Some("p".to_string());
+    request.tls_enabled = Some(true);
+    assert!(Validator::validate_node_request(&request)
+        .unwrap_err()
+        .contains("TLS"));
+}
+
+#[test]
 fn test_non_hysteria2_rejects_obfs_request() {
     let req = NodeRequest {
         node_type: Some("anytls".to_string()),

@@ -95,14 +95,15 @@ fn node_schema() -> JsonValue {
         "properties": {
             "node_type": {
                 "type": "string",
-                "enum": ["hysteria2", "anytls", "ss", "vmess", "vless", "trojan", "tuic"],
+                "enum": ["hysteria2", "anytls", "ss", "socks", "vmess", "vless", "trojan", "tuic"],
                 "default": "hysteria2",
                 "description": "节点协议"
             },
             "tag": { "type": "string", "description": "唯一节点名称，1-64 个字符" },
             "server": { "type": "string", "description": "服务器域名、IPv4 或 IPv6" },
             "server_port": { "type": "integer", "minimum": 1, "maximum": 65535 },
-            "password": { "type": "string", "description": "hysteria2/anytls/ss/trojan/tuic 的密码" },
+            "username": { "type": "string", "description": "SOCKS5 用户名；与密码同时填写或同时留空" },
+            "password": { "type": "string", "description": "hysteria2/anytls/ss/socks/trojan/tuic 的密码" },
             "uuid": { "type": "string", "description": "vmess/vless/tuic 的 UUID" },
             "alter_id": { "type": "integer", "minimum": 0, "maximum": 65535 },
             "sni": { "type": "string" },
