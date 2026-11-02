@@ -6,7 +6,9 @@ use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::{Mutex, Notify, RwLock};
 
-use crate::models::{Config, GitHubRelease, NodeMultiplier, NodeSelect, StableConfig, SubStatus};
+use crate::models::{
+    Config, GitHubRelease, NodeMultiplier, NodeSelect, StableConfig, SubStatus, SubscriptionState,
+};
 use crate::paths::RuntimePaths;
 
 pub mod lifecycle;
@@ -183,6 +185,27 @@ impl AppState {
         self.subscription_refresh.reset(generation);
         self.sub_refresh_cancel.notify_waiters();
         generation
+    }
+
+    /// Call under config_update after retiring a fetch generation, before a
+    /// replacement fetch can begin. Local edits may not fetch again at all.
+    pub(crate) async fn settle_cancelled_sub_statuses(&self) {
+        let mut changed = false;
+        for status in self.sub_status.lock().await.values_mut() {
+            if status.state == SubscriptionState::Refreshing {
+                status.state = if status.success {
+                    SubscriptionState::Ready
+                } else if status.failure_kind.is_some() || status.error.is_some() {
+                    SubscriptionState::Failed
+                } else {
+                    SubscriptionState::Pending
+                };
+                changed = true;
+            }
+        }
+        if changed {
+            self.data_revision.fetch_add(1, Ordering::Relaxed);
+        }
     }
 
     pub async fn config_with_preferences(&self) -> Config {

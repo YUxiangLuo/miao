@@ -1,6 +1,78 @@
 use super::*;
 
 #[test]
+fn missing_detours_exclude_dependants_and_restore_when_the_upstream_returns() {
+    let config = Config {
+        node_select: NodeSelect::Fastest(Region::Jp),
+        custom_rules: vec![r#"{"domain":"account.example","outbound":"日本-leaf"}"#.into()],
+        ..Config::default()
+    };
+    // Reverse dependency order ensures exclusion propagates beyond one pass.
+    let nodes = vec![
+        json!({"type":"socks", "tag":"日本-leaf", "detour":"日本-middle"}),
+        json!({"type":"socks", "tag":"日本-middle", "detour":"upstream"}),
+        json!({"type":"socks", "tag":"美国-independent", "detour":"direct"}),
+    ];
+    for restored in [false, true] {
+        let mut outbounds = nodes.clone();
+        if restored {
+            outbounds.push(json!({"type":"socks", "tag":"upstream"}));
+        }
+        let names = outbounds
+            .iter()
+            .map(|node| node["tag"].as_str().unwrap().to_string())
+            .collect();
+        let (built, warnings, selection) =
+            build_sing_box_config(&config, names, outbounds, vec![], vec![]).unwrap();
+        let tags: Vec<_> = built["outbounds"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|node| node["tag"].as_str())
+            .collect();
+        assert_eq!(tags.contains(&"日本-leaf"), restored);
+        assert_eq!(tags.contains(&"日本-middle"), restored);
+        assert!(tags.contains(&"美国-independent"));
+        assert_eq!(warnings.is_empty(), restored);
+        assert_eq!(
+            selection,
+            if restored {
+                config.node_select
+            } else {
+                NodeSelect::Manual
+            }
+        );
+        assert_eq!(
+            built["outbounds"][0]["outbounds"],
+            if restored {
+                json!(["日本-leaf", "日本-middle"])
+            } else {
+                json!(["美国-independent"])
+            }
+        );
+        for section in ["route", "dns"] {
+            let rule = built[section]["rules"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|rule| rule["domain"] == "account.example")
+                .unwrap();
+            assert_eq!(rule["action"] == "reject", !restored);
+        }
+    }
+    let broken = nodes[..2].to_vec();
+    assert!(build_sing_box_config(
+        &config,
+        vec!["日本-leaf".into(), "日本-middle".into()],
+        broken,
+        vec![],
+        vec![],
+    )
+    .unwrap_err()
+    .is_no_usable_nodes());
+}
+
+#[test]
 fn subscription_bootstrap_survives_a_dead_default_without_overriding_custom_rules() {
     for route_mode in [RouteMode::Rule, RouteMode::Global] {
         let config = Config {

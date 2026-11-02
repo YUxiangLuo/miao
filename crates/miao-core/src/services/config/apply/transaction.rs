@@ -1,3 +1,7 @@
+use super::super::{
+    bindings::load_bindings,
+    persist::{save_sub_nodes_snapshot, SubNodesSnapshot},
+};
 use super::*;
 
 /// Rollback material is captured before generation/installation, under the
@@ -52,6 +56,11 @@ pub(in crate::services::config) async fn regenerate_and_restart_runtime(
     Ok(outcome)
 }
 
+fn is_subscription_removal(before: &[String], after: &[String]) -> bool {
+    after.len() < before.len() && after.iter().all(|url| before.contains(url))
+}
+
+/// Source removal reuses the retained sources' accepted nodes when possible.
 /// Network fetches never own the configuration transaction lock. Only the
 /// newest subscription operation may commit; local edits made during the
 /// fetch are rebased by copying only the requested subscription list.
@@ -74,14 +83,27 @@ pub async fn edit_subscriptions<T>(
     }
     let generation = state.next_sub_refresh();
     let _foreground = state.subscription_refresh.foreground(generation);
+    // Do this before preparing the candidate, including when that edit later
+    // fails: the previous fetch has already been cancelled in either case.
+    state.settle_cancelled_sub_statuses().await;
+    let retained = if !force_refresh && is_subscription_removal(&before.subs, &candidate.subs) {
+        super::super::generate::retained_subscription_nodes(&before, &candidate, state).await
+    } else {
+        None
+    };
     drop(guard);
-    let fetched = super::super::generate::fetch_sub_nodes_if_current(
-        &candidate,
-        state,
-        SubFetchRetry::None,
-        generation,
-    )
-    .await;
+    let fetched = match retained {
+        Some(nodes) => nodes,
+        None => {
+            super::super::generate::fetch_sub_nodes_if_current(
+                &candidate,
+                state,
+                SubFetchRetry::None,
+                generation,
+            )
+            .await
+        }
+    };
     let _guard = state.config_update.lock().await;
     if state.lifecycle.is_shutting_down()
         || state.sub_refresh_generation.load(Ordering::Relaxed) != generation
@@ -115,6 +137,11 @@ pub async fn edit_subscriptions<T>(
         .map(|effect| effect.runtime_update())
     }
     .map_err(ConfigMutationError::Apply)?;
+    state
+        .sub_status
+        .lock()
+        .await
+        .retain(|url, _| new_config.subs.contains(url));
     if accepted_response {
         state
             .sub_refresh_success_generation
@@ -464,21 +491,75 @@ pub(in crate::services::config) async fn persist_config_without_usable_nodes_at(
     state.data_revision.fetch_add(1, Ordering::Relaxed);
     *state.config.write().await = persisted_config.clone();
     *state.config_warning.lock().await = Some(no_usable_nodes_warning(&persisted_config));
+    state.skipped_rules.lock().await.clear();
+    state.available_multipliers.write().await.clear();
     Ok(())
 }
 
 async fn persist_config_without_usable_nodes(
     state: &Arc<AppState>,
     persisted_config: Config,
+    snapshot: Option<SubNodesSnapshot>,
 ) -> AppResult<()> {
-    persist_config_without_usable_nodes_at(
-        state,
-        persisted_config,
-        &state.runtime_paths.active_config,
-        &state.runtime_paths.config_cache,
-        &state.runtime_paths.sub_nodes_snapshot,
-    )
-    .await
+    let Some(snapshot) = snapshot else {
+        return persist_config_without_usable_nodes_at(
+            state,
+            persisted_config,
+            &state.runtime_paths.active_config,
+            &state.runtime_paths.config_cache,
+            &state.runtime_paths.sub_nodes_snapshot,
+        )
+        .await;
+    };
+
+    // An empty runtime can still have disabled canonical nodes. Preserve that
+    // material and bind it to this commit, just like a generated runtime does.
+    // Otherwise re-enabling a node would require another subscription fetch.
+    let old_bindings = read_file_snapshot(&state.runtime_paths.node_bindings).await?;
+    let mut bindings = load_bindings(state).await?.unwrap_or_default();
+    bindings.subscription_snapshot_sha256 = Some(snapshot.fingerprint()?);
+    // A successful deletion must never leave old bytes at an active/cache
+    // path. Stage their removal before committing; keep the old process alive
+    // and restore the files if either retirement or persistence fails.
+    let retired = super::retirement::RuntimeRetirement::stage(&state.runtime_paths).await?;
+    let commit = async {
+        save_node_bindings(state, &bindings).await?;
+        save_config_layered(state, &persisted_config).await
+    }
+    .await;
+    if let Err(err) = commit {
+        // Neither the running process nor the accepted snapshot has changed.
+        let bindings_restore =
+            restore_file_snapshot(&state.runtime_paths.node_bindings, old_bindings.as_deref())
+                .await;
+        let files_restore = retired.restore().await;
+        let errors: Vec<_> = [bindings_restore, files_restore]
+            .into_iter()
+            .filter_map(Result::err)
+            .map(|err| err.to_string())
+            .collect();
+        return if errors.is_empty() {
+            Err(err)
+        } else {
+            Err(AppError::message(format!(
+                "Failed to persist configuration without usable nodes: {err}. Rollback failed: {}",
+                errors.join("; ")
+            )))
+        };
+    }
+
+    stop_sing_internal(state).await;
+    retired.discard().await;
+    *state.config.write().await = persisted_config.clone();
+    // Publishes to memory even if the derived disk write fails. The committed
+    // fingerprint then prevents an older snapshot being reused after restart.
+    if let Err(err) = save_sub_nodes_snapshot(state, &snapshot).await {
+        warn!(error = %err, "Failed to save subscription snapshot without usable nodes");
+    }
+    *state.config_warning.lock().await = Some(no_usable_nodes_warning(&persisted_config));
+    state.skipped_rules.lock().await.clear();
+    state.available_multipliers.write().await.clear();
+    Ok(())
 }
 
 async fn restore_previous_config(
@@ -565,6 +646,21 @@ pub(super) async fn apply_config_change_with_source(
     let new_config = &preferred_new_config;
     let should_run = state.lifecycle.snapshot().should_run;
     let apply_mode = config_apply_mode(new_config, should_run);
+    // A successful empty response is authoritative. A removal must not be
+    // undone just because it leaves no nodes; only a total fetch failure with
+    // no usable retained/manual nodes warrants keeping the old configuration.
+    let empty_removal_snapshot = match &source {
+        SubSource::Prefetched(fetched)
+            if is_subscription_removal(&old_config.subs, &new_config.subs)
+                && (new_config.subs.is_empty() || fetched.report.accepted_response()) =>
+        {
+            Some(SubNodesSnapshot::from_fetched_nodes(
+                new_config.subs.clone(),
+                fetched.nodes.clone(),
+            ))
+        }
+        _ => None,
+    };
 
     if apply_mode == ConfigApplyMode::Clear {
         let _activity = state
@@ -663,32 +759,37 @@ pub(super) async fn apply_config_change_with_source(
             }
         }
         Err(apply_err) if apply_err.is_no_usable_nodes() => {
-            // 有本地可用材料（运行时快照/cache/节点集快照）时，订阅全失败不再停核清场：
-            // 回滚到变更前状态，把订阅故障作为普通变更失败报给用户
-            if checkpoint.runtime.is_some()
-                || has_config_cache(state)
-                || has_sub_nodes_snapshot(state)
+            if empty_removal_snapshot.is_none()
+                && (checkpoint.runtime.is_some()
+                    || has_config_cache(state)
+                    || has_sub_nodes_snapshot(state))
             {
-                warn!(error = %apply_err, "All subscriptions failed during config change; keeping previous runtime state");
+                warn!(error = %apply_err, "Config change left no usable nodes; keeping previous runtime state");
                 match checkpoint
                     .restore(old_config, state, should_run, false)
                     .await
                 {
                     Ok(()) => Err(AppError::context(
-                        "所有订阅获取失败，已保留当前运行配置",
+                        "配置变更后没有可用节点，已保留当前运行配置；请恢复订阅获取或添加可用手动节点后重试",
                         apply_err,
                     )),
                     Err(rollback_err) => Err(AppError::message(format!(
-                        "所有订阅获取失败: {}. 恢复先前运行状态失败: {}",
+                        "配置变更后没有可用节点: {}. 恢复先前运行状态失败: {}",
                         apply_err, rollback_err
                     ))),
                 }
             } else {
-                // 本地没有任何可用材料（新装/清场后）：没有可回退的状态，维持落盘+停核
+                // Accept an authoritative removal, or initial setup without
+                // rollback material. Clear runtime/cache, retaining only the
+                // remaining sources' canonical nodes (including disabled ones).
                 warn!(error = %apply_err, "Config change left no usable nodes; persisting it and stopping sing-box");
-                persist_config_without_usable_nodes(state, new_config.clone())
-                    .await
-                    .map(|()| ConfigApplyEffect::Cleared)
+                persist_config_without_usable_nodes(
+                    state,
+                    new_config.clone(),
+                    empty_removal_snapshot,
+                )
+                .await
+                .map(|()| ConfigApplyEffect::Cleared)
             }
         }
         Err(apply_err) => {

@@ -77,7 +77,9 @@ pub async fn start_service(state: Arc<AppState>) -> CommandResult {
     // the explicitly stopped state.
     state.lifecycle.request_running(true);
 
-    if state.lifecycle.snapshot().phase == RuntimePhase::Failed {
+    if state.lifecycle.snapshot().phase == RuntimePhase::Failed
+        || !state.runtime_paths.active_config.is_file()
+    {
         let generation = state.lifecycle.snapshot().generation;
         let activity = state
             .lifecycle
@@ -108,6 +110,14 @@ pub async fn start_service(state: Arc<AppState>) -> CommandResult {
         drop(activity);
         drop(config_update);
         let recovery = crate::runtime::recover_data_plane_once(&state).await;
+        if recovery == crate::runtime::RecoveryOutcome::WaitForNodes {
+            let waiting = state.clone();
+            tokio::spawn(async move { crate::runtime::retry_waiting_for_nodes(&waiting).await });
+            return Err(command_error(
+                CommandErrorKind::InvalidInput,
+                crate::services::config::SUBS_WAITING_FOR_NODES,
+            ));
+        }
         if state.lifecycle.snapshot().ready {
             if recovery == crate::runtime::RecoveryOutcome::RetrySubscriptions {
                 let recovering = state.clone();
@@ -144,15 +154,7 @@ pub async fn stop_service(state: Arc<AppState>) -> CommandResult {
 
     let _config_update = state.config_update.lock().await;
     state.next_sub_refresh();
-    for status in state.sub_status.lock().await.values_mut() {
-        if status.state == crate::models::SubscriptionState::Refreshing {
-            status.state = if status.success {
-                crate::models::SubscriptionState::Ready
-            } else {
-                crate::models::SubscriptionState::Failed
-            };
-        }
-    }
+    state.settle_cancelled_sub_statuses().await;
     state.data_revision.fetch_add(1, Ordering::Relaxed);
     state.lifecycle.request_running(false);
     stop_sing_internal(&state).await;

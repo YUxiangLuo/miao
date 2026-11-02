@@ -326,7 +326,10 @@ use startup::{
 };
 #[cfg(test)]
 use startup::{prepare_compatible_startup_cache, startup_is_settled};
-pub(crate) use startup::{recover_data_plane_once, retry_recovered_subscriptions, RecoveryOutcome};
+pub(crate) use startup::{
+    recover_data_plane_once, retry_recovered_subscriptions, retry_waiting_for_nodes,
+    RecoveryOutcome,
+};
 
 async fn request_shutdown(handle: &mut ServerHandle) {
     if let Some(tx) = handle.init_cancel.take() {

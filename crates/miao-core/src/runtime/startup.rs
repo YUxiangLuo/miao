@@ -68,6 +68,7 @@ pub(super) async fn initialize_runtime(
             RecoveryOutcome::Complete => {}
             RecoveryOutcome::RetrySubscriptions => retry_recovered_subscriptions(&state).await,
             RecoveryOutcome::RetryDataPlane => retry_failed_startup(&state).await,
+            RecoveryOutcome::WaitForNodes => retry_waiting_for_nodes(&state).await,
         }
     }
     // Configuration can be removed while a failed startup fetch is in flight,
@@ -323,6 +324,7 @@ enum BackgroundRefreshStep {
     Finished,
     Retry,
     Superseded,
+    WaitForNodes,
 }
 
 /// 后台订阅刷新（快速通道启动后调用）。
@@ -343,19 +345,37 @@ pub(super) async fn refresh_subscriptions_with_slow_retry_interval(
     state: &Arc<AppState>,
     slow_retry_interval: Duration,
 ) {
+    refresh_subscriptions_with_initial_wait(config, state, slow_retry_interval, false).await;
+}
+
+pub(super) async fn refresh_subscriptions_with_initial_wait(
+    config: &Config,
+    state: &Arc<AppState>,
+    slow_retry_interval: Duration,
+    mut waiting_for_nodes: bool,
+) {
     // This owner spans retry sleeps, but is NOT a mutation lease. Waiting
     // entrants must recheck completion rather than launch a duplicate fetch.
     let _owner = state.subscription_recovery.background.lock().await;
     let mut refresh_generation = state.sub_refresh_generation.load(Ordering::Relaxed);
-    let mut retry = SubFetchRetry::Startup;
+    let mut retry = if waiting_for_nodes {
+        SubFetchRetry::None
+    } else {
+        SubFetchRetry::Startup
+    };
     let mut delay = STARTUP_RECOVERY_INITIAL_DELAY;
     let mut fast_retries = 0;
     let mut quiet = false;
+    let mut next_wait = if waiting_for_nodes {
+        slow_retry_interval
+    } else {
+        Duration::ZERO
+    };
 
     loop {
         // Also notice a foreground success that committed during our sleep.
         let Some(generation) =
-            wait_for_background_retry(config, state, refresh_generation, Duration::ZERO).await
+            wait_for_background_retry(config, state, refresh_generation, next_wait).await
         else {
             return;
         };
@@ -365,6 +385,7 @@ pub(super) async fn refresh_subscriptions_with_slow_retry_interval(
         {
             BackgroundRefreshStep::Finished => return,
             BackgroundRefreshStep::Retry => {}
+            BackgroundRefreshStep::WaitForNodes => waiting_for_nodes = true,
             BackgroundRefreshStep::Superseded => {
                 let Some(generation) =
                     resume_after_foreground_refresh(config, state, refresh_generation).await
@@ -377,9 +398,16 @@ pub(super) async fn refresh_subscriptions_with_slow_retry_interval(
 
         let wait = {
             let _config_update = state.config_update.lock().await;
-            quiet = fast_retries >= STARTUP_BACKGROUND_FAST_RETRIES
-                && state.lifecycle.snapshot().ready
-                && is_sing_box_running(state).await;
+            let runtime_ready =
+                state.lifecycle.snapshot().ready && is_sing_box_running(state).await;
+            if waiting_for_nodes && runtime_ready {
+                // A local edit may have repaired the runtime while this owner
+                // slept. Keep the slow cadence, but no longer claim no nodes.
+                waiting_for_nodes = false;
+                fast_retries = STARTUP_BACKGROUND_FAST_RETRIES;
+            }
+            quiet = waiting_for_nodes
+                || (fast_retries >= STARTUP_BACKGROUND_FAST_RETRIES && runtime_ready);
             if quiet {
                 // A newer foreground operation owns its warning and state.
                 if state.sub_refresh_generation.load(Ordering::Relaxed) == refresh_generation
@@ -389,7 +417,14 @@ pub(super) async fn refresh_subscriptions_with_slow_retry_interval(
                         || state.sub_refresh_success_generation.load(Ordering::Relaxed)
                             != refresh_generation)
                 {
-                    *state.config_warning.lock().await = Some(SUBS_RETRYING_SLOWLY.to_string());
+                    *state.config_warning.lock().await = Some(
+                        if waiting_for_nodes {
+                            crate::services::config::SUBS_WAITING_FOR_NODES
+                        } else {
+                            SUBS_RETRYING_SLOWLY
+                        }
+                        .to_string(),
+                    );
                 }
                 slow_retry_interval
             } else {
@@ -404,12 +439,7 @@ pub(super) async fn refresh_subscriptions_with_slow_retry_interval(
             delay_secs = wait.as_secs(),
             quiet, "Startup subscription refresh will retry in the background"
         );
-        let Some(generation) =
-            wait_for_background_retry(config, state, refresh_generation, wait).await
-        else {
-            return;
-        };
-        refresh_generation = generation;
+        next_wait = wait;
         delay = next_startup_recovery_delay(delay);
         // 后续由外层控制快速/低频重试；每轮只请求一次，不再重复首轮预算。
         retry = SubFetchRetry::None;
@@ -606,6 +636,11 @@ async fn background_subscription_refresh_once(
             state.subscription_recovery.complete(refresh_generation);
             BackgroundRefreshStep::Finished
         }
+        Err(err) if err.is_no_usable_nodes() && fetch_report.accepted_response() => {
+            *state.config_warning.lock().await =
+                Some(crate::services::config::SUBS_WAITING_FOR_NODES.to_string());
+            BackgroundRefreshStep::WaitForNodes
+        }
         Err(err) => {
             warn!(error = %err, "Background subscription refresh failed");
             *state.config_warning.lock().await = Some(REFRESH_FAILED_KEEP_CACHE.to_string());
@@ -650,6 +685,9 @@ pub(crate) enum RecoveryOutcome {
     RetryDataPlane,
     /// The kernel is ready, but no authoritative subscription response landed.
     RetrySubscriptions,
+    /// An authoritative response cannot build a runtime. Await new nodes or a
+    /// local configuration edit instead of repeatedly treating it as a failure.
+    WaitForNodes,
 }
 
 /// One bounded fetch/install attempt. Its registration spans network I/O and
@@ -680,11 +718,24 @@ pub(crate) async fn recover_data_plane_once(state: &Arc<AppState>) -> RecoveryOu
         if state.subscription_refresh.foreground_in_flight() {
             return RetryDataPlane;
         }
+        // A foreground/local operation can repair the runtime while this
+        // attempt waits for config_update. Do not retire its fresh success.
+        if state.lifecycle.snapshot().ready && is_sing_box_running(state).await {
+            return recovery_after_concurrent_change(state).await;
+        }
+        let generation = state.sub_refresh_generation.load(Ordering::Relaxed);
+        let generation = if generation != 0
+            && state.sub_refresh_success_generation.load(Ordering::Relaxed) == generation
+        {
+            // The last foreground commit may have deliberately left no nodes.
+            // A new repair must not inherit that commit's completion marker;
+            // later foreground successes still supersede this new generation.
+            state.next_sub_refresh()
+        } else {
+            generation
+        };
         state.subscription_recovery.invalidate();
-        (
-            state.config_with_preferences().await,
-            state.sub_refresh_generation.load(Ordering::Relaxed),
-        )
+        (state.config_with_preferences().await, generation)
     };
     let nodes =
         fetch_sub_nodes_if_current(&config, state, SubFetchRetry::Startup, refresh_generation)
@@ -705,6 +756,7 @@ pub(crate) async fn recover_data_plane_once(state: &Arc<AppState>) -> RecoveryOu
         return recovery_after_concurrent_change(state).await;
     }
     let pending = !current.subs.is_empty() && !accepted_response;
+    let mut waiting_for_nodes = false;
 
     match refresh_subscriptions(
         &current,
@@ -744,6 +796,7 @@ pub(crate) async fn recover_data_plane_once(state: &Arc<AppState>) -> RecoveryOu
         },
         Err(err) => {
             warn!(error = %err, "Startup data-plane recovery attempt failed");
+            waiting_for_nodes = accepted_response && err.is_no_usable_nodes();
             *state.config_warning.lock().await = Some(DATA_PLANE_RETRYING.to_string());
         }
     }
@@ -767,7 +820,13 @@ pub(crate) async fn recover_data_plane_once(state: &Arc<AppState>) -> RecoveryOu
             .lifecycle
             .finish(runtime.generation, RuntimePhase::Failed);
     }
-    RetryDataPlane
+    if waiting_for_nodes {
+        *state.config_warning.lock().await =
+            Some(crate::services::config::SUBS_WAITING_FOR_NODES.to_string());
+        WaitForNodes
+    } else {
+        RetryDataPlane
+    }
 }
 
 /// Another operation may repair the kernel without committing a subscription
@@ -798,6 +857,11 @@ pub(crate) async fn retry_recovered_subscriptions(state: &Arc<AppState>) {
     refresh_subscriptions_in_background(&config, state).await;
 }
 
+pub(crate) async fn retry_waiting_for_nodes(state: &Arc<AppState>) {
+    let config = state.config_with_preferences().await;
+    refresh_subscriptions_with_initial_wait(&config, state, SUBS_SLOW_RETRY_INTERVAL, true).await;
+}
+
 /// Keep repairing an unavailable initial data plane without blocking panel
 /// mutations on subscription network I/O. Foreground subscription operations
 /// advance `sub_refresh_generation`, so their result always wins.
@@ -814,6 +878,10 @@ pub(super) async fn retry_failed_startup(state: &Arc<AppState>) {
                 return;
             }
             RecoveryOutcome::RetryDataPlane => {}
+            RecoveryOutcome::WaitForNodes => {
+                retry_waiting_for_nodes(state).await;
+                return;
+            }
         }
         delay = next_startup_recovery_delay(delay);
     }

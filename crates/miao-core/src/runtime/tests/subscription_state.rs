@@ -7,6 +7,147 @@ use std::sync::{
 };
 
 #[tokio::test]
+async fn empty_cold_start_waits_slowly_through_failure_then_activates_new_nodes() {
+    use axum::{http::StatusCode, routing::get, Router};
+    let calls = Arc::new(AtomicUsize::new(0));
+    let requests = calls.clone();
+    let app = Router::new().route("/sub", get(move || {
+        let attempt = requests.fetch_add(1, Ordering::Relaxed) + 1;
+        async move { match attempt {
+            1 | 2 => (StatusCode::OK, "proxies: []"),
+            3 => (StatusCode::SERVICE_UNAVAILABLE, "offline"),
+            _ => (StatusCode::OK, "proxies:\n- name: recovered\n  type: trojan\n  server: 192.0.2.1\n  port: 9\n  password: fixture\n"),
+        } }
+    }));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let cfg = Config {
+        subs: vec![format!("http://{}/sub", listener.local_addr().unwrap())],
+        ..Config::default()
+    };
+    let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let (state, root) = local_startup_test_state(cfg.clone(), "empty-cold-recovery").await;
+    let startup_state = state.clone();
+    let startup = tokio::spawn(async move {
+        super::super::startup::initialize_runtime(cfg, startup_state, false).await;
+    });
+    for target in 1..=3 {
+        tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            loop {
+                if calls.load(Ordering::Relaxed) == target
+                    && state.subscription_refresh.snapshot().phase
+                        == SubscriptionRefreshPhase::Waiting
+                {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .unwrap();
+        assert!(!state.lifecycle.snapshot().ready);
+        assert!(state.sing_process.lock().await.is_none());
+        assert_eq!(
+            state.config_warning.lock().await.as_deref(),
+            Some(config::SUBS_WAITING_FOR_NODES)
+        );
+        assert_eq!(
+            state.subscription_refresh.snapshot().outcome,
+            if target == 3 {
+                SubscriptionFetchOutcome::Failed
+            } else {
+                SubscriptionFetchOutcome::Empty
+            }
+        );
+        // All fast test retries would fit here. An authoritative empty result
+        // must instead wait the slow interval, including after an HTTP failure.
+        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+        assert_eq!(calls.load(Ordering::Relaxed), target);
+    }
+    tokio::time::timeout(std::time::Duration::from_secs(2), startup)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(calls.load(Ordering::Relaxed), 4);
+    assert!(state.lifecycle.snapshot().ready);
+    assert!(state.config_warning.lock().await.is_none());
+    singbox::stop_sing_internal(&state).await;
+    server.abort();
+    let _ = tokio::fs::remove_dir_all(root).await;
+}
+
+#[tokio::test]
+async fn waiting_for_empty_cold_start_cancels_on_stop_or_successful_edit() {
+    use axum::{routing::get, Router};
+    for stop in [false, true] {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let requests = calls.clone();
+        let app = Router::new().route(
+            "/sub",
+            get(move || {
+                requests.fetch_add(1, Ordering::Relaxed);
+                async { "proxies: []" }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let cfg = Config {
+            subs: vec![format!("http://{}/sub", listener.local_addr().unwrap())],
+            ..Config::default()
+        };
+        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let (state, root) = local_startup_test_state(cfg.clone(), "empty-cold-cancel").await;
+        assert!(!initialize_runtime_locked(&cfg, &state).await);
+        assert_eq!(
+            crate::runtime::recover_data_plane_once(&state).await,
+            crate::runtime::RecoveryOutcome::WaitForNodes
+        );
+        let waiting_state = state.clone();
+        let waiting_config = cfg.clone();
+        let waiting = tokio::spawn(async move {
+            super::super::startup::refresh_subscriptions_with_initial_wait(
+                &waiting_config,
+                &waiting_state,
+                std::time::Duration::from_secs(60),
+                true,
+            )
+            .await;
+        });
+        tokio::time::timeout(std::time::Duration::from_secs(1), async {
+            while state.subscription_refresh.snapshot().phase != SubscriptionRefreshPhase::Waiting {
+                tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .unwrap();
+        if stop {
+            crate::services::commands::service::stop_service(state.clone())
+                .await
+                .unwrap();
+        } else {
+            // A local edit can activate independent manuals without waiting for
+            // HTTP; a subsequent accepted foreground refresh retires recovery.
+            let mut edit = config::ConfigEdit::begin(&state).await;
+            edit.candidate.nodes.push(serde_json::json!({"type":"socks","tag":"manual","server":"192.0.2.1","server_port":9,"version":"5"}).to_string());
+            edit.commit().await.unwrap();
+            assert!(state.lifecycle.snapshot().ready);
+            assert!(
+                config::refresh_subscriptions_foreground(&state)
+                    .await
+                    .unwrap()
+                    .fetch_succeeded
+            );
+        }
+        tokio::time::timeout(std::time::Duration::from_millis(300), waiting)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(calls.load(Ordering::Relaxed), if stop { 1 } else { 2 });
+        singbox::stop_sing_internal(&state).await;
+        server.abort();
+        let _ = tokio::fs::remove_dir_all(root).await;
+    }
+}
+
+#[tokio::test]
 async fn empty_response_without_a_replacement_keeps_runtime_without_network_retries() {
     use axum::{routing::get, Router};
     let calls = Arc::new(AtomicUsize::new(0));

@@ -267,6 +267,35 @@ pub(super) struct NodeMetadata {
     pub multiplier: Option<NodeMultiplier>,
 }
 
+/// A missing upstream only excludes that node and its dependants. Keep the
+/// canonical inputs intact so a later refresh/local edit can restore the chain.
+fn resolved_outbound_tags(outbounds: &[serde_json::Value]) -> HashSet<String> {
+    let mut available: HashSet<String> = outbounds
+        .iter()
+        .filter_map(|outbound| outbound["tag"].as_str().map(str::to_owned))
+        .collect();
+    available.extend(["proxy".to_string(), "direct".to_string()]);
+    loop {
+        let mut removed = false;
+        for outbound in outbounds {
+            let tag = outbound["tag"].as_str().unwrap_or_default();
+            if let Some(detour) = outbound["detour"].as_str().filter(|tag| !tag.is_empty()) {
+                if available.contains(tag) && !available.contains(detour) {
+                    warn!(
+                        node = tag,
+                        detour, "Excluding node whose detour is unavailable"
+                    );
+                    available.remove(tag);
+                    removed = true;
+                }
+            }
+        }
+        if !removed {
+            return available;
+        }
+    }
+}
+
 pub(super) fn build_sing_box_config_with_multipliers(
     config: &Config,
     my_names: Vec<String>,
@@ -276,20 +305,25 @@ pub(super) fn build_sing_box_config_with_multipliers(
     metadata: Vec<NodeMetadata>,
     parsed_rules: ParsedCustomRules,
 ) -> AppResult<(serde_json::Value, Vec<SkippedRule>, NodeSelect)> {
-    let total_nodes = my_outbounds.len() + final_outbounds.len();
-    if total_nodes == 0 {
-        return Err(AppError::NoUsableNodes);
-    }
-
-    let (node_names, outbounds) = normalize_outbound_tags(
+    let (node_names, mut outbounds) = normalize_outbound_tags(
         my_names.into_iter().chain(final_node_names).collect(),
         my_outbounds.into_iter().chain(final_outbounds).collect(),
     );
+    let available_outbounds = resolved_outbound_tags(&outbounds);
+    outbounds.retain(|outbound| {
+        outbound["tag"]
+            .as_str()
+            .is_some_and(|tag| available_outbounds.contains(tag))
+    });
+    if outbounds.is_empty() {
+        return Err(AppError::NoUsableNodes);
+    }
     // Stable public tags are identifiers. Region and multiplier belong to
     // the current display metadata, which may change independently of a tag.
     let automatic_members: Vec<String> = node_names
         .iter()
         .zip(&metadata)
+        .filter(|(tag, _)| available_outbounds.contains(*tag))
         .filter(|(_, meta)| {
             config
                 .node_select
@@ -309,15 +343,15 @@ pub(super) fn build_sing_box_config_with_multipliers(
         config.node_select
     };
     let group_names = if effective_select.is_manual() {
-        node_names.clone()
+        node_names
+            .into_iter()
+            .filter(|tag| available_outbounds.contains(tag))
+            .collect()
     } else {
         automatic_members
     };
 
     // 缺失出口改为拒绝，防止流量落入后续直连或默认代理规则。
-    let mut available_outbounds: HashSet<String> = node_names.iter().cloned().collect();
-    available_outbounds.insert("proxy".to_string());
-    available_outbounds.insert("direct".to_string());
     let (custom_rules, skipped_rules) =
         block_parsed_rules_with_missing_outbound(parsed_rules.rules, &available_outbounds);
 

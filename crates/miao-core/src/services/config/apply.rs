@@ -383,6 +383,7 @@ pub async fn refresh_subscriptions(
 
 mod edit;
 mod preferences;
+mod retirement;
 mod transaction;
 pub(crate) use edit::ConfigEdit;
 pub use preferences::{apply_max_multiplier, apply_node_select};
@@ -407,6 +408,8 @@ mod edit_tests;
 mod rollback_tests;
 #[cfg(test)]
 mod snapshot_tests;
+#[cfg(test)]
+mod subscription_delete_tests;
 #[cfg(test)]
 mod transaction_tests;
 

@@ -82,6 +82,60 @@ pub fn subscription_source_id(url: &str) -> String {
     hex::encode(Sha256::digest(url.as_bytes()))
 }
 
+/// Removing a source is a local edit when the accepted snapshot can identify
+/// every node's owner. Never borrow nodes from a removed or legacy source.
+pub(super) async fn retained_subscription_nodes(
+    before: &Config,
+    candidate: &Config,
+    state: &Arc<AppState>,
+) -> Option<FetchedSubscriptions> {
+    if candidate.subs.is_empty() {
+        return Some(FetchedSubscriptions::default());
+    }
+    let snapshot = read_sub_nodes_snapshot(state).await?;
+    let previous_sources: BTreeSet<_> = before
+        .subs
+        .iter()
+        .map(|url| subscription_source_id(url))
+        .collect();
+    if !snapshot.matches_subs(&before.subs)
+        || snapshot.version != 1
+        || snapshot.node_names.len() != snapshot.outbounds.len()
+        || snapshot.source_ids.len() != snapshot.outbounds.len()
+        || snapshot
+            .source_ids
+            .iter()
+            .any(|source| !previous_sources.contains(source))
+    {
+        return None;
+    }
+    let retained_sources: BTreeSet<_> = candidate
+        .subs
+        .iter()
+        .map(|url| subscription_source_id(url))
+        .collect();
+    let nodes: Vec<_> = filter_informational_fetched_nodes(snapshot.to_fetched_nodes())
+        .into_iter()
+        .filter(|node| retained_sources.contains(&node.source_id))
+        .collect();
+    // Disabled nodes and broken detour chains remain canonical, but cannot
+    // keep the service available. Use the same build boundary as activation;
+    // otherwise a broken manual fallback can prevent fetching a usable source.
+    if build_prepared(candidate, state, nodes.clone())
+        .await
+        .is_err()
+    {
+        return None;
+    }
+    Some(FetchedSubscriptions {
+        report: SubscriptionFetchReport {
+            cached_nodes: nodes.len(),
+            ..Default::default()
+        },
+        nodes,
+    })
+}
+
 const MAX_CONCURRENT_SUBS: usize = 5;
 
 /// 订阅全失败时的退避重试预算。

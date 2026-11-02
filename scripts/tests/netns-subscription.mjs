@@ -1,5 +1,6 @@
 // Invoked only in netns.sh's private network/mount/PID namespaces.
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
 import { createSocket } from 'node:dgram'
 import { closeSync, existsSync, openSync, readFileSync, readlinkSync, writeFileSync, rmSync } from 'node:fs'
 
@@ -28,10 +29,20 @@ if (process.argv[2] === '--upstream') {
   Bun.serve({
     hostname: '198.51.100.10', port: 8080,
     fetch(request) {
+      // Startup changes TUN routes; a pooled pre-start connection can then
+      // fail instead of delivering the response selected by this fixture.
+      const headers = { Connection: 'close' }
       writeFileSync('/tmp/subscription-requested', '')
-      if (!existsSync('/tmp/subscription-online')) return new Response('temporarily unavailable', { status: 503 })
-      if (new URL(request.url).pathname === '/sub') return Response.redirect('http://bootstrap.test:8080/nodes', 302)
-      return new Response('proxies:\n  - {name: "日本 subscription-node", type: trojan, server: 192.0.2.1, port: 9, password: fixture, sni: example.com}\n')
+      const counter = '/tmp/subscription-request-count'
+      writeFileSync(counter, String((existsSync(counter) ? Number(readFileSync(counter, 'utf8')) : 0) + 1))
+      if (new URL(request.url).pathname === '/empty' && !existsSync('/tmp/subscription-empty-restored')) {
+        return new Response('proxies: []\n', { headers })
+      }
+      if (!existsSync('/tmp/subscription-online')) return new Response('temporarily unavailable', { status: 503, headers })
+      if (new URL(request.url).pathname === '/sub') return new Response(null, {
+        status: 302, headers: { ...headers, Location: 'http://bootstrap.test:8080/nodes' },
+      })
+      return new Response('proxies:\n  - {name: "日本 subscription-node", type: trojan, server: 192.0.2.1, port: 9, password: fixture, sni: example.com}\n', { headers })
     },
   })
   writeFileSync('/tmp/subscription-upstream-ready', '')
@@ -49,9 +60,9 @@ if (process.argv[2] === '--upstream') {
     }
     throw new Error(message)
   }
-  async function api(path, body) {
+  async function api(path, body, method = body === undefined ? 'GET' : 'POST') {
     const response = await fetch(`http://127.0.0.1:6161/api/${path}`, {
-      method: body === undefined ? 'GET' : 'POST',
+      method,
       headers: { 'Content-Type': 'application/json' },
       body: body === undefined ? undefined : JSON.stringify(body),
       signal: AbortSignal.timeout(35000),
@@ -93,8 +104,14 @@ if (process.argv[2] === '--upstream') {
       rmSync('/tmp/subscription-online', { force: true })
       rmSync('/tmp/subscription-requested', { force: true })
       const manual = { type: 'trojan', tag: 'dead-manual', server: '192.0.2.1', server_port: 9, password: 'fixture', tls: { enabled: true, server_name: 'example.com' } }
+      const nodes = [manual,
+        { ...manual, tag: 'detour-leaf', detour: 'detour-parent' },
+        { ...manual, tag: 'detour-parent', detour: 'missing-upstream' },
+      ].map(node => JSON.stringify(node))
       const configPath = `/tmp/bootstrap-${mode}.yaml`
-      writeFileSync(configPath, Bun.YAML.stringify({ port: 6161, route_mode: mode, node_select: 'fastest_jp', subs: ['http://bootstrap.test:8080/sub'], nodes: [JSON.stringify(manual)] }))
+      writeFileSync(configPath, Bun.YAML.stringify({ port: 6161, route_mode: mode, node_select: 'fastest_jp', subs: ['http://bootstrap.test:8080/sub'], nodes,
+        custom_rules: [JSON.stringify({ source_ip_cidr: '192.168.8.194/32', outbound: 'detour-leaf' })],
+      }))
       const logFd = openSync(`/tmp/bootstrap-${mode}.log`, 'w')
       try {
         app = Bun.spawn(['/run/miao-rust', '--config', configPath], { stdout: logFd, stderr: logFd })
@@ -105,6 +122,12 @@ if (process.argv[2] === '--upstream') {
         try { const status = await api('status'); return status.ready && !status.initializing } catch { return false }
       }, 'manual-only startup did not become ready', 15000)
       assert.equal((await api('status')).route_mode, mode)
+      const profileId = createHash('sha256').update(configPath).digest('hex')
+      const runtime = JSON.parse(readFileSync(`/tmp/miao-sing-box/profiles/${profileId}/config.json`, 'utf8'))
+      assert(!runtime.outbounds.some(node => ['detour-leaf', 'detour-parent'].includes(node.tag)))
+      for (const section of ['route', 'dns']) {
+        assert(runtime[section].rules.some(rule => rule.source_ip_cidr === '192.168.8.194/32' && rule.action === 'reject'))
+      }
       // This request must reach the simulated server despite the dead default.
       // Its initial 503 also exercises a real failure followed by recovery.
       await until(() => existsSync('/tmp/subscription-requested'), 'dead manual node prevented subscription DNS/HTTP from reaching its server')
@@ -119,13 +142,71 @@ if (process.argv[2] === '--upstream') {
       assert.equal(status.subscription_refresh.report.fresh_nodes, 1)
       assert.equal(status.node_select, 'fastest_jp')
       const saved = Bun.YAML.parse(readFileSync(configPath, 'utf8'))
-      assert.deepEqual(saved.nodes, [JSON.stringify(manual)], 'recovery must preserve the manual node')
-      console.log(`PASS ${mode} cold boot recovers subscription DNS/HTTP with an unreachable manual node`)
+      assert.deepEqual(saved.nodes, nodes, 'recovery must preserve manual inputs including excluded detours')
+      console.log(`PASS ${mode} cold boot isolates broken detours and recovers subscriptions with an unreachable manual node`)
       await stop(app)
       app = undefined
     }
+
+    const configPath = '/tmp/bootstrap-empty.yaml'
+    writeFileSync(configPath, Bun.YAML.stringify({ port: 6161, subs: ['http://bootstrap.test:8080/empty'] }))
+    const logFd = openSync('/tmp/bootstrap-empty.log', 'w')
+    try {
+      app = Bun.spawn(['/run/miao-rust', '--config', configPath], { stdout: logFd, stderr: logFd })
+    } finally { closeSync(logFd) }
+    await until(async () => {
+      try {
+        const status = await api('status')
+        return !status.ready && !status.initializing && status.subscription_refresh.phase === 'waiting'
+          && status.subscription_refresh.outcome === 'empty' && status.subscription_refresh.retry_in_secs > 1700
+      } catch { return false }
+    }, 'successful empty cold boot did not enter the 30 minute wait', 15000)
+    const requests = readFileSync('/tmp/subscription-request-count', 'utf8')
+    await Bun.sleep(2000)
+    assert.equal(readFileSync('/tmp/subscription-request-count', 'utf8'), requests, 'empty response must not trigger fast retries')
+    writeFileSync('/tmp/subscription-empty-restored', '')
+    await api('subs/refresh', {})
+    assert.equal((await api('status')).ready, true, 'fresh nodes must activate without testing remote connectivity')
+    console.log('PASS successful empty cold boot waits slowly and a foreground refresh activates recovered nodes')
+
+    // Accept an empty deletion after a successful foreground generation, then
+    // exercise the actual Start endpoint. It must begin a new recovery instead
+    // of starting retired bytes or inheriting the previous "success" marker.
+    rmSync('/tmp/subscription-empty-restored')
+    const added = 'http://bootstrap.test:8080/sub'
+    await api('subs', { url: added })
+    const withBothSources = await api('status')
+    assert.equal(withBothSources.ready, true)
+    assert.equal(withBothSources.subscription_refresh.report.successful_sources, 2)
+    await api('subs', { url: added }, 'DELETE')
+    assert.equal((await api('status')).ready, false)
+    assert.deepEqual(Bun.YAML.parse(readFileSync(configPath, 'utf8')).subs, ['http://bootstrap.test:8080/empty'])
+    const profileId = createHash('sha256').update(configPath).digest('hex')
+    assert(!existsSync(`/tmp/miao-sing-box/profiles/${profileId}/config.json`), 'deletion must retire the old active config')
+    const started = await fetch('http://127.0.0.1:6161/api/service/start', {
+      method: 'POST', signal: AbortSignal.timeout(35000),
+    })
+    const startResult = await started.json()
+    assert.equal(started.status, 400, JSON.stringify(startResult))
+    assert.equal(startResult.success, false)
+    assert.match(startResult.message, /30 分钟/)
+    await until(async () => {
+      const status = await api('status')
+      return !status.ready && status.subscription_refresh.phase === 'waiting'
+        && status.subscription_refresh.retry_in_secs > 1700
+    }, 'Start after empty deletion did not retain its new recovery task')
+    const afterStart = readFileSync('/tmp/subscription-request-count', 'utf8')
+    await Bun.sleep(2000)
+    assert.equal(readFileSync('/tmp/subscription-request-count', 'utf8'), afterStart, 'new recovery must keep its slow cadence')
+    assert.equal((await api('status')).subscription_refresh.phase, 'waiting')
+    writeFileSync('/tmp/subscription-empty-restored', '')
+    await api('subs/refresh', {})
+    assert.equal((await api('status')).ready, true)
+    console.log('PASS empty deletion retires the old runtime and a new Start waits for nodes until foreground recovery')
+    await stop(app)
+    app = undefined
   } catch (error) {
-    for (const mode of ['rule', 'global']) {
+    for (const mode of ['rule', 'global', 'empty']) {
       const log = `/tmp/bootstrap-${mode}.log`
       if (existsSync(log)) console.error(readFileSync(log, 'utf8').split('\n').slice(-45).join('\n'))
     }
