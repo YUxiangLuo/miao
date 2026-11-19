@@ -3,7 +3,9 @@ use yaml_serde::Value;
 
 use crate::error::{AppError, AppResult};
 
-use super::protocols::{is_supported_node_type, parse_single_node};
+use super::protocols::{parse_single_node, ClashProtocol};
+
+const MAX_CLASH_PROXIES: usize = 10_000;
 
 /// 节点解析结果，包含有效节点和错误记录
 #[derive(Debug)]
@@ -19,10 +21,10 @@ pub fn parse_clash_proxies(clash_yaml: &str) -> AppResult<ParseResult> {
     let clash_obj: Value = yaml_serde::from_str(clash_yaml)
         .map_err(|e| AppError::context("Failed to parse subscription YAML", e))?;
 
-    let proxy_list = clash_obj.get("proxies").and_then(|p| p.as_sequence());
+    let proxy_list = clash_obj.get("proxies").and_then(Value::as_sequence);
     let proxies = proxy_list.map(Vec::as_slice).unwrap_or_default();
     // Count the original entries, before unsupported/invalid nodes are skipped.
-    if proxies.len() > 10_000 {
+    if proxies.len() > MAX_CLASH_PROXIES {
         return Err(AppError::message("订阅节点数超过 10000 上限"));
     }
 
@@ -36,26 +38,28 @@ pub fn parse_clash_proxies(clash_yaml: &str) -> AppResult<ParseResult> {
     for (idx, node) in proxies.iter().enumerate() {
         let node_type = node
             .get("type")
-            .and_then(|t| t.as_str())
+            .and_then(Value::as_str)
             .unwrap_or("unknown");
-        let normalized_type = node_type.to_ascii_lowercase();
 
-        // Skip unsupported node types silently
-        if !is_supported_node_type(&normalized_type) {
+        // Skip unsupported node types silently rather than recording parse errors.
+        let Some(protocol) = ClashProtocol::from_clash_type(node_type) else {
             continue;
-        }
+        };
 
-        match parse_single_node(node) {
+        match parse_single_node(protocol, node) {
             Ok((name, outbound)) => result.nodes.push((name, outbound)),
             Err(err) => {
-                let name = node
-                    .get("name")
-                    .and_then(|n| n.as_str())
-                    .map(|s| s.to_string())
-                    .unwrap_or_else(|| format!("<index {}>", idx));
+                let fallback_name;
+                let name = match node.get("name").and_then(Value::as_str) {
+                    Some(name) => name,
+                    None => {
+                        fallback_name = format!("<index {idx}>");
+                        &fallback_name
+                    }
+                };
                 result
                     .errors
-                    .push(format!("Node '{}' (type: {}): {}", name, node_type, err));
+                    .push(format!("Node '{name}' (type: {node_type}): {err}"));
             }
         }
     }

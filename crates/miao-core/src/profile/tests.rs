@@ -414,3 +414,24 @@ fn temporary_directory_outlives_all_state_leases_but_unowned_directories_are_not
     );
     assert!(env.cwd.exists());
 }
+
+#[test]
+fn temporary_profile_rejects_paths_escaping_its_directory_and_normalizes_missing_dotdot() {
+    let (_root, env) = environment();
+    let direct = named(env.cwd.join("new/config.yaml"), &env);
+    let dotdot = named(env.cwd.join("new/nested/../config.yaml"), &env);
+    assert_eq!(direct.config.path, dotdot.config.path);
+    assert_eq!(direct.runtime, dotdot.runtime);
+
+    let prepared = crate::cli::prepare(crate::cli::LaunchSource::Subscription {
+        url: "https://example.com/sub".into(),
+        node_select: Default::default(),
+    })
+    .unwrap();
+    let mut escaped = prepared.options;
+    escaped.log_path = Some(env.cwd.join("outside.log"));
+    let err = ResolvedProfile::resolve_in(&escaped, prepared.profile, &env)
+        .err()
+        .expect("escaped log path must be rejected");
+    assert!(err.to_string().contains("Temporary profile paths"));
+}

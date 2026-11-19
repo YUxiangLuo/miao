@@ -171,49 +171,54 @@ pub async fn provision_vps_node(vps_ip: &str, root_password: &str) -> AppResult<
     Validator::server_address(&vps_ip)
         .map_err(|e| AppError::message(format!("Invalid VPS address '{}': {}", vps_ip, e)))?;
 
-    let fallback_obfs_password = random_password()?;
-    let credentials = match probe_remote_hysteria_credentials(
-        &vps_ip,
-        &fallback_obfs_password,
-        root_password,
-    )
-    .await
-    {
-        Ok(RemoteHysteriaState::Reusable(credentials)) => {
-            info!(vps_ip = %vps_ip, port = HYSTERIA_PORT, obfs = HYSTERIA_OBFS_TYPE, "Recovered existing VPS Hysteria2 node from remote config");
-            credentials
-        }
-        Ok(RemoteHysteriaState::NeedsMigration(credentials)) => {
-            info!(vps_ip = %vps_ip, "Migrating legacy Miao Hysteria2 deployment transactionally");
-            provision_remote_hysteria(&vps_ip, &credentials, root_password).await?;
-            credentials
-        }
-        Ok(RemoteHysteriaState::NotFound) => {
-            let credentials = HysteriaCredentials {
-                password: random_password()?,
-                obfs_password: fallback_obfs_password,
-            };
-            info!(vps_ip = %vps_ip, port = HYSTERIA_PORT, obfs = HYSTERIA_OBFS_TYPE, "Provisioning Hysteria2 server over SSH");
-            provision_remote_hysteria(&vps_ip, &credentials, root_password).await?;
-            credentials
-        }
-        Ok(RemoteHysteriaState::NeedsCleanup) => {
-            let credentials = HysteriaCredentials {
-                password: random_password()?,
-                obfs_password: fallback_obfs_password,
-            };
-            warn!(vps_ip = %vps_ip, port = HYSTERIA_PORT, obfs = HYSTERIA_OBFS_TYPE, "Existing Hysteria2 service is not deployed by Miao; cleaning up and re-provisioning");
-            provision_remote_hysteria(&vps_ip, &credentials, root_password).await?;
-            credentials
-        }
-        // 探针失败(认证失败/不可达)直接报错,不盲目重装
-        Err(e) => return Err(e),
-    };
-
+    let credentials = resolve_or_provision_credentials(&vps_ip, root_password).await?;
     let node_json =
         build_hysteria_node_json(&vps_ip, &credentials.password, &credentials.obfs_password)?;
     info!(vps_ip = %vps_ip, port = HYSTERIA_PORT, "Provisioned VPS Hysteria2 node");
     Ok(node_json)
+}
+
+async fn resolve_or_provision_credentials(
+    vps_ip: &str,
+    root_password: &str,
+) -> AppResult<HysteriaCredentials> {
+    let fallback_obfs_password = random_password()?;
+    // 探针失败(认证失败/不可达)直接报错,不盲目重装
+    let state =
+        probe_remote_hysteria_credentials(vps_ip, &fallback_obfs_password, root_password).await?;
+
+    match state {
+        RemoteHysteriaState::Reusable(credentials) => {
+            info!(vps_ip = %vps_ip, port = HYSTERIA_PORT, obfs = HYSTERIA_OBFS_TYPE, "Recovered existing VPS Hysteria2 node from remote config");
+            Ok(credentials)
+        }
+        RemoteHysteriaState::NeedsMigration(credentials) => {
+            info!(vps_ip = %vps_ip, "Migrating legacy Miao Hysteria2 deployment transactionally");
+            provision_remote_hysteria(vps_ip, &credentials, root_password).await?;
+            Ok(credentials)
+        }
+        RemoteHysteriaState::NotFound => {
+            info!(vps_ip = %vps_ip, port = HYSTERIA_PORT, obfs = HYSTERIA_OBFS_TYPE, "Provisioning Hysteria2 server over SSH");
+            provision_fresh_hysteria(vps_ip, fallback_obfs_password, root_password).await
+        }
+        RemoteHysteriaState::NeedsCleanup => {
+            warn!(vps_ip = %vps_ip, port = HYSTERIA_PORT, obfs = HYSTERIA_OBFS_TYPE, "Existing Hysteria2 service is not deployed by Miao; cleaning up and re-provisioning");
+            provision_fresh_hysteria(vps_ip, fallback_obfs_password, root_password).await
+        }
+    }
+}
+
+async fn provision_fresh_hysteria(
+    vps_ip: &str,
+    obfs_password: String,
+    root_password: &str,
+) -> AppResult<HysteriaCredentials> {
+    let credentials = HysteriaCredentials {
+        password: random_password()?,
+        obfs_password,
+    };
+    provision_remote_hysteria(vps_ip, &credentials, root_password).await?;
+    Ok(credentials)
 }
 
 fn build_hysteria_node_json(
@@ -253,21 +258,14 @@ fn vps_node_tag(server: &str) -> String {
         }
     }
 
-    while tag.ends_with('-') {
-        tag.pop();
-    }
-
     if tag.len() > 64 {
         tag.truncate(64);
-        while tag.ends_with('-') {
-            tag.pop();
-        }
     }
-
-    if tag == "vps" {
+    let trimmed = tag.trim_end_matches('-');
+    if trimmed == "vps" {
         "vps-node".to_string()
     } else {
-        tag
+        trimmed.to_string()
     }
 }
 

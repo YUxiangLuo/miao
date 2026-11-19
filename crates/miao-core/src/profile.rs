@@ -48,6 +48,16 @@ impl Environment {
     }
 }
 
+fn append_relative_tail(resolved: &mut PathBuf, tail: Vec<std::ffi::OsString>) {
+    for component in tail.into_iter().rev() {
+        if component == ".." {
+            resolved.pop();
+        } else if component != "." {
+            resolved.push(component);
+        }
+    }
+}
+
 /// Resolve existing symlinks and relative aliases. For a new configuration,
 /// resolve its nearest existing ancestor so its identity survives first save.
 fn resolve_path(path: &Path, cwd: &Path) -> AppResult<PathBuf> {
@@ -67,13 +77,7 @@ fn resolve_path(path: &Path, cwd: &Path) -> AppResult<PathBuf> {
                         "Profile path ancestor is not a directory",
                     ));
                 }
-                for component in tail.into_iter().rev() {
-                    if component == ".." {
-                        resolved.pop();
-                    } else if component != "." {
-                        resolved.push(component);
-                    }
-                }
+                append_relative_tail(&mut resolved, tail);
                 return Ok(resolved);
             }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
@@ -88,6 +92,99 @@ fn resolve_path(path: &Path, cwd: &Path) -> AppResult<PathBuf> {
             Err(error) => return Err(AppError::context("Failed to resolve profile path", error)),
         }
     }
+}
+
+/// An inaccessible *unselected* installed profile must never prevent a
+/// temporary/explicit launch. Only resolve it for best-effort identity
+/// comparison; its contents and legacy state are never imported.
+fn classify_profile_kind(
+    options: &RuntimeOptions,
+    is_temporary: bool,
+    config_path: &Path,
+    env: &Environment,
+) -> ProfileKind {
+    if is_temporary {
+        return ProfileKind::Temporary;
+    }
+    let matches_default = options.config_path.is_none()
+        || config_path == env.default_config.path
+        || resolve_path(&env.default_config.path, &env.cwd)
+            .ok()
+            .as_deref()
+            == Some(config_path);
+    if matches_default {
+        ProfileKind::Default
+    } else {
+        ProfileKind::Named
+    }
+}
+
+fn select_runtime_dir(
+    options: &RuntimeOptions,
+    kind: ProfileKind,
+    profile_id: &str,
+    env: &Environment,
+) -> AppResult<PathBuf> {
+    match &options.runtime_dir {
+        Some(path) => resolve_path(path, &env.cwd),
+        None if kind == ProfileKind::Named => {
+            Ok(env.runtime_root.join("profiles").join(profile_id))
+        }
+        None => Ok(env.runtime_root.clone()),
+    }
+}
+
+/// Preference files (`.last_proxy`, `.node_select`, `.max_multiplier`) live:
+/// - in `runtime_dir` when `runtime_dir` is explicitly overridden or on
+///   OpenWrt/non-systemd hosts (`PreferenceStore::Runtime`, tmpfs flash safety);
+/// - in `.miao-profiles/<id>` alongside config for named profiles on systemd;
+/// - in startup `cwd` (`/etc/miao` under systemd unit) for the default profile.
+fn select_preference_dir(
+    has_runtime_override: bool,
+    kind: ProfileKind,
+    runtime_dir: &Path,
+    persistent_dir: &Path,
+    env: &Environment,
+) -> PathBuf {
+    match (has_runtime_override, env.preferences, kind) {
+        (true, _, _) | (false, PreferenceStore::Runtime, _) => runtime_dir.to_path_buf(),
+        (false, PreferenceStore::Working, ProfileKind::Named) => persistent_dir.to_path_buf(),
+        (false, PreferenceStore::Working, ProfileKind::Default | ProfileKind::Temporary) => {
+            env.cwd.clone()
+        }
+    }
+}
+
+fn ensure_temporary_containment(
+    owner: &tempfile::TempDir,
+    config_path: &Path,
+    runtime: &RuntimePaths,
+    volatile: &Path,
+    log: Option<&Path>,
+) -> AppResult<()> {
+    let root = std::fs::canonicalize(owner.path())?;
+    let required_paths = [
+        config_path,
+        runtime.runtime_dir.as_path(),
+        runtime.node_bindings.as_path(),
+        runtime.last_proxy.as_path(),
+        runtime.node_select_preference.as_path(),
+        runtime.max_multiplier_preference.as_path(),
+        volatile,
+    ];
+    let escaped = required_paths.iter().any(|path| !path.starts_with(&root))
+        || log.is_some_and(|path| !path.starts_with(&root));
+    if escaped {
+        return Err(AppError::message(
+            "Temporary profile paths must remain inside its directory",
+        ));
+    }
+    Ok(())
+}
+
+fn legacy_bindings_source(config_path: &Path, target_bindings: &Path) -> Option<PathBuf> {
+    let legacy = config_path.with_extension("node-bindings.json");
+    (!paths::is_standard_config(config_path) && legacy != target_bindings).then_some(legacy)
 }
 
 impl ResolvedProfile {
@@ -110,87 +207,45 @@ impl ResolvedProfile {
                 .unwrap_or(&env.default_config.path),
             &env.cwd,
         )?;
-        // An inaccessible *unselected* installed profile must never prevent a
-        // temporary/explicit launch. Only resolve it for best-effort identity
-        // comparison; its contents and legacy state are never imported.
-        let is_default = options.config_path.is_none()
-            || (temporary.is_none()
-                && (config_path == env.default_config.path
-                    || resolve_path(&env.default_config.path, &env.cwd)
-                        .ok()
-                        .as_ref()
-                        == Some(&config_path)));
-        let kind = if temporary.is_some() {
-            ProfileKind::Temporary
-        } else if is_default {
-            ProfileKind::Default
-        } else {
-            ProfileKind::Named
-        };
+        let kind = classify_profile_kind(options, temporary.is_some(), &config_path, env);
         let id = paths::profile_id(&config_path);
         let persistent = paths::profile_state_dir(&config_path);
-        let runtime_dir = match &options.runtime_dir {
-            Some(path) => resolve_path(path, &env.cwd)?,
-            None if kind == ProfileKind::Named => env.runtime_root.join("profiles").join(&id),
-            None => env.runtime_root.clone(),
-        };
-        let overridden = options.runtime_dir.is_some();
-        let preference_dir = if overridden || env.preferences == PreferenceStore::Runtime {
-            runtime_dir.clone()
-        } else if kind == ProfileKind::Named {
-            persistent.clone()
-        } else {
-            match env.preferences {
-                PreferenceStore::Working => env.cwd.clone(),
-                PreferenceStore::Runtime => unreachable!("handled above"),
-            }
-        };
+        let runtime_dir = select_runtime_dir(options, kind, &id, env)?;
+        let preference_dir = select_preference_dir(
+            options.runtime_dir.is_some(),
+            kind,
+            &runtime_dir,
+            &persistent,
+            env,
+        );
         let volatile = match &options.volatile_path {
             Some(path) => resolve_path(path, &env.cwd)?,
             None => runtime_dir.join("volatile.yaml"),
         };
-        let log = match &options.log_path {
-            Some(path) => Some(resolve_path(path, &env.cwd)?),
-            None => None,
-        };
+        let log = options
+            .log_path
+            .as_deref()
+            .map(|path| resolve_path(path, &env.cwd))
+            .transpose()?;
         let runtime = RuntimePaths::new(runtime_dir, &config_path).with_preferences(
             preference_dir.join(".last_proxy"),
             preference_dir.join(".node_select"),
             preference_dir.join(".max_multiplier"),
         );
         if let Some(owner) = &temporary {
-            let root = std::fs::canonicalize(owner.path())?;
-            if [
-                &config_path,
-                &runtime.runtime_dir,
-                &runtime.node_bindings,
-                &runtime.last_proxy,
-                &runtime.node_select_preference,
-                &runtime.max_multiplier_preference,
-                &volatile,
-            ]
-            .iter()
-            .any(|path| !path.starts_with(&root))
-                || log.as_ref().is_some_and(|path| !path.starts_with(&root))
-            {
-                return Err(AppError::message(
-                    "Temporary profile paths must remain inside its directory",
-                ));
-            }
+            ensure_temporary_containment(owner, &config_path, &runtime, &volatile, log.as_deref())?;
         }
-        let legacy = config_path.with_extension("node-bindings.json");
-        let legacy_bindings = (!paths::is_standard_config(&config_path)
-            && legacy != runtime.node_bindings)
-            .then_some(legacy);
+        let legacy_bindings = legacy_bindings_source(&config_path, &runtime.node_bindings);
+        let source = if options.config_path.is_some() {
+            ConfigPathSource::Explicit
+        } else {
+            env.default_config.source.clone()
+        };
         Ok(Self {
             kind,
             config: ConfigPathResolution {
                 path: config_path,
-                source: if options.config_path.is_some() {
-                    ConfigPathSource::Explicit
-                } else {
-                    env.default_config.source.clone()
-                },
+                source,
             },
             runtime,
             volatile,

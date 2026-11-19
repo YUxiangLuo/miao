@@ -4,7 +4,8 @@ use std::time::Instant;
 use tokio::time::Duration;
 
 use super::{
-    command_error, success, success_no_data, CommandErrorKind, CommandReply, CommandResult,
+    command_error, success, success_no_data, CommandError, CommandErrorKind, CommandReply,
+    CommandResult,
 };
 use crate::error::AppError;
 use crate::models::{
@@ -59,78 +60,90 @@ pub async fn get_status(state: Arc<AppState>) -> CommandReply<StatusData> {
     )
 }
 
+fn needs_runtime_recovery(state: &AppState) -> bool {
+    state.lifecycle.snapshot().phase == RuntimePhase::Failed
+        || !state.runtime_paths.active_config.is_file()
+}
+
+async fn extract_runtime_for_recovery(
+    state: &AppState,
+    generation: u64,
+) -> Result<(), CommandError> {
+    let _activity = state
+        .lifecycle
+        .activity(crate::state::lifecycle::RuntimeActivity::Extracting);
+    let runtime_dir = state.runtime_paths.runtime_dir.clone();
+    let extracted = tokio::task::spawn_blocking(move || extract_sing_box_to(&runtime_dir)).await;
+    match extracted {
+        Ok(Ok(_)) => Ok(()),
+        Ok(Err(err)) => {
+            state.lifecycle.finish(generation, RuntimePhase::Failed);
+            Err(command_error(
+                CommandErrorKind::Internal,
+                format!("Failed to prepare embedded runtime: {err}"),
+            ))
+        }
+        Err(err) => {
+            state.lifecycle.finish(generation, RuntimePhase::Failed);
+            Err(command_error(
+                CommandErrorKind::Internal,
+                format!("Embedded runtime extraction task failed: {err}"),
+            ))
+        }
+    }
+}
+
+async fn recover_service_after_extract(state: Arc<AppState>) -> CommandResult {
+    let recovery = crate::runtime::recover_data_plane_once(&state).await;
+    if recovery == crate::runtime::RecoveryOutcome::WaitForNodes {
+        let waiting = state.clone();
+        tokio::spawn(async move { crate::runtime::retry_waiting_for_nodes(&waiting).await });
+        return Err(command_error(
+            CommandErrorKind::InvalidInput,
+            crate::services::config::SUBS_WAITING_FOR_NODES,
+        ));
+    }
+    if state.lifecycle.snapshot().ready {
+        if recovery == crate::runtime::RecoveryOutcome::RetrySubscriptions {
+            let recovering = state.clone();
+            tokio::spawn(async move {
+                crate::runtime::retry_recovered_subscriptions(&recovering).await
+            });
+        }
+        return Ok(success_no_data("sing-box recovered successfully"));
+    }
+    Err(command_error(
+        CommandErrorKind::Internal,
+        "Failed to recover sing-box runtime",
+    ))
+}
+
 pub async fn start_service(state: Arc<AppState>) -> CommandResult {
     super::ensure_initialized(&state)?;
 
     let config_update = state.config_update.lock().await;
-    let config = state.config.read().await;
-    if config.subs.is_empty() && config.nodes.is_empty() {
-        return Err(command_error(
-            CommandErrorKind::InvalidInput,
-            "Add a subscription or node before starting sing-box",
-        ));
+    {
+        let config = state.config.read().await;
+        if config.subs.is_empty() && config.nodes.is_empty() {
+            return Err(command_error(
+                CommandErrorKind::InvalidInput,
+                "Add a subscription or node before starting sing-box",
+            ));
+        }
     }
-    drop(config);
 
     // Record the user's desired state before launching. If startup fails, a
     // subsequent config fix should retry starting instead of silently keeping
     // the explicitly stopped state.
     state.lifecycle.request_running(true);
 
-    if state.lifecycle.snapshot().phase == RuntimePhase::Failed
-        || !state.runtime_paths.active_config.is_file()
-    {
+    if needs_runtime_recovery(&state) {
         let generation = state.lifecycle.snapshot().generation;
-        let activity = state
-            .lifecycle
-            .activity(crate::state::lifecycle::RuntimeActivity::Extracting);
-        let runtime_dir = state.runtime_paths.runtime_dir.clone();
-        let extracted =
-            tokio::task::spawn_blocking(move || extract_sing_box_to(&runtime_dir)).await;
-        match extracted {
-            Ok(Ok(_)) => {}
-            Ok(Err(err)) => {
-                state.lifecycle.finish(generation, RuntimePhase::Failed);
-                return Err(command_error(
-                    CommandErrorKind::Internal,
-                    format!("Failed to prepare embedded runtime: {err}"),
-                ));
-            }
-            Err(err) => {
-                state.lifecycle.finish(generation, RuntimePhase::Failed);
-                return Err(command_error(
-                    CommandErrorKind::Internal,
-                    format!("Embedded runtime extraction task failed: {err}"),
-                ));
-            }
-        }
-
+        extract_runtime_for_recovery(&state, generation).await?;
         // The recovery helper fetches subscriptions without this lock and takes
         // it again only while publishing a current result.
-        drop(activity);
         drop(config_update);
-        let recovery = crate::runtime::recover_data_plane_once(&state).await;
-        if recovery == crate::runtime::RecoveryOutcome::WaitForNodes {
-            let waiting = state.clone();
-            tokio::spawn(async move { crate::runtime::retry_waiting_for_nodes(&waiting).await });
-            return Err(command_error(
-                CommandErrorKind::InvalidInput,
-                crate::services::config::SUBS_WAITING_FOR_NODES,
-            ));
-        }
-        if state.lifecycle.snapshot().ready {
-            if recovery == crate::runtime::RecoveryOutcome::RetrySubscriptions {
-                let recovering = state.clone();
-                tokio::spawn(async move {
-                    crate::runtime::retry_recovered_subscriptions(&recovering).await
-                });
-            }
-            return Ok(success_no_data("sing-box recovered successfully"));
-        }
-        return Err(command_error(
-            CommandErrorKind::Internal,
-            "Failed to recover sing-box runtime",
-        ));
+        return recover_service_after_extract(state).await;
     }
 
     match start_sing_internal(&state).await {
@@ -326,6 +339,16 @@ pub(crate) struct ConnectivityRequest {
     pub(crate) url: String,
 }
 
+fn classify_connectivity_error(error: &reqwest::Error) -> &'static str {
+    if error.is_timeout() {
+        "timeout"
+    } else if error.is_connect() {
+        "connect"
+    } else {
+        "request"
+    }
+}
+
 pub async fn test_connectivity(
     state: Arc<AppState>,
     req: ConnectivityRequest,
@@ -353,16 +376,7 @@ pub async fn test_connectivity(
             latency_ms: None,
             success: false,
             http_status: None,
-            error_kind: Some(
-                if error.is_timeout() {
-                    "timeout"
-                } else if error.is_connect() {
-                    "connect"
-                } else {
-                    "request"
-                }
-                .into(),
-            ),
+            error_kind: Some(classify_connectivity_error(&error).into()),
             error: Some(error.without_url().to_string()),
         },
     };

@@ -91,67 +91,121 @@ pub(super) async fn run_script(
     }
 }
 
-pub(super) fn failure(output: &SshOutput, stage: &str, secrets: &[&str]) -> AppError {
-    let mut details = String::from_utf8_lossy(&output.stderr).into_owned();
+const SSH_CLIENT_ERROR_CODE: i32 = 255;
+const DETAIL_TAIL_CHARS: usize = 4000;
+const GENERIC_REMOTE_FAILURE: &str = "远端操作失败。请查看下方错误详情，检查 VPS 环境后重试。";
+
+struct ClassifiedFailure<'a> {
+    hint: &'a str,
+    attach_auth_help: bool,
+}
+
+fn redact_secrets(raw_stderr: &[u8], secrets: &[&str]) -> String {
+    let mut details = String::from_utf8_lossy(raw_stderr).into_owned();
     for secret in secrets.iter().filter(|secret| !secret.is_empty()) {
         details = details.replace(secret, "[已隐藏]");
     }
-    let lower = details.to_ascii_lowercase();
-    let authentication_failed = output.status.code() == Some(255)
-        && (lower.contains("permission denied")
-            || lower.contains("authentication failed")
-            || lower.contains("no supported authentication methods"));
-    let hint = if output.status.code() != Some(255) {
-        details
-            .lines()
-            .rev()
-            .find_map(|line| line.strip_prefix("MIAO_ERROR: "))
-            .unwrap_or("远端操作失败。请查看下方错误详情，检查 VPS 环境后重试。")
-    } else if lower.contains("remote host identification has changed")
+    details
+}
+
+fn extract_miao_error(details: &str) -> &str {
+    details
+        .lines()
+        .rev()
+        .find_map(|line| line.strip_prefix("MIAO_ERROR: "))
+        .unwrap_or(GENERIC_REMOTE_FAILURE)
+}
+
+/// OpenSSH reserves exit code 255 for transport/client/authentication errors;
+/// any other non-zero exit code comes from the remote POSIX shell script
+/// (e.g., `Permission denied` inside a remote command must NOT trigger SSH auth help).
+fn classify_exit_255<'a>(lower: &str, details: &'a str) -> ClassifiedFailure<'a> {
+    if lower.contains("remote host identification has changed")
         || lower.contains("host key verification failed")
     {
-        "SSH 主机密钥校验失败。若 VPS 曾重装，请先通过服务商控制台核对主机指纹，再更新运行 Miao 账户的 known_hosts；不要直接关闭主机校验。"
-    } else if authentication_failed {
-        "SSH 认证被拒绝。当前部署使用 root 密码登录：请确认密码正确，且 VPS 允许 root 登录和密码认证。客户端无法区分密码错误与服务端禁用登录；请通过服务商控制台检查 sshd 的 PermitRootLogin、PasswordAuthentication、Include/Match 配置及认证日志。若仅允许密钥登录，当前密码部署方式不适用。"
+        ClassifiedFailure {
+            hint: "SSH 主机密钥校验失败。若 VPS 曾重装，请先通过服务商控制台核对主机指纹，再更新运行 Miao 账户的 known_hosts；不要直接关闭主机校验。",
+            attach_auth_help: false,
+        }
+    } else if lower.contains("permission denied")
+        || lower.contains("authentication failed")
+        || lower.contains("no supported authentication methods")
+    {
+        ClassifiedFailure {
+            hint: "SSH 认证被拒绝。当前部署使用 root 密码登录：请确认密码正确，且 VPS 允许 root 登录和密码认证。客户端无法区分密码错误与服务端禁用登录；请通过服务商控制台检查 sshd 的 PermitRootLogin、PasswordAuthentication、Include/Match 配置及认证日志。若仅允许密钥登录，当前密码部署方式不适用。",
+            attach_auth_help: true,
+        }
     } else if lower.contains("connection refused") {
-        "SSH 连接被拒绝。请确认 VPS 的 SSH 服务已启动并监听 22 端口；当前部署使用固定的 22 端口。"
+        ClassifiedFailure {
+            hint: "SSH 连接被拒绝。请确认 VPS 的 SSH 服务已启动并监听 22 端口；当前部署使用固定的 22 端口。",
+            attach_auth_help: false,
+        }
     } else if lower.contains("connection timed out") || lower.contains("operation timed out") {
-        "SSH 连接超时。请检查 VPS 地址、22 端口，以及服务商安全组和防火墙是否允许运行 Miao 的设备连接。"
+        ClassifiedFailure {
+            hint: "SSH 连接超时。请检查 VPS 地址、22 端口，以及服务商安全组和防火墙是否允许运行 Miao 的设备连接。",
+            attach_auth_help: false,
+        }
     } else if lower.contains("no route to host") || lower.contains("network is unreachable") {
-        "无法到达 VPS。请检查地址、网络路由，以及本机是否具备对应的 IPv4/IPv6 连通性。"
+        ClassifiedFailure {
+            hint: "无法到达 VPS。请检查地址、网络路由，以及本机是否具备对应的 IPv4/IPv6 连通性。",
+            attach_auth_help: false,
+        }
     } else if lower.contains("could not resolve hostname") {
-        "无法解析 VPS 地址。请检查域名拼写及运行 Miao 设备的 DNS。"
+        ClassifiedFailure {
+            hint: "无法解析 VPS 地址。请检查域名拼写及运行 Miao 设备的 DNS。",
+            attach_auth_help: false,
+        }
     } else if lower.contains("connection reset")
         || lower.contains("connection closed")
         || lower.contains("broken pipe")
     {
-        "SSH 连接被中断。请检查 VPS 的 SSH 服务日志、连接限制或封禁策略（如 Fail2ban），并确认网络稳定后重试。"
+        ClassifiedFailure {
+            hint: "SSH 连接被中断。请检查 VPS 的 SSH 服务日志、连接限制或封禁策略（如 Fail2ban），并确认网络稳定后重试。",
+            attach_auth_help: false,
+        }
     } else {
-        details
-            .lines()
-            .rev()
-            .find_map(|line| line.strip_prefix("MIAO_ERROR: "))
-            .unwrap_or("远端操作失败。请查看下方错误详情，检查 VPS 环境后重试。")
-    };
+        ClassifiedFailure {
+            hint: extract_miao_error(details),
+            attach_auth_help: false,
+        }
+    }
+}
+
+fn format_sanitized_tail(details: &str) -> String {
     let clean: String = details
         .chars()
         .filter(|c| !c.is_control() || *c == '\n' || *c == '\t')
         .collect();
-    let detail: String = clean
+    clean
         .chars()
         .rev()
-        .take(4000)
+        .take(DETAIL_TAIL_CHARS)
         .collect::<Vec<_>>()
         .into_iter()
         .rev()
-        .collect();
-    let help = if authentication_failed {
+        .collect()
+}
+
+pub(super) fn failure(output: &SshOutput, stage: &str, secrets: &[&str]) -> AppError {
+    let details = redact_secrets(&output.stderr, secrets);
+    let lower = details.to_ascii_lowercase();
+    let classified = if output.status.code() == Some(SSH_CLIENT_ERROR_CODE) {
+        classify_exit_255(&lower, &details)
+    } else {
+        ClassifiedFailure {
+            hint: extract_miao_error(&details),
+            attach_auth_help: false,
+        }
+    };
+    let detail = format_sanitized_tail(&details);
+    let help = if classified.attach_auth_help {
         format!("\n\n{}", include_str!("ssh-auth-help.txt").trim())
     } else {
         String::new()
     };
     AppError::message(format!(
-        "{stage}失败：{hint}{help}\n\n错误详情（退出状态 {}）：\n{}",
+        "{stage}失败：{}{help}\n\n错误详情（退出状态 {}）：\n{}",
+        classified.hint,
         output.status,
         if detail.trim().is_empty() {
             "SSH 未返回错误信息"

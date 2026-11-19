@@ -1,11 +1,58 @@
 use std::sync::Arc;
 
-use super::{command_error, success, CommandErrorKind, CommandResult};
+use super::{command_error, success, CommandError, CommandErrorKind, CommandReply, CommandResult};
 use crate::models::{VpsDeployRequest, VpsDeployResponse};
 use crate::services::config::ConfigEdit;
 use crate::services::vps::{node_tag_for_vps, provision_vps_node};
 use crate::state::AppState;
 use crate::validation::Validator;
+
+fn validate_deploy_request(req: &VpsDeployRequest) -> Result<&str, CommandError> {
+    let ip = req.ip.trim();
+    Validator::server_address(ip).map_err(|e| command_error(CommandErrorKind::InvalidInput, e))?;
+    if req.password.is_empty() {
+        return Err(command_error(
+            CommandErrorKind::InvalidInput,
+            "root 密码不能为空",
+        ));
+    }
+    if req.password.len() > 256 {
+        return Err(command_error(
+            CommandErrorKind::InvalidInput,
+            "root 密码过长",
+        ));
+    }
+    Ok(ip)
+}
+
+/// Hold a per-address lock across SSH and config commit, never the global
+/// config lock during network I/O. Weak entries don't retain idle locks.
+async fn acquire_vps_deployment_lock(
+    state: &AppState,
+    ip: &str,
+) -> tokio::sync::OwnedMutexGuard<()> {
+    let deployment = {
+        let mut deployments = state.vps_deployments.lock().await;
+        deployments.retain(|_, lock| lock.strong_count() > 0);
+        let entry = deployments.entry(ip.to_string()).or_default();
+        match entry.upgrade() {
+            Some(lock) => lock,
+            None => {
+                let lock = Arc::new(tokio::sync::Mutex::new(()));
+                *entry = Arc::downgrade(&lock);
+                lock
+            }
+        }
+    };
+    deployment.lock_owned().await
+}
+
+fn existing_vps_reply(tag: String) -> CommandReply<VpsDeployResponse> {
+    success(
+        format!("该 VPS 的节点已存在: {tag}"),
+        VpsDeployResponse { tag },
+    )
+}
 
 pub async fn deploy_vps(
     state: Arc<AppState>,
@@ -23,48 +70,13 @@ async fn deploy_vps_with<F: std::future::Future<Output = crate::error::AppResult
     provision: impl FnOnce(String, String) -> F,
 ) -> CommandResult<VpsDeployResponse> {
     super::ensure_initialized(&state)?;
+    let ip = validate_deploy_request(&req)?;
 
-    let ip = req.ip.trim();
-    Validator::server_address(ip).map_err(|e| command_error(CommandErrorKind::InvalidInput, e))?;
-    if req.password.is_empty() {
-        return Err(command_error(
-            CommandErrorKind::InvalidInput,
-            "root 密码不能为空",
-        ));
-    }
-    if req.password.len() > 256 {
-        return Err(command_error(
-            CommandErrorKind::InvalidInput,
-            "root 密码过长",
-        ));
-    }
-
-    // Hold a per-address lock across SSH and config commit, never the global
-    // config lock during network I/O. Weak entries don't retain idle locks.
-    let deployment = {
-        let mut deployments = state.vps_deployments.lock().await;
-        deployments.retain(|_, lock| lock.strong_count() > 0);
-        let entry = deployments.entry(ip.to_string()).or_default();
-        match entry.upgrade() {
-            Some(lock) => lock,
-            None => {
-                let lock = Arc::new(tokio::sync::Mutex::new(()));
-                *entry = Arc::downgrade(&lock);
-                lock
-            }
-        }
-    };
-    let _deployment = deployment.lock_owned().await;
+    let _deployment = acquire_vps_deployment_lock(&state, ip).await;
 
     // 排队请求在前一次部署落盘后复用节点，不再次改写远端凭据。
-    {
-        let config = state.config.read().await;
-        if let Some(tag) = node_tag_for_vps(&config, ip) {
-            return Ok(success(
-                format!("该 VPS 的节点已存在: {tag}"),
-                VpsDeployResponse { tag },
-            ));
-        }
+    if let Some(tag) = node_tag_for_vps(&*state.config.read().await, ip) {
+        return Ok(existing_vps_reply(tag));
     }
 
     // SSH 供给可能耗时数分钟：不持 config_update 锁，避免阻塞所有配置变更。
@@ -77,10 +89,7 @@ async fn deploy_vps_with<F: std::future::Future<Output = crate::error::AppResult
 
     // 供给期间其他变更可能已添加同一 VPS 的节点
     if let Some(tag) = node_tag_for_vps(edit.original(), ip) {
-        return Ok(success(
-            format!("该 VPS 的节点已存在: {tag}"),
-            VpsDeployResponse { tag },
-        ));
+        return Ok(existing_vps_reply(tag));
     }
 
     edit.candidate.nodes.push(node_json);

@@ -785,3 +785,71 @@ proxies:
     assert_eq!(result.errors.len(), 1);
     assert!(result.errors[0].contains("ss-no-cipher"));
 }
+
+#[test]
+fn parse_clash_proxies_enforces_raw_proxy_limit_before_skipping_unsupported_types() {
+    let mut yaml = String::from("proxies:\n");
+    for idx in 0..10_000 {
+        yaml.push_str(&format!(
+            "  - {{name: n{idx}, type: snell, server: s.example.com, port: 443}}\n"
+        ));
+    }
+    let at_limit = parse_clash_proxies(&yaml).unwrap();
+    assert_eq!(at_limit.total_count, 10_000);
+    assert!(at_limit.nodes.is_empty());
+
+    yaml.push_str("  - {name: overflow, type: snell, server: s.example.com, port: 443}\n");
+    let err = parse_clash_proxies(&yaml).unwrap_err();
+    assert!(err.to_string().contains("10000"));
+}
+
+#[test]
+fn parse_clash_proxies_keeps_tls_enabled_for_mandatory_tls_protocols_even_when_false() {
+    let yaml = r#"
+proxies:
+  - name: hy2-explicit-false
+    type: hysteria2
+    server: hy.example.com
+    port: 443
+    password: pass
+    tls: false
+    skip-cert-verify: true
+    servername: sni.example.com
+  - type: trojan
+    server: tr.example.com
+    port: 443
+"#;
+
+    let result = parse_clash_proxies(yaml).unwrap();
+    assert_eq!(result.nodes.len(), 1);
+    assert_eq!(result.nodes[0].1["tls"]["enabled"], true);
+    assert_eq!(result.nodes[0].1["tls"]["insecure"], true);
+    assert_eq!(result.nodes[0].1["tls"]["server_name"], "sni.example.com");
+    assert_eq!(result.errors.len(), 1);
+    assert!(result.errors[0].contains("<index 1>"));
+}
+
+#[test]
+fn parse_clash_proxies_maps_h2_and_http_transports_from_their_respective_opts() {
+    let yaml = r#"
+proxies:
+  - name: vless-h2
+    type: vless
+    server: vl.example.com
+    port: 443
+    uuid: 123e4567-e89b-12d3-a456-426614174000
+    network: h2
+    h2-opts:
+      path: ["/h2-primary", "/h2-secondary"]
+      host: "h2.example.com"
+    http-opts:
+      path: ["/wrong-source"]
+"#;
+
+    let result = parse_clash_proxies(yaml).unwrap();
+    assert_eq!(result.nodes.len(), 1);
+    let transport = &result.nodes[0].1["transport"];
+    assert_eq!(transport["type"], "http");
+    assert_eq!(transport["path"], "/h2-primary");
+    assert_eq!(transport["host"], serde_json::json!(["h2.example.com"]));
+}

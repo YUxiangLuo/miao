@@ -10,15 +10,53 @@ use crate::models::{
 };
 use crate::services::config::{
     apply_disabled_nodes, collect_manual_outbounds, edit_subscriptions, read_sub_nodes_snapshot,
-    refresh_subscriptions_foreground, subscription_source_id, ConfigMutationError,
+    refresh_subscriptions_foreground, subscription_source_id, ConfigMutationError, RuntimeUpdate,
+    SubNodesReadModel,
 };
 use crate::services::subscription::is_informational_subscription_node;
 use crate::services::verge;
 use crate::state::AppState;
 use crate::validation::Validator;
 
+fn live_snapshot_nodes(
+    snapshot: &SubNodesReadModel,
+) -> impl Iterator<Item = (&str, &str, &serde_json::Value)> {
+    snapshot
+        .source_ids
+        .iter()
+        .zip(snapshot.node_names.iter())
+        .enumerate()
+        .filter_map(|(index, (source_id, name))| {
+            let outbound = snapshot.outbounds.get(index)?;
+            (!is_informational_subscription_node(name, outbound)).then_some((
+                source_id.as_str(),
+                name.as_str(),
+                outbound,
+            ))
+        })
+}
+
+fn build_sub_node_info(name: &str, outbound: &serde_json::Value, disabled: bool) -> SubNodeInfo {
+    let str_field = |key: &str| {
+        outbound
+            .get(key)
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+    };
+    SubNodeInfo {
+        name: name.to_string(),
+        server: str_field("server").to_string(),
+        server_port: outbound
+            .get("server_port")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or_default() as u16,
+        node_type: str_field("type").to_string(),
+        disabled,
+    }
+}
+
 pub async fn get_subs(state: Arc<AppState>) -> CommandReply<Vec<SubStatus>> {
-    // 快照磁盘读先于一切锁：本 handler 是面板轮询热点，不把 IO 关进临界区
+    // 快照磁盘读先于一切锁：本入口是面板轮询热点，不把 IO 关进临界区
     let snapshot = read_sub_nodes_snapshot(&state).await;
     let config = state.config.read().await;
     let status_map = state.sub_status.lock().await;
@@ -78,39 +116,18 @@ pub async fn get_sub_nodes(state: Arc<AppState>) -> CommandReply<Vec<SubNodesInf
         .iter()
         .map(|url| {
             let source_id = subscription_source_id(url);
-            let mut nodes = Vec::new();
-            if let Some(snapshot) = &snapshot {
-                for (index, entry_source) in snapshot.source_ids.iter().enumerate() {
-                    if *entry_source != source_id {
-                        continue;
-                    }
-                    let (Some(name), Some(outbound)) = (
-                        snapshot.node_names.get(index),
-                        snapshot.outbounds.get(index),
-                    ) else {
-                        continue;
-                    };
-                    if is_informational_subscription_node(name, outbound) {
-                        continue;
-                    }
-                    let str_field = |key: &str| {
-                        outbound
-                            .get(key)
-                            .and_then(|value| value.as_str())
-                            .unwrap_or_default()
-                    };
-                    nodes.push(SubNodeInfo {
-                        name: name.clone(),
-                        server: str_field("server").to_string(),
-                        server_port: outbound
-                            .get("server_port")
-                            .and_then(|value| value.as_u64())
-                            .unwrap_or_default() as u16,
-                        node_type: str_field("type").to_string(),
-                        disabled: disabled_keys.contains(&(source_id.clone(), name.as_str())),
-                    });
-                }
-            }
+            let nodes: Vec<SubNodeInfo> = snapshot
+                .as_ref()
+                .map(|snap| {
+                    live_snapshot_nodes(snap)
+                        .filter(|(entry_source, _, _)| *entry_source == source_id)
+                        .map(|(_, name, outbound)| {
+                            let is_disabled = disabled_keys.contains(&(source_id.clone(), name));
+                            build_sub_node_info(name, outbound, is_disabled)
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
             // 失配的禁用条目：存在禁用记录但当前快照里已没有同名节点
             let stale_disabled = config
                 .disabled_nodes
@@ -130,6 +147,33 @@ pub async fn get_sub_nodes(state: Arc<AppState>) -> CommandReply<Vec<SubNodesInf
     success("Subscription nodes loaded", groups)
 }
 
+async fn load_live_entries_for_disable(
+    state: &AppState,
+    sub_url: &str,
+    node_name: &str,
+) -> Result<Vec<(String, String)>, super::CommandError> {
+    let Some(snapshot) = read_sub_nodes_snapshot(state).await else {
+        return Err(command_error(
+            CommandErrorKind::InvalidInput,
+            "订阅节点尚未获取，无法设置禁用",
+        ));
+    };
+    let entries: Vec<(String, String)> = live_snapshot_nodes(&snapshot)
+        .map(|(source, name, _)| (source.to_string(), name.to_string()))
+        .collect();
+    let source_id = subscription_source_id(sub_url);
+    if !entries
+        .iter()
+        .any(|(source, name)| source == &source_id && name == node_name)
+    {
+        return Err(command_error(
+            CommandErrorKind::InvalidInput,
+            "订阅中不存在该节点",
+        ));
+    }
+    Ok(entries)
+}
+
 /// 禁用/启用订阅节点（易变层）。本地语义变更：快照零网络重建 + 热应用。
 /// 成功路径会热重启内核；校验失败（订阅/节点不存在、禁用后空池）在事务前拦截。
 pub async fn set_node_disabled(state: Arc<AppState>, req: SetNodeDisabledRequest) -> CommandResult {
@@ -143,33 +187,11 @@ pub async fn set_node_disabled(state: Arc<AppState>, req: SetNodeDisabledRequest
     }
     // 存在性校验只约束「禁用」；「启用/清理」按名字移除条目即可，
     // 必须能清理已失配的条目（节点改名后快照里已不存在）
-    let mut entries: Vec<(String, String)> = Vec::new();
-    if req.disabled {
-        let Some(snapshot) = read_sub_nodes_snapshot(&state).await else {
-            return Err(command_error(
-                CommandErrorKind::InvalidInput,
-                "订阅节点尚未获取，无法设置禁用",
-            ));
-        };
-        entries = snapshot
-            .source_ids
-            .iter()
-            .zip(snapshot.node_names.iter())
-            .enumerate()
-            .filter_map(|(index, (source, name))| {
-                let outbound = snapshot.outbounds.get(index)?;
-                (!is_informational_subscription_node(name, outbound))
-                    .then_some((source.clone(), name.clone()))
-            })
-            .collect();
-        let source_id = subscription_source_id(&req.sub);
-        if !entries.contains(&(source_id, req.name.clone())) {
-            return Err(command_error(
-                CommandErrorKind::InvalidInput,
-                "订阅中不存在该节点",
-            ));
-        }
-    }
+    let entries = if req.disabled {
+        load_live_entries_for_disable(&state, &req.sub, &req.name).await?
+    } else {
+        Vec::new()
+    };
 
     let sub = req.sub.clone();
     let name = req.name.clone();
@@ -214,23 +236,15 @@ pub async fn set_node_disabled(state: Arc<AppState>, req: SetNodeDisabledRequest
     .await;
 
     match result {
-        Ok(update) => Ok(success_no_data(if update.updated() {
-            if req.disabled {
-                "节点已禁用"
-            } else {
-                "节点已启用"
-            }
-        } else {
-            "节点状态未变化"
-        })),
-        Err(ConfigMutationError::Superseded) => Err(command_error(
-            CommandErrorKind::Conflict,
-            "操作已被更新的请求取代",
-        )),
-        Err(ConfigMutationError::Rejected(message)) => {
-            Err(command_error(CommandErrorKind::InvalidInput, message))
+        Ok(update) => {
+            let message = match (update.updated(), req.disabled) {
+                (true, true) => "节点已禁用",
+                (true, false) => "节点已启用",
+                (false, _) => "节点状态未变化",
+            };
+            Ok(success_no_data(message))
         }
-        Err(ConfigMutationError::Apply(e)) => Err(command_error(CommandErrorKind::Internal, e)),
+        Err(error) => Err(subscription_error(error, CommandErrorKind::InvalidInput)),
     }
 }
 
@@ -363,24 +377,21 @@ pub async fn refresh_subs(state: Arc<AppState>) -> CommandResult<SubscriptionRef
         .map_err(|error| subscription_error(error, CommandErrorKind::InvalidInput))?;
     let update = outcome.runtime_update;
     let warning = state.config_warning.lock().await.clone();
+    let message = match (outcome.fetch_succeeded, update.updated()) {
+        (true, true) => "Subscriptions fetched and runtime updated",
+        (true, false) => "Subscriptions fetched",
+        (false, _) => "Subscription fetch failed; kept cached configuration",
+    };
     Ok(success(
-        if outcome.fetch_succeeded {
-            if update.updated() {
-                "Subscriptions fetched and runtime updated"
-            } else {
-                "Subscriptions fetched"
-            }
-        } else {
-            "Subscription fetch failed; kept cached configuration"
-        },
+        message,
         SubscriptionRefreshResult {
             refreshed: outcome.fetch_succeeded,
             fetch_succeeded: outcome.fetch_succeeded,
             report: outcome.report,
             runtime_updated: update.updated(),
-            started: update == crate::services::config::RuntimeUpdate::Started,
-            reloaded: update == crate::services::config::RuntimeUpdate::Reloaded,
-            restarted: update == crate::services::config::RuntimeUpdate::Restarted,
+            started: update == RuntimeUpdate::Started,
+            reloaded: update == RuntimeUpdate::Reloaded,
+            restarted: update == RuntimeUpdate::Restarted,
             warning,
         },
     ))

@@ -33,14 +33,28 @@ fn request_password(req: &NodeRequest) -> &str {
     req.password.as_deref().unwrap_or_default().trim()
 }
 
-fn build_tls(req: &NodeRequest, default_enabled: bool, force_enabled: bool) -> Option<JsonValue> {
-    let enabled = force_enabled
-        || req.tls_enabled.unwrap_or(default_enabled)
-        || non_empty(&req.reality_public_key).is_some();
-    if !enabled {
-        return None;
-    }
+#[derive(Clone, Copy)]
+enum TlsPolicy {
+    Mandatory,
+    DefaultOn,
+    DefaultOff,
+}
 
+impl TlsPolicy {
+    fn is_enabled(self, req: &NodeRequest) -> bool {
+        match self {
+            Self::Mandatory => true,
+            Self::DefaultOn => {
+                req.tls_enabled.unwrap_or(true) || non_empty(&req.reality_public_key).is_some()
+            }
+            Self::DefaultOff => {
+                req.tls_enabled.unwrap_or(false) || non_empty(&req.reality_public_key).is_some()
+            }
+        }
+    }
+}
+
+fn build_tls_object(req: &NodeRequest) -> JsonValue {
     let mut tls = Map::new();
     tls.insert("enabled".to_string(), json!(true));
     tls.insert(
@@ -82,7 +96,20 @@ fn build_tls(req: &NodeRequest, default_enabled: bool, force_enabled: bool) -> O
         tls.insert("reality".to_string(), JsonValue::Object(reality));
     }
 
-    Some(JsonValue::Object(tls))
+    JsonValue::Object(tls)
+}
+
+fn build_optional_tls(req: &NodeRequest, policy: TlsPolicy) -> Option<JsonValue> {
+    policy.is_enabled(req).then(|| build_tls_object(req))
+}
+
+fn attach_v2ray_layers(obj: &mut Map<String, JsonValue>, req: &NodeRequest, tls_policy: TlsPolicy) {
+    if let Some(tls) = build_optional_tls(req, tls_policy) {
+        obj.insert("tls".to_string(), tls);
+    }
+    if let Some(transport) = build_transport(req) {
+        obj.insert("transport".to_string(), transport);
+    }
 }
 
 fn build_transport(req: &NodeRequest) -> Option<JsonValue> {
@@ -122,7 +149,7 @@ fn build_transport(req: &NodeRequest) -> Option<JsonValue> {
 }
 
 pub(crate) fn build_node_value(req: &NodeRequest, node_type: &str) -> JsonValue {
-    match node_type {
+    let obj = match node_type {
         "socks" => {
             let mut obj = base_outbound("socks", req);
             obj.insert("version".to_string(), json!("5"));
@@ -135,16 +162,13 @@ pub(crate) fn build_node_value(req: &NodeRequest, node_type: &str) -> JsonValue 
                 insert_optional_string(&mut obj, "username", req.username.as_deref());
                 insert_optional_string(&mut obj, "password", req.password.as_deref());
             }
-            JsonValue::Object(obj)
+            obj
         }
         "anytls" => {
             let mut obj = base_outbound("anytls", req);
             obj.insert("password".to_string(), json!(request_password(req)));
-            obj.insert(
-                "tls".to_string(),
-                build_tls(req, true, true).expect("AnyTLS TLS is always enabled"),
-            );
-            JsonValue::Object(obj)
+            obj.insert("tls".to_string(), build_tls_object(req));
+            obj
         }
         "ss" => {
             let mut obj = base_outbound("shadowsocks", req);
@@ -153,7 +177,7 @@ pub(crate) fn build_node_value(req: &NodeRequest, node_type: &str) -> JsonValue 
                 json!(non_empty(&req.cipher).unwrap_or("2022-blake3-aes-128-gcm")),
             );
             obj.insert("password".to_string(), json!(request_password(req)));
-            JsonValue::Object(obj)
+            obj
         }
         "vmess" => {
             let mut obj = base_outbound("vmess", req);
@@ -167,13 +191,8 @@ pub(crate) fn build_node_value(req: &NodeRequest, node_type: &str) -> JsonValue 
             );
             obj.insert("alter_id".to_string(), json!(req.alter_id.unwrap_or(0)));
             insert_optional_string(&mut obj, "packet_encoding", non_empty(&req.packet_encoding));
-            if let Some(tls) = build_tls(req, false, false) {
-                obj.insert("tls".to_string(), tls);
-            }
-            if let Some(transport) = build_transport(req) {
-                obj.insert("transport".to_string(), transport);
-            }
-            JsonValue::Object(obj)
+            attach_v2ray_layers(&mut obj, req, TlsPolicy::DefaultOff);
+            obj
         }
         "vless" => {
             let mut obj = base_outbound("vless", req);
@@ -183,24 +202,14 @@ pub(crate) fn build_node_value(req: &NodeRequest, node_type: &str) -> JsonValue 
             );
             insert_optional_string(&mut obj, "flow", non_empty(&req.flow));
             insert_optional_string(&mut obj, "packet_encoding", non_empty(&req.packet_encoding));
-            if let Some(tls) = build_tls(req, true, false) {
-                obj.insert("tls".to_string(), tls);
-            }
-            if let Some(transport) = build_transport(req) {
-                obj.insert("transport".to_string(), transport);
-            }
-            JsonValue::Object(obj)
+            attach_v2ray_layers(&mut obj, req, TlsPolicy::DefaultOn);
+            obj
         }
         "trojan" => {
             let mut obj = base_outbound("trojan", req);
             obj.insert("password".to_string(), json!(request_password(req)));
-            if let Some(tls) = build_tls(req, true, true) {
-                obj.insert("tls".to_string(), tls);
-            }
-            if let Some(transport) = build_transport(req) {
-                obj.insert("transport".to_string(), transport);
-            }
-            JsonValue::Object(obj)
+            attach_v2ray_layers(&mut obj, req, TlsPolicy::Mandatory);
+            obj
         }
         "tuic" => {
             let mut obj = base_outbound("tuic", req);
@@ -220,19 +229,13 @@ pub(crate) fn build_node_value(req: &NodeRequest, node_type: &str) -> JsonValue 
             if req.tuic_zero_rtt.unwrap_or(false) {
                 obj.insert("zero_rtt_handshake".to_string(), json!(true));
             }
-            obj.insert(
-                "tls".to_string(),
-                build_tls(req, true, true).expect("TUIC TLS is always enabled"),
-            );
-            JsonValue::Object(obj)
+            obj.insert("tls".to_string(), build_tls_object(req));
+            obj
         }
         _ => {
             let mut obj = base_outbound("hysteria2", req);
             obj.insert("password".to_string(), json!(request_password(req)));
-            obj.insert(
-                "tls".to_string(),
-                build_tls(req, true, true).expect("Hysteria2 TLS is always enabled"),
-            );
+            obj.insert("tls".to_string(), build_tls_object(req));
             if let Some(obfs_type) = non_empty(&req.obfs_type) {
                 obj.insert(
                     "obfs".to_string(),
@@ -242,9 +245,10 @@ pub(crate) fn build_node_value(req: &NodeRequest, node_type: &str) -> JsonValue 
                     }),
                 );
             }
-            JsonValue::Object(obj)
+            obj
         }
-    }
+    };
+    JsonValue::Object(obj)
 }
 
 fn validated_node_json(req: &NodeRequest) -> Result<(String, String), String> {
@@ -260,7 +264,7 @@ pub async fn get_nodes(state: Arc<AppState>) -> CommandReply<Vec<NodeInfo>> {
     let config = state.config.read().await;
 
     let mut nodes = Vec::new();
-    let mut parse_errors = Vec::new();
+    let mut skipped_invalid = 0usize;
 
     for (idx, node_str) in config.nodes.iter().enumerate() {
         match parse_node_json(node_str) {
@@ -274,16 +278,14 @@ pub async fn get_nodes(state: Arc<AppState>) -> CommandReply<Vec<NodeInfo>> {
                 });
             }
             Err(e) => {
-                let error_msg = format!("Node #{}: {}", idx, e);
-                warn!("[get_nodes] {}", error_msg);
-                parse_errors.push(error_msg);
+                warn!("[get_nodes] Node #{}: {}", idx, e);
+                skipped_invalid += 1;
             }
         }
     }
 
-    // 如果有解析错误，记录到日志但不影响返回有效节点
-    if !parse_errors.is_empty() {
-        warn!("[get_nodes] Skipped {} invalid node(s)", parse_errors.len());
+    if skipped_invalid > 0 {
+        warn!("[get_nodes] Skipped {} invalid node(s)", skipped_invalid);
     }
 
     success("Nodes loaded", nodes)

@@ -27,39 +27,34 @@ pub(crate) fn build_rule_json(req: &RuleRequest) -> JsonValue {
     JsonValue::Object(rule)
 }
 
-/// 把存储的 JSON 字符串还原成结构化展示;无法识别的手写规则以 raw 兜底
-pub(crate) fn describe_rule(index: usize, raw: &str) -> RuleInfo {
-    let parsed = serde_json::from_str::<JsonValue>(raw).ok();
-    let mut info = RuleInfo {
-        index,
-        field: None,
-        value: None,
-        target: None,
-        skipped: false,
-        raw: raw.to_string(),
-    };
+struct StructuredRule {
+    field: String,
+    value: String,
+    target: Option<String>,
+}
 
-    let Some(JsonValue::Object(map)) = parsed else {
-        return info;
+fn parse_structured_rule(raw: &str) -> Option<StructuredRule> {
+    let JsonValue::Object(map) = serde_json::from_str::<JsonValue>(raw).ok()? else {
+        return None;
     };
 
     // 仅单条件规则做结构化展示:零个或多个已知匹配字段(含两个白名单字段的复合规则)
     // 都回退 raw,避免隐藏条件误导用户
-    let matched: Vec<&&str> = CUSTOM_RULE_FIELDS
+    let mut matched = CUSTOM_RULE_FIELDS
         .iter()
-        .filter(|field| map.contains_key(**field))
-        .collect();
-    if matched.len() != 1 {
-        return info;
+        .copied()
+        .filter(|field| map.contains_key(*field));
+    let field = matched.next()?;
+    if matched.next().is_some() {
+        return None;
     }
-    let field = *matched[0];
 
     // 出现匹配字段/action/outbound 之外的键,同样回退 raw
-    let has_unknown_keys = map.keys().any(|key| {
-        !CUSTOM_RULE_FIELDS.contains(&key.as_str()) && key != "action" && key != "outbound"
-    });
+    let has_unknown_keys = map
+        .keys()
+        .any(|key| key != field && key != "action" && key != "outbound");
     if has_unknown_keys {
-        return info;
+        return None;
     }
 
     let value = match &map[field] {
@@ -67,29 +62,48 @@ pub(crate) fn describe_rule(index: usize, raw: &str) -> RuleInfo {
         JsonValue::Number(n) => n.to_string(),
         JsonValue::Array(items) => items
             .iter()
-            .filter_map(|item| item.as_str())
+            .filter_map(JsonValue::as_str)
             .collect::<Vec<_>>()
             .join(", "),
-        _ => return info,
+        _ => return None,
     };
 
     // 新格式 action 优先,兼容旧版 outbound 内联写法
-    let target = match map.get("action").and_then(|a| a.as_str()) {
+    let target = match map.get("action").and_then(JsonValue::as_str) {
         Some("reject") => Some("reject".to_string()),
-        Some("route") => map
-            .get("outbound")
-            .and_then(|o| o.as_str())
-            .map(str::to_string),
         _ => map
             .get("outbound")
-            .and_then(|o| o.as_str())
+            .and_then(JsonValue::as_str)
             .map(str::to_string),
     };
 
-    info.field = Some(field.to_string());
-    info.value = Some(value);
-    info.target = target;
-    info
+    Some(StructuredRule {
+        field: field.to_string(),
+        value,
+        target,
+    })
+}
+
+/// 把存储的 JSON 字符串还原成结构化展示;无法识别的手写规则以 raw 兜底
+pub(crate) fn describe_rule(index: usize, raw: &str) -> RuleInfo {
+    match parse_structured_rule(raw) {
+        Some(structured) => RuleInfo {
+            index,
+            field: Some(structured.field),
+            value: Some(structured.value),
+            target: structured.target,
+            skipped: false,
+            raw: raw.to_string(),
+        },
+        None => RuleInfo {
+            index,
+            field: None,
+            value: None,
+            target: None,
+            skipped: false,
+            raw: raw.to_string(),
+        },
+    }
 }
 
 pub async fn get_rules(state: Arc<AppState>) -> CommandReply<Vec<RuleInfo>> {

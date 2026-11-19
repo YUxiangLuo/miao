@@ -351,3 +351,63 @@ fn test_invalid_passwords() {
     assert!(Validator::password("secret").is_err()); // 6 字符，不够
     assert!(Validator::password(&"a".repeat(257)).is_err());
 }
+
+#[test]
+fn cross_protocol_node_request_guards_reject_mismatched_options() {
+    let vless_with_cipher = NodeRequest {
+        node_type: Some("vless".into()),
+        tag: "vl".into(),
+        server: "example.com".into(),
+        server_port: 443,
+        uuid: Some("123e4567-e89b-12d3-a456-426614174000".into()),
+        cipher: Some("aes-128-gcm".into()),
+        ..NodeRequest::default()
+    };
+    assert!(Validator::validate_node_request(&vless_with_cipher)
+        .unwrap_err()
+        .contains("不支持加密方式字段"));
+
+    let hy2_with_transport = NodeRequest {
+        node_type: Some("hysteria2".into()),
+        tag: "hy2".into(),
+        server: "example.com".into(),
+        server_port: 443,
+        password: Some("password123".into()),
+        transport_type: Some("ws".into()),
+        ..NodeRequest::default()
+    };
+    assert!(Validator::validate_node_request(&hy2_with_transport)
+        .unwrap_err()
+        .contains("不支持传输层配置"));
+
+    let vless_short_id_without_pubkey = NodeRequest {
+        node_type: Some("vless".into()),
+        tag: "vl-reality".into(),
+        server: "example.com".into(),
+        server_port: 443,
+        uuid: Some("123e4567-e89b-12d3-a456-426614174000".into()),
+        reality_short_id: Some("abcd".into()),
+        client_fingerprint: Some("chrome".into()),
+        ..NodeRequest::default()
+    };
+    assert!(
+        Validator::validate_node_request(&vless_short_id_without_pubkey)
+            .unwrap_err()
+            .contains("Reality public key")
+    );
+
+    let hy2_obfs_password_without_type = NodeRequest {
+        node_type: Some("hysteria2".into()),
+        tag: "hy2-obfs".into(),
+        server: "example.com".into(),
+        server_port: 443,
+        password: Some("password123".into()),
+        obfs_password: Some("secret".into()),
+        ..NodeRequest::default()
+    };
+    assert!(
+        Validator::validate_node_request(&hy2_obfs_password_without_type)
+            .unwrap_err()
+            .contains("混淆类型")
+    );
+}
