@@ -9,42 +9,8 @@ pub(super) async fn initialize_runtime(
         state.initializing.store(false, Ordering::Relaxed);
         return;
     };
-    if extract_runtime {
-        let extraction_generation = state.lifecycle.snapshot().generation;
-        let _activity = state
-            .lifecycle
-            .activity(crate::state::lifecycle::RuntimeActivity::Extracting);
-        let runtime_dir = state.runtime_paths.runtime_dir.clone();
-        let extracted =
-            tokio::task::spawn_blocking(move || extract_sing_box_to(&runtime_dir)).await;
-        match extracted {
-            Ok(Ok(_)) => {}
-            Ok(Err(err)) => {
-                error!(error = %err, "Failed to prepare embedded sing-box runtime");
-                *state.config_warning.lock().await = Some(format!("准备 sing-box 内核失败：{err}"));
-
-                state
-                    .lifecycle
-                    .finish(extraction_generation, RuntimePhase::Failed);
-                state
-                    .initializing
-                    .store(false, std::sync::atomic::Ordering::Relaxed);
-                return;
-            }
-            Err(err) => {
-                error!(error = %err, "Embedded sing-box extraction task failed");
-                *state.config_warning.lock().await =
-                    Some(format!("准备 sing-box 内核任务失败：{err}"));
-
-                state
-                    .lifecycle
-                    .finish(extraction_generation, RuntimePhase::Failed);
-                state
-                    .initializing
-                    .store(false, std::sync::atomic::Ordering::Relaxed);
-                return;
-            }
-        }
+    if extract_runtime && !extract_embedded_runtime_for_startup(&state).await {
+        return;
     }
 
     // config_update 只覆盖本地启核。订阅 HTTP 一律在锁外拉取。
@@ -54,9 +20,7 @@ pub(super) async fn initialize_runtime(
         // Ready publication confirms a real data plane. Empty configurations
         // and an explicit Stop are settled too; confirm under this lease/lock,
         // before a concurrent installer can create a new pending marker.
-        if startup_is_settled(&state).await && !state.lifecycle.is_shutting_down() {
-            crate::services::version::mark_upgrade_healthy();
-        }
+        confirm_upgrade_if_settled(&state).await;
         refresh
     };
     drop(local_initialization); // Never keep an admission lease over retry sleeps.
@@ -64,12 +28,7 @@ pub(super) async fn initialize_runtime(
     if needs_background_refresh {
         refresh_subscriptions_in_background(&config, &state).await;
     } else {
-        match recover_data_plane_once(&state).await {
-            RecoveryOutcome::Complete => {}
-            RecoveryOutcome::RetrySubscriptions => retry_recovered_subscriptions(&state).await,
-            RecoveryOutcome::RetryDataPlane => retry_failed_startup(&state).await,
-            RecoveryOutcome::WaitForNodes => retry_waiting_for_nodes(&state).await,
-        }
+        dispatch_recovery_outcome(&state, recover_data_plane_once(&state).await).await;
     }
     // Configuration can be removed while a failed startup fetch is in flight,
     // including between the initial checkpoint and the retry guard above.
@@ -77,9 +36,52 @@ pub(super) async fn initialize_runtime(
         return;
     };
     let _config_update = state.config_update.lock().await;
-    if startup_is_settled(&state).await && !state.lifecycle.is_shutting_down() {
+    confirm_upgrade_if_settled(&state).await;
+}
+
+async fn extract_embedded_runtime_for_startup(state: &Arc<AppState>) -> bool {
+    let extraction_generation = state.lifecycle.snapshot().generation;
+    let _activity = state
+        .lifecycle
+        .activity(crate::state::lifecycle::RuntimeActivity::Extracting);
+    let runtime_dir = state.runtime_paths.runtime_dir.clone();
+    let extracted = tokio::task::spawn_blocking(move || extract_sing_box_to(&runtime_dir)).await;
+    let warning = match extracted {
+        Ok(Ok(_)) => return true,
+        Ok(Err(err)) => {
+            error!(error = %err, "Failed to prepare embedded sing-box runtime");
+            format!("准备 sing-box 内核失败：{err}")
+        }
+        Err(err) => {
+            error!(error = %err, "Embedded sing-box extraction task failed");
+            format!("准备 sing-box 内核任务失败：{err}")
+        }
+    };
+    *state.config_warning.lock().await = Some(warning);
+    state
+        .lifecycle
+        .finish(extraction_generation, RuntimePhase::Failed);
+    state.initializing.store(false, Ordering::Relaxed);
+    false
+}
+
+async fn confirm_upgrade_if_settled(state: &Arc<AppState>) {
+    if startup_is_settled(state).await && !state.lifecycle.is_shutting_down() {
         crate::services::version::mark_upgrade_healthy();
     }
+}
+
+async fn dispatch_recovery_outcome(state: &Arc<AppState>, outcome: RecoveryOutcome) {
+    match outcome {
+        RecoveryOutcome::Complete => {}
+        RecoveryOutcome::RetrySubscriptions => retry_recovered_subscriptions(state).await,
+        RecoveryOutcome::RetryDataPlane => retry_failed_startup(state).await,
+        RecoveryOutcome::WaitForNodes => retry_waiting_for_nodes(state).await,
+    }
+}
+
+async fn data_plane_is_ready(state: &AppState) -> bool {
+    state.lifecycle.snapshot().ready && is_sing_box_running(state).await
 }
 
 pub(super) async fn startup_is_settled(state: &Arc<AppState>) -> bool {
@@ -100,16 +102,23 @@ pub(super) async fn should_retry_failed_startup(state: &Arc<AppState>) -> bool {
     !config.subs.is_empty() || !config.nodes.is_empty()
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum StartupCacheKind {
+    Verified,
+    /// Pre-manifest cache accepted once; still requires one background
+    /// local reconciliation to prove all inputs and upgrade its manifest.
+    Legacy,
+}
+
 /// Check cache provenance and runtime semantics before copying it into the
-/// active slot. `Ok(true)` identifies the one-time legacy compatibility path.
+/// active slot.
 pub(super) async fn prepare_compatible_startup_cache(
     config: &Config,
     state: &Arc<AppState>,
-) -> AppResult<bool> {
-    let compatibility = cache_compatibility(state, config).await;
-    let legacy = match compatibility {
-        CacheCompatibility::Verified => false,
-        CacheCompatibility::Legacy => true,
+) -> AppResult<StartupCacheKind> {
+    let cache_kind = match cache_compatibility(state, config).await {
+        CacheCompatibility::Verified => StartupCacheKind::Verified,
+        CacheCompatibility::Legacy => StartupCacheKind::Legacy,
         CacheCompatibility::Incompatible(reason) => {
             return Err(AppError::message(format!(
                 "Cached config provenance check failed: {reason}"
@@ -121,7 +130,10 @@ pub(super) async fn prepare_compatible_startup_cache(
     // were built under the requested cap. Its public tags may also predate the
     // current subscription display names. Reject it and let the next startup
     // tier rebuild from the local node snapshot instead of guessing.
-    if legacy && !config.node_select.is_manual() && config.max_multiplier.is_some() {
+    if cache_kind == StartupCacheKind::Legacy
+        && !config.node_select.is_manual()
+        && config.max_multiplier.is_some()
+    {
         return Err(AppError::message(
             "Legacy automatic cache cannot prove max_multiplier compatibility",
         ));
@@ -135,13 +147,28 @@ pub(super) async fn prepare_compatible_startup_cache(
         .map_err(|e| AppError::context("Failed to read cached config", e))?;
     let json: serde_json::Value = serde_json::from_str(&content)
         .map_err(|e| AppError::context("Cached config is invalid JSON", e))?;
-    if legacy && !runtime_config_matches_node_select(&json, config.node_select) {
+    if cache_kind == StartupCacheKind::Legacy
+        && !runtime_config_matches_node_select(&json, config.node_select)
+    {
         return Err(AppError::message(
             "Cached config does not match the effective node_select",
         ));
     }
     restore_config_from_cache(state).await?;
-    Ok(legacy)
+    Ok(cache_kind)
+}
+
+async fn publish_started_cache_runtime(
+    config: &Config,
+    state: &Arc<AppState>,
+    cache_kind: StartupCacheKind,
+) {
+    if cache_kind == StartupCacheKind::Legacy {
+        mark_legacy_cache_used(state).await;
+    }
+    publish_runtime_multiplier_options(config, state).await;
+    publish_cached_rule_diagnostics(config, state).await;
+    spawn_restore_last_proxy(state);
 }
 
 /// Restore a compatible cache into the active slot and start sing-box.
@@ -150,27 +177,29 @@ pub(super) async fn try_start_compatible_cache(config: &Config, state: &Arc<AppS
     if !has_config_cache(state) {
         return false;
     }
-    match prepare_compatible_startup_cache(config, state).await {
-        Ok(legacy_cache) => match start_sing_internal(state).await {
-            Ok(()) => {
-                info!("sing-box started from cached config during startup recovery");
-                if legacy_cache {
-                    mark_legacy_cache_used(state).await;
-                }
-                publish_runtime_multiplier_options(config, state).await;
-                publish_cached_rule_diagnostics(config, state).await;
-                spawn_restore_last_proxy(state);
-                true
-            }
-            Err(err) => {
-                warn!(error = %err, "Failed to start sing-box from cache during startup recovery");
-                false
-            }
-        },
+    let cache_kind = match prepare_compatible_startup_cache(config, state).await {
+        Ok(kind) => kind,
         Err(err) => {
             warn!(error = %err, "Cached config is not eligible during startup recovery");
-            false
+            return false;
         }
+    };
+    if let Err(err) = start_sing_internal(state).await {
+        warn!(error = %err, "Failed to start sing-box from cache during startup recovery");
+        return false;
+    }
+    info!("sing-box started from cached config during startup recovery");
+    publish_started_cache_runtime(config, state, cache_kind).await;
+    true
+}
+
+fn local_startup_warning(config: &Config, outcome: &GenConfigOutcome) -> Option<String> {
+    if !config.node_select.is_manual() && outcome.node_select.is_manual() {
+        Some(REGION_FALLBACK.to_string())
+    } else if !outcome.has_sub_nodes && !config.subs.is_empty() {
+        Some(SUBS_REFRESHING_MANUAL.to_string())
+    } else {
+        None
     }
 }
 
@@ -196,19 +225,81 @@ pub(super) async fn start_prepared_local_runtime(
 
     save_config_cache(state).await;
     publish_generation_diagnostics(state, outcome).await;
-    *state.config_warning.lock().await =
-        if !config.node_select.is_manual() && outcome.node_select.is_manual() {
-            Some(REGION_FALLBACK.to_string())
-        } else if !outcome.has_sub_nodes && !config.subs.is_empty() {
-            Some(SUBS_REFRESHING_MANUAL.to_string())
-        } else {
-            None
-        };
+    *state.config_warning.lock().await = local_startup_warning(config, outcome);
     spawn_restore_last_proxy(state);
-    state
-        .initializing
-        .store(false, std::sync::atomic::Ordering::Relaxed);
+    state.initializing.store(false, Ordering::Relaxed);
     Ok(())
+}
+
+/// Tier 1: returns `Some(needs_background_refresh)` when the cached config starts.
+async fn try_start_cached_startup_runtime(config: &Config, state: &Arc<AppState>) -> Option<bool> {
+    if !has_config_cache(state) {
+        return None;
+    }
+    let _activity = state
+        .lifecycle
+        .activity(crate::state::lifecycle::RuntimeActivity::Validating);
+    let cache_kind = match prepare_compatible_startup_cache(config, state).await {
+        Ok(kind) => kind,
+        Err(err) => {
+            warn!(error = %err, "Cached config is not eligible for startup; regenerating");
+            return None;
+        }
+    };
+    if let Err(err) = start_sing_internal(state).await {
+        error!(error = %err, "Failed to start sing-box from cache, fetching subscriptions");
+        return None;
+    }
+    info!("sing-box started from cached config");
+    publish_started_cache_runtime(config, state, cache_kind).await;
+    state.initializing.store(false, Ordering::Relaxed);
+    // A legacy cache still needs one local regeneration to prove all runtime
+    // inputs and upgrade its manifest, even when there are no subscriptions.
+    Some(cache_kind == StartupCacheKind::Legacy || !config.subs.is_empty())
+}
+
+/// Tier 2: rebuild from the last accepted subscription node snapshot (no network).
+async fn try_start_snapshot_startup_runtime(config: &Config, state: &Arc<AppState>) -> bool {
+    let Some(snapshot) = read_sub_nodes_snapshot(state).await else {
+        return false;
+    };
+    if !snapshot.matches_subs(&config.subs) {
+        warn!("Subscription node snapshot does not match current subscription list");
+        return false;
+    }
+    info!("Rebuilding startup config from subscription node snapshot (no network)");
+    let outcome = match gen_config_from_nodes(config, state, snapshot.to_fetched_nodes()).await {
+        Ok(outcome) => outcome,
+        Err(err) => {
+            warn!(error = %err, "Failed to rebuild from subscription node snapshot");
+            return false;
+        }
+    };
+    if let Err(err) = start_prepared_local_runtime(config, state, &outcome, "node_snapshot").await {
+        warn!(error = %err, "Failed to start from subscription node snapshot");
+        return false;
+    }
+    true
+}
+
+/// Tier 3: build from configured manual nodes alone (no network).
+async fn try_start_manual_startup_runtime(config: &Config, state: &Arc<AppState>) -> bool {
+    if config.nodes.is_empty() {
+        return false;
+    }
+    info!("Building startup config from manual nodes (no network)");
+    let outcome = match gen_config_from_nodes(config, state, Vec::new()).await {
+        Ok(outcome) => outcome,
+        Err(err) => {
+            warn!(error = %err, "No valid manual-node startup config available");
+            return false;
+        }
+    };
+    if let Err(err) = start_prepared_local_runtime(config, state, &outcome, "manual_nodes").await {
+        warn!(error = %err, "Failed to start from manual nodes");
+        return false;
+    }
+    true
 }
 
 /// 持锁执行的本地初始化。返回 true = 内核已用本地材料快速启动，订阅需改为
@@ -223,99 +314,28 @@ pub(super) async fn initialize_runtime_locked(config: &Config, state: &Arc<AppSt
 
     if config.subs.is_empty() && config.nodes.is_empty() {
         info!("No subscriptions or nodes configured, waiting for onboarding");
-
         state
             .lifecycle
             .finish(state.lifecycle.snapshot().generation, RuntimePhase::Stopped);
-        state
-            .initializing
-            .store(false, std::sync::atomic::Ordering::Relaxed);
+        state.initializing.store(false, Ordering::Relaxed);
         return false;
     }
 
-    // 快速通道：存在上次成功运行的缓存配置 → 先起内核（秒开），订阅改为后台刷新。
-    // 缓存读取/校验/启动失败则继续本地 snapshot/manuals；本地材料全部失败才
-    // 标记 Failed 并返回。HTTP 拉取在锁外 recover_data_plane_once 进行。
-    if has_config_cache(state) {
-        let _activity = state
-            .lifecycle
-            .activity(crate::state::lifecycle::RuntimeActivity::Validating);
-        match prepare_compatible_startup_cache(config, state).await {
-            Ok(legacy_cache) => {
-                match start_sing_internal(state).await {
-                    Ok(()) => {
-                        info!("sing-box started from cached config");
-                        if legacy_cache {
-                            mark_legacy_cache_used(state).await;
-                        }
-                        publish_runtime_multiplier_options(config, state).await;
-                        publish_cached_rule_diagnostics(config, state).await;
-                        spawn_restore_last_proxy(state);
-                        state
-                            .initializing
-                            .store(false, std::sync::atomic::Ordering::Relaxed);
-                        // A legacy cache still needs one local regeneration to
-                        // prove all runtime inputs and upgrade its manifest,
-                        // even when there are no subscriptions to fetch.
-                        return legacy_cache || !config.subs.is_empty();
-                    }
-                    Err(err) => {
-                        error!(error = %err, "Failed to start sing-box from cache, fetching subscriptions");
-                    }
-                }
-            }
-            Err(err) => {
-                warn!(error = %err, "Cached config is not eligible for startup; regenerating");
-            }
-        }
+    // 快速通道：依次尝试精确缓存 → 本地订阅节点快照 → 本地手动节点（均不联网）。
+    if let Some(needs_background_refresh) = try_start_cached_startup_runtime(config, state).await {
+        return needs_background_refresh;
     }
-
-    // 本地 tier 2：精确缓存缺失/不兼容时，用上次订阅节点集按当前规则、
-    // 路由模式和节点选择重新生成。订阅列表必须逐项一致，避免用错来源。
-    if let Some(snapshot) = read_sub_nodes_snapshot(state).await {
-        if snapshot.matches_subs(&config.subs) {
-            info!("Rebuilding startup config from subscription node snapshot (no network)");
-            match gen_config_from_nodes(config, state, snapshot.to_fetched_nodes()).await {
-                Ok(outcome) => {
-                    match start_prepared_local_runtime(config, state, &outcome, "node_snapshot")
-                        .await
-                    {
-                        Ok(()) => return !config.subs.is_empty(),
-                        Err(err) => {
-                            warn!(error = %err, "Failed to start from subscription node snapshot")
-                        }
-                    }
-                }
-                Err(err) => {
-                    warn!(error = %err, "Failed to rebuild from subscription node snapshot")
-                }
-            }
-        } else {
-            warn!("Subscription node snapshot does not match current subscription list");
-        }
+    if try_start_snapshot_startup_runtime(config, state).await {
+        return !config.subs.is_empty();
     }
-
-    // 本地 tier 3：即使从未成功拉取过订阅，只要配置中还有有效手动节点，
-    // 也先让数据面可用；订阅继续在后台刷新，成功后再无缝更新运行配置。
-    if !config.nodes.is_empty() {
-        info!("Building startup config from manual nodes (no network)");
-        match gen_config_from_nodes(config, state, Vec::new()).await {
-            Ok(outcome) => {
-                match start_prepared_local_runtime(config, state, &outcome, "manual_nodes").await {
-                    Ok(()) => return !config.subs.is_empty(),
-                    Err(err) => warn!(error = %err, "Failed to start from manual nodes"),
-                }
-            }
-            Err(err) => warn!(error = %err, "No valid manual-node startup config available"),
-        }
+    if try_start_manual_startup_runtime(config, state).await {
+        return !config.subs.is_empty();
     }
 
     state
         .lifecycle
         .finish(state.lifecycle.snapshot().generation, RuntimePhase::Failed);
-    state
-        .initializing
-        .store(false, std::sync::atomic::Ordering::Relaxed);
+    state.initializing.store(false, Ordering::Relaxed);
     false
 }
 
@@ -325,6 +345,74 @@ enum BackgroundRefreshStep {
     Retry,
     Superseded,
     WaitForNodes,
+}
+
+/// Pure retry-budget and cadence policy for the background subscription owner.
+struct BackgroundRetryCadence {
+    slow_retry_interval: Duration,
+    fetch_retry: SubFetchRetry,
+    fast_delay: Duration,
+    fast_retries: usize,
+    waiting_for_nodes: bool,
+    quiet: bool,
+    next_wait: Duration,
+}
+
+impl BackgroundRetryCadence {
+    fn new(slow_retry_interval: Duration, waiting_for_nodes: bool) -> Self {
+        Self {
+            slow_retry_interval,
+            fetch_retry: if waiting_for_nodes {
+                SubFetchRetry::None
+            } else {
+                SubFetchRetry::Startup
+            },
+            fast_delay: STARTUP_RECOVERY_INITIAL_DELAY,
+            fast_retries: 0,
+            waiting_for_nodes,
+            quiet: false,
+            next_wait: if waiting_for_nodes {
+                slow_retry_interval
+            } else {
+                Duration::ZERO
+            },
+        }
+    }
+
+    fn mark_waiting_for_nodes(&mut self) {
+        self.waiting_for_nodes = true;
+    }
+
+    /// Compute the next wait duration and optional quiet-mode warning given
+    /// whether the kernel data plane is currently healthy.
+    fn plan_next_wait(&mut self, runtime_ready: bool) -> (Duration, Option<&'static str>) {
+        if self.waiting_for_nodes && runtime_ready {
+            // A local edit may have repaired the runtime while this owner
+            // slept. Keep the slow cadence, but no longer claim no nodes.
+            self.waiting_for_nodes = false;
+            self.fast_retries = STARTUP_BACKGROUND_FAST_RETRIES;
+        }
+        self.quiet = self.waiting_for_nodes
+            || (self.fast_retries >= STARTUP_BACKGROUND_FAST_RETRIES && runtime_ready);
+        if self.quiet {
+            let warning = if self.waiting_for_nodes {
+                crate::services::config::SUBS_WAITING_FOR_NODES
+            } else {
+                SUBS_RETRYING_SLOWLY
+            };
+            (self.slow_retry_interval, Some(warning))
+        } else {
+            self.fast_retries = self.fast_retries.saturating_add(1);
+            (self.fast_delay, None)
+        }
+    }
+
+    fn advance_after_scheduling(&mut self, scheduled_wait: Duration) {
+        self.next_wait = scheduled_wait;
+        self.fast_delay = next_startup_recovery_delay(self.fast_delay);
+        // 后续由外层控制快速/低频重试；每轮只请求一次，不再重复首轮预算。
+        self.fetch_retry = SubFetchRetry::None;
+    }
 }
 
 /// 后台订阅刷新（快速通道启动后调用）。
@@ -352,40 +440,34 @@ pub(super) async fn refresh_subscriptions_with_initial_wait(
     config: &Config,
     state: &Arc<AppState>,
     slow_retry_interval: Duration,
-    mut waiting_for_nodes: bool,
+    waiting_for_nodes: bool,
 ) {
     // This owner spans retry sleeps, but is NOT a mutation lease. Waiting
     // entrants must recheck completion rather than launch a duplicate fetch.
     let _owner = state.subscription_recovery.background.lock().await;
     let mut refresh_generation = state.sub_refresh_generation.load(Ordering::Relaxed);
-    let mut retry = if waiting_for_nodes {
-        SubFetchRetry::None
-    } else {
-        SubFetchRetry::Startup
-    };
-    let mut delay = STARTUP_RECOVERY_INITIAL_DELAY;
-    let mut fast_retries = 0;
-    let mut quiet = false;
-    let mut next_wait = if waiting_for_nodes {
-        slow_retry_interval
-    } else {
-        Duration::ZERO
-    };
+    let mut cadence = BackgroundRetryCadence::new(slow_retry_interval, waiting_for_nodes);
 
     loop {
         // Also notice a foreground success that committed during our sleep.
         let Some(generation) =
-            wait_for_background_retry(config, state, refresh_generation, next_wait).await
+            wait_for_background_retry(config, state, refresh_generation, cadence.next_wait).await
         else {
             return;
         };
         refresh_generation = generation;
-        match background_subscription_refresh_once(config, state, refresh_generation, retry, quiet)
-            .await
+        match background_subscription_refresh_once(
+            config,
+            state,
+            refresh_generation,
+            cadence.fetch_retry,
+            cadence.quiet,
+        )
+        .await
         {
             BackgroundRefreshStep::Finished => return,
             BackgroundRefreshStep::Retry => {}
-            BackgroundRefreshStep::WaitForNodes => waiting_for_nodes = true,
+            BackgroundRefreshStep::WaitForNodes => cadence.mark_waiting_for_nodes(),
             BackgroundRefreshStep::Superseded => {
                 let Some(generation) =
                     resume_after_foreground_refresh(config, state, refresh_generation).await
@@ -398,51 +480,29 @@ pub(super) async fn refresh_subscriptions_with_initial_wait(
 
         let wait = {
             let _config_update = state.config_update.lock().await;
-            let runtime_ready =
-                state.lifecycle.snapshot().ready && is_sing_box_running(state).await;
-            if waiting_for_nodes && runtime_ready {
-                // A local edit may have repaired the runtime while this owner
-                // slept. Keep the slow cadence, but no longer claim no nodes.
-                waiting_for_nodes = false;
-                fast_retries = STARTUP_BACKGROUND_FAST_RETRIES;
-            }
-            quiet = waiting_for_nodes
-                || (fast_retries >= STARTUP_BACKGROUND_FAST_RETRIES && runtime_ready);
-            if quiet {
+            let runtime_ready = data_plane_is_ready(state).await;
+            let (wait, quiet_warning) = cadence.plan_next_wait(runtime_ready);
+            if let Some(warning) = quiet_warning {
                 // A newer foreground operation owns its warning and state.
                 if state.sub_refresh_generation.load(Ordering::Relaxed) == refresh_generation
                     && state.lifecycle.snapshot().should_run
                     && !state.subscription_refresh.foreground_in_flight()
-                    && (refresh_generation == 0
-                        || state.sub_refresh_success_generation.load(Ordering::Relaxed)
-                            != refresh_generation)
+                    && !state.foreground_sub_refresh_succeeded(refresh_generation)
                 {
-                    *state.config_warning.lock().await = Some(
-                        if waiting_for_nodes {
-                            crate::services::config::SUBS_WAITING_FOR_NODES
-                        } else {
-                            SUBS_RETRYING_SLOWLY
-                        }
-                        .to_string(),
-                    );
+                    *state.config_warning.lock().await = Some(warning.to_string());
                 }
-                slow_retry_interval
-            } else {
-                fast_retries = fast_retries.saturating_add(1);
-                delay
             }
+            wait
         };
         state
             .subscription_refresh
             .wait_to_retry(refresh_generation, wait);
         info!(
             delay_secs = wait.as_secs(),
-            quiet, "Startup subscription refresh will retry in the background"
+            quiet = cadence.quiet,
+            "Startup subscription refresh will retry in the background"
         );
-        next_wait = wait;
-        delay = next_startup_recovery_delay(delay);
-        // 后续由外层控制快速/低频重试；每轮只请求一次，不再重复首轮预算。
-        retry = SubFetchRetry::None;
+        cadence.advance_after_scheduling(wait);
     }
 }
 
@@ -507,10 +567,7 @@ async fn resume_after_foreground_refresh(
         info!("Subscriptions changed while foreground refresh superseded startup recovery");
         return None;
     }
-    if state.subscription_recovery.is_complete(current_generation)
-        || (current_generation != 0
-            && state.sub_refresh_success_generation.load(Ordering::Relaxed) == current_generation)
-    {
+    if state.sub_recovery_satisfied(current_generation) {
         info!("Subscription recovery already completed for this generation");
         return None;
     }
@@ -519,6 +576,139 @@ async fn resume_after_foreground_refresh(
         info!("Foreground refresh has not committed a successful subscription response; resuming startup recovery");
     }
     Some(current_generation)
+}
+
+fn activated_startup_refresh_warning(
+    current: &Config,
+    effective_node_select: crate::models::NodeSelect,
+    pending_subs: bool,
+) -> Option<String> {
+    if pending_subs {
+        Some(ALL_SUBS_FAILED_KEEP_CACHE.to_string())
+    } else if !current.node_select.is_manual() && effective_node_select.is_manual() {
+        Some(REGION_FALLBACK.to_string())
+    } else {
+        None
+    }
+}
+
+fn retry_if_subs_configured(current: &Config) -> BackgroundRefreshStep {
+    if current.subs.is_empty() {
+        BackgroundRefreshStep::Finished
+    } else {
+        BackgroundRefreshStep::Retry
+    }
+}
+
+async fn check_background_refresh_preconditions(
+    startup_config: &Config,
+    state: &AppState,
+    refresh_generation: u64,
+) -> Result<Config, BackgroundRefreshStep> {
+    if state.sub_refresh_generation.load(Ordering::Relaxed) != refresh_generation {
+        return Err(BackgroundRefreshStep::Superseded);
+    }
+    if state.subscription_recovery.is_complete(refresh_generation) {
+        return Err(BackgroundRefreshStep::Finished);
+    }
+    if !state.lifecycle.snapshot().should_run {
+        info!("Service stopped before background refresh; skipping");
+        return Err(BackgroundRefreshStep::Finished);
+    }
+    let before_fetch = state.config_with_preferences().await;
+    if before_fetch.subs != startup_config.subs {
+        info!("Subscriptions changed before background refresh; skipping");
+        return Err(BackgroundRefreshStep::Finished);
+    }
+    Ok(before_fetch)
+}
+
+async fn check_background_commit_preconditions(
+    startup_config: &Config,
+    state: &AppState,
+    refresh_generation: u64,
+) -> Result<Config, BackgroundRefreshStep> {
+    if state.sub_refresh_generation.load(Ordering::Relaxed) != refresh_generation {
+        return Err(BackgroundRefreshStep::Superseded);
+    }
+    let current = state.config_with_preferences().await;
+    if current.subs != startup_config.subs {
+        info!(
+            "Subscriptions changed during background refresh; skipping (panel edit already applied)"
+        );
+        return Err(BackgroundRefreshStep::Finished);
+    }
+    if !state.lifecycle.snapshot().should_run {
+        info!("Service stopped during background refresh; skipping");
+        return Err(BackgroundRefreshStep::Finished);
+    }
+    Ok(current)
+}
+
+async fn settle_background_refresh_attempt(
+    current: &Config,
+    state: &Arc<AppState>,
+    refresh_generation: u64,
+    fetch_report: crate::models::SubscriptionFetchReport,
+    source: SubSource,
+    quiet: bool,
+) -> BackgroundRefreshStep {
+    let result = refresh_subscriptions(current, state, RefreshPolicy::Startup, source).await;
+    let step = match result {
+        Ok(outcome) => match outcome.effect {
+            RefreshEffect::Activated | RefreshEffect::SkippedUnchanged => {
+                // Kernel activation and subscription acceptance are independent.
+                // A manual/cache rebuild can succeed with every source offline.
+                let pending = !current.subs.is_empty() && !fetch_report.accepted_response();
+                save_config_cache(state).await;
+                *state.config_warning.lock().await =
+                    activated_startup_refresh_warning(current, outcome.node_select, pending);
+                if outcome.effect == RefreshEffect::Activated {
+                    spawn_restore_last_proxy(state);
+                }
+                if pending {
+                    BackgroundRefreshStep::Retry
+                } else {
+                    state.subscription_recovery.complete(refresh_generation);
+                    BackgroundRefreshStep::Finished
+                }
+            }
+            RefreshEffect::KeptRunningOnTotalFailure => {
+                warn!("{ALL_SUBS_FAILED_KEEP_CACHE}");
+                *state.config_warning.lock().await = Some(ALL_SUBS_FAILED_KEEP_CACHE.to_string());
+                retry_if_subs_configured(current)
+            }
+            RefreshEffect::KeptRunningOnValidationFailure => {
+                error!("Refreshed config failed validation; keeping current config");
+                *state.config_warning.lock().await = Some(REFRESH_VALIDATION_FAILED.to_string());
+                retry_if_subs_configured(current)
+            }
+        },
+        Err(err) if err.is_no_usable_nodes() && fetch_report.accepted_response() => {
+            if state.lifecycle.snapshot().ready {
+                // The response was authoritative; fetching it again is not a
+                // network-recovery operation. Preserve availability, but do not
+                // publish an unactivated empty snapshot or retry it as a failure.
+                *state.config_warning.lock().await =
+                    Some(crate::services::config::SUBS_NO_USABLE_KEEP_CACHE.to_string());
+                state.subscription_recovery.complete(refresh_generation);
+                BackgroundRefreshStep::Finished
+            } else {
+                *state.config_warning.lock().await =
+                    Some(crate::services::config::SUBS_WAITING_FOR_NODES.to_string());
+                BackgroundRefreshStep::WaitForNodes
+            }
+        }
+        Err(err) => {
+            warn!(error = %err, "Background subscription refresh failed");
+            *state.config_warning.lock().await = Some(REFRESH_FAILED_KEEP_CACHE.to_string());
+            retry_if_subs_configured(current)
+        }
+    };
+    if quiet && step == BackgroundRefreshStep::Retry && state.lifecycle.snapshot().ready {
+        *state.config_warning.lock().await = Some(SUBS_RETRYING_SLOWLY.to_string());
+    }
+    step
 }
 
 async fn background_subscription_refresh_once(
@@ -536,21 +726,13 @@ async fn background_subscription_refresh_once(
             BackgroundRefreshStep::Retry
         };
     };
-    if state.sub_refresh_generation.load(Ordering::Relaxed) != refresh_generation {
-        return BackgroundRefreshStep::Superseded;
-    }
-    if state.subscription_recovery.is_complete(refresh_generation) {
-        return BackgroundRefreshStep::Finished;
-    }
-    if !state.lifecycle.snapshot().should_run {
-        info!("Service stopped before background refresh; skipping");
-        return BackgroundRefreshStep::Finished;
-    }
-    let before_fetch = state.config_with_preferences().await;
-    if before_fetch.subs != startup_config.subs {
-        info!("Subscriptions changed before background refresh; skipping");
-        return BackgroundRefreshStep::Finished;
-    }
+    let before_fetch =
+        match check_background_refresh_preconditions(startup_config, state, refresh_generation)
+            .await
+        {
+            Ok(config) => config,
+            Err(step) => return step,
+        };
 
     // Fetch activity is published independently of the proxy lifecycle.
     // Only validation/activation may change the runtime phase.
@@ -558,103 +740,26 @@ async fn background_subscription_refresh_once(
     let fetch_report = nodes.report;
 
     let _config_update = state.config_update.lock().await;
-    if state.sub_refresh_generation.load(Ordering::Relaxed) != refresh_generation {
-        return BackgroundRefreshStep::Superseded;
-    }
-    let current = state.config_with_preferences().await;
-    if current.subs != startup_config.subs {
-        info!(
-            "Subscriptions changed during background refresh; skipping (panel edit already applied)"
-        );
-        return BackgroundRefreshStep::Finished;
-    }
-    if !state.lifecycle.snapshot().should_run {
-        info!("Service stopped during background refresh; skipping");
-        return BackgroundRefreshStep::Finished;
-    }
-
-    let step = match refresh_subscriptions(
-        &current,
+    let current = match check_background_commit_preconditions(
+        startup_config,
         state,
-        RefreshPolicy::Startup,
-        SubSource::Prefetched(nodes),
+        refresh_generation,
     )
     .await
     {
-        Ok(outcome) => match outcome.effect {
-            RefreshEffect::Activated | RefreshEffect::SkippedUnchanged => {
-                // Kernel activation and subscription acceptance are independent.
-                // A manual/cache rebuild can succeed with every source offline.
-                let pending = !current.subs.is_empty() && !fetch_report.accepted_response();
-                save_config_cache(state).await;
-                *state.config_warning.lock().await = if pending {
-                    Some(ALL_SUBS_FAILED_KEEP_CACHE.to_string())
-                } else if !current.node_select.is_manual() && outcome.node_select.is_manual() {
-                    Some(REGION_FALLBACK.to_string())
-                } else {
-                    None
-                };
-                if outcome.effect == RefreshEffect::Activated {
-                    spawn_restore_last_proxy(state);
-                }
-                if pending {
-                    BackgroundRefreshStep::Retry
-                } else {
-                    state.subscription_recovery.complete(refresh_generation);
-                    BackgroundRefreshStep::Finished
-                }
-            }
-            RefreshEffect::KeptRunningOnTotalFailure => {
-                warn!("{ALL_SUBS_FAILED_KEEP_CACHE}");
-                *state.config_warning.lock().await = Some(ALL_SUBS_FAILED_KEEP_CACHE.to_string());
-                if current.subs.is_empty() {
-                    BackgroundRefreshStep::Finished
-                } else {
-                    BackgroundRefreshStep::Retry
-                }
-            }
-            RefreshEffect::KeptRunningOnValidationFailure => {
-                error!("Refreshed config failed validation; keeping current config");
-                *state.config_warning.lock().await = Some(REFRESH_VALIDATION_FAILED.to_string());
-                if current.subs.is_empty() {
-                    BackgroundRefreshStep::Finished
-                } else {
-                    BackgroundRefreshStep::Retry
-                }
-            }
-        },
-        Err(err)
-            if err.is_no_usable_nodes()
-                && fetch_report.accepted_response()
-                && state.lifecycle.snapshot().ready =>
-        {
-            // The response was authoritative; fetching it again is not a
-            // network-recovery operation. Preserve availability, but do not
-            // publish an unactivated empty snapshot or retry it as a failure.
-            *state.config_warning.lock().await =
-                Some(crate::services::config::SUBS_NO_USABLE_KEEP_CACHE.to_string());
-            state.subscription_recovery.complete(refresh_generation);
-            BackgroundRefreshStep::Finished
-        }
-        Err(err) if err.is_no_usable_nodes() && fetch_report.accepted_response() => {
-            *state.config_warning.lock().await =
-                Some(crate::services::config::SUBS_WAITING_FOR_NODES.to_string());
-            BackgroundRefreshStep::WaitForNodes
-        }
-        Err(err) => {
-            warn!(error = %err, "Background subscription refresh failed");
-            *state.config_warning.lock().await = Some(REFRESH_FAILED_KEEP_CACHE.to_string());
-            if current.subs.is_empty() {
-                BackgroundRefreshStep::Finished
-            } else {
-                BackgroundRefreshStep::Retry
-            }
-        }
+        Ok(config) => config,
+        Err(step) => return step,
     };
-    if quiet && step == BackgroundRefreshStep::Retry && state.lifecycle.snapshot().ready {
-        *state.config_warning.lock().await = Some(SUBS_RETRYING_SLOWLY.to_string());
-    }
-    step
+
+    settle_background_refresh_attempt(
+        &current,
+        state,
+        refresh_generation,
+        fetch_report,
+        SubSource::Prefetched(nodes),
+        quiet,
+    )
+    .await
 }
 
 pub(super) const STARTUP_BACKGROUND_FAST_RETRIES: usize = 4;
@@ -690,129 +795,139 @@ pub(crate) enum RecoveryOutcome {
     WaitForNodes,
 }
 
-/// One bounded fetch/install attempt. Its registration spans network I/O and
-/// commit, but not the outer retry sleep, so upgrade can drain without hanging
-/// forever on an offline subscription.
-pub(crate) async fn recover_data_plane_once(state: &Arc<AppState>) -> RecoveryOutcome {
-    use RecoveryOutcome::*;
-    // Acquire before config_update and this attempt's mutation lease. An
-    // admitted HTTP caller still retains its request lease while waiting.
-    // Reuse the preceding attempt's committed result when ownership transfers.
-    let _attempt = state.subscription_recovery.attempt.lock().await;
-    let Some(_mutation) = state.begin_mutation() else {
-        return if state.lifecycle.is_shutting_down() {
-            Complete
-        } else {
-            RetryDataPlane
-        };
-    };
-    if !should_retry_failed_startup(state).await {
-        return recovery_after_concurrent_change(state).await;
-    }
+enum DataPlaneAttemptPrep {
+    ReadyToFetch { config: Config, generation: u64 },
+    Resolved(RecoveryOutcome),
+}
 
-    let (config, refresh_generation) = {
-        let _config_update = state.config_update.lock().await;
-        if !state.lifecycle.snapshot().should_run {
-            return Complete;
-        }
-        if state.subscription_refresh.foreground_in_flight() {
-            return RetryDataPlane;
-        }
-        // A foreground/local operation can repair the runtime while this
-        // attempt waits for config_update. Do not retire its fresh success.
-        if state.lifecycle.snapshot().ready && is_sing_box_running(state).await {
-            return recovery_after_concurrent_change(state).await;
-        }
-        let generation = state.sub_refresh_generation.load(Ordering::Relaxed);
-        let generation = if generation != 0
-            && state.sub_refresh_success_generation.load(Ordering::Relaxed) == generation
-        {
-            // The last foreground commit may have deliberately left no nodes.
-            // A new repair must not inherit that commit's completion marker;
-            // later foreground successes still supersede this new generation.
-            state.next_sub_refresh()
-        } else {
-            generation
-        };
-        state.subscription_recovery.invalidate();
-        (state.config_with_preferences().await, generation)
-    };
-    let nodes =
-        fetch_sub_nodes_if_current(&config, state, SubFetchRetry::Startup, refresh_generation)
-            .await;
-    let accepted_response = nodes.report.accepted_response();
+enum DataPlaneRefreshAttempt {
+    Recovered(RecoveryOutcome),
+    NeedsCacheFallback { waiting_for_nodes: bool },
+}
+
+async fn prepare_data_plane_recovery_attempt(state: &Arc<AppState>) -> DataPlaneAttemptPrep {
     let _config_update = state.config_update.lock().await;
     if !state.lifecycle.snapshot().should_run {
-        return Complete;
+        return DataPlaneAttemptPrep::Resolved(RecoveryOutcome::Complete);
+    }
+    if state.subscription_refresh.foreground_in_flight() {
+        return DataPlaneAttemptPrep::Resolved(RecoveryOutcome::RetryDataPlane);
+    }
+    // A foreground/local operation can repair the runtime while this
+    // attempt waits for config_update. Do not retire its fresh success.
+    if data_plane_is_ready(state).await {
+        return DataPlaneAttemptPrep::Resolved(recovery_after_concurrent_change(state).await);
+    }
+    let generation = state.sub_refresh_generation.load(Ordering::Relaxed);
+    let generation = if state.foreground_sub_refresh_succeeded(generation) {
+        // The last foreground commit may have deliberately left no nodes.
+        // A new repair must not inherit that commit's completion marker;
+        // later foreground successes still supersede this new generation.
+        state.next_sub_refresh()
+    } else {
+        generation
+    };
+    state.subscription_recovery.invalidate();
+    DataPlaneAttemptPrep::ReadyToFetch {
+        config: state.config_with_preferences().await,
+        generation,
+    }
+}
+
+async fn revalidate_data_plane_commit(
+    fetched_config: &Config,
+    state: &Arc<AppState>,
+    refresh_generation: u64,
+) -> Result<Config, RecoveryOutcome> {
+    if !state.lifecycle.snapshot().should_run {
+        return Err(RecoveryOutcome::Complete);
     }
     let current = state.config_with_preferences().await;
     if state.sub_refresh_generation.load(Ordering::Relaxed) != refresh_generation
-        || current.subs != config.subs
+        || current.subs != fetched_config.subs
     {
         info!("Startup recovery was superseded; discarding stale fetch");
-        return recovery_after_concurrent_change(state).await;
+        return Err(recovery_after_concurrent_change(state).await);
     }
-    if state.lifecycle.snapshot().ready && is_sing_box_running(state).await {
-        return recovery_after_concurrent_change(state).await;
+    if data_plane_is_ready(state).await {
+        return Err(recovery_after_concurrent_change(state).await);
     }
-    let pending = !current.subs.is_empty() && !accepted_response;
-    let mut waiting_for_nodes = false;
+    Ok(current)
+}
 
-    match refresh_subscriptions(
-        &current,
-        state,
-        RefreshPolicy::Startup,
-        SubSource::Prefetched(nodes),
-    )
-    .await
-    {
+async fn apply_data_plane_refresh_attempt(
+    current: &Config,
+    state: &Arc<AppState>,
+    refresh_generation: u64,
+    source: SubSource,
+    accepted_response: bool,
+    pending_subs: bool,
+) -> DataPlaneRefreshAttempt {
+    match refresh_subscriptions(current, state, RefreshPolicy::Startup, source).await {
         Ok(outcome) => match outcome.effect {
             RefreshEffect::Activated | RefreshEffect::SkippedUnchanged => {
-                if state.lifecycle.snapshot().ready && is_sing_box_running(state).await {
+                if data_plane_is_ready(state).await {
                     save_config_cache(state).await;
-                    *state.config_warning.lock().await = if pending {
-                        Some(ALL_SUBS_FAILED_KEEP_CACHE.to_string())
-                    } else if !current.node_select.is_manual() && outcome.node_select.is_manual() {
-                        Some(REGION_FALLBACK.to_string())
-                    } else {
-                        None
-                    };
+                    *state.config_warning.lock().await = activated_startup_refresh_warning(
+                        current,
+                        outcome.node_select,
+                        pending_subs,
+                    );
                     spawn_restore_last_proxy(state);
-                    return if pending {
-                        RetrySubscriptions
+                    let recovery = if pending_subs {
+                        RecoveryOutcome::RetrySubscriptions
                     } else {
                         state.subscription_recovery.complete(refresh_generation);
-                        Complete
+                        RecoveryOutcome::Complete
                     };
+                    return DataPlaneRefreshAttempt::Recovered(recovery);
                 }
                 warn!("Startup recovery produced unchanged bytes without a ready data plane");
+                DataPlaneRefreshAttempt::NeedsCacheFallback {
+                    waiting_for_nodes: false,
+                }
             }
             RefreshEffect::KeptRunningOnTotalFailure => {
                 *state.config_warning.lock().await = Some(ALL_SUBS_FAILED_RETRY.to_string());
+                DataPlaneRefreshAttempt::NeedsCacheFallback {
+                    waiting_for_nodes: false,
+                }
             }
             RefreshEffect::KeptRunningOnValidationFailure => {
                 *state.config_warning.lock().await = Some(STARTUP_VALIDATION_RETRY.to_string());
+                DataPlaneRefreshAttempt::NeedsCacheFallback {
+                    waiting_for_nodes: false,
+                }
             }
         },
         Err(err) => {
             warn!(error = %err, "Startup data-plane recovery attempt failed");
-            waiting_for_nodes = accepted_response && err.is_no_usable_nodes();
+            let waiting_for_nodes = accepted_response && err.is_no_usable_nodes();
             *state.config_warning.lock().await = Some(DATA_PLANE_RETRYING.to_string());
+            DataPlaneRefreshAttempt::NeedsCacheFallback { waiting_for_nodes }
         }
     }
-    if try_start_compatible_cache(&current, state).await {
+}
+
+async fn finish_data_plane_cache_fallback(
+    current: &Config,
+    state: &Arc<AppState>,
+    pending_subs: bool,
+    waiting_for_nodes: bool,
+) -> RecoveryOutcome {
+    if try_start_compatible_cache(current, state).await {
         if current.subs.is_empty() {
-            return Complete;
+            return RecoveryOutcome::Complete;
         }
         *state.config_warning.lock().await = Some(
-            if pending {
+            if pending_subs {
                 ALL_SUBS_FAILED_KEEP_CACHE
             } else {
                 REFRESH_FAILED_KEEP_CACHE
             }
             .to_string(),
         );
-        return RetrySubscriptions;
+        return RecoveryOutcome::RetrySubscriptions;
     }
     let runtime = state.lifecycle.snapshot();
     if !runtime.ready {
@@ -823,9 +938,60 @@ pub(crate) async fn recover_data_plane_once(state: &Arc<AppState>) -> RecoveryOu
     if waiting_for_nodes {
         *state.config_warning.lock().await =
             Some(crate::services::config::SUBS_WAITING_FOR_NODES.to_string());
-        WaitForNodes
+        RecoveryOutcome::WaitForNodes
     } else {
-        RetryDataPlane
+        RecoveryOutcome::RetryDataPlane
+    }
+}
+
+/// One bounded fetch/install attempt. Its registration spans network I/O and
+/// commit, but not the outer retry sleep, so upgrade can drain without hanging
+/// forever on an offline subscription.
+pub(crate) async fn recover_data_plane_once(state: &Arc<AppState>) -> RecoveryOutcome {
+    // Acquire before config_update and this attempt's mutation lease. An
+    // admitted HTTP caller still retains its request lease while waiting.
+    // Reuse the preceding attempt's committed result when ownership transfers.
+    let _attempt = state.subscription_recovery.attempt.lock().await;
+    let Some(_mutation) = state.begin_mutation() else {
+        return if state.lifecycle.is_shutting_down() {
+            RecoveryOutcome::Complete
+        } else {
+            RecoveryOutcome::RetryDataPlane
+        };
+    };
+    if !should_retry_failed_startup(state).await {
+        return recovery_after_concurrent_change(state).await;
+    }
+
+    let (config, refresh_generation) = match prepare_data_plane_recovery_attempt(state).await {
+        DataPlaneAttemptPrep::ReadyToFetch { config, generation } => (config, generation),
+        DataPlaneAttemptPrep::Resolved(outcome) => return outcome,
+    };
+    let nodes =
+        fetch_sub_nodes_if_current(&config, state, SubFetchRetry::Startup, refresh_generation)
+            .await;
+    let accepted_response = nodes.report.accepted_response();
+    let _config_update = state.config_update.lock().await;
+    let current = match revalidate_data_plane_commit(&config, state, refresh_generation).await {
+        Ok(current) => current,
+        Err(outcome) => return outcome,
+    };
+    let pending = !current.subs.is_empty() && !accepted_response;
+
+    match apply_data_plane_refresh_attempt(
+        &current,
+        state,
+        refresh_generation,
+        SubSource::Prefetched(nodes),
+        accepted_response,
+        pending,
+    )
+    .await
+    {
+        DataPlaneRefreshAttempt::Recovered(outcome) => outcome,
+        DataPlaneRefreshAttempt::NeedsCacheFallback { waiting_for_nodes } => {
+            finish_data_plane_cache_fallback(&current, state, pending, waiting_for_nodes).await
+        }
     }
 }
 
@@ -841,11 +1007,7 @@ async fn recovery_after_concurrent_change(state: &Arc<AppState>) -> RecoveryOutc
         return RecoveryOutcome::RetryDataPlane;
     }
     let generation = state.sub_refresh_generation.load(Ordering::Relaxed);
-    if !config.subs.is_empty()
-        && !state.subscription_recovery.is_complete(generation)
-        && (generation == 0
-            || state.sub_refresh_success_generation.load(Ordering::Relaxed) != generation)
-    {
+    if !config.subs.is_empty() && !state.sub_recovery_satisfied(generation) {
         RecoveryOutcome::RetrySubscriptions
     } else {
         RecoveryOutcome::Complete

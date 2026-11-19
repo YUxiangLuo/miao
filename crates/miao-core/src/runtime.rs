@@ -180,39 +180,18 @@ pub(crate) async fn spawn_resolved(
         load_node_select_preference(&profile.runtime.node_select_preference).await;
     let stored_max_multiplier =
         load_max_multiplier_preference(&profile.runtime.max_multiplier_preference).await;
-    // Old releases only had volatile.yaml. Only a non-manual value is safe to
-    // migrate: serialized manual is indistinguishable from a temporary region
-    // fallback, so promoting it could permanently mask config.yaml's default.
-    let migrated_node_select = if stored_node_select.is_none() {
-        volatile_config
-            .as_ref()
-            .map(|volatile| volatile.node_select)
-            .filter(|node_select| !node_select.is_manual())
-    } else {
-        None
-    };
-    let requested_node_select = stored_node_select
-        .or(migrated_node_select)
-        .unwrap_or(stable_config.node_select);
-    // 最高倍率没有运行期降级值；旧版易变层里若已存在该字段则迁移非空值。
-    // None 不迁移，避免把“旧文件没有该字段”误当成用户明确选择不限。
-    let migrated_max_multiplier = if stored_max_multiplier.is_none() {
-        volatile_config
-            .as_ref()
-            .and_then(|volatile| volatile.max_multiplier)
-    } else {
-        None
-    };
-    let requested_max_multiplier = match stored_max_multiplier {
-        Some(stored) => stored,
-        None => migrated_max_multiplier.or(stable_config.max_multiplier),
-    };
+    let boot_prefs = resolve_boot_preferences(
+        &stable_config,
+        volatile_config.as_ref(),
+        stored_node_select,
+        stored_max_multiplier,
+    );
     let mut config = stable_config.effective(volatile_config);
-    config.node_select = requested_node_select;
-    config.max_multiplier = requested_max_multiplier;
+    config.node_select = boot_prefs.requested_node_select;
+    config.max_multiplier = boot_prefs.requested_max_multiplier;
     if stored_node_select.is_some() {
         info!(
-            node_select = requested_node_select.as_str(),
+            node_select = boot_prefs.requested_node_select.as_str(),
             "Restored node-selection preference"
         );
     }
@@ -231,12 +210,12 @@ pub(crate) async fn spawn_resolved(
         AppState::with_profile(stable_config, config.clone(), profile)
             .map_err(|e| AppError::context("Failed to create HTTP client", e))?,
     );
-    if let Some(node_select) = migrated_node_select {
+    if let Some(node_select) = boot_prefs.migrated_node_select {
         if let Err(err) = save_node_select_preference(&app_state, node_select).await {
             warn!(error = %err, "Failed to migrate volatile node-selection preference");
         }
     }
-    if let Some(max_multiplier) = migrated_max_multiplier {
+    if let Some(max_multiplier) = boot_prefs.migrated_max_multiplier {
         if let Err(err) = save_max_multiplier_preference(&app_state, Some(max_multiplier)).await {
             warn!(error = %err, "Failed to migrate volatile max-multiplier preference");
         }
@@ -431,6 +410,54 @@ fn install_tracing(log_path: Option<&std::path::Path>) {
         .try_init();
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct BootPreferences {
+    requested_node_select: crate::models::NodeSelect,
+    requested_max_multiplier: Option<crate::models::NodeMultiplier>,
+    migrated_node_select: Option<crate::models::NodeSelect>,
+    migrated_max_multiplier: Option<crate::models::NodeMultiplier>,
+}
+
+fn resolve_boot_preferences(
+    stable: &crate::models::StableConfig,
+    volatile: Option<&crate::models::VolatileConfig>,
+    stored_node_select: Option<crate::models::NodeSelect>,
+    stored_max_multiplier: Option<Option<crate::models::NodeMultiplier>>,
+) -> BootPreferences {
+    // Old releases only had volatile.yaml. Only a non-manual value is safe to
+    // migrate: serialized manual is indistinguishable from a temporary region
+    // fallback, so promoting it could permanently mask config.yaml's default.
+    let migrated_node_select = if stored_node_select.is_none() {
+        volatile
+            .map(|v| v.node_select)
+            .filter(|node_select| !node_select.is_manual())
+    } else {
+        None
+    };
+    let requested_node_select = stored_node_select
+        .or(migrated_node_select)
+        .unwrap_or(stable.node_select);
+
+    // 最高倍率没有运行期降级值；旧版易变层里若已存在该字段则迁移非空值。
+    // None 不迁移，避免把“旧文件没有该字段”误当成用户明确选择不限。
+    let migrated_max_multiplier = if stored_max_multiplier.is_none() {
+        volatile.and_then(|v| v.max_multiplier)
+    } else {
+        None
+    };
+    let requested_max_multiplier = match stored_max_multiplier {
+        Some(stored) => stored,
+        None => migrated_max_multiplier.or(stable.max_multiplier),
+    };
+
+    BootPreferences {
+        requested_node_select,
+        requested_max_multiplier,
+        migrated_node_select,
+        migrated_max_multiplier,
+    }
+}
+
 fn panel_bind_addr(port: u16) -> String {
     format!("0.0.0.0:{port}")
 }
@@ -464,6 +491,26 @@ fn browser_launch_env() -> Vec<(String, String)> {
     envs
 }
 
+fn build_browser_command(
+    url: &str,
+    sudo_user: Option<&str>,
+    launch_env: Vec<(String, String)>,
+) -> tokio::process::Command {
+    if let Some(sudo_user) = sudo_user {
+        let mut command = tokio::process::Command::new("runuser");
+        command.arg("-u").arg(sudo_user).arg("--").arg("env");
+        for (key, value) in &launch_env {
+            command.arg(format!("{key}={value}"));
+        }
+        command.arg("xdg-open").arg(url);
+        command
+    } else {
+        let mut command = tokio::process::Command::new("xdg-open");
+        command.arg(url).envs(launch_env);
+        command
+    }
+}
+
 async fn open_onboarding_browser(url: String) {
     let has_graphical_session =
         std::env::var_os("DISPLAY").is_some() || std::env::var_os("WAYLAND_DISPLAY").is_some();
@@ -471,27 +518,10 @@ async fn open_onboarding_browser(url: String) {
         return;
     }
 
-    let launch_env = browser_launch_env();
     let sudo_user = std::env::var("SUDO_USER")
         .ok()
         .filter(|user| !user.is_empty());
-    let use_runuser = sudo_user.is_some();
-    let mut command = if let Some(sudo_user) = sudo_user {
-        let mut command = tokio::process::Command::new("runuser");
-        command.arg("-u").arg(sudo_user).arg("--").arg("env");
-        for (key, value) in &launch_env {
-            command.arg(format!("{key}={value}"));
-        }
-        command.arg("xdg-open");
-        command
-    } else {
-        tokio::process::Command::new("xdg-open")
-    };
-
-    command.arg(&url);
-    if !use_runuser {
-        command.envs(launch_env);
-    }
+    let mut command = build_browser_command(&url, sudo_user.as_deref(), browser_launch_env());
 
     match command
         .stdin(std::process::Stdio::null())

@@ -15,6 +15,7 @@ pub mod lifecycle;
 mod mutations;
 mod recovery;
 mod subscriptions;
+pub(crate) use mutations::UpgradeQuiescence;
 use subscriptions::SubscriptionRefresh;
 
 /// 应用状态容器 - 包含所有运行时状态
@@ -187,19 +188,26 @@ impl AppState {
         generation
     }
 
+    /// Generation 0 is the uninitialized value of `sub_refresh_success_generation`
+    /// before any foreground refresh runs (`next_sub_refresh` starts at 1).
+    pub(crate) fn foreground_sub_refresh_succeeded(&self, generation: u64) -> bool {
+        generation != 0 && self.sub_refresh_success_generation.load(Ordering::Relaxed) == generation
+    }
+
+    /// True once either background recovery or a foreground transaction has
+    /// accepted and committed an authoritative subscription response for `generation`.
+    pub(crate) fn sub_recovery_satisfied(&self, generation: u64) -> bool {
+        self.subscription_recovery.is_complete(generation)
+            || self.foreground_sub_refresh_succeeded(generation)
+    }
+
     /// Call under config_update after retiring a fetch generation, before a
     /// replacement fetch can begin. Local edits may not fetch again at all.
     pub(crate) async fn settle_cancelled_sub_statuses(&self) {
         let mut changed = false;
         for status in self.sub_status.lock().await.values_mut() {
             if status.state == SubscriptionState::Refreshing {
-                status.state = if status.success {
-                    SubscriptionState::Ready
-                } else if status.failure_kind.is_some() || status.error.is_some() {
-                    SubscriptionState::Failed
-                } else {
-                    SubscriptionState::Pending
-                };
+                status.state = settled_cancelled_sub_state(status);
                 changed = true;
             }
         }
@@ -222,6 +230,16 @@ impl AppState {
         config.node_select = *self.node_select_preference.read().await;
         config.max_multiplier = *self.max_multiplier_preference.read().await;
         config
+    }
+}
+
+fn settled_cancelled_sub_state(status: &SubStatus) -> SubscriptionState {
+    if status.success {
+        SubscriptionState::Ready
+    } else if status.failure_kind.is_some() || status.error.is_some() {
+        SubscriptionState::Failed
+    } else {
+        SubscriptionState::Pending
     }
 }
 
@@ -323,5 +341,68 @@ mod tests {
 
         assert!(cache.release.is_none());
         assert!(cache.fetched_at.is_none());
+    }
+
+    #[test]
+    fn cancelled_refreshing_sub_status_converges_to_prior_outcome() {
+        let base = SubStatus {
+            url: "https://example.com/sub".to_string(),
+            success: false,
+            node_count: 0,
+            disabled_count: 0,
+            state: SubscriptionState::Refreshing,
+            failure_kind: None,
+            error: None,
+        };
+        assert_eq!(
+            settled_cancelled_sub_state(&base),
+            SubscriptionState::Pending
+        );
+        assert_eq!(
+            settled_cancelled_sub_state(&SubStatus {
+                success: true,
+                ..base.clone()
+            }),
+            SubscriptionState::Ready
+        );
+        assert_eq!(
+            settled_cancelled_sub_state(&SubStatus {
+                failure_kind: Some(crate::models::SubscriptionFailureKind::Timeout),
+                ..base.clone()
+            }),
+            SubscriptionState::Failed
+        );
+        assert_eq!(
+            settled_cancelled_sub_state(&SubStatus {
+                error: Some("boom".to_string()),
+                ..base
+            }),
+            SubscriptionState::Failed
+        );
+    }
+
+    #[test]
+    fn sub_recovery_satisfaction_distinguishes_boot_generation_zero_from_foreground_commits() {
+        let state = AppState::new(Config::default()).unwrap();
+        assert!(!state.foreground_sub_refresh_succeeded(0));
+        assert!(!state.sub_recovery_satisfied(0));
+
+        state.subscription_recovery.complete(0);
+        assert!(state.sub_recovery_satisfied(0));
+
+        let g1 = state.next_sub_refresh();
+        assert_eq!(g1, 1);
+        assert!(!state.sub_recovery_satisfied(g1));
+        state
+            .sub_refresh_success_generation
+            .store(g1, Ordering::Relaxed);
+        assert!(state.foreground_sub_refresh_succeeded(g1));
+        assert!(state.sub_recovery_satisfied(g1));
+
+        state.subscription_recovery.invalidate();
+        assert!(
+            state.sub_recovery_satisfied(g1),
+            "foreground commit marker remains authoritative until a new generation starts"
+        );
     }
 }

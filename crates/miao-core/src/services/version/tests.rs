@@ -6,8 +6,8 @@ use crate::models::{Config, GitHubAsset, GitHubRelease};
 use crate::test_support::app_state;
 
 use super::{
-    current_version, mark_upgrade_healthy_at, upgrade_pending_path, upgrade_requires_rollback,
-    write_upgrade_pending, UpgradePending,
+    current_version, decide_pending_upgrade, mark_upgrade_healthy_at, upgrade_pending_path,
+    upgrade_requires_rollback, write_upgrade_pending, PendingUpgradeAction, UpgradePending,
 };
 
 #[test]
@@ -207,4 +207,48 @@ fn version_info_includes_linux_asset_url() {
             Some("https://example.com/miao")
         );
     }
+}
+
+#[test]
+fn decide_pending_upgrade_covers_all_marker_and_backup_combinations() {
+    assert_eq!(
+        decide_pending_upgrade(None, "v1.0.0", 42, true, |_| false),
+        PendingUpgradeAction::CleanLegacyBackup
+    );
+    let installed = UpgradePending {
+        expected_version: "1.0.0".to_string(),
+        state: "installed".to_string(),
+        boot_pid: None,
+    };
+    assert_eq!(
+        decide_pending_upgrade(Some(&installed), "v1.0.0", 42, true, |_| false),
+        PendingUpgradeAction::TransitionToBooting { pid: 42 }
+    );
+    assert_eq!(
+        decide_pending_upgrade(Some(&installed), "v0.9.0", 42, true, |_| false),
+        PendingUpgradeAction::RollbackToBackup
+    );
+    assert_eq!(
+        decide_pending_upgrade(Some(&installed), "v0.9.0", 42, false, |_| false),
+        PendingUpgradeAction::KeepBootingWindow
+    );
+
+    let booting = UpgradePending {
+        expected_version: "v1.0.0".to_string(),
+        state: "booting".to_string(),
+        boot_pid: Some(100),
+    };
+    assert_eq!(
+        decide_pending_upgrade(Some(&booting), "v1.0.0", 200, true, |pid| pid == 100),
+        PendingUpgradeAction::KeepBootingWindow,
+        "concurrent CLI launch while primary boot_pid lives must not roll back"
+    );
+    assert_eq!(
+        decide_pending_upgrade(Some(&booting), "v1.0.0", 200, true, |_| false),
+        PendingUpgradeAction::RollbackToBackup
+    );
+    assert_eq!(
+        decide_pending_upgrade(Some(&booting), "v1.0.0", 200, false, |_| false),
+        PendingUpgradeAction::KeepBootingWindow
+    );
 }

@@ -45,6 +45,18 @@ enum FireOutcome {
     Skipped,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum DueKind {
+    Scheduled,
+    Retry,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct DueTarget {
+    at: ZonedDateTime,
+    kind: DueKind,
+}
+
 /// 失败退避预算。`retry_at` 必须存绝对时刻：循环每 [`MAX_TICK`] 会重算目标，
 /// 按剩余时长存储会被不断推后，永远到不了点。
 struct RetryState {
@@ -72,17 +84,22 @@ impl RetryState {
     }
 
     /// 本次等待的目标：未完成的退避优先，但计划时刻更早时以计划时刻为准。
-    /// 返回 `(目标时刻, 是否退避重试)`。
-    fn target(&self, scheduled: ZonedDateTime) -> (ZonedDateTime, bool) {
+    fn target(&self, scheduled: ZonedDateTime) -> DueTarget {
         match &self.retry_at {
-            Some(retry) if retry < scheduled => (retry.clone(), true),
-            _ => (scheduled, false),
+            Some(retry) if *retry < scheduled => DueTarget {
+                at: retry.clone(),
+                kind: DueKind::Retry,
+            },
+            _ => DueTarget {
+                at: scheduled,
+                kind: DueKind::Scheduled,
+            },
         }
     }
 
     /// 到点执行前的准备：计划时刻（非退避）开始新一轮预算。
-    fn begin(&mut self, is_retry: bool) {
-        if !is_retry {
+    fn begin(&mut self, kind: DueKind) {
+        if kind == DueKind::Scheduled {
             self.clear();
         }
     }
@@ -91,15 +108,15 @@ impl RetryState {
         self.clear();
     }
 
-    /// 记录一次可重试的失败并推进退避；返回是否还有重试预算。
-    fn on_failure(&mut self, now: &ZonedDateTime) -> bool {
+    /// 记录一次可重试的失败并推进退避；返回下一次退避时刻（若仍有预算）。
+    fn on_failure(&mut self, now: &ZonedDateTime) -> Option<&ZonedDateTime> {
         self.retry_at = self
             .backoff
             .get(self.failures)
             .copied()
             .and_then(|delay| now.checked_add(delay).ok());
         self.failures = self.failures.saturating_add(1);
-        self.retry_at.is_some()
+        self.retry_at.as_ref()
     }
 
     fn clear(&mut self) {
@@ -117,12 +134,9 @@ async fn run_scheduled_refreshes(
         match fire(&state).await {
             FireOutcome::Succeeded | FireOutcome::Skipped => retry.on_success(),
             FireOutcome::Retryable => {
-                if retry.on_failure(&now()) {
-                    let retry_in_secs = retry
-                        .retry_at
-                        .as_ref()
-                        .map(|at| at.duration_since(&now()).as_secs().max(0))
-                        .unwrap_or(0);
+                let failed_at = now();
+                if let Some(retry_at) = retry.on_failure(&failed_at) {
+                    let retry_in_secs = retry_at.duration_since(&failed_at).as_secs().max(0);
                     warn!(
                         retry_in_secs,
                         attempts = retry.failures,
@@ -179,9 +193,9 @@ async fn wait_for_due_refresh(
         }
         let timer = async {
             match &target {
-                Some((target, _)) => {
+                Some(due) => {
                     let remaining =
-                        Duration::try_from(target.duration_since(&now())).unwrap_or_default();
+                        Duration::try_from(due.at.duration_since(&now())).unwrap_or_default();
                     sleep(remaining.min(MAX_TICK)).await;
                 }
                 None => std::future::pending::<()>().await,
@@ -200,9 +214,9 @@ async fn wait_for_due_refresh(
             return false;
         }
         // Sleep in bounded chunks so clock/timezone changes are picked up.
-        if let Some((target, is_retry)) = target {
-            if now() >= target {
-                retry.begin(is_retry);
+        if let Some(due) = target {
+            if now() >= due.at {
+                retry.begin(due.kind);
                 return true;
             }
         }
@@ -283,15 +297,18 @@ mod tests {
         let now = local(12, 0);
         assert!(retry.retry_at.is_none());
 
-        assert!(retry.on_failure(&now));
+        assert!(retry.on_failure(&now).is_some());
         assert!(retry.retry_at.is_some());
-        assert!(retry.on_failure(&now));
-        assert!(!retry.on_failure(&now), "预算用尽后不再安排重试");
+        assert!(retry.on_failure(&now).is_some());
+        assert!(retry.on_failure(&now).is_none(), "预算用尽后不再安排重试");
         assert!(retry.retry_at.is_none());
-        assert!(!retry.on_failure(&now));
+        assert!(retry.on_failure(&now).is_none());
 
         retry.on_success();
-        assert!(retry.on_failure(&now), "成功清零后重新获得完整预算");
+        assert!(
+            retry.on_failure(&now).is_some(),
+            "成功清零后重新获得完整预算"
+        );
         assert_eq!(retry.failures, 1);
     }
 
@@ -303,11 +320,23 @@ mod tests {
         retry.retry_at = Some(one_minute.clone());
 
         let later = now.checked_add(Duration::from_secs(3600)).unwrap();
-        assert_eq!(retry.target(later), (one_minute, true));
+        assert_eq!(
+            retry.target(later),
+            DueTarget {
+                at: one_minute,
+                kind: DueKind::Retry,
+            }
+        );
 
         let earlier = now.checked_add(Duration::from_secs(30)).unwrap();
-        assert_eq!(retry.target(earlier.clone()), (earlier, false));
-        retry.begin(false);
+        assert_eq!(
+            retry.target(earlier.clone()),
+            DueTarget {
+                at: earlier,
+                kind: DueKind::Scheduled,
+            }
+        );
+        retry.begin(DueKind::Scheduled);
         assert!(retry.retry_at.is_none(), "计划时刻开始新一轮预算");
     }
 

@@ -1074,6 +1074,67 @@ fn rotate_oversized_log_renames_big_file() {
     let _ = std::fs::remove_file(&rotated);
 }
 
+#[test]
+fn resolve_boot_preferences_preserves_stable_defaults_over_volatile_manual_fallback() {
+    use crate::models::{NodeMultiplier, NodeSelect, Region, StableConfig, VolatileConfig};
+
+    let stable = StableConfig {
+        node_select: NodeSelect::Fastest(Region::Jp),
+        max_multiplier: NodeMultiplier::parse("3"),
+        ..StableConfig::default()
+    };
+    let volatile_fallback = VolatileConfig {
+        node_select: NodeSelect::Manual,
+        max_multiplier: None,
+        ..VolatileConfig::default()
+    };
+    let resolved = super::resolve_boot_preferences(&stable, Some(&volatile_fallback), None, None);
+    assert_eq!(
+        resolved.requested_node_select,
+        NodeSelect::Fastest(Region::Jp)
+    );
+    assert_eq!(resolved.migrated_node_select, None);
+    assert_eq!(
+        resolved.requested_max_multiplier,
+        NodeMultiplier::parse("3")
+    );
+    assert_eq!(resolved.migrated_max_multiplier, None);
+
+    let volatile_regional = VolatileConfig {
+        node_select: NodeSelect::Fastest(Region::Sg),
+        max_multiplier: NodeMultiplier::parse("1.5"),
+        ..VolatileConfig::default()
+    };
+    let migrated = super::resolve_boot_preferences(&stable, Some(&volatile_regional), None, None);
+    assert_eq!(
+        migrated.requested_node_select,
+        NodeSelect::Fastest(Region::Sg)
+    );
+    assert_eq!(
+        migrated.migrated_node_select,
+        Some(NodeSelect::Fastest(Region::Sg))
+    );
+    assert_eq!(
+        migrated.requested_max_multiplier,
+        NodeMultiplier::parse("1.5")
+    );
+    assert_eq!(
+        migrated.migrated_max_multiplier,
+        NodeMultiplier::parse("1.5")
+    );
+
+    let explicit_unlimited = super::resolve_boot_preferences(
+        &stable,
+        Some(&volatile_regional),
+        Some(NodeSelect::Manual),
+        Some(None),
+    );
+    assert_eq!(explicit_unlimited.requested_node_select, NodeSelect::Manual);
+    assert_eq!(explicit_unlimited.migrated_node_select, None);
+    assert_eq!(explicit_unlimited.requested_max_multiplier, None);
+    assert_eq!(explicit_unlimited.migrated_max_multiplier, None);
+}
+
 fn unique_test_config_path() -> PathBuf {
     std::env::temp_dir().join(format!(
         "miao-spawn-server-test-{}-{}.yaml",

@@ -22,6 +22,21 @@ impl Default for RuntimeSnapshot {
     }
 }
 
+impl RuntimeSnapshot {
+    /// `Ready` and `Starting` require active run intent; `Failed` and `Stopped`
+    /// may still settle the current generation when intent is already false.
+    fn can_finish_as(self, generation: u64, phase: RuntimePhase) -> bool {
+        if self.generation != generation {
+            return false;
+        }
+        match phase {
+            RuntimePhase::Ready | RuntimePhase::Starting => self.should_run,
+            RuntimePhase::Failed | RuntimePhase::Stopped => true,
+            _ => unreachable!("unsupported terminal runtime phase: {phase:?}"),
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 pub enum KernelOperation {
     Start,
@@ -29,11 +44,75 @@ pub enum KernelOperation {
     Stop,
 }
 
+impl KernelOperation {
+    fn phase(self) -> RuntimePhase {
+        match self {
+            Self::Start => RuntimePhase::Starting,
+            Self::Reload => RuntimePhase::Reloading,
+            Self::Stop => RuntimePhase::Stopping,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 pub enum RuntimeActivity {
     Extracting,
     Validating,
     ApplyingConfig,
+}
+
+impl RuntimeActivity {
+    fn phase(self) -> RuntimePhase {
+        match self {
+            Self::Extracting => RuntimePhase::Extracting,
+            Self::Validating => RuntimePhase::Validating,
+            Self::ApplyingConfig => RuntimePhase::ApplyingConfig,
+        }
+    }
+}
+
+/// Three-state write-admission and upgrade-handoff gate. `ShuttingDown` is
+/// terminal: dropping an `UpgradeQuiescence` guard after shutdown never reopens
+/// write admission or permits `exec` handoff.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum MutationAdmission {
+    #[default]
+    Open,
+    QuiescingForUpgrade,
+    ShuttingDown,
+}
+
+impl MutationAdmission {
+    fn allows_mutations(self) -> bool {
+        matches!(self, Self::Open)
+    }
+
+    fn is_shutting_down(self) -> bool {
+        matches!(self, Self::ShuttingDown)
+    }
+
+    fn allows_upgrade_handoff(self) -> bool {
+        matches!(self, Self::QuiescingForUpgrade)
+    }
+
+    fn enter_quiescence(&mut self) -> bool {
+        if matches!(self, Self::Open) {
+            *self = Self::QuiescingForUpgrade;
+            true
+        } else {
+            false
+        }
+    }
+
+    fn resume_from_quiescence(&mut self) {
+        if matches!(self, Self::QuiescingForUpgrade) {
+            *self = Self::Open;
+        }
+    }
+
+    fn enter_shutdown(&mut self) {
+        *self = Self::ShuttingDown;
+    }
 }
 
 #[derive(Default)]
@@ -48,8 +127,7 @@ struct Inner {
     snapshot: RuntimeSnapshot,
     next_activity: u64,
     activity: Option<u64>,
-    shutting_down: bool,
-    quiescing: bool,
+    admission: MutationAdmission,
     active_mutations: usize,
 }
 
@@ -62,7 +140,7 @@ impl RuntimeLifecycle {
     /// do not pretend a still-live process has already stopped.
     pub fn request_running(&self, should_run: bool) {
         let mut inner = self.inner.lock().unwrap();
-        if inner.shutting_down && should_run {
+        if inner.admission.is_shutting_down() && should_run {
             return;
         }
         if inner.snapshot.should_run != should_run {
@@ -76,7 +154,7 @@ impl RuntimeLifecycle {
     /// may finish, but cannot request another kernel after server shutdown.
     pub fn shutdown(&self) {
         let mut inner = self.inner.lock().unwrap();
-        inner.shutting_down = true;
+        inner.admission.enter_shutdown();
         inner.snapshot.should_run = false;
         inner.snapshot.generation += 1;
         inner.activity = None;
@@ -98,7 +176,7 @@ impl RuntimeLifecycle {
     /// before shutdown can observe an empty set; later writes are rejected.
     pub(super) fn register_mutation(&self) -> bool {
         let mut inner = self.inner.lock().unwrap();
-        if inner.shutting_down || inner.quiescing {
+        if !inner.admission.allows_mutations() {
             return false;
         }
         inner.active_mutations += 1;
@@ -130,29 +208,27 @@ impl RuntimeLifecycle {
     }
 
     pub(super) fn quiesce_mutations(&self) -> bool {
-        let mut inner = self.inner.lock().unwrap();
-        if inner.shutting_down || inner.quiescing {
-            return false;
-        }
-        inner.quiescing = true;
-        true
+        self.inner.lock().unwrap().admission.enter_quiescence()
     }
 
     pub(super) fn resume_mutations(&self) {
-        self.inner.lock().unwrap().quiescing = false;
+        self.inner
+            .lock()
+            .unwrap()
+            .admission
+            .resume_from_quiescence();
     }
 
     #[cfg(test)]
     pub(crate) fn mutations_allowed(&self) -> bool {
-        let inner = self.inner.lock().unwrap();
-        !inner.shutting_down && !inner.quiescing
+        self.inner.lock().unwrap().admission.allows_mutations()
     }
 
     /// No await in this critical section. Either shutdown wins and prevents
     /// exec, or successful exec replaces the process before shutdown begins.
     pub(crate) fn with_upgrade_handoff<T>(&self, action: impl FnOnce() -> T) -> Option<T> {
         let inner = self.inner.lock().unwrap();
-        if inner.shutting_down || !inner.quiescing {
+        if !inner.admission.allows_upgrade_handoff() {
             return None;
         }
         Some(action())
@@ -163,11 +239,7 @@ impl RuntimeLifecycle {
     pub fn begin(&self, operation: KernelOperation) -> u64 {
         let mut inner = self.inner.lock().unwrap();
         inner.snapshot.generation += 1;
-        inner.snapshot.phase = match operation {
-            KernelOperation::Start => RuntimePhase::Starting,
-            KernelOperation::Reload => RuntimePhase::Reloading,
-            KernelOperation::Stop => RuntimePhase::Stopping,
-        };
+        inner.snapshot.phase = operation.phase();
         inner.snapshot.ready = false;
         inner.activity = None;
         inner.snapshot.generation
@@ -175,7 +247,7 @@ impl RuntimeLifecycle {
 
     /// 服务是否已进入不可逆关闭流程；后台任务据此退出等待。
     pub fn is_shutting_down(&self) -> bool {
-        self.inner.lock().unwrap().shutting_down
+        self.inner.lock().unwrap().admission.is_shutting_down()
     }
 
     pub fn is_current(&self, generation: u64) -> bool {
@@ -205,10 +277,7 @@ impl RuntimeLifecycle {
                 | RuntimePhase::Starting
         ));
         let mut inner = self.inner.lock().unwrap();
-        if inner.snapshot.generation != generation
-            || (matches!(phase, RuntimePhase::Ready | RuntimePhase::Starting)
-                && !inner.snapshot.should_run)
-        {
+        if !inner.snapshot.can_finish_as(generation, phase) {
             return false;
         }
         inner.snapshot.phase = phase;
@@ -226,11 +295,7 @@ impl RuntimeLifecycle {
         inner.next_activity += 1;
         let id = inner.next_activity;
         inner.activity = Some(id);
-        inner.snapshot.phase = match activity {
-            RuntimeActivity::Extracting => RuntimePhase::Extracting,
-            RuntimeActivity::Validating => RuntimePhase::Validating,
-            RuntimeActivity::ApplyingConfig => RuntimePhase::ApplyingConfig,
-        };
+        inner.snapshot.phase = activity.phase();
         ActivityGuard {
             owner: self,
             id,
@@ -334,5 +399,29 @@ mod tests {
         drop(preparation);
         assert_eq!(state.snapshot().phase, RuntimePhase::Failed);
         assert!(!state.snapshot().ready);
+    }
+
+    #[test]
+    fn mutation_admission_transitions_preserve_terminal_shutdown() {
+        let mut admission = MutationAdmission::default();
+        assert!(admission.allows_mutations());
+        assert!(!admission.allows_upgrade_handoff());
+
+        assert!(admission.enter_quiescence());
+        assert!(!admission.enter_quiescence());
+        assert!(!admission.allows_mutations());
+        assert!(admission.allows_upgrade_handoff());
+
+        admission.resume_from_quiescence();
+        assert!(admission.allows_mutations());
+        assert!(!admission.allows_upgrade_handoff());
+
+        assert!(admission.enter_quiescence());
+        admission.enter_shutdown();
+        assert!(admission.is_shutting_down());
+        assert!(!admission.allows_upgrade_handoff());
+        admission.resume_from_quiescence();
+        assert!(admission.is_shutting_down());
+        assert!(!admission.allows_mutations());
     }
 }

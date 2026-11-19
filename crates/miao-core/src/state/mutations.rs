@@ -49,15 +49,23 @@ impl AppState {
         })
     }
 
-    /// No config_update lock may be held here: admitted SSH/network work and
-    /// queued writes still need it. Exempt precisely this request's lease, not
-    /// an arbitrary count of tasks. Standalone callers acquire their own lease.
-    pub(crate) async fn quiesce_for_upgrade(self: &Arc<Self>) -> AppResult<UpgradeQuiescence> {
-        let mutation = CURRENT_MUTATION
+    /// Reuse the enclosing HTTP/MCP write request's task-local lease when it
+    /// belongs to this `AppState` so draining awaits all *other* mutations
+    /// without deadlocking on itself; standalone callers acquire a fresh lease.
+    fn acquire_upgrade_mutation_lease(self: &Arc<Self>) -> Option<MutationGuard> {
+        CURRENT_MUTATION
             .try_with(|guard| Arc::ptr_eq(&guard.0.state, self).then(|| guard.clone()))
             .ok()
             .flatten()
             .or_else(|| self.begin_mutation())
+    }
+
+    /// No config_update lock may be held here: admitted SSH/network work and
+    /// queued writes still need it. Exempt precisely this request's lease, not
+    /// an arbitrary count of tasks. Standalone callers acquire their own lease.
+    pub(crate) async fn quiesce_for_upgrade(self: &Arc<Self>) -> AppResult<UpgradeQuiescence> {
+        let mutation = self
+            .acquire_upgrade_mutation_lease()
             .ok_or_else(|| AppError::message("Service is not accepting upgrades"))?;
         if !self.lifecycle.quiesce_mutations() {
             return Err(AppError::message(

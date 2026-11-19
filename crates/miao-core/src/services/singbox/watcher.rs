@@ -22,6 +22,30 @@ pub(super) fn start_still_current(state: &AppState, expected_generation: u64) ->
     state.lifecycle.is_current(expected_generation)
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum WatchPoll {
+    /// Watcher generation was superseded or service run intent became false.
+    Retired,
+    /// Owned child is still running (resets crash counter once stable).
+    Running,
+    /// Child exited unexpectedly (or was already reaped); slot cleared and marked Failed.
+    Exited,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CrashAction {
+    RetryAfter(Duration),
+    GiveUp,
+}
+
+fn plan_crash_recovery(restarts: u32) -> CrashAction {
+    if restarts <= MAX_KERNEL_RESTARTS {
+        CrashAction::RetryAfter(restart_backoff(restarts))
+    } else {
+        CrashAction::GiveUp
+    }
+}
+
 pub(super) async fn clear_kernel_give_up_warning(state: &Arc<AppState>, generation: u64) {
     let mut warning = state.config_warning.lock().await;
     state.lifecycle.with_current(generation, || {
@@ -31,12 +55,42 @@ pub(super) async fn clear_kernel_give_up_warning(state: &Arc<AppState>, generati
     });
 }
 
+async fn publish_kernel_give_up_warning(state: &AppState, generation: u64) {
+    let mut warning = state.config_warning.lock().await;
+    if state.lifecycle.with_current(generation, || {
+        *warning = Some(KERNEL_GIVE_UP_WARNING.to_string());
+    }) {
+        error!("sing-box kept crashing; giving up on automatic restarts");
+    }
+}
+
+/// Returns `false` only when this generation was retired during restart.
+async fn restart_crashed_kernel(state: &Arc<AppState>, generation: u64, restarts: u32) -> bool {
+    let result = match spawn_and_probe_sing_box(state, generation).await {
+        Ok(()) => publish_kernel_ready(state, generation).await,
+        Err(err) => Err(err),
+    };
+    match result {
+        Ok(()) => {
+            info!(restarts, "sing-box restarted after an unexpected exit");
+            true
+        }
+        Err(err) => {
+            if !state.lifecycle.finish(generation, RuntimePhase::Failed) {
+                return false;
+            }
+            warn!(error = %err, "Failed to restart sing-box after an unexpected exit");
+            true
+        }
+    }
+}
+
 /// Recheck ownership after obtaining the slot, not just before awaiting it.
 /// Otherwise an old watcher can reap a new instance installed while it waited.
-async fn poll_crash(state: &AppState, generation: u64, restarts: &mut u32) -> Option<bool> {
+async fn poll_crash(state: &AppState, generation: u64, restarts: &mut u32) -> WatchPoll {
     let mut slot = state.sing_process.lock().await;
     if !start_still_current(state, generation) {
-        return None;
+        return WatchPoll::Retired;
     }
     // An empty slot may have been reaped by status polling already.
     if let Some(process) = slot.as_mut() {
@@ -45,7 +99,7 @@ async fn poll_crash(state: &AppState, generation: u64, restarts: &mut u32) -> Op
                 if process.started_at.elapsed() >= KERNEL_STABLE_AFTER {
                     *restarts = 0;
                 }
-                return Some(false);
+                return WatchPoll::Running;
             }
             Ok(Some(status)) => warn!(exit_code = ?status.code(), "sing-box exited unexpectedly"),
             Err(err) => warn!(error = %err, "Failed to poll sing-box process state"),
@@ -53,7 +107,7 @@ async fn poll_crash(state: &AppState, generation: u64, restarts: &mut u32) -> Op
     }
     *slot = None;
     state.lifecycle.finish(generation, RuntimePhase::Failed);
-    Some(true)
+    WatchPoll::Exited
 }
 
 /// Recovery reuses config.json, preserves the retry budget and never owns a
@@ -63,43 +117,33 @@ pub(super) async fn watch_sing_box(state: Arc<AppState>, generation: u64) {
     loop {
         sleep(KERNEL_WATCH_INTERVAL).await;
         match poll_crash(&state, generation, &mut restarts).await {
-            None => return,
-            Some(false) => continue,
-            Some(true) => {}
+            WatchPoll::Retired => return,
+            WatchPoll::Running => continue,
+            WatchPoll::Exited => {}
         }
         restarts += 1;
-        if restarts <= MAX_KERNEL_RESTARTS {
+        let action = plan_crash_recovery(restarts);
+        if let CrashAction::RetryAfter(backoff) = action {
             if !state.lifecycle.finish(generation, RuntimePhase::Starting) {
                 return;
             }
-            sleep(restart_backoff(restarts)).await;
+            sleep(backoff).await;
         }
 
         let _config_update = state.config_update.lock().await;
         if !start_still_current(&state, generation) {
             return;
         }
-        if restarts > MAX_KERNEL_RESTARTS {
-            let mut warning = state.config_warning.lock().await;
-            if state.lifecycle.with_current(generation, || {
-                *warning = Some(KERNEL_GIVE_UP_WARNING.to_string());
-            }) {
-                error!("sing-box kept crashing; giving up on automatic restarts");
+        match action {
+            CrashAction::GiveUp => {
+                publish_kernel_give_up_warning(&state, generation).await;
+                state.lifecycle.finish(generation, RuntimePhase::Failed);
+                return;
             }
-            state.lifecycle.finish(generation, RuntimePhase::Failed);
-            return;
-        }
-        let result = match spawn_and_probe_sing_box(&state, generation).await {
-            Ok(()) => publish_kernel_ready(&state, generation).await,
-            Err(err) => Err(err),
-        };
-        match result {
-            Ok(()) => info!(restarts, "sing-box restarted after an unexpected exit"),
-            Err(err) => {
-                if !state.lifecycle.finish(generation, RuntimePhase::Failed) {
+            CrashAction::RetryAfter(_) => {
+                if !restart_crashed_kernel(&state, generation, restarts).await {
                     return;
                 }
-                warn!(error = %err, "Failed to restart sing-box after an unexpected exit");
             }
         }
     }
@@ -121,7 +165,20 @@ mod tests {
         state.lifecycle.finish(new, RuntimePhase::Ready);
         let snapshot = state.lifecycle.snapshot();
         drop(slot);
-        assert_eq!(poll.await.unwrap(), None);
+        assert_eq!(poll.await.unwrap(), WatchPoll::Retired);
         assert_eq!(state.lifecycle.snapshot(), snapshot);
+    }
+
+    #[test]
+    fn crash_recovery_plan_retries_up_to_five_times_then_gives_up() {
+        assert_eq!(
+            plan_crash_recovery(1),
+            CrashAction::RetryAfter(Duration::from_secs(1))
+        );
+        assert_eq!(
+            plan_crash_recovery(5),
+            CrashAction::RetryAfter(Duration::from_secs(16))
+        );
+        assert_eq!(plan_crash_recovery(6), CrashAction::GiveUp);
     }
 }

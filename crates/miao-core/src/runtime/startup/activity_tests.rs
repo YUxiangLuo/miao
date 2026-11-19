@@ -72,3 +72,44 @@ async fn elapsed_retry_waits_for_foreground_commit_not_just_http_completion() {
         None
     );
 }
+
+#[test]
+fn background_retry_cadence_transitions_between_fast_quiet_and_waiting_for_nodes() {
+    let slow = Duration::from_secs(1800);
+    let mut normal = BackgroundRetryCadence::new(slow, false);
+    assert_eq!(normal.fetch_retry, SubFetchRetry::Startup);
+    assert_eq!(normal.next_wait, Duration::ZERO);
+
+    for _ in 0..STARTUP_BACKGROUND_FAST_RETRIES {
+        let (wait, warning) = normal.plan_next_wait(true);
+        assert!(wait < slow);
+        assert!(warning.is_none());
+        normal.advance_after_scheduling(wait);
+        assert_eq!(normal.fetch_retry, SubFetchRetry::None);
+    }
+    // Exhausted fast budget with ready runtime switches to quiet slow cadence.
+    let (wait, warning) = normal.plan_next_wait(true);
+    assert_eq!(wait, slow);
+    assert_eq!(warning, Some(SUBS_RETRYING_SLOWLY));
+
+    // If the data plane is NOT ready, fast budget exhaustion still keeps fast recovery.
+    let (wait_unready, warning_unready) = normal.plan_next_wait(false);
+    assert!(wait_unready < slow);
+    assert!(warning_unready.is_none());
+
+    // Authoritative empty cold start begins on slow wait and transitions to
+    // SUBS_RETRYING_SLOWLY if a local edit repairs the runtime while waiting.
+    let mut empty_cold = BackgroundRetryCadence::new(slow, true);
+    assert_eq!(empty_cold.fetch_retry, SubFetchRetry::None);
+    assert_eq!(empty_cold.next_wait, slow);
+    let (wait_empty, warn_empty) = empty_cold.plan_next_wait(false);
+    assert_eq!(wait_empty, slow);
+    assert_eq!(
+        warn_empty,
+        Some(crate::services::config::SUBS_WAITING_FOR_NODES)
+    );
+
+    let (wait_repaired, warn_repaired) = empty_cold.plan_next_wait(true);
+    assert_eq!(wait_repaired, slow);
+    assert_eq!(warn_repaired, Some(SUBS_RETRYING_SLOWLY));
+}

@@ -114,21 +114,26 @@ pub async fn validate_sing_box_config(
     Ok(())
 }
 
+fn ensure_no_live_child(slot: &mut Option<SingBoxProcess>) -> AppResult<()> {
+    if let Some(ref mut proc) = *slot {
+        if proc
+            .child
+            .try_wait()
+            .map_err(|e| {
+                AppError::context("Failed to check whether sing-box is already running", e)
+            })?
+            .is_none()
+        {
+            return Err(AppError::AlreadyRunning);
+        }
+    }
+    Ok(())
+}
+
 pub async fn start_sing_internal(state: &Arc<AppState>) -> AppResult<()> {
     let generation = {
         let mut lock = state.sing_process.lock().await;
-        if let Some(ref mut proc) = *lock {
-            if proc
-                .child
-                .try_wait()
-                .map_err(|e| {
-                    AppError::context("Failed to check whether sing-box is already running", e)
-                })?
-                .is_none()
-            {
-                return Err(AppError::AlreadyRunning);
-            }
-        }
+        ensure_no_live_child(&mut lock)?;
         if !state.lifecycle.snapshot().should_run {
             return Err(AppError::message("sing-box start was cancelled"));
         }
@@ -150,70 +155,58 @@ pub async fn start_sing_internal(state: &Arc<AppState>) -> AppResult<()> {
     Ok(())
 }
 
+async fn signal_reload_in_slot(
+    state: &AppState,
+    slot: &mut Option<SingBoxProcess>,
+) -> AppResult<(u32, activation::Activation)> {
+    use nix::sys::signal::{kill, Signal};
+    use nix::unistd::Pid;
+
+    let process = slot
+        .as_mut()
+        .ok_or_else(|| AppError::message("sing-box is not running"))?;
+    let exit_status = process
+        .child
+        .try_wait()
+        .map_err(|err| AppError::context("Failed to check sing-box before reload", err))?;
+    if let Some(status) = exit_status {
+        *slot = None;
+        return Err(AppError::message(format!(
+            "sing-box exited before reload with code {}",
+            status.code().unwrap_or(-1)
+        )));
+    }
+    let pid = process
+        .child
+        .id()
+        .ok_or_else(|| AppError::message("sing-box process ID is unavailable"))?;
+    let activation = activation::Activation::prepare(state).await?;
+    // Signal while owning the slot; Stop cannot replace/reap this PID
+    // between inspection and SIGHUP delivery.
+    // Do not infer health merely from a live process after a signal error;
+    // the owning configuration transaction can restore and probe it.
+    kill(Pid::from_raw(pid as i32), Signal::SIGHUP)
+        .map_err(|err| AppError::message(format!("Failed to signal sing-box reload: {err}")))?;
+    Ok((pid, activation))
+}
+
 /// Reload the active config in place on Unix. sing-box officially wires
 /// SIGHUP to its reload path; miao still verifies that the same process stays
 /// alive and the data plane becomes healthy before publishing `ready` again.
 pub async fn reload_sing_internal(state: &Arc<AppState>) -> AppResult<()> {
-    use nix::sys::signal::{kill, Signal};
-    use nix::unistd::Pid;
-
-    let (pid, generation, activation, signal) = {
+    let (generation, signalled) = {
         let mut lock = state.sing_process.lock().await;
         if !state.lifecycle.snapshot().should_run {
             return Err(AppError::message("sing-box reload was cancelled"));
         }
         let generation = state.lifecycle.begin(KernelOperation::Reload);
-        let Some(process) = lock.as_mut() else {
+        let signalled = signal_reload_in_slot(state, &mut lock).await;
+        if signalled.is_err() {
             state.lifecycle.finish(generation, RuntimePhase::Failed);
-            return Err(AppError::message("sing-box is not running"));
-        };
-        let exit_status = match process.child.try_wait() {
-            Ok(status) => status,
-            Err(err) => {
-                state.lifecycle.finish(generation, RuntimePhase::Failed);
-                return Err(AppError::context(
-                    "Failed to check sing-box before reload",
-                    err,
-                ));
-            }
-        };
-        if let Some(status) = exit_status {
-            *lock = None;
-            state.lifecycle.finish(generation, RuntimePhase::Failed);
-            return Err(AppError::message(format!(
-                "sing-box exited before reload with code {}",
-                status.code().unwrap_or(-1)
-            )));
         }
-        let Some(pid) = process.child.id() else {
-            state.lifecycle.finish(generation, RuntimePhase::Failed);
-            return Err(AppError::message("sing-box process ID is unavailable"));
-        };
-        let activation = match activation::Activation::prepare(state).await {
-            Ok(activation) => activation,
-            Err(err) => {
-                state.lifecycle.finish(generation, RuntimePhase::Failed);
-                return Err(err);
-            }
-        };
-        // Signal while owning the slot; Stop cannot replace/reap this PID
-        // between inspection and SIGHUP delivery.
-        (
-            pid,
-            generation,
-            activation,
-            kill(Pid::from_raw(pid as i32), Signal::SIGHUP),
-        )
+        (generation, signalled)
     };
-
-    if let Err(err) = signal {
-        state.lifecycle.finish(generation, RuntimePhase::Failed);
-        // Do not infer health merely from a live process after a signal error.
-        // The owning configuration transaction can restore and probe it.
-        return Err(AppError::message(format!(
-            "Failed to signal sing-box reload: {err}"
-        )));
-    }
+    let (pid, activation) = signalled?;
 
     if let Err(err) = wait_for_sing_box_reload_ready(state, generation, pid, &activation).await {
         state.lifecycle.finish(generation, RuntimePhase::Failed);
@@ -272,6 +265,29 @@ async fn publish_kernel_ready(state: &AppState, generation: u64) -> AppResult<()
     Ok(())
 }
 
+fn open_log_stdio(log_path: &std::path::Path) -> Option<(std::fs::File, std::fs::File)> {
+    let stdout = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(log_path)
+        .ok()?;
+    let stderr = stdout.try_clone().ok()?;
+    Some((stdout, stderr))
+}
+
+fn configure_child_stdio(
+    command: &mut tokio::process::Command,
+    log_path: Option<&std::path::Path>,
+) {
+    if let Some((stdout, stderr)) = log_path.and_then(open_log_stdio) {
+        command.stdout(stdout).stderr(stderr);
+    } else {
+        command
+            .stdout(std::process::Stdio::inherit())
+            .stderr(std::process::Stdio::inherit());
+    }
+}
+
 /// Spawn sing-box from the current config.json. `expected_generation` must
 /// still be current; a live child in the slot is never overwritten.
 async fn spawn_and_probe_sing_box(
@@ -282,18 +298,7 @@ async fn spawn_and_probe_sing_box(
     if !start_still_current(state, expected_generation) {
         return Err(AppError::message("sing-box start was cancelled"));
     }
-    if let Some(ref mut proc) = *lock {
-        if proc
-            .child
-            .try_wait()
-            .map_err(|e| {
-                AppError::context("Failed to check whether sing-box is already running", e)
-            })?
-            .is_none()
-        {
-            return Err(AppError::AlreadyRunning);
-        }
-    }
+    ensure_no_live_child(&mut lock)?;
 
     let sing_box_home = &state.runtime_paths.runtime_dir;
     let sing_box_path = sing_box_home.join(sing_box_file_name());
@@ -312,30 +317,10 @@ async fn spawn_and_probe_sing_box(
 
     // If start is cancelled between spawn and store, Drop must not leak the kernel.
     command.kill_on_drop(true);
-
-    if let Some(log_path) = crate::paths::active_log_path() {
-        if let Ok(file) = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(log_path)
-        {
-            if let Ok(stderr) = file.try_clone() {
-                command.stdout(file).stderr(stderr);
-            } else {
-                command
-                    .stdout(std::process::Stdio::inherit())
-                    .stderr(std::process::Stdio::inherit());
-            }
-        } else {
-            command
-                .stdout(std::process::Stdio::inherit())
-                .stderr(std::process::Stdio::inherit());
-        }
-    } else {
-        command
-            .stdout(std::process::Stdio::inherit())
-            .stderr(std::process::Stdio::inherit());
-    }
+    configure_child_stdio(
+        &mut command,
+        crate::paths::active_log_path().map(PathBuf::as_path),
+    );
 
     let child = command
         .spawn()

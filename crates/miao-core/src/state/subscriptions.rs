@@ -1,7 +1,20 @@
 use std::sync::Mutex;
 use tokio::time::{Duration, Instant};
 
-use crate::models::{SubscriptionFetchReport, SubscriptionRefreshPhase, SubscriptionRefreshStatus};
+use crate::models::{
+    SubscriptionFetchOutcome, SubscriptionFetchReport, SubscriptionRefreshPhase,
+    SubscriptionRefreshStatus,
+};
+
+fn phase_for_outcome(outcome: SubscriptionFetchOutcome) -> SubscriptionRefreshPhase {
+    match outcome {
+        SubscriptionFetchOutcome::NotRequested => SubscriptionRefreshPhase::Idle,
+        SubscriptionFetchOutcome::Failed => SubscriptionRefreshPhase::Failed,
+        SubscriptionFetchOutcome::Success
+        | SubscriptionFetchOutcome::Empty
+        | SubscriptionFetchOutcome::PartialFailure => SubscriptionRefreshPhase::Completed,
+    }
+}
 
 /// Subscription activity has its own owner and never writes the proxy phase.
 /// No lock is held across network I/O. Generation checks also apply to Drop,
@@ -19,6 +32,18 @@ struct RefreshState {
     foreground_active: bool,
     status: SubscriptionRefreshStatus,
     retry_at: Option<Instant>,
+}
+
+impl RefreshState {
+    fn owns_attempt(&self, generation: u64, attempt: u64) -> bool {
+        self.generation == generation && self.attempt == attempt
+    }
+
+    fn can_project_waiting(&self, generation: u64) -> bool {
+        self.generation == generation
+            && !self.foreground_active
+            && self.status.phase != SubscriptionRefreshPhase::Fetching
+    }
 }
 
 impl SubscriptionRefresh {
@@ -68,10 +93,7 @@ impl SubscriptionRefresh {
 
     pub fn wait_to_retry(&self, generation: u64, delay: Duration) {
         let mut state = self.inner.lock().unwrap();
-        if state.generation == generation
-            && !state.foreground_active
-            && state.status.phase != SubscriptionRefreshPhase::Fetching
-        {
+        if state.can_project_waiting(generation) {
             state.status.phase = SubscriptionRefreshPhase::Waiting;
             state.retry_at = Some(Instant::now() + delay);
         }
@@ -112,17 +134,11 @@ pub struct FetchGuard<'a> {
 impl FetchGuard<'_> {
     pub fn finish(self, report: SubscriptionFetchReport) {
         let mut state = self.owner.inner.lock().unwrap();
-        if state.generation == self.generation && state.attempt == self.attempt {
+        if state.owns_attempt(self.generation, self.attempt) {
+            let outcome = report.outcome();
             state.status = SubscriptionRefreshStatus {
-                phase: if report.outcome() == crate::models::SubscriptionFetchOutcome::NotRequested
-                {
-                    SubscriptionRefreshPhase::Idle
-                } else if report.total_failure() {
-                    SubscriptionRefreshPhase::Failed
-                } else {
-                    SubscriptionRefreshPhase::Completed
-                },
-                outcome: report.outcome(),
+                phase: phase_for_outcome(outcome),
+                outcome,
                 report,
                 retry_in_secs: None,
             };
@@ -133,8 +149,7 @@ impl FetchGuard<'_> {
 impl Drop for FetchGuard<'_> {
     fn drop(&mut self) {
         let mut state = self.owner.inner.lock().unwrap();
-        if state.generation == self.generation
-            && state.attempt == self.attempt
+        if state.owns_attempt(self.generation, self.attempt)
             && state.status.phase == SubscriptionRefreshPhase::Fetching
         {
             state.status.phase = SubscriptionRefreshPhase::Idle;

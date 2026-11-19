@@ -20,16 +20,19 @@ impl std::error::Error for FetchError {
 }
 
 impl FetchError {
-    fn request(context: String, error: reqwest::Error) -> Self {
-        let kind = if error.is_timeout() {
+    fn classify_reqwest_error(error: &reqwest::Error) -> SubscriptionFailureKind {
+        if error.is_timeout() {
             SubscriptionFailureKind::Timeout
         } else if error.status().is_some() {
             SubscriptionFailureKind::Http
         } else {
             SubscriptionFailureKind::Network
-        };
+        }
+    }
+
+    fn request(context: String, error: reqwest::Error) -> Self {
         Self {
-            kind,
+            kind: Self::classify_reqwest_error(&error),
             error: AppError::context(context, error),
         }
     }
@@ -164,22 +167,10 @@ fn filter_informational_nodes(
     (nodes, filtered_count)
 }
 
-pub async fn fetch_sub(link: &str, client: &reqwest::Client) -> Result<FetchResult, FetchError> {
-    let mut res = client
-        .get(link)
-        .timeout(std::time::Duration::from_secs(30))
-        .header("User-Agent", "clash-meta")
-        .send()
-        .await
-        .map_err(|e| FetchError::request(format!("Failed to fetch subscription from {}", link), e))?
-        .error_for_status()
-        .map_err(|e| {
-            FetchError::request(
-                format!("Subscription server returned HTTP error for {}", link),
-                e,
-            )
-        })?;
-
+async fn read_bounded_response_bytes(
+    mut res: reqwest::Response,
+    link: &str,
+) -> Result<Vec<u8>, FetchError> {
     if res
         .content_length()
         .is_some_and(|length| length > MAX_SUBSCRIPTION_BYTES as u64)
@@ -198,9 +189,11 @@ pub async fn fetch_sub(link: &str, client: &reqwest::Client) -> Result<FetchResu
         }
         bytes.extend_from_slice(&chunk);
     }
-    let text = String::from_utf8_lossy(&bytes);
+    Ok(bytes)
+}
 
-    let parse_result = parse_clash_proxies(&text).map_err(|e| {
+fn parse_subscription_body(text: &str, link: &str) -> Result<FetchResult, FetchError> {
+    let parse_result = parse_clash_proxies(text).map_err(|e| {
         FetchError::parse(AppError::context(
             format!("Failed to parse subscription content from {}", link),
             e,
@@ -220,7 +213,6 @@ pub async fn fetch_sub(link: &str, client: &reqwest::Client) -> Result<FetchResu
     let (node_names, outbounds): (Vec<String>, Vec<serde_json::Value>) = nodes.into_iter().unzip();
 
     // 解析错误将由调用方统一处理，此处不再打印
-
     Ok(FetchResult {
         node_names,
         outbounds,
@@ -228,6 +220,27 @@ pub async fn fetch_sub(link: &str, client: &reqwest::Client) -> Result<FetchResu
         total_count,
         filtered_info_count,
     })
+}
+
+pub async fn fetch_sub(link: &str, client: &reqwest::Client) -> Result<FetchResult, FetchError> {
+    let res = client
+        .get(link)
+        .timeout(std::time::Duration::from_secs(30))
+        .header("User-Agent", "clash-meta")
+        .send()
+        .await
+        .map_err(|e| FetchError::request(format!("Failed to fetch subscription from {}", link), e))?
+        .error_for_status()
+        .map_err(|e| {
+            FetchError::request(
+                format!("Subscription server returned HTTP error for {}", link),
+                e,
+            )
+        })?;
+
+    let bytes = read_bounded_response_bytes(res, link).await?;
+    let text = String::from_utf8_lossy(&bytes);
+    parse_subscription_body(&text, link)
 }
 
 #[cfg(test)]
@@ -465,5 +478,25 @@ proxies:
         assert_eq!(result.nodes.len(), 1);
         assert_eq!(result.errors.len(), 1);
         assert!(result.errors[0].contains("<index 0>"));
+    }
+
+    #[test]
+    fn parse_subscription_body_distinguishes_missing_proxy_list_from_authoritative_empty_pool() {
+        let maintenance = parse_subscription_body("port: 7890\nmode: rule\n", "https://sub.test")
+            .expect_err("YAML without proxies list must be a parse failure");
+        assert_eq!(maintenance.kind, SubscriptionFailureKind::Parse);
+
+        let empty = parse_subscription_body("proxies: []\n", "https://sub.test")
+            .expect("explicit empty list is authoritative");
+        assert!(empty.outbounds.is_empty());
+        assert_eq!(empty.total_count, 0);
+
+        let info_only = parse_subscription_body(
+            "proxies:\n  - { name: \"剩余流量：1 GB\", type: ss, server: 127.0.0.1, port: 1, cipher: aes-128-gcm, password: p }\n",
+            "https://sub.test",
+        )
+        .expect("informational-only list is still an accepted empty pool");
+        assert!(info_only.outbounds.is_empty());
+        assert_eq!(info_only.filtered_info_count, 1);
     }
 }

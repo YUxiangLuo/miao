@@ -1,42 +1,113 @@
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Instant;
 
-use std::{fs, path::Path, sync::atomic::Ordering};
-
 use futures::StreamExt;
-
 use sha2::{Digest, Sha256};
-
 use tokio::io::AsyncWriteExt;
-
-use tokio::time::sleep;
-use tokio::time::Duration;
-
-use tracing::info;
-use tracing::{error, warn};
+use tokio::time::{sleep, Duration};
+use tracing::{error, info, warn};
 
 use crate::error::{AppError, AppResult};
-
-use crate::models::GitHubAsset;
-use crate::models::{GitHubRelease, VersionInfo};
-use crate::services::singbox::is_sing_box_running;
-
-use crate::services::singbox::{start_sing_internal, stop_sing_internal};
-use crate::state::{AppState, VersionCache};
+use crate::models::{GitHubAsset, GitHubRelease, VersionInfo};
+use crate::services::singbox::{is_sing_box_running, start_sing_internal, stop_sing_internal};
+use crate::state::{AppState, UpgradeQuiescence, VersionCache};
 use crate::VERSION;
 
 const CACHE_TTL: Duration = Duration::from_secs(300);
-
 const DOWNLOAD_MAX_ATTEMPTS: u32 = 3;
-
 const DOWNLOAD_RETRY_BASE_MS: u64 = 500;
+const HANDOFF_RESPONSE_FLUSH_DELAY: Duration = Duration::from_millis(500);
 
-#[derive(serde::Serialize, serde::Deserialize)]
+const MARKER_STATE_INSTALLED: &str = "installed";
+const MARKER_STATE_BOOTING: &str = "booting";
+
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 struct UpgradePending {
     expected_version: String,
     state: String,
     #[serde(default)]
     boot_pid: Option<u32>,
+}
+
+struct UpgradePaths {
+    current_exe: PathBuf,
+    staged: PathBuf,
+    backup: PathBuf,
+    pending: PathBuf,
+    failed: PathBuf,
+}
+
+impl UpgradePaths {
+    fn for_exe(current_exe: &Path) -> Self {
+        let display = current_exe.display();
+        Self {
+            current_exe: current_exe.to_path_buf(),
+            staged: PathBuf::from(format!("{display}.new")),
+            backup: PathBuf::from(format!("{display}.bak")),
+            pending: PathBuf::from(format!("{display}.upgrade-pending.json")),
+            failed: PathBuf::from(format!("{display}.failed")),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PendingUpgradeAction {
+    /// No marker file: remove any legacy `.bak` left by pre-marker releases.
+    CleanLegacyBackup,
+    /// First boot of the expected upgraded binary: record `booting` + current PID.
+    TransitionToBooting { pid: u32 },
+    /// Concurrent CLI launch while `boot_pid` is alive, or no backup to restore.
+    KeepBootingWindow,
+    /// Version mismatch or crashed `booting` process with retained `.bak`.
+    RollbackToBackup,
+}
+
+fn decide_pending_upgrade(
+    marker: Option<&UpgradePending>,
+    current_ver: &str,
+    current_pid: u32,
+    backup_exists: bool,
+    is_pid_alive: impl FnOnce(u32) -> bool,
+) -> PendingUpgradeAction {
+    let Some(marker) = marker else {
+        return PendingUpgradeAction::CleanLegacyBackup;
+    };
+    if parse_semver_tag(&marker.expected_version) != parse_semver_tag(current_ver) {
+        // The activated executable is not the release recorded by the
+        // installer. Do not grant it a health window; restore the retained
+        // binary immediately when possible.
+        return if backup_exists {
+            PendingUpgradeAction::RollbackToBackup
+        } else {
+            PendingUpgradeAction::KeepBootingWindow
+        };
+    }
+    match marker.state.as_str() {
+        MARKER_STATE_INSTALLED => PendingUpgradeAction::TransitionToBooting { pid: current_pid },
+        MARKER_STATE_BOOTING => {
+            // Linux CLI allows multiple panel processes. A concurrent launch is
+            // not evidence that the first upgraded process crashed.
+            if marker.boot_pid.is_some_and(is_pid_alive) || !backup_exists {
+                PendingUpgradeAction::KeepBootingWindow
+            } else {
+                PendingUpgradeAction::RollbackToBackup
+            }
+        }
+        _ => PendingUpgradeAction::KeepBootingWindow,
+    }
+}
+
+fn marker_belongs_to_current_boot(
+    marker: &UpgradePending,
+    current_ver: &str,
+    current_pid: u32,
+) -> bool {
+    marker.state == MARKER_STATE_BOOTING
+        && marker.boot_pid == Some(current_pid)
+        && parse_semver_tag(&marker.expected_version) == parse_semver_tag(current_ver)
 }
 
 fn process_is_alive(pid: u32) -> bool {
@@ -51,12 +122,13 @@ fn process_is_alive(pid: u32) -> bool {
     }
 }
 
-fn upgrade_pending_path(current_exe: &Path) -> std::path::PathBuf {
-    std::path::PathBuf::from(format!("{}.upgrade-pending.json", current_exe.display()))
+#[cfg(test)]
+fn upgrade_pending_path(current_exe: &Path) -> PathBuf {
+    UpgradePaths::for_exe(current_exe).pending
 }
 
 fn write_upgrade_pending(path: &Path, pending: &UpgradePending) -> AppResult<()> {
-    let temp = std::path::PathBuf::from(format!("{}.tmp", path.display()));
+    let temp = PathBuf::from(format!("{}.tmp", path.display()));
     let bytes = serde_json::to_vec(pending)?;
     let mut file = fs::File::create(&temp)
         .map_err(|e| AppError::context("Failed to create upgrade marker", e))?;
@@ -72,39 +144,36 @@ fn write_upgrade_pending(path: &Path, pending: &UpgradePending) -> AppResult<()>
 /// extraction and the expected data plane become healthy rolls back to the
 /// retained executable.
 fn upgrade_requires_rollback(current_exe: &Path) -> AppResult<bool> {
-    let backup = std::path::PathBuf::from(format!("{}.bak", current_exe.display()));
-    let pending_path = upgrade_pending_path(current_exe);
-    let bytes = match fs::read(&pending_path) {
-        Ok(bytes) => bytes,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-            // Legacy releases left backups without a marker. Reaching this
-            // point proves the current executable can at least start.
-            if backup.exists() {
-                let _ = fs::remove_file(backup);
-            }
-            return Ok(false);
-        }
+    let paths = UpgradePaths::for_exe(current_exe);
+    let pending = match fs::read(&paths.pending) {
+        Ok(bytes) => Some(serde_json::from_slice::<UpgradePending>(&bytes)?),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => None,
         Err(err) => return Err(AppError::context("Failed to read upgrade marker", err)),
     };
-    let mut pending: UpgradePending = serde_json::from_slice(&bytes)?;
-    if parse_semver_tag(&pending.expected_version) != parse_semver_tag(&current_version()) {
-        // The activated executable is not the release recorded by the
-        // installer. Do not grant it a health window; restore the retained
-        // binary immediately when possible.
-        return Ok(backup.exists());
+    let action = decide_pending_upgrade(
+        pending.as_ref(),
+        &current_version(),
+        std::process::id(),
+        paths.backup.exists(),
+        process_is_alive,
+    );
+    match action {
+        PendingUpgradeAction::CleanLegacyBackup => {
+            if paths.backup.exists() {
+                let _ = fs::remove_file(&paths.backup);
+            }
+            Ok(false)
+        }
+        PendingUpgradeAction::TransitionToBooting { pid } => {
+            let mut updated = pending.expect("installed marker exists");
+            updated.state = MARKER_STATE_BOOTING.to_string();
+            updated.boot_pid = Some(pid);
+            write_upgrade_pending(&paths.pending, &updated)?;
+            Ok(false)
+        }
+        PendingUpgradeAction::KeepBootingWindow => Ok(false),
+        PendingUpgradeAction::RollbackToBackup => Ok(true),
     }
-    if pending.state == "installed" {
-        pending.state = "booting".to_string();
-        pending.boot_pid = Some(std::process::id());
-        write_upgrade_pending(&pending_path, &pending)?;
-        return Ok(false);
-    }
-    if pending.state == "booting" && pending.boot_pid.is_some_and(process_is_alive) {
-        // Linux CLI allows multiple panel processes. A concurrent launch is
-        // not evidence that the first upgraded process crashed.
-        return Ok(false);
-    }
-    Ok(pending.state == "booting" && backup.exists())
 }
 
 pub fn reconcile_pending_upgrade() -> AppResult<()> {
@@ -113,20 +182,18 @@ pub fn reconcile_pending_upgrade() -> AppResult<()> {
         return Ok(());
     }
 
-    let backup = std::path::PathBuf::from(format!("{}.bak", current_exe.display()));
-    let pending_path = upgrade_pending_path(&current_exe);
-    let failed = std::path::PathBuf::from(format!("{}.failed", current_exe.display()));
-    let _ = fs::remove_file(&failed);
-    fs::rename(&current_exe, &failed)
+    let paths = UpgradePaths::for_exe(&current_exe);
+    let _ = fs::remove_file(&paths.failed);
+    fs::rename(&paths.current_exe, &paths.failed)
         .map_err(|e| AppError::context("Failed to move unhealthy upgraded binary", e))?;
-    if let Err(err) = fs::rename(&backup, &current_exe) {
-        let _ = fs::rename(&failed, &current_exe);
+    if let Err(err) = fs::rename(&paths.backup, &paths.current_exe) {
+        let _ = fs::rename(&paths.failed, &paths.current_exe);
         return Err(AppError::context("Failed to restore previous binary", err));
     }
-    let _ = fs::remove_file(&pending_path);
-    let _ = fs::remove_file(&failed);
+    let _ = fs::remove_file(&paths.pending);
+    let _ = fs::remove_file(&paths.failed);
     let args: Vec<String> = std::env::args().collect();
-    let err = exec_replace(std::process::Command::new(&current_exe).args(&args[1..]));
+    let err = exec_replace(std::process::Command::new(&paths.current_exe).args(&args[1..]));
     Err(AppError::message(format!(
         "Failed to exec restored binary: {err}"
     )))
@@ -140,8 +207,8 @@ pub fn mark_upgrade_healthy() {
 }
 
 fn mark_upgrade_healthy_at(current_exe: &Path) {
-    let pending = upgrade_pending_path(current_exe);
-    let Ok(bytes) = fs::read(&pending) else {
+    let paths = UpgradePaths::for_exe(current_exe);
+    let Ok(bytes) = fs::read(&paths.pending) else {
         return;
     };
     let Ok(marker) = serde_json::from_slice::<UpgradePending>(&bytes) else {
@@ -149,15 +216,11 @@ fn mark_upgrade_healthy_at(current_exe: &Path) {
     };
     // A delayed health observer must never acknowledge another boot or an
     // upgrade that this process has just installed but has not exec'd yet.
-    if marker.state != "booting"
-        || marker.boot_pid != Some(std::process::id())
-        || parse_semver_tag(&marker.expected_version) != parse_semver_tag(&current_version())
-    {
+    if !marker_belongs_to_current_boot(&marker, &current_version(), std::process::id()) {
         return;
     }
-    let backup = std::path::PathBuf::from(format!("{}.bak", current_exe.display()));
-    let _ = fs::remove_file(backup);
-    let _ = fs::remove_file(pending);
+    let _ = fs::remove_file(paths.backup);
+    let _ = fs::remove_file(paths.pending);
 }
 
 /// 流式下载到临时文件并增量 SHA256；成功时文件已关闭且校验通过。
@@ -463,6 +526,133 @@ fn stdout_version_matches_release(stdout: &str, tag_name: &str) -> bool {
     stdout.contains(tag_trim) || stdout.contains(no_v)
 }
 
+struct UpgradeGuard(Arc<AppState>);
+
+impl Drop for UpgradeGuard {
+    fn drop(&mut self) {
+        self.0.upgrading.store(false, Ordering::SeqCst);
+    }
+}
+
+async fn stage_verified_binary(temp_path: &Path, staged_path: &Path) -> AppResult<()> {
+    let _ = fs::remove_file(staged_path);
+    fs::copy(temp_path, staged_path)
+        .map_err(|e| AppError::context("Failed to stage new binary", e))?;
+    set_executable(staged_path)
+        .map_err(|e| AppError::context("Failed to set staged binary permissions", e))?;
+    fs::File::open(staged_path)
+        .and_then(|file| file.sync_all())
+        .map_err(|e| AppError::context("Failed to sync staged binary", e))?;
+    let _ = tokio::fs::remove_file(temp_path).await;
+    Ok(())
+}
+
+fn install_staged_upgrade(paths: &UpgradePaths, expected_version: &str) -> AppResult<()> {
+    if paths.backup.exists() {
+        return Err(AppError::message(
+            "A previous upgrade backup is still pending; restart miao before upgrading again",
+        ));
+    }
+    fs::rename(&paths.current_exe, &paths.backup)
+        .map_err(|e| AppError::context("Failed to backup current binary", e))?;
+    if let Err(err) = fs::rename(&paths.staged, &paths.current_exe) {
+        let _ = fs::rename(&paths.backup, &paths.current_exe);
+        return Err(AppError::context("Failed to activate new binary", err));
+    }
+    if let Err(err) = write_upgrade_pending(
+        &paths.pending,
+        &UpgradePending {
+            expected_version: expected_version.to_string(),
+            state: MARKER_STATE_INSTALLED.to_string(),
+            boot_pid: None,
+        },
+    ) {
+        let _ = fs::remove_file(&paths.current_exe);
+        let _ = fs::rename(&paths.backup, &paths.current_exe);
+        return Err(err);
+    }
+    Ok(())
+}
+
+async fn recover_after_failed_install(
+    state: &Arc<AppState>,
+    staged_path: &Path,
+    was_running: bool,
+    install_err: AppError,
+) -> AppError {
+    let _ = fs::remove_file(staged_path);
+    if was_running {
+        if let Err(restart_err) = start_sing_internal(state).await {
+            return AppError::message(format!(
+                "{install_err}. Previous sing-box restart failed: {restart_err}"
+            ));
+        }
+    }
+    install_err
+}
+
+async fn run_delayed_upgrade_handoff(
+    guard: UpgradeGuard,
+    quiescence: UpgradeQuiescence,
+    lifecycle_guard: tokio::sync::OwnedMutexGuard<()>,
+    paths: UpgradePaths,
+) {
+    let state = guard.0.clone();
+    let _guard = guard;
+    let _quiescence = quiescence;
+    let _lifecycle_guard = lifecycle_guard;
+    sleep(HANDOFF_RESPONSE_FLUSH_DELAY).await;
+
+    // 内嵌文件的刷新由新进程启动时的 extract_sing_box 无条件重释放保证,此处无需清理
+    let args: Vec<String> = std::env::args().collect();
+    let result = state.lifecycle.with_upgrade_handoff(|| {
+        exec_replace(std::process::Command::new(&paths.current_exe).args(&args[1..]))
+    });
+    let Some(err) = result else {
+        // Shutdown won after installation but before exec. Do not replace
+        // its process out from under it; restore the on-disk old executable.
+        match fs::rename(&paths.backup, &paths.current_exe) {
+            Ok(()) => {
+                let _ = fs::remove_file(&paths.pending);
+            }
+            Err(err) => error!(%err, "Failed to restore cancelled upgrade backup"),
+        }
+        info!("Upgrade handoff cancelled by shutdown");
+        return;
+    };
+
+    error!("Failed to exec new binary: {}", err);
+    error!("Attempting to restore from backup...");
+
+    if fs::rename(&paths.backup, &paths.current_exe).is_ok() {
+        let _ = fs::remove_file(&paths.pending);
+        let _ = set_executable(&paths.current_exe);
+        error!("Restored from backup, restarting with old version...");
+        if state
+            .lifecycle
+            .with_upgrade_handoff(|| {
+                exec_replace(std::process::Command::new(&paths.current_exe).args(&args[1..]))
+            })
+            .is_none()
+        {
+            info!("Restored upgrade backup; shutdown cancelled fallback exec");
+            return;
+        }
+    }
+    let diag = format!(
+        "miao upgrade failure: exec and backup restore both failed.\nbinary: {:?}\nbackup: {}\n",
+        paths.current_exe,
+        paths.backup.display()
+    );
+    let _ = std::fs::write(upgrade_failure_log_path(), &diag);
+    error!(
+        "Diagnostics written to {}",
+        upgrade_failure_log_path().display()
+    );
+    error!("Failed to restore from backup, manual intervention required");
+    std::process::exit(1);
+}
+
 pub async fn upgrade_binary(state: &Arc<AppState>) -> AppResult<String> {
     if state
         .upgrading
@@ -471,19 +661,11 @@ pub async fn upgrade_binary(state: &Arc<AppState>) -> AppResult<String> {
     {
         return Err(AppError::message("Upgrade already in progress"));
     }
-
-    struct UpgradeGuard(Arc<AppState>);
-    impl Drop for UpgradeGuard {
-        fn drop(&mut self) {
-            self.0.upgrading.store(false, Ordering::SeqCst);
-        }
-    }
     let guard = UpgradeGuard(state.clone());
 
     invalidate_release_cache(state).await;
     let release = fetch_latest_release(&state.http_client, state).await?;
     let current = current_version();
-
     if !release_is_newer_than_current(&current, &release.tag_name) {
         return Ok("Already up to date".to_string());
     }
@@ -492,8 +674,8 @@ pub async fn upgrade_binary(state: &Arc<AppState>) -> AppResult<String> {
         current_arch_asset_name().ok_or_else(|| AppError::message("Unsupported architecture"))?;
     let (binary_asset, expected_hex) = binary_asset_and_digest(&release, asset_name)?;
 
-    let temp_path = get_temp_binary_path();
-    let temp_path = Path::new(&temp_path);
+    let temp_path_buf = get_temp_binary_path();
+    let temp_path = Path::new(&temp_path_buf);
 
     info!(
         from_version = %current,
@@ -512,22 +694,13 @@ pub async fn upgrade_binary(state: &Arc<AppState>) -> AppResult<String> {
     )
     .await?;
 
-    if let Err(e) = verify_temp_binary_executable(temp_path, &release.tag_name).await {
+    if let Err(err) = verify_temp_binary_executable(temp_path, &release.tag_name).await {
         let _ = tokio::fs::remove_file(temp_path).await;
-        return Err(e);
+        return Err(err);
     }
 
-    let current_exe = std::env::current_exe()?;
-    let staged_path = std::path::PathBuf::from(format!("{}.new", current_exe.display()));
-    let _ = fs::remove_file(&staged_path);
-    fs::copy(temp_path, &staged_path)
-        .map_err(|e| AppError::context("Failed to stage new binary", e))?;
-    set_executable(&staged_path)
-        .map_err(|e| AppError::context("Failed to set staged binary permissions", e))?;
-    fs::File::open(&staged_path)
-        .and_then(|file| file.sync_all())
-        .map_err(|e| AppError::context("Failed to sync staged binary", e))?;
-    let _ = tokio::fs::remove_file(temp_path).await;
+    let paths = UpgradePaths::for_exe(&std::env::current_exe()?);
+    stage_verified_binary(temp_path, &paths.staged).await?;
 
     // Close admission and drain all OTHER accepted writes before taking the
     // transaction lock. The shared request lease survives into delayed exec,
@@ -535,13 +708,13 @@ pub async fn upgrade_binary(state: &Arc<AppState>) -> AppResult<String> {
     let quiescence = match state.quiesce_for_upgrade().await {
         Ok(quiescence) => quiescence,
         Err(err) => {
-            let _ = fs::remove_file(&staged_path);
+            let _ = fs::remove_file(&paths.staged);
             return Err(err);
         }
     };
     let lifecycle_guard = state.config_update.clone().lock_owned().await;
     if state.lifecycle.is_shutting_down() {
-        let _ = fs::remove_file(&staged_path);
+        let _ = fs::remove_file(&paths.staged);
         return Err(AppError::message("Upgrade cancelled by shutdown"));
     }
     state.next_sub_refresh();
@@ -550,45 +723,10 @@ pub async fn upgrade_binary(state: &Arc<AppState>) -> AppResult<String> {
     info!("Stopping sing-box before upgrade...");
     stop_sing_internal(state).await;
 
-    let backup_path = format!("{}.bak", current_exe.display());
-    let backup = Path::new(&backup_path);
-    let install_result = (|| -> AppResult<()> {
-        if backup.exists() {
-            return Err(AppError::message(
-                "A previous upgrade backup is still pending; restart miao before upgrading again",
-            ));
-        }
-        fs::rename(&current_exe, backup)
-            .map_err(|e| AppError::context("Failed to backup current binary", e))?;
-        if let Err(err) = fs::rename(&staged_path, &current_exe) {
-            let _ = fs::rename(backup, &current_exe);
-            return Err(AppError::context("Failed to activate new binary", err));
-        }
-        if let Err(err) = write_upgrade_pending(
-            &upgrade_pending_path(&current_exe),
-            &UpgradePending {
-                expected_version: release.tag_name.clone(),
-                state: "installed".to_string(),
-                boot_pid: None,
-            },
-        ) {
-            let _ = fs::remove_file(&current_exe);
-            let _ = fs::rename(backup, &current_exe);
-            return Err(err);
-        }
-        Ok(())
-    })();
-    if let Err(install_err) = install_result {
-        let _ = fs::remove_file(&staged_path);
-        if was_running {
-            if let Err(restart_err) = start_sing_internal(state).await {
-                return Err(AppError::message(format!(
-                    "{}. Previous sing-box restart failed: {}",
-                    install_err, restart_err
-                )));
-            }
-        }
-        return Err(install_err);
+    if let Err(install_err) = install_staged_upgrade(&paths, &release.tag_name) {
+        return Err(
+            recover_after_failed_install(state, &paths.staged, was_running, install_err).await,
+        );
     }
 
     info!(
@@ -598,62 +736,12 @@ pub async fn upgrade_binary(state: &Arc<AppState>) -> AppResult<String> {
     );
 
     let new_version = release.tag_name.clone();
-    tokio::spawn(async move {
-        let state = guard.0.clone();
-        let _guard = guard;
-        let _quiescence = quiescence;
-        let _lifecycle_guard = lifecycle_guard;
-        sleep(Duration::from_millis(500)).await;
-
-        // 内嵌文件的刷新由新进程启动时的 extract_sing_box 无条件重释放保证,此处无需清理
-
-        let args: Vec<String> = std::env::args().collect();
-        let result = state.lifecycle.with_upgrade_handoff(|| {
-            exec_replace(std::process::Command::new(&current_exe).args(&args[1..]))
-        });
-        let Some(err) = result else {
-            // Shutdown won after installation but before exec. Do not replace
-            // its process out from under it; restore the on-disk old executable.
-            match fs::rename(&backup_path, &current_exe) {
-                Ok(()) => {
-                    let _ = fs::remove_file(upgrade_pending_path(&current_exe));
-                }
-                Err(err) => error!(%err, "Failed to restore cancelled upgrade backup"),
-            }
-            info!("Upgrade handoff cancelled by shutdown");
-            return;
-        };
-
-        error!("Failed to exec new binary: {}", err);
-        error!("Attempting to restore from backup...");
-
-        if fs::rename(&backup_path, &current_exe).is_ok() {
-            let _ = fs::remove_file(upgrade_pending_path(&current_exe));
-            let _ = set_executable(&current_exe);
-            error!("Restored from backup, restarting with old version...");
-            if state
-                .lifecycle
-                .with_upgrade_handoff(|| {
-                    exec_replace(std::process::Command::new(&current_exe).args(&args[1..]))
-                })
-                .is_none()
-            {
-                info!("Restored upgrade backup; shutdown cancelled fallback exec");
-                return;
-            }
-        }
-        let diag = format!(
-            "miao upgrade failure: exec and backup restore both failed.\nbinary: {:?}\nbackup: {}\n",
-            current_exe, backup_path
-        );
-        let _ = std::fs::write(upgrade_failure_log_path(), &diag);
-        error!(
-            "Diagnostics written to {}",
-            upgrade_failure_log_path().display()
-        );
-        error!("Failed to restore from backup, manual intervention required");
-        std::process::exit(1);
-    });
+    tokio::spawn(run_delayed_upgrade_handoff(
+        guard,
+        quiescence,
+        lifecycle_guard,
+        paths,
+    ));
 
     Ok(new_version)
 }

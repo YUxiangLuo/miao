@@ -7,11 +7,11 @@ const PROBE_INTERVAL: Duration = Duration::from_millis(25);
 const CLASH_PROBE_TIMEOUT: Duration = Duration::from_millis(250);
 // OpenWrt can need several seconds to install auto_redirect and bind Clash.
 const READY_TIMEOUT: Duration = Duration::from_secs(8);
+const REQUIRED_CONSECUTIVE_READY: u8 = 2;
 
 #[derive(Clone, Copy)]
 pub(super) enum Operation {
     Start,
-
     Reload { pid: u32 },
 }
 
@@ -19,7 +19,6 @@ impl Operation {
     fn settle_time(self) -> Duration {
         match self {
             Self::Start => Duration::from_millis(100),
-
             Self::Reload { .. } => Duration::from_millis(500),
         }
     }
@@ -27,8 +26,28 @@ impl Operation {
     fn cancelled(self) -> &'static str {
         match self {
             Self::Start => "sing-box start was cancelled",
-
             Self::Reload { .. } => "sing-box reload was cancelled",
+        }
+    }
+
+    fn missing_process_error(self) -> &'static str {
+        match self {
+            Self::Start => self.cancelled(),
+            Self::Reload { .. } => "sing-box exited during reload",
+        }
+    }
+
+    fn status_check_context(self) -> &'static str {
+        match self {
+            Self::Start => "Failed to check sing-box startup status",
+            Self::Reload { .. } => "Failed to check sing-box reload status",
+        }
+    }
+
+    fn phase_label(self) -> &'static str {
+        match self {
+            Self::Start => "startup",
+            Self::Reload { .. } => "reload",
         }
     }
 
@@ -37,7 +56,6 @@ impl Operation {
             Self::Start => {
                 "sing-box process started but its data plane did not become ready within 8 seconds"
             }
-
             Self::Reload { .. } => {
                 "sing-box data plane did not become ready within 8 seconds after reload"
             }
@@ -101,13 +119,9 @@ async fn check_process(state: &AppState, generation: u64, operation: Operation) 
     if !start_still_current(state, generation) {
         return Err(AppError::message(operation.cancelled()));
     }
-    let Some(process) = slot.as_mut() else {
-        return Err(AppError::message(match operation {
-            Operation::Start => operation.cancelled(),
-
-            Operation::Reload { .. } => "sing-box exited during reload",
-        }));
-    };
+    let process = slot
+        .as_mut()
+        .ok_or_else(|| AppError::message(operation.missing_process_error()))?;
 
     if let Operation::Reload { pid } = operation {
         if process.child.id() != Some(pid) {
@@ -116,25 +130,15 @@ async fn check_process(state: &AppState, generation: u64, operation: Operation) 
             ));
         }
     }
-    let context = match operation {
-        Operation::Start => "Failed to check sing-box startup status",
-
-        Operation::Reload { .. } => "Failed to check sing-box reload status",
-    };
     if let Some(status) = process
         .child
         .try_wait()
-        .map_err(|e| AppError::context(context, e))?
+        .map_err(|e| AppError::context(operation.status_check_context(), e))?
     {
         *slot = None;
-
-        let phase = match operation {
-            Operation::Start => "startup",
-
-            Operation::Reload { .. } => "reload",
-        };
         return Err(AppError::message(format!(
-            "sing-box exited during {phase} with code {}",
+            "sing-box exited during {} with code {}",
+            operation.phase_label(),
             status.code().unwrap_or(-1)
         )));
     }
@@ -178,7 +182,7 @@ async fn wait_with_activation(
         };
         if acknowledged && tun_ready && clash_ready {
             consecutive_ready += 1;
-            if consecutive_ready >= 2 {
+            if consecutive_ready >= REQUIRED_CONSECUTIVE_READY {
                 if matches!(operation, Operation::Start) {
                     info!(
                         elapsed_ms = started.elapsed().as_millis(),
