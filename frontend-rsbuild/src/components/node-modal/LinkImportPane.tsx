@@ -3,7 +3,7 @@ import { ListPlus } from 'lucide-react'
 import { ICON } from '../../tokens'
 import { Button } from '../ui'
 import { buildNodeRequest } from '../../nodeForm'
-import { parseShareLinks, type ParsedShareLink } from '../../shareLink'
+import { parseShareLinks, retainUnimportedShareLinks, type ParsedShareLink } from '../../shareLink'
 import { EMPTY_NODE_FORM, NODE_TYPE_OPTIONS, nodeTypeDefaults } from '../../utils'
 import type { BatchNodeResult, NodeRequest } from '../../types/api'
 
@@ -100,8 +100,7 @@ export function LinkImportPane({ onImport, loading }: LinkImportPaneProps) {
       const result = await onImport(validPayloads, items.every(item => item.ok))
       if (!result) return
       const added = new Set(result.added.map(item => item.index))
-      let validIndex = 0
-      const remaining = items.filter(item => !item.ok || !added.has(validIndex++))
+      const remaining = retainUnimportedShareLinks(items, added)
       setText(remaining.map(item => item.line).join('\n'))
       setResultMessage([
         `本次已添加 ${result.added.length} 个节点；未成功的链接已保留，可修改后重试。`,

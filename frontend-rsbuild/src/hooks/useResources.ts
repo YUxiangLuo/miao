@@ -31,6 +31,16 @@ const INITIAL_STATUS: StatusData = {
   mcp: false,
 }
 
+function isSameResourceValue<T>(previous: T, next: T): boolean {
+  return JSON.stringify(previous) === JSON.stringify(next)
+}
+
+export function normalizeStatusData(value: StatusData): StatusData {
+  const ready = value.ready ?? (value.running && !value.initializing)
+  const fallbackPhase = ready ? 'ready' : value.initializing ? 'initializing' : 'stopped'
+  return { ...value, ready, phase: value.phase ?? fallbackPhase }
+}
+
 function useResource<T>(path: string, initial: T, revision = 0) {
   const [data, setData] = useState(initial)
   const revisionRef = useRef(revision)
@@ -54,7 +64,7 @@ function useResource<T>(path: string, initial: T, revision = 0) {
       if (!payload.success || payload.data == null) throw new Error(payload.message || '请求失败')
       const next = payload.data
       // Stable references let memoized rules and lists survive health polling.
-      setData(previous => JSON.stringify(previous) === JSON.stringify(next) ? previous : next)
+      setData(previous => isSameResourceValue(previous, next) ? previous : next)
       setLoaded(true)
       setReadRevision(requestRevision)
       setFailures(0)
@@ -75,11 +85,7 @@ function useResource<T>(path: string, initial: T, revision = 0) {
 
 export function useStatus() {
   const resource = useResource('/api/status', INITIAL_STATUS)
-  const status = useMemo(() => {
-    const value = resource.data
-    const ready = value.ready ?? (value.running && !value.initializing)
-    return { ...value, ready, phase: value.phase ?? (ready ? 'ready' : value.initializing ? 'initializing' : 'stopped') }
-  }, [resource.data])
+  const status = useMemo(() => normalizeStatusData(resource.data), [resource.data])
   return {
     status,
     statusLoaded: resource.loaded,

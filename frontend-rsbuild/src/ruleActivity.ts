@@ -70,31 +70,60 @@ export function signatureFromCustomRule(rule: RuleInfo | null | undefined): Rule
   }
 }
 
-export function signatureFromClashRule(text: string | null | undefined): RuleSignature | null {
+export type ParsedClashRule =
+  | { kind: 'final' }
+  | { kind: 'keyValue'; field: string; value: string; target: string }
+  | { kind: 'flag'; field: string; target: string | null }
+
+export function parseClashActionTarget(action: string): string | null {
+  if (action === 'reject') return 'reject'
+  if (action.startsWith('route(') && action.endsWith(')')) {
+    return action.slice('route('.length, -1)
+  }
+  return null
+}
+
+/**
+ * Parses sing-box Clash API rule strings into structured variants:
+ * - `final`
+ * - `field=value => route(outbound)` / `field=value => reject`
+ * - `flag_field => route(outbound)` (e.g. `ip_is_private => route(direct)`)
+ */
+export function parseClashRule(text: string | null | undefined): ParsedClashRule | null {
   const raw = String(text || '').trim()
-  if (!raw || raw === 'final' || raw === '-') return null
+  if (!raw || raw === '-') return null
+  if (raw === 'final') return { kind: 'final' }
 
   const sep = raw.lastIndexOf(CLASH_ACTION_SEP)
   if (sep < 0) return null
 
   const left = raw.slice(0, sep)
   const action = raw.slice(sep + CLASH_ACTION_SEP.length)
-  const eq = left.indexOf('=')
-  if (eq < 0) return null
+  const target = parseClashActionTarget(action)
 
-  let target: string | null = null
-  if (action === 'reject') {
-    target = 'reject'
-  } else if (action.startsWith('route(') && action.endsWith(')')) {
-    target = action.slice(6, -1)
-  } else {
-    return null
+  const eq = left.indexOf('=')
+  if (eq >= 0) {
+    if (target === null) return null
+    return {
+      kind: 'keyValue',
+      field: left.slice(0, eq),
+      value: left.slice(eq + 1),
+      target,
+    }
   }
 
+  const flagField = left.trim()
+  if (!/^[a-z_]+$/.test(flagField)) return null
+  return { kind: 'flag', field: flagField, target }
+}
+
+export function signatureFromClashRule(text: string | null | undefined): RuleSignature | null {
+  const parsed = parseClashRule(text)
+  if (!parsed || parsed.kind !== 'keyValue') return null
   return {
-    field: left.slice(0, eq),
-    value: left.slice(eq + 1),
-    target,
+    field: parsed.field,
+    value: parsed.value,
+    target: parsed.target,
   }
 }
 
@@ -113,29 +142,45 @@ export function isCustomRuleActive(rule: RuleInfo, connections: RuleBearingConne
   ))
 }
 
+function matcherKey(signature: Pick<RuleSignature, 'field' | 'value'>): string {
+  return JSON.stringify([signature.field, signature.value])
+}
+
+function indexConnectionTargetsByMatcher(connections: RuleBearingConnection[]): Map<string, Set<string | null>> {
+  const index = new Map<string, Set<string | null>>()
+  for (const connection of connections) {
+    const signature = signatureFromClashRule(connection?.rule)
+    if (!signature) continue
+    const key = matcherKey(signature)
+    let targets = index.get(key)
+    if (!targets) {
+      targets = new Set()
+      index.set(key, targets)
+    }
+    targets.add(signature.target || null)
+  }
+  return index
+}
+
+function matchesIndexedTargets(
+  indexedTargets: ReadonlySet<string | null> | undefined,
+  expectedTarget: string | null,
+): boolean {
+  if (!indexedTargets) return false
+  return !expectedTarget || indexedTargets.has(null) || indexedTargets.has(expectedTarget)
+}
+
 export function activeRuleIndexes(rules: RuleInfo[], connections: RuleBearingConnection[]): Set<number> {
   const active = new Set<number>()
   if (!Array.isArray(rules) || !Array.isArray(connections) || connections.length === 0) {
     return active
   }
-  const targetsByMatcher = new Map<string, Set<string | null>>()
-  const key = (signature: RuleSignature) => JSON.stringify([signature.field, signature.value])
-  for (const connection of connections) {
-    const signature = signatureFromClashRule(connection?.rule)
-    if (!signature) continue
-    const matcher = key(signature)
-    let targets = targetsByMatcher.get(matcher)
-    if (!targets) {
-      targets = new Set()
-      targetsByMatcher.set(matcher, targets)
-    }
-    targets.add(signature.target || null)
-  }
+  const targetsByMatcher = indexConnectionTargetsByMatcher(connections)
   for (const rule of rules) {
     const signature = signatureFromCustomRule(rule)
     if (!signature) continue
-    const targets = targetsByMatcher.get(key(signature))
-    if (targets && (!signature.target || targets.has(null) || targets.has(signature.target))) {
+    const targets = targetsByMatcher.get(matcherKey(signature))
+    if (matchesIndexedTargets(targets, signature.target)) {
       active.add(rule.index)
     }
   }

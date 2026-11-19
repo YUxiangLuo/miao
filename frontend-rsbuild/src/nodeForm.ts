@@ -13,11 +13,34 @@ import {
 } from './utils'
 import type { NodeRequest, NodeType } from './types/api'
 
+const UTF8_ENCODER = new TextEncoder()
+const MAX_SOCKS_CREDENTIAL_BYTES = 255
+
 function assertValid(message: string | null): void {
   if (message) throw new Error(message)
 }
 
-export function buildNodeRequest(nodeType: NodeType, form: NodeForm): NodeRequest {
+function validateSocksCredentials(username: string, password: string): void {
+  if (Boolean(username) !== Boolean(password)) {
+    throw new Error('SOCKS5 用户名和密码须同时填写，或同时留空')
+  }
+  if (
+    UTF8_ENCODER.encode(username).length > MAX_SOCKS_CREDENTIAL_BYTES
+    || UTF8_ENCODER.encode(password).length > MAX_SOCKS_CREDENTIAL_BYTES
+  ) {
+    throw new Error('SOCKS5 用户名和密码各不能超过 255 字节')
+  }
+}
+
+function validateVlessOptions(form: NodeForm): void {
+  assertValid(validateVlessFlow(form.flow))
+  const hasRealityConfig = Boolean(form.reality_public_key?.trim() || form.reality_short_id?.trim())
+  if (hasRealityConfig && !form.client_fingerprint?.trim()) {
+    throw new Error('Reality 节点必须配置 TLS 指纹（uTLS）')
+  }
+}
+
+export function validateNodeForm(nodeType: NodeType, form: NodeForm): void {
   const caps = nodeCapabilities(nodeType)
 
   assertValid(validateNodeTag(form.tag.trim()))
@@ -26,16 +49,6 @@ export function buildNodeRequest(nodeType: NodeType, form: NodeForm): NodeReques
 
   if (caps.password) assertValid(validatePassword(form.password.trim()))
   if (caps.uuid) assertValid(validateUuid(form.uuid))
-  if (nodeType === 'socks') {
-    if (Boolean(form.username) !== Boolean(form.password)) {
-      throw new Error('SOCKS5 用户名和密码须同时填写，或同时留空')
-    }
-    const encoder = new TextEncoder()
-    if (encoder.encode(form.username).length > 255 || encoder.encode(form.password).length > 255) {
-      throw new Error('SOCKS5 用户名和密码各不能超过 255 字节')
-    }
-  }
-
   if (caps.transport) {
     assertValid(validateTransport(
       form.transport_type,
@@ -45,75 +58,117 @@ export function buildNodeRequest(nodeType: NodeType, form: NodeForm): NodeReques
     ))
   }
 
-  if (nodeType === 'vless') {
-    assertValid(validateVlessFlow(form.flow))
-    const hasRealityConfig = form.reality_public_key?.trim() || form.reality_short_id?.trim()
-    if (hasRealityConfig && !form.client_fingerprint?.trim()) {
-      throw new Error('Reality 节点必须配置 TLS 指纹（uTLS）')
-    }
+  switch (nodeType) {
+    case 'socks':
+      validateSocksCredentials(form.username, form.password)
+      break
+    case 'vless':
+      validateVlessOptions(form)
+      break
+    case 'hysteria2':
+      assertValid(validateHysteria2Obfs(form.obfs_type, form.obfs_password))
+      break
+    case 'anytls':
+    case 'ss':
+    case 'vmess':
+    case 'trojan':
+    case 'tuic':
+      break
   }
+}
 
-  if (nodeType === 'hysteria2') {
-    assertValid(validateHysteria2Obfs(form.obfs_type, form.obfs_password))
+function buildCommonTlsFields(
+  form: Pick<NodeForm, 'sni' | 'skip_cert_verify' | 'client_fingerprint'>,
+): Pick<NodeRequest, 'sni' | 'skip_cert_verify' | 'client_fingerprint'> {
+  const tls: Pick<NodeRequest, 'sni' | 'skip_cert_verify' | 'client_fingerprint'> = {
+    skip_cert_verify: form.skip_cert_verify,
   }
+  if (form.sni?.trim()) tls.sni = form.sni.trim()
+  if (form.client_fingerprint?.trim()) tls.client_fingerprint = form.client_fingerprint.trim()
+  return tls
+}
 
-  const payload: NodeRequest = {
+export function buildNodeRequest(nodeType: NodeType, form: NodeForm): NodeRequest {
+  validateNodeForm(nodeType, form)
+
+  const base: NodeRequest = {
     node_type: nodeType,
     tag: form.tag.trim(),
     server: form.server.trim(),
     server_port: form.server_port,
   }
 
-  if (caps.password) payload.password = form.password.trim()
-  if (caps.uuid) payload.uuid = form.uuid.trim()
-  if (nodeType === 'socks') {
-    if (form.username) {
-      payload.username = form.username
-      payload.password = form.password
-    }
-    return payload
+  switch (nodeType) {
+    case 'socks':
+      // SOCKS5 credentials are preserved verbatim (no trimming) and exclude TLS/transport fields.
+      return form.username
+        ? { ...base, username: form.username, password: form.password }
+        : base
+
+    case 'ss':
+      return {
+        ...base,
+        password: form.password.trim(),
+        cipher: form.cipher,
+      }
+
+    case 'anytls':
+      return {
+        ...base,
+        password: form.password.trim(),
+        ...buildCommonTlsFields(form),
+      }
+
+    case 'hysteria2':
+      return {
+        ...base,
+        password: form.password.trim(),
+        ...buildCommonTlsFields(form),
+        ...(form.obfs_type ? { obfs_type: form.obfs_type, obfs_password: form.obfs_password.trim() } : {}),
+      }
+
+    case 'trojan':
+      return {
+        ...base,
+        password: form.password.trim(),
+        ...buildCommonTlsFields(form),
+        ...buildTransportPayload(form),
+      }
+
+    case 'tuic':
+      return {
+        ...base,
+        password: form.password.trim(),
+        uuid: form.uuid.trim(),
+        ...buildCommonTlsFields(form),
+        tuic_congestion_control: form.tuic_congestion_control,
+        tuic_udp_relay_mode: form.tuic_udp_relay_mode,
+        tuic_zero_rtt: Boolean(form.tuic_zero_rtt),
+      }
+
+    case 'vmess':
+      return {
+        ...base,
+        uuid: form.uuid.trim(),
+        ...buildCommonTlsFields(form),
+        cipher: form.vmess_cipher,
+        alter_id: Number(form.alter_id || 0),
+        tls_enabled: Boolean(form.tls_enabled),
+        ...(form.packet_encoding ? { packet_encoding: form.packet_encoding } : {}),
+        ...buildTransportPayload(form),
+      }
+
+    case 'vless':
+      return {
+        ...base,
+        uuid: form.uuid.trim(),
+        ...buildCommonTlsFields(form),
+        tls_enabled: Boolean(form.tls_enabled),
+        ...(form.flow ? { flow: form.flow } : {}),
+        ...(form.packet_encoding ? { packet_encoding: form.packet_encoding } : {}),
+        ...(form.reality_public_key?.trim() ? { reality_public_key: form.reality_public_key.trim() } : {}),
+        ...(form.reality_short_id?.trim() ? { reality_short_id: form.reality_short_id.trim() } : {}),
+        ...buildTransportPayload(form),
+      }
   }
-
-  if (nodeType === 'ss') {
-    payload.cipher = form.cipher
-  } else {
-    if (form.sni?.trim()) payload.sni = form.sni.trim()
-    payload.skip_cert_verify = form.skip_cert_verify
-    if (form.client_fingerprint?.trim()) {
-      payload.client_fingerprint = form.client_fingerprint.trim()
-    }
-    if (nodeType === 'hysteria2' && form.obfs_type) {
-      payload.obfs_type = form.obfs_type
-      payload.obfs_password = form.obfs_password.trim()
-    }
-  }
-
-  if (nodeType === 'vmess') {
-    payload.cipher = form.vmess_cipher
-    payload.alter_id = Number(form.alter_id || 0)
-    payload.tls_enabled = Boolean(form.tls_enabled)
-    if (form.packet_encoding) payload.packet_encoding = form.packet_encoding
-  }
-
-  if (nodeType === 'vless') {
-    payload.tls_enabled = Boolean(form.tls_enabled)
-    if (form.flow) payload.flow = form.flow
-    if (form.packet_encoding) payload.packet_encoding = form.packet_encoding
-    if (form.reality_public_key?.trim()) {
-      payload.reality_public_key = form.reality_public_key.trim()
-    }
-    if (form.reality_short_id?.trim()) {
-      payload.reality_short_id = form.reality_short_id.trim()
-    }
-  }
-
-  if (caps.transport) Object.assign(payload, buildTransportPayload(form))
-
-  if (nodeType === 'tuic') {
-    payload.tuic_congestion_control = form.tuic_congestion_control
-    payload.tuic_udp_relay_mode = form.tuic_udp_relay_mode
-    payload.tuic_zero_rtt = Boolean(form.tuic_zero_rtt)
-  }
-
-  return payload
 }

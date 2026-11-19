@@ -1,7 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useToast, useApi } from './useApi'
 import { useStatus, useSubs, useNodes, useRules, useVersion } from './useResources'
-import { useProxies, useTraffic, useConnections, useDelays, isClashProxyGroup } from './useClash'
+import {
+  collectNodeProtocols,
+  collectRuleTargetNodes,
+  mergeDisplayMeasurements,
+  useConnections,
+  useDelays,
+  useProxies,
+  useTraffic,
+} from './useClash'
 import { usePolling, type PollTask } from './usePolling'
 import { useDesktopLayout } from './useDesktopLayout'
 import {
@@ -20,6 +28,75 @@ export interface ConfirmState {
   title: string
   message: string
   onConfirm: (() => void) | null
+}
+
+export interface OnboardingGateInput {
+  firstLoadDone: boolean
+  statusLoaded: boolean
+  backendUnreachable: boolean
+  initializing: boolean
+  ready: boolean
+  subsCurrent: boolean
+  nodesCurrent: boolean
+  rulesCurrent: boolean
+  subsAvailable: boolean
+  nodesAvailable: boolean
+  subsError: string
+  nodesError: string
+  rulesError: string
+  subsCount: number
+  nodesCount: number
+}
+
+/**
+ * A later successful read can complete startup even if the first request failed.
+ * When `/api/status` has settled without ever succeeding, config polling is still
+ * disabled, so we settle immediately to show the backend-reconnecting state.
+ */
+export function isInitialLoadComplete(state: {
+  statusSettled: boolean
+  statusLoaded: boolean
+  subsSettled: boolean
+  nodesSettled: boolean
+  rulesSettled: boolean
+}): boolean {
+  if (!state.statusSettled) return false
+  if (!state.statusLoaded) return true
+  return state.subsSettled && state.nodesSettled && state.rulesSettled
+}
+
+/**
+ * Determines whether to show onboarding instead of the dashboard.
+ * Every guard prevents a distinct false-positive empty-config state:
+ * - unreachable backend or unsettled initial wave
+ * - active or still-initializing runtime
+ * - config projections lagging behind `status.data_revision`
+ * - failed list reads whose placeholder `[]` is not authoritative emptiness
+ */
+export function shouldEnterOnboarding(input: OnboardingGateInput): boolean {
+  if (!input.firstLoadDone || !input.statusLoaded || input.backendUnreachable) return false
+  if (input.initializing || input.ready) return false
+  if (!input.subsCurrent || !input.nodesCurrent || !input.rulesCurrent) return false
+  if (!input.subsAvailable || !input.nodesAvailable) return false
+  if (input.subsError || input.nodesError || input.rulesError) return false
+  return input.subsCount === 0 && input.nodesCount === 0
+}
+
+/**
+ * Auto-test the active node once per node selection in manual (`Selector`) mode.
+ * `URLTest` (`fastest_*`) groups are excluded because probing a single node in Clash API
+ * triggers immediate `PerformUpdateCheck` against stale peers and causes rapid flapping.
+ */
+export function shouldAutoTestCurrentNode(state: {
+  ready: boolean
+  initializing: boolean
+  currentNodeName: string
+  isUrlTestGroup: boolean
+  lastAutoTestedNode: string
+}): boolean {
+  if (!state.ready || state.initializing || !state.currentNodeName) return false
+  if (state.isUrlTestGroup) return false
+  return state.currentNodeName !== state.lastAutoTestedNode
 }
 
 export function useAppData() {
@@ -47,26 +124,8 @@ export function useAppData() {
   }, [fetchStatus, fetchSubs, fetchNodes, fetchRules, fetchProxies])
   const { apiCall, pendingActions } = useApi(refreshAfterUncertainWrite)
 
-  // 节点名 → 协议类型（Clash API 的 type，如 Hysteria2/AnyTLS/VLESS）；分组项不入图
-  const nodeProtocols = useMemo(() => {
-    const map: Record<string, string> = {}
-    Object.entries(proxies || {}).forEach(([name, proxy]) => {
-      if (proxy?.type && !isClashProxyGroup(proxy.type)) map[name] = proxy.type
-    })
-    return map
-  }, [proxies])
-
-  // 规则「指定节点」下拉的候选:手动节点(服务停止时也在) ∪ 运行时全部 outbound
-  // 与后端 known_rule_targets 同口径(排除内置 proxy/direct 与分组项),不随 fastest_* 地区过滤收缩
-  const ruleNodeNames = useMemo(() => {
-    const names = new Set<string>(nodes.map((node) => node.tag))
-    Object.entries(proxies || {}).forEach(([name, proxy]) => {
-      if (name !== 'proxy' && name !== 'direct' && !isClashProxyGroup(proxy?.type)) {
-        names.add(name)
-      }
-    })
-    return [...names]
-  }, [nodes, proxies])
+  const nodeProtocols = useMemo(() => collectNodeProtocols(proxies), [proxies])
+  const ruleNodeNames = useMemo(() => collectRuleTargetNodes(nodes, proxies), [nodes, proxies])
   const { traffic, closeSockets } = useTraffic(status)
   const {
     connectionsInfo,
@@ -77,62 +136,60 @@ export function useAppData() {
   const { versionInfo, fetchVersion } = useVersion()
   const { delays, delayMeasuredAt, testingNodes, testingGroup, testDelay, testGroupDelays, clearDelays } = useDelays()
 
-  // 进入首页且当前节点就绪后,自动测一次延迟;切换节点后也会测新节点。
-  // 每个节点每次会话只自动测一次,手动点测不受影响。
-  // fastest 模式(primaryGroup 为 URLTest)例外:Clash API 的单节点测延迟会让
-  // sing-box 对所在 urltest 组立即 PerformUpdateCheck——新鲜测量值与组内
-  // 陈旧历史一比较就会换节点,面板打开几秒内连换数次。该模式延迟改读 history。
   const autoTestedNodeRef = useRef('')
   const currentNodeName = primaryGroup?.now || ''
   const isUrlTestGroup = primaryGroup?.type === 'URLTest'
   useEffect(() => {
-    if (!status.ready || status.initializing || !currentNodeName || isUrlTestGroup) return
-    if (currentNodeName === autoTestedNodeRef.current) return
+    const shouldAutoTest = shouldAutoTestCurrentNode({
+      ready: status.ready,
+      initializing: status.initializing,
+      currentNodeName,
+      isUrlTestGroup,
+      lastAutoTestedNode: autoTestedNodeRef.current,
+    })
+    if (!shouldAutoTest) return
     autoTestedNodeRef.current = currentNodeName
     testDelay(clashApiBase, currentNodeName)
   }, [status.ready, status.initializing, currentNodeName, isUrlTestGroup, clashApiBase, testDelay])
 
-  // fastest(urltest) 模式的延迟展示回落到 /proxies 自带的 urltest 周期测速
-  // history(每轮 fetchProxies 自动刷新);手动点测结果优先显示——它与 history
-  // 同源(sing-box 测完即写回),下一轮轮询即收敛。
-  const displayMeasurements = useMemo(() => {
-    const map = { ...delays }
-    const measuredAt = { ...delayMeasuredAt }
-    if (!isUrlTestGroup) return { delays: map, measuredAt }
-    Object.entries(proxies || {}).forEach(([name, proxy]) => {
-      if (isClashProxyGroup(proxy?.type)) return
-      const history = proxy?.history?.length ? proxy.history.reduce((latest, item) =>
-        Date.parse(item.time) > Date.parse(latest.time) ? item : latest) : undefined
-      if (history?.delay && (!(name in map) || Date.parse(history.time) > (delayMeasuredAt[name] ?? 0))) {
-        map[name] = history.delay
-        measuredAt[name] = Date.parse(history.time)
-      }
-    })
-    return { delays: map, measuredAt }
-  }, [proxies, isUrlTestGroup, delays, delayMeasuredAt])
+  const displayMeasurements = useMemo(
+    () => mergeDisplayMeasurements({ proxies, isUrlTestGroup, delays, delayMeasuredAt }),
+    [proxies, isUrlTestGroup, delays, delayMeasuredAt],
+  )
 
   const resetNodeForm = useCallback(() => {
     setNodeType('hysteria2')
     setNodeForm({ ...EMPTY_NODE_FORM, ...nodeTypeDefaults('hysteria2') })
   }, [])
 
-  // A later successful read can complete startup even if the first request
-  // failed. The polling hooks own initial reads as well as subsequent refreshes.
-  const firstLoadDone = statusSettled && (!statusLoaded || (subsLoaded && nodesLoaded && rulesLoaded))
+  const firstLoadDone = isInitialLoadComplete({
+    statusSettled,
+    statusLoaded,
+    subsSettled: subsLoaded,
+    nodesSettled: nodesLoaded,
+    rulesSettled: rulesLoaded,
+  })
 
   // 连续失败达到阈值视为后端不可达：面板显示断线提示，且不再按空数据误判进入引导页
   const backendUnreachable = statusFailures >= STATUS_FAILURE_THRESHOLD
 
-  const needsOnboarding = firstLoadDone
-    && statusLoaded
-    && !backendUnreachable
-    && !status.initializing
-    && !status.ready
-    && subsCurrent && nodesCurrent && rulesCurrent
-    && subsAvailable && nodesAvailable
-    && !subsError && !nodesError && !rulesError
-    && subs.length === 0
-    && nodes.length === 0
+  const needsOnboarding = shouldEnterOnboarding({
+    firstLoadDone,
+    statusLoaded,
+    backendUnreachable,
+    initializing: status.initializing,
+    ready: status.ready,
+    subsCurrent,
+    nodesCurrent,
+    rulesCurrent,
+    subsAvailable,
+    nodesAvailable,
+    subsError,
+    nodesError,
+    rulesError,
+    subsCount: subs.length,
+    nodesCount: nodes.length,
+  })
 
   const pollingTasks = useMemo<PollTask[]>(() => {
     const tasks: PollTask[] = [fetchStatus]

@@ -3,6 +3,35 @@ export const WRITE_TIMEOUT_MS = 120_000
 
 export class RequestInterruptedError extends Error {}
 
+/**
+ * Whether a failed write request left backend execution state uncertain.
+ * Miao registers HTTP write tasks once the body arrives and finishes commit/rollback
+ * even if the client times out or loses its network connection.
+ */
+export function isUncertainRequestError(error: unknown): error is RequestInterruptedError | TypeError {
+  return error instanceof RequestInterruptedError || error instanceof TypeError
+}
+
+function parseErrorResponseMessage(rawBody: string, status: number): string {
+  const body = rawBody.trim()
+  if (!body) return `请求失败 (${status})`
+  try {
+    const parsed: unknown = JSON.parse(body)
+    if (
+      parsed
+      && typeof parsed === 'object'
+      && 'message' in parsed
+      && typeof parsed.message === 'string'
+      && parsed.message
+    ) {
+      return parsed.message
+    }
+  } catch {
+    // Plain-text response; fall back to raw body.
+  }
+  return body
+}
+
 /** Bound the complete read, including body parsing. Aborting or timing out
  * settles even if a transport adapter does not implement AbortSignal. */
 export async function fetchJson<T>(url: string, options: RequestInit = {}, timeout = READ_TIMEOUT_MS): Promise<T> {
@@ -21,10 +50,7 @@ export async function fetchJson<T>(url: string, options: RequestInit = {}, timeo
       (async () => {
         const response = await fetch(url, { ...options, signal: controller.signal })
         if (!response.ok) {
-          const body = (await response.text()).trim()
-          let message = body
-          try { message = JSON.parse(body).message || body } catch { /* plain-text response */ }
-          throw new Error(message || `请求失败 (${response.status})`)
+          throw new Error(parseErrorResponseMessage(await response.text(), response.status))
         }
         return await response.json() as T
       })(),

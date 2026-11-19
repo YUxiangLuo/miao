@@ -2,7 +2,13 @@ import { act, renderHook } from '@testing-library/react'
 import { afterEach, expect, it, rs } from '@rstest/core'
 import { useStatus, useNodes } from './useResources'
 import { useDelays, useProxies } from './useClash'
-import { useAppData } from './useAppData'
+import {
+  isInitialLoadComplete,
+  shouldAutoTestCurrentNode,
+  shouldEnterOnboarding,
+  useAppData,
+} from './useAppData'
+import { resolveAppScreenMode } from '../App'
 import { usePolling } from './usePolling'
 import { READ_TIMEOUT_MS } from './request'
 import { nodeMock, statusMock } from '../testFixtures'
@@ -177,4 +183,45 @@ it('refreshes configuration on revision changes instead of every health poll', a
   revision++
   await act(async () => { await rs.advanceTimersByTimeAsync(3000) })
   expect(reads.filter(path => path === '/api/subs')).toHaveLength(2)
+})
+
+it('evaluates startup, onboarding, and auto-probe gates without false positives', () => {
+  expect(isInitialLoadComplete({
+    statusSettled: true, statusLoaded: false, subsSettled: false, nodesSettled: false, rulesSettled: false,
+  })).toBe(true)
+  expect(resolveAppScreenMode({ firstLoadDone: true, statusLoaded: false, needsOnboarding: false }))
+    .toBe('backend-unreachable')
+
+  const baseOnboarding = {
+    firstLoadDone: true,
+    statusLoaded: true,
+    backendUnreachable: false,
+    initializing: false,
+    ready: false,
+    subsCurrent: true,
+    nodesCurrent: true,
+    rulesCurrent: true,
+    subsAvailable: true,
+    nodesAvailable: true,
+    subsError: '',
+    nodesError: '',
+    rulesError: '',
+    subsCount: 0,
+    nodesCount: 0,
+  }
+  expect(shouldEnterOnboarding(baseOnboarding)).toBe(true)
+  expect(shouldEnterOnboarding({ ...baseOnboarding, backendUnreachable: true })).toBe(false)
+  expect(shouldEnterOnboarding({ ...baseOnboarding, nodesCurrent: false })).toBe(false)
+  expect(shouldEnterOnboarding({ ...baseOnboarding, rulesError: 'timeout' })).toBe(false)
+  expect(shouldEnterOnboarding({ ...baseOnboarding, subsCount: 1 })).toBe(false)
+
+  expect(shouldAutoTestCurrentNode({
+    ready: true, initializing: false, currentNodeName: 'hk-1', isUrlTestGroup: false, lastAutoTestedNode: '',
+  })).toBe(true)
+  expect(shouldAutoTestCurrentNode({
+    ready: true, initializing: false, currentNodeName: 'hk-1', isUrlTestGroup: true, lastAutoTestedNode: '',
+  })).toBe(false)
+  expect(shouldAutoTestCurrentNode({
+    ready: true, initializing: false, currentNodeName: 'hk-1', isUrlTestGroup: false, lastAutoTestedNode: 'hk-1',
+  })).toBe(false)
 })

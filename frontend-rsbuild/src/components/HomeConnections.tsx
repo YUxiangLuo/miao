@@ -8,7 +8,7 @@ import { iconForDomain, mainDomain } from './siteIcons'
 import { groupConnections, groupSpeed, sortConnectionGroups, isDirectOutbound } from './connectionFilters'
 import type { StatusData } from '../types/api'
 import type { ConnectionGroup, ConnectionsInfo } from '../types/clash'
-import { foldHomeConnections } from './homeConnectionsFold'
+import { foldHomeConnections, mergeActiveGroupOrder } from './homeConnectionsFold'
 
 // 首页条带专用卡：圆角正方形，favicon 为主视觉 + 主域名 + 出口 chip。
 // 首页条带是独立的轻量呈现（图标+主域名+出口），与链接统计面板的行式列表各自演进
@@ -65,18 +65,12 @@ export function HomeConnections({ status, data, onOpenAll }: HomeConnectionsProp
     [connections],
   )
 
-  // 条带顺序 = 首次出现先后，新组永远最前：每轮把未见过的 id（按传入的
-  // 速率降序）前插到既有顺序之前，既有组保持原位（不随速率波动重排）；
-  // 消失的组从顺序册移除，再出现时按全新处理（回最前）。
   // ref 变更幂等，useMemo/StrictMode 重放安全。
   const orderRef = useRef<string[]>([])
   const orderedGroups = useMemo(() => {
-    const byId = new Map(activeGroups.map((group) => [group.id, group]))
-    const prevSet = new Set(orderRef.current)
-    const fresh = activeGroups.map((group) => group.id).filter((id) => !prevSet.has(id))
-    const kept = orderRef.current.filter((id) => byId.has(id))
-    orderRef.current = [...fresh, ...kept]
-    return orderRef.current.map((id) => byId.get(id)!)
+    const merged = mergeActiveGroupOrder(orderRef.current, activeGroups)
+    orderRef.current = merged.nextOrder
+    return merged.orderedGroups
   }, [activeGroups])
 
   const hasActive = Boolean(status.ready) && activeGroups.length > 0

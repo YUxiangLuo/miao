@@ -86,68 +86,97 @@ function parseHysteria2(url: URL): ParsedShareLink {
   return { nodeType: 'hysteria2', formPatch: patch, tag: tagFromUrl(url, 'hysteria2 节点') }
 }
 
-function parseSs(line: string): ParsedShareLink {
-  const body = line.slice('ss://'.length)
+function splitFragment(body: string): { main: string; tag: string } {
   const hashIndex = body.indexOf('#')
-  const main = hashIndex >= 0 ? body.slice(0, hashIndex) : body
-  const tag = sanitizeTag(hashIndex >= 0 ? decodeURIComponent(body.slice(hashIndex + 1)) : '')
-
-  // 旧版: ss://base64(method:password@host:port)
-  if (!main.includes('@')) {
-    const queryIndex = main.indexOf('?')
-    // base64 段后允许带 / 再跟 query(ss://.../?plugin=...),剥掉再解码
-    const encoded = (queryIndex >= 0 ? main.slice(0, queryIndex) : main).replace(/\/+$/, '')
-    const params = new URLSearchParams(queryIndex >= 0 ? main.slice(queryIndex + 1) : '')
-    let decoded: string
-    try {
-      decoded = decodeBase64(encoded)
-    } catch {
-      throw new Error('SS 链接 base64 解码失败')
-    }
-    return parseSsUserinfo(decoded, tag, params, false)
+  if (hashIndex < 0) return { main: body, tag: '' }
+  return {
+    main: body.slice(0, hashIndex),
+    tag: sanitizeTag(decodeURIComponent(body.slice(hashIndex + 1))),
   }
-
-  // SIP002: ss://base64(method:password)@host:port?...#name
-  const atIndex = main.lastIndexOf('@')
-  const userinfo = main.slice(0, atIndex)
-  const hostportAndQuery = main.slice(atIndex + 1)
-  const queryIndex = hostportAndQuery.indexOf('?')
-  const hostport = queryIndex >= 0 ? hostportAndQuery.slice(0, queryIndex) : hostportAndQuery
-  const params = new URLSearchParams(queryIndex >= 0 ? hostportAndQuery.slice(queryIndex + 1) : '')
-
-  let credentials = userinfo
-  // userinfo 可能是 base64(method:password),也可能是明文 method:password
-  // base64 解码出的密码是字面量;只有明文 userinfo 里的密码才是 percent-encoded
-  let passwordEncoded = true
-  if (!userinfo.includes(':')) {
-    try {
-      credentials = decodeBase64(userinfo)
-      passwordEncoded = false
-    } catch {
-      throw new Error('SS 链接用户信息解码失败')
-    }
-  }
-  return parseSsUserinfo(`${credentials}@${hostport}`, tag, params, passwordEncoded)
 }
 
-function parseSsUserinfo(combined: string, tag: string, params: URLSearchParams, passwordEncoded: boolean): ParsedShareLink {
-  // combined: method:password@host:port(密码可能含 @,取最后一个 @)
-  const atIndex = combined.lastIndexOf('@')
+function splitQuery(text: string): { beforeQuery: string; params: URLSearchParams } {
+  const queryIndex = text.indexOf('?')
+  if (queryIndex < 0) return { beforeQuery: text, params: new URLSearchParams() }
+  return {
+    beforeQuery: text.slice(0, queryIndex),
+    params: new URLSearchParams(text.slice(queryIndex + 1)),
+  }
+}
+
+interface SsWireParts {
+  rawCredentials: string
+  rawHostPort: string
+  params: URLSearchParams
+  /** Plaintext SIP002 userinfo uses percent-encoding; base64-decoded userinfo is literal. */
+  passwordPercentEncoded: boolean
+}
+
+function decodeLegacySsParts(main: string): SsWireParts {
+  // Legacy: ss://base64(method:password@host:port)[/?plugin=...]
+  const { beforeQuery, params } = splitQuery(main)
+  const encoded = beforeQuery.replace(/\/+$/, '')
+  let decoded: string
+  try {
+    decoded = decodeBase64(encoded)
+  } catch {
+    throw new Error('SS 链接 base64 解码失败')
+  }
+  const atIndex = decoded.lastIndexOf('@')
   if (atIndex < 0) throw new Error('SS 链接缺少 @')
-  const userinfo = combined.slice(0, atIndex)
-  // 端口后允许带 /(ss://...@host:8388/#name 或 /?query)
-  const hostport = combined.slice(atIndex + 1).replace(/\/+$/, '')
-  const colonIndex = userinfo.indexOf(':')
+  return {
+    rawCredentials: decoded.slice(0, atIndex),
+    rawHostPort: decoded.slice(atIndex + 1),
+    params,
+    passwordPercentEncoded: false,
+  }
+}
+
+function decodeSip002SsParts(main: string): SsWireParts {
+  // SIP002: ss://<base64(method:password) | method:percent_password>@host:port[/?query]
+  const atIndex = main.lastIndexOf('@')
+  const userinfo = main.slice(0, atIndex)
+  const { beforeQuery: rawHostPort, params } = splitQuery(main.slice(atIndex + 1))
+
+  if (userinfo.includes(':')) {
+    return { rawCredentials: userinfo, rawHostPort, params, passwordPercentEncoded: true }
+  }
+
+  try {
+    return {
+      rawCredentials: decodeBase64(userinfo),
+      rawHostPort,
+      params,
+      passwordPercentEncoded: false,
+    }
+  } catch {
+    throw new Error('SS 链接用户信息解码失败')
+  }
+}
+
+function parseSs(line: string): ParsedShareLink {
+  const { main, tag } = splitFragment(line.slice('ss://'.length))
+  const parts = main.includes('@') ? decodeSip002SsParts(main) : decodeLegacySsParts(main)
+
+  if (parts.params.get('plugin')) {
+    throw new Error('暂不支持带插件的 SS 节点')
+  }
+
+  const colonIndex = parts.rawCredentials.indexOf(':')
   if (colonIndex < 0) throw new Error('SS 链接缺少加密方式')
-  const method = userinfo.slice(0, colonIndex)
-  const rawPassword = userinfo.slice(colonIndex + 1)
-  const password = passwordEncoded ? decodeURIComponent(rawPassword) : rawPassword
-  const portMatch = hostport.match(/:(\d+)$/)
+  const method = parts.rawCredentials.slice(0, colonIndex)
+  const rawPassword = parts.rawCredentials.slice(colonIndex + 1)
+  const password = parts.passwordPercentEncoded ? decodeURIComponent(rawPassword) : rawPassword
+
+  // 端口后允许带 / (ss://...@host:8388/#name 或 /?query)
+  const cleanHostPort = parts.rawHostPort.replace(/\/+$/, '')
+  const portMatch = cleanHostPort.match(/:(\d+)$/)
   if (!portMatch) throw new Error('SS 链接缺少端口')
-  // 与其他协议一致,剥掉 IPv6 方括号
-  const server = hostport.slice(0, hostport.length - portMatch[0].length).replace(/^\[|\]$/g, '')
+
+  const server = cleanHostPort
+    .slice(0, cleanHostPort.length - portMatch[0].length)
+    .replace(/^\[|\]$/g, '')
   if (!server) throw new Error('SS 链接缺少服务器地址')
-  if (params.get('plugin')) throw new Error('暂不支持带插件的 SS 节点')
 
   return {
     nodeType: 'ss',
@@ -259,16 +288,64 @@ function parseAnytls(url: URL): ParsedShareLink {
   return { nodeType: 'anytls', formPatch, tag: tagFromUrl(url, 'AnyTLS 节点') }
 }
 
+function parseSocks(url: URL): ParsedShareLink {
+  if (boolParam(url.searchParams.get('tls')) || url.searchParams.get('security') === 'tls') {
+    throw new Error('SOCKS5 节点不支持 TLS 配置')
+  }
+  return {
+    nodeType: 'socks',
+    formPatch: {
+      username: decodeURIComponent(url.username),
+      password: decodeURIComponent(url.password),
+      tls_enabled: false,
+    },
+    tag: tagFromUrl(url, 'SOCKS5 节点'),
+  }
+}
+
+const SCHEME_PREFIX_RE = /^[a-z][a-z0-9+.-]*:\/\//iu
+const BARE_SOCKS5_RE = /^(\[[^\]]+\]|[^\s:]+):(\d+):([^:]+):(.+)$/u
+
+function parseBareSocks5Line(text: string): ParsedShareLink {
+  const match = BARE_SOCKS5_RE.exec(text)
+  if (!match) {
+    throw new Error('不支持的链接类型；请填写分享链接或 SOCKS5 地址:端口:用户名:密码')
+  }
+  const [, host, port, username, password] = match
+  // Percent-encode literal credentials so `:`, `@`, `%`, `://` survive URL parsing intact.
+  return parseShareLink(
+    `socks5://${encodeURIComponent(username)}:${encodeURIComponent(password)}@${host}:${port}`,
+  )
+}
+
+function parseUrlBasedScheme(scheme: string, url: URL): ParsedShareLink {
+  switch (scheme) {
+    case 'hysteria2':
+    case 'hy2':
+      return parseHysteria2(url)
+    case 'vless':
+      return parseVless(url)
+    case 'trojan':
+      return parseTrojan(url)
+    case 'tuic':
+      return parseTuic(url)
+    case 'anytls':
+      return parseAnytls(url)
+    case 'socks':
+    case 'socks5':
+      return parseSocks(url)
+    default:
+      throw new Error(`不支持的链接类型: ${scheme}`)
+  }
+}
+
 export function parseShareLink(line: string): ParsedShareLink {
   const text = String(line || '').trim()
   if (!text) throw new Error('链接不能为空')
-  if (!/^[a-z][a-z0-9+.-]*:\/\//iu.test(text)) {
-    const match = /^(\[[^\]]+\]|[^\s:]+):(\d+):([^:]+):(.+)$/u.exec(text)
-    if (!match) throw new Error('不支持的链接类型；请填写分享链接或 SOCKS5 地址:端口:用户名:密码')
-    const [, host, port, username, password] = match
-    const parsed = parseShareLink(`socks5://${encodeURIComponent(username)}:${encodeURIComponent(password)}@${host}:${port}`)
-    return parsed
+  if (!SCHEME_PREFIX_RE.test(text)) {
+    return parseBareSocks5Line(text)
   }
+
   const scheme = text.split('://')[0].toLowerCase()
   if (!SUPPORTED_SCHEMES.includes(scheme)) {
     throw new Error(`不支持的链接类型: ${scheme || '无法识别'}`)
@@ -278,37 +355,7 @@ export function parseShareLink(line: string): ParsedShareLink {
   if (scheme === 'vmess') return parseVmess(text)
 
   const url = parseUrl(text)
-  const parsed = ((): ParsedShareLink => {
-    switch (scheme) {
-      case 'hysteria2':
-      case 'hy2':
-        return parseHysteria2(url)
-      case 'vless':
-        return parseVless(url)
-      case 'trojan':
-        return parseTrojan(url)
-      case 'tuic':
-        return parseTuic(url)
-      case 'anytls':
-        return parseAnytls(url)
-      case 'socks':
-      case 'socks5':
-        if (boolParam(url.searchParams.get('tls')) || url.searchParams.get('security') === 'tls') {
-          throw new Error('SOCKS5 节点不支持 TLS 配置')
-        }
-        return {
-          nodeType: 'socks',
-          formPatch: {
-            username: decodeURIComponent(url.username),
-            password: decodeURIComponent(url.password),
-            tls_enabled: false,
-          },
-          tag: tagFromUrl(url, 'SOCKS5 节点'),
-        }
-      default:
-        throw new Error(`不支持的链接类型: ${scheme}`)
-    }
-  })()
+  const parsed = parseUrlBasedScheme(scheme, url)
 
   return {
     ...parsed,
@@ -337,4 +384,29 @@ export function parseShareLinks(text: string): ShareLinkResult[] {
         return { line, ok: false, error: error instanceof Error ? error.message : String(error) }
       }
     })
+}
+
+/**
+ * Reconciles pasted share-link lines after `/api/nodes/import` returns.
+ * `addedIndices` indexes into the subset of valid (`ok: true`) payloads sent to the API,
+ * NOT into `items` directly. Invalid lines and valid lines rejected by the backend are retained.
+ */
+export function retainUnimportedShareLinks<T extends { line: string; ok: boolean }>(
+  items: readonly T[],
+  addedIndices: ReadonlySet<number>,
+): T[] {
+  const remaining: T[] = []
+  let validPayloadIndex = 0
+  for (const item of items) {
+    if (!item.ok) {
+      remaining.push(item)
+      continue
+    }
+    const wasAdded = addedIndices.has(validPayloadIndex)
+    validPayloadIndex += 1
+    if (!wasAdded) {
+      remaining.push(item)
+    }
+  }
+  return remaining
 }

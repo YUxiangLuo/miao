@@ -2,6 +2,7 @@ import { describe, expect, it } from '@rstest/core'
 import {
   activeRuleIndexes,
   isCustomRuleActive,
+  parseClashRule,
   signatureFromClashRule,
   signatureFromCustomRule,
 } from './ruleActivity'
@@ -37,6 +38,12 @@ describe('signatureFromClashRule', () => {
   it('ignores final and matcher-only built-in rules', () => {
     expect(signatureFromClashRule('final')).toBeNull()
     expect(signatureFromClashRule('ip_is_private => route(direct)')).toBeNull()
+    expect(parseClashRule('final')).toEqual({ kind: 'final' })
+    expect(parseClashRule('ip_is_private => route(direct)')).toEqual({
+      kind: 'flag',
+      field: 'ip_is_private',
+      target: 'direct',
+    })
   })
 })
 

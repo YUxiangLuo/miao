@@ -43,3 +43,36 @@ export function ruleJsonPreview(field: string, value: string, target: string): s
       : { [field]: jsonValue, action: 'route', outbound: target }
   return JSON.stringify(rule)
 }
+
+function isValidPortNumber(raw: string): boolean {
+  if (!/^\d+$/.test(raw)) return false
+  const port = Number(raw)
+  return port >= 1 && port <= 65535
+}
+
+function isValidPortRange(raw: string): boolean {
+  const match = /^(\d*):(\d*)$/.exec(raw)
+  if (!match) return false
+  const [, startRaw, endRaw] = match
+  if (!startRaw && !endRaw) return false
+  if (startRaw && !isValidPortNumber(startRaw)) return false
+  if (endRaw && !isValidPortNumber(endRaw)) return false
+  if (startRaw && endRaw && Number(startRaw) > Number(endRaw)) return false
+  return true
+}
+
+export function validateRuleValue(field: string, value: string): string | null {
+  const trimmed = value.trim()
+  if (!trimmed) return null
+  if ([...trimmed].length > 256) return '最多填写 256 个字符'
+  if (field.startsWith('domain') && /[/:\s]/.test(trimmed)) {
+    return '只填写域名或关键词，不要包含 https://、路径或空格'
+  }
+  if (field === 'port' && !isValidPortNumber(trimmed)) {
+    return '端口号需在 1–65535 之间'
+  }
+  if (field === 'port_range' && !isValidPortRange(trimmed)) {
+    return '请填写有效范围，例如 1000:2000'
+  }
+  return null
+}

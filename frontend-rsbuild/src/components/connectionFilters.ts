@@ -1,5 +1,5 @@
 import type { ClashConnection, ConnectionGroup, EnrichedConnection } from '../types/clash'
-import { signatureFromClashRule } from '../ruleActivity'
+import { parseClashRule } from '../ruleActivity'
 import { ruleFieldLabel, ruleTargetLabel } from '../ruleFormat'
 import { formatUptime } from '../utils'
 import { connectionDomain, iconForDomain } from './siteIcons'
@@ -39,6 +39,16 @@ const RULE_SET_LABELS: Record<string, string> = {
   chinaip: '中国 IP 规则集',
 }
 
+function describeClashMatcherField(field: string, value: string): string {
+  if (field === 'rule_set') {
+    return RULE_SET_LABELS[value] || `规则集 ${value}`
+  }
+  if (field === 'ip_is_private') {
+    return '私有 IP'
+  }
+  return `${ruleFieldLabel(field)} ${value}`
+}
+
 /**
  * 把 Clash API 的规则文本翻译成人话：
  * `rule_set=chinasite => route(direct)` → 「中国站点规则集 → 直连」
@@ -46,42 +56,19 @@ const RULE_SET_LABELS: Record<string, string> = {
  * 无法解析的格式（如 mihomo 的 "RuleSet" 裸类型）返回 null，调用方回退 displayRuleText。
  */
 export function humanizeClashRule(text: string | null | undefined): string | null {
-  const raw = String(text || '').trim()
-  if (!raw || raw === '-') return null
-  if (raw === 'final') return '兜底规则'
+  const parsed = parseClashRule(text)
+  if (!parsed) return null
+  if (parsed.kind === 'final') return '兜底规则'
 
-  const sig = signatureFromClashRule(raw)
-  if (!sig) {
-    // 无值裸匹配（如 `ip_is_private => route(direct)`）
-    const sep = raw.lastIndexOf(' => ')
-    if (sep < 0) return null
-    const field = raw.slice(0, sep).trim()
-    if (!/^[a-z_]+$/.test(field)) return null
-    const action = raw.slice(sep + 4)
-    const target = actionTargetLabel(action)
-    const label = field === 'ip_is_private' ? '私有 IP' : ruleFieldLabel(field)
+  if (parsed.kind === 'flag') {
+    const label = parsed.field === 'ip_is_private' ? '私有 IP' : ruleFieldLabel(parsed.field)
+    const target = parsed.target ? ruleTargetLabel(parsed.target) : null
     return target ? `${label} → ${target}` : label
   }
 
-  let fieldLabel: string
-  if (sig.field === 'rule_set') {
-    fieldLabel = RULE_SET_LABELS[sig.value] || `规则集 ${sig.value}`
-  } else if (sig.field === 'ip_is_private') {
-    fieldLabel = '私有 IP'
-  } else {
-    fieldLabel = `${ruleFieldLabel(sig.field)} ${sig.value}`
-  }
-  const target = sig.target ? ruleTargetLabel(sig.target) : null
+  const fieldLabel = describeClashMatcherField(parsed.field, parsed.value)
+  const target = parsed.target ? ruleTargetLabel(parsed.target) : null
   return target ? `${fieldLabel} → ${target}` : fieldLabel
-}
-
-/** `route(direct)` → 「直连」；`reject` → 「拦截」；节点名原样 */
-function actionTargetLabel(action: string): string | null {
-  if (action === 'reject') return ruleTargetLabel('reject')
-  if (action.startsWith('route(') && action.endsWith(')')) {
-    return ruleTargetLabel(action.slice(6, -1))
-  }
-  return null
 }
 
 /**

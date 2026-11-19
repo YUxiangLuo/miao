@@ -5,7 +5,7 @@ import { useDialog } from '../hooks/useDialog'
 import { Button } from './ui'
 import { PROTOCOL_OPTIONS, RULE_FIELD_OPTIONS } from '../ruleFormat'
 import { COMMON_DOMAIN_SITES, COMMON_PROCESS_APPS } from '../ruleApps'
-import { rulePlainPreview } from '../rulePreview'
+import { rulePlainPreview, validateRuleValue } from '../rulePreview'
 import { classNames } from '../utils'
 import type { RuleRequest } from '../types/api'
 
@@ -50,23 +50,6 @@ const PROCESS_EXAMPLES = [
   COMMON_PROCESS_APPS[0].apps[0], COMMON_PROCESS_APPS[1].apps[0],
   COMMON_PROCESS_APPS[2].apps[0], COMMON_PROCESS_APPS[4].apps[0],
 ]
-
-function valueError(field: string, value: string): string | null {
-  const trimmed = value.trim()
-  if (!trimmed) return null
-  if ([...trimmed].length > 256) return '最多填写 256 个字符'
-  if (field.startsWith('domain') && /[/:\s]/.test(trimmed)) return '只填写域名或关键词，不要包含 https://、路径或空格'
-  if (field === 'port' && (!/^\d+$/.test(trimmed) || Number(trimmed) < 1 || Number(trimmed) > 65535)) return '端口号需在 1–65535 之间'
-  if (field === 'port_range') {
-    const match = /^(\d*):(\d*)$/.exec(trimmed)
-    const start = Number(match?.[1])
-    const end = Number(match?.[2])
-    if (!match || (!match[1] && !match[2]) || (match[1] && (start < 1 || start > 65535)) || (match[2] && (end < 1 || end > 65535)) || (match[1] && match[2] && start > end)) {
-      return '请填写有效范围，例如 1000:2000'
-    }
-  }
-  return null
-}
 
 export interface RuleModalProps {
   open: boolean
@@ -114,7 +97,7 @@ export function RuleModal({ open, loading, onClose, onSubmit, nodeNames = [], de
 
   const matchGroup = MATCH_GROUPS.find((group) => (group.fields as readonly string[]).includes(field)) || MATCH_GROUPS[0]
   const fieldOption = RULE_FIELD_OPTIONS.find((option) => option.value === field)
-  const error = valueError(field, value)
+  const error = validateRuleValue(field, value)
   const canSubmit = value.trim().length > 0 && !error
   const isNodeTarget = !TARGET_OPTIONS.some((option) => option.value === target)
   const preview = error ? null : rulePlainPreview(field, value, target)

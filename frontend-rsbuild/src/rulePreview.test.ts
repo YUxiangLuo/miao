@@ -1,5 +1,5 @@
 import { describe, expect, it } from '@rstest/core'
-import { ruleJsonPreview, rulePlainPreview } from './rulePreview'
+import { ruleJsonPreview, rulePlainPreview, validateRuleValue } from './rulePreview'
 
 describe('rulePlainPreview', () => {
   it('describes process rules in plain language', () => {
@@ -55,5 +55,28 @@ describe('ruleJsonPreview', () => {
 
   it('returns null without a value', () => {
     expect(ruleJsonPreview('domain_suffix', '', 'proxy')).toBeNull()
+  })
+})
+
+describe('validateRuleValue', () => {
+  it('validates ports and open/closed port ranges', () => {
+    expect(validateRuleValue('port', '443')).toBeNull()
+    expect(validateRuleValue('port', '0')).toMatch(/1–65535/)
+    expect(validateRuleValue('port', '65536')).toMatch(/1–65535/)
+
+    expect(validateRuleValue('port_range', '1000:2000')).toBeNull()
+    expect(validateRuleValue('port_range', ':2000')).toBeNull()
+    expect(validateRuleValue('port_range', '1000:')).toBeNull()
+    expect(validateRuleValue('port_range', ':')).toMatch(/有效范围/)
+    expect(validateRuleValue('port_range', '2000:1000')).toMatch(/有效范围/)
+    expect(validateRuleValue('port_range', '0:100')).toMatch(/有效范围/)
+    expect(validateRuleValue('port_range', '100:65536')).toMatch(/有效范围/)
+  })
+
+  it('validates domain characters and unicode code-point length', () => {
+    expect(validateRuleValue('domain_suffix', 'example.com')).toBeNull()
+    expect(validateRuleValue('domain_suffix', 'https://example.com')).toMatch(/不要包含/)
+    expect(validateRuleValue('process_name', '中'.repeat(256))).toBeNull()
+    expect(validateRuleValue('process_name', '中'.repeat(257))).toMatch(/256/)
   })
 })

@@ -1,5 +1,5 @@
 import { describe, expect, it } from '@rstest/core'
-import { parseShareLink, parseShareLinks, sanitizeTag } from './shareLink'
+import { parseShareLink, parseShareLinks, retainUnimportedShareLinks, sanitizeTag } from './shareLink'
 
 function encodeBase64(input: string): string {
   const bytes = new TextEncoder().encode(input)
@@ -85,10 +85,10 @@ describe('parseShareLink', () => {
 
   it('keeps literal percent signs in base64-encoded ss passwords', () => {
     // base64 userinfo 里的密码是字面量,再做 percent-decoding 会抛 URIError 或改错密码
-    const userinfo = encodeBase64('aes-128-gcm:100%secret')
+    const userinfo = encodeBase64('aes-128-gcm:100%secret@with:chars')
     const parsed = parseShareLink(`ss://${userinfo}@ss.example.com:8388`)
 
-    expect(parsed.formPatch).toMatchObject({ cipher: 'aes-128-gcm', password: '100%secret' })
+    expect(parsed.formPatch).toMatchObject({ cipher: 'aes-128-gcm', password: '100%secret@with:chars' })
   })
 
   it('does not double-decode percent escapes in legacy ss passwords', () => {
@@ -261,5 +261,20 @@ describe('parseShareLinks', () => {
     expect(second.error).toBeTruthy()
     if (!third?.ok) throw new Error('expected third link to parse')
     expect(third.parsed.nodeType).toBe('trojan')
+  })
+
+  it('retains invalid lines and backend-failed valid indices during batch import reconciliation', () => {
+    const items = [
+      { line: 'bad-1', ok: false },
+      { line: 'valid-0-failed', ok: true },
+      { line: 'valid-1-added', ok: true },
+      { line: 'bad-2', ok: false },
+      { line: 'valid-2-added', ok: true },
+    ]
+    expect(retainUnimportedShareLinks(items, new Set([1, 2])).map((item) => item.line)).toEqual([
+      'bad-1',
+      'valid-0-failed',
+      'bad-2',
+    ])
   })
 })

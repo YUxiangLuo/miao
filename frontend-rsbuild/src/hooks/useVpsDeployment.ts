@@ -1,6 +1,6 @@
 import { useCallback, useRef, useState } from 'react'
 import type { useAppData } from './useAppData'
-import { RequestInterruptedError } from './request'
+import { isUncertainRequestError } from './request'
 import { mutationFeedback } from './mutationFeedback'
 import type { VpsDeployRequest, VpsDeployResponse } from '../types/api'
 
@@ -37,7 +37,7 @@ export function useVpsDeployment({ apiCall, fetchNodes, clearDelays, showToast }
       return true
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
-      const uncertain = error instanceof RequestInterruptedError || error instanceof TypeError
+      const uncertain = isUncertainRequestError(error)
       update({ phase: uncertain ? 'unknown' : 'error', message, finishedAt: Date.now() })
       // The pane may already have unmounted. The page-level record owns the result.
       showToast(uncertain ? 'VPS 部署结果未知，请查看部署记录并核对远端状态。' : 'VPS 部署请求失败，详情已保留在部署记录。', 'error')

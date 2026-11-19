@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { API_HEADERS } from '../utils'
 import type { ApiResponse } from '../types/api'
-import { fetchJson, RequestInterruptedError, WRITE_TIMEOUT_MS } from './request'
+import { fetchJson, isUncertainRequestError, RequestInterruptedError, WRITE_TIMEOUT_MS } from './request'
 
 const TOAST_DURATION = 3500
 
@@ -79,7 +79,7 @@ export function useApi(onUncertain?: () => void) {
       if (!payload.success) throw new Error(payload.message || '请求失败')
       return payload
     } catch (error) {
-      if (error instanceof RequestInterruptedError || error instanceof TypeError) {
+      if (isUncertainRequestError(error)) {
         onUncertain?.()
         throw new RequestInterruptedError('请求中断或网络异常，操作结果未知；请刷新状态确认，勿直接重复操作')
       }

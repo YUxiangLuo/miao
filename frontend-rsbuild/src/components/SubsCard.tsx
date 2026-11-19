@@ -16,16 +16,56 @@ interface SubRowProps {
   disabled: boolean
 }
 
-const SubRow = memo(function SubRow({ sub, onDelete, onShowNodes, disabled }: SubRowProps) {
+interface SubRowDisplay {
+  badgeTone: 'info' | 'success' | 'error'
+  isSpinning: boolean
+  pending: boolean
+  isFailed: boolean
+  fetchStatusText: string | null
+  retainedCacheText: string | null
+}
+
+function describeSubRow(sub: SubStatus): SubRowDisplay {
   const state = sub.state || (sub.success ? 'ready' : 'failed')
   const pending = state === 'pending' || state === 'refreshing'
+  const badgeTone = pending ? 'info' : sub.success ? 'success' : 'error'
   // 节点管理读取本地快照，不依赖本轮刷新成功；空列表也可能有失配禁用待清理。
   const showFetchStatus = pending || !sub.success || sub.node_count === 0
+
+  let fetchStatusText: string | null = null
+  if (showFetchStatus) {
+    if (state === 'pending') {
+      fetchStatusText = '等待首次获取'
+    } else if (state === 'refreshing') {
+      fetchStatusText = sub.success ? `正在刷新，上次获取 ${sub.node_count} 个节点` : '正在获取订阅'
+    } else if (sub.success) {
+      fetchStatusText = sub.node_count > 0 ? `${sub.node_count} 个节点` : '获取成功，暂无代理节点'
+    } else {
+      fetchStatusText = sub.error || '获取失败'
+    }
+  }
+
+  const retainedCacheText = !pending && !sub.success && sub.node_count > 0
+    ? `保留 ${sub.node_count} 个缓存节点，本次获取失败`
+    : null
+
+  return {
+    badgeTone,
+    isSpinning: state === 'refreshing',
+    pending,
+    isFailed: state === 'failed',
+    fetchStatusText,
+    retainedCacheText,
+  }
+}
+
+const SubRow = memo(function SubRow({ sub, onDelete, onShowNodes, disabled }: SubRowProps) {
+  const display = describeSubRow(sub)
   return (
     <div className="list-row">
-      <div className={classNames('status-icon-badge', pending ? 'info' : sub.success ? 'success' : 'error')}>
-        {pending
-          ? <RefreshCw size={ICON.xs} className={state === 'refreshing' ? 'spin' : undefined} />
+      <div className={classNames('status-icon-badge', display.badgeTone)}>
+        {display.pending
+          ? <RefreshCw size={ICON.xs} className={display.isSpinning ? 'spin' : undefined} />
           : sub.success
             ? <Check size={ICON.xs} />
             : <CircleX size={ICON.xs} />}
@@ -42,22 +82,16 @@ const SubRow = memo(function SubRow({ sub, onDelete, onShowNodes, disabled }: Su
             ? `${sub.node_count} 个节点${sub.disabled_count > 0 ? ` · 禁用 ${sub.disabled_count}` : ''}`
             : '查看节点'}
         </button>
-        {showFetchStatus && (
+        {display.fetchStatusText && (
           <div
-            className={classNames('list-row-meta', state === 'failed' && 'error')}
-            title={state === 'failed' ? sub.error : undefined}
+            className={classNames('list-row-meta', display.isFailed && 'error')}
+            title={display.isFailed ? sub.error : undefined}
           >
-            {state === 'pending'
-              ? '等待首次获取'
-              : state === 'refreshing'
-                ? sub.success ? `正在刷新，上次获取 ${sub.node_count} 个节点` : '正在获取订阅'
-                : sub.success
-                  ? sub.node_count > 0 ? `${sub.node_count} 个节点` : '获取成功，暂无代理节点'
-                  : sub.error || '获取失败'}
+            {display.fetchStatusText}
           </div>
         )}
-        {!pending && !sub.success && sub.node_count > 0 && (
-          <div className="list-row-meta subscription-feedback">保留 {sub.node_count} 个缓存节点，本次获取失败</div>
+        {display.retainedCacheText && (
+          <div className="list-row-meta subscription-feedback">{display.retainedCacheText}</div>
         )}
       </div>
       <button

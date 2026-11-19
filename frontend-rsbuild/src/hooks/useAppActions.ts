@@ -2,10 +2,19 @@ import { useCallback, useRef, useState } from 'react'
 import { CONNECTIONS_MODAL_MIN_WIDTH } from '../tokens'
 import { validateSubscriptionUrl } from '../utils'
 import { buildNodeRequest } from '../nodeForm'
-import { waitForUpgrade } from './upgrade'
-import { RequestInterruptedError } from './request'
+import { describeVersionCheckResult, waitForUpgrade } from './upgrade'
+import { isUncertainRequestError } from './request'
 import { useVpsDeployment } from './useVpsDeployment'
-import { mutationFeedback } from './mutationFeedback'
+import {
+  batchNodeFailuresFeedback,
+  mutationFeedback,
+  nodeSelectFeedback,
+  routeModeConfirmCopy,
+  subscriptionRefreshFeedback,
+  switchProxyFeedback,
+  vergeImportFeedback,
+  type ToastFeedback,
+} from './mutationFeedback'
 import type { ResourceReadResult } from './useResources'
 import type { ToastTone } from './useApi'
 import type { useAppData } from './useAppData'
@@ -75,10 +84,13 @@ export function useAppActions(data: AppData) {
   } = data
   const requestedNodeSelect = status.requested_node_select || status.node_select || 'manual'
 
-  const showMutationResult = useCallback((message: string, read: ResourceReadResult<unknown>, action: string, tone?: ToastTone) => {
-    const feedback = mutationFeedback(message, read, action, tone)
-    showToast(feedback.message, feedback.tone)
+  const presentFeedback = useCallback((feedback: ToastFeedback | null) => {
+    if (feedback) showToast(feedback.message, feedback.tone)
   }, [showToast])
+
+  const showMutationResult = useCallback((message: string, read: ResourceReadResult<unknown>, action: string, tone?: ToastTone) => {
+    presentFeedback(mutationFeedback(message, read, action, tone))
+  }, [presentFeedback])
 
   const openConfirm = useCallback((title: string, message: string, onConfirm: () => void) => {
     setConfirmState({ open: true, title, message, onConfirm })
@@ -128,19 +140,8 @@ export function useAppActions(data: AppData) {
 
   const handleOpenSetRouteModeConfirm = useCallback((nextMode: RouteMode) => {
     if (nextMode === status.route_mode) return
-    if (nextMode === 'global') {
-      openConfirm(
-        '切换为全局代理',
-        '关闭内网和国内直连分流，按自定义规则选择出口，其余流量走默认代理（含国内站点）。切换时服务会短暂中断。',
-        () => handleSetRouteMode('global')
-      )
-      return
-    }
-    openConfirm(
-      '切换为分流模式',
-      '内网和中国大陆先直连，再匹配自定义规则；其余流量使用默认代理。切换时服务会短暂中断。',
-      () => handleSetRouteMode('rule')
-    )
+    const copy = routeModeConfirmCopy(nextMode)
+    openConfirm(copy.title, copy.message, () => handleSetRouteMode(nextMode))
   }, [status.route_mode, openConfirm, handleSetRouteMode])
 
   const handleSetMaxMultiplier = useCallback(async (nextMultiplier: string | null) => {
@@ -180,17 +181,7 @@ export function useAppActions(data: AppData) {
       clearDelays()
       const read = await fetchStatus()
       await fetchProxies()
-      if (!payload.data) {
-        showToast('节点选择请求已处理，请查看当前策略', 'info')
-      } else if (payload.data.requested !== 'manual' && payload.data.node_select === 'manual') {
-        // The status hook already presents its warning. Use the command result
-        // when status could not be read or did not provide a warning.
-        if (read.status !== 'success' || !read.data.warning) {
-          showToast('请求的地区暂无可用节点，当前使用手动选择', 'info')
-        }
-      } else {
-        showToast('节点选择已更新', 'success')
-      }
+      presentFeedback(nodeSelectFeedback(payload.data, read))
     } catch (error) {
       showToast(errorMessage(error), 'error')
     }
@@ -200,6 +191,7 @@ export function useAppActions(data: AppData) {
     clearDelays,
     fetchStatus,
     fetchProxies,
+    presentFeedback,
     showToast
   ])
 
@@ -212,16 +204,13 @@ export function useAppActions(data: AppData) {
         method: 'POST', body: JSON.stringify({ group: groupName, name: nodeName } satisfies LastProxy),
       }, 'switchProxy')
       await fetchProxies()
-      showToast(response.data?.persisted
-        ? `已切换到 ${nodeName}`
-        : `已切换到 ${nodeName}，但保存选择失败，重启后可能恢复旧节点`,
-      response.data?.persisted ? 'success' : 'error')
+      presentFeedback(switchProxyFeedback(nodeName, response.data))
     } catch (error) {
       showToast(errorMessage(error) || '切换节点失败', 'error')
     } finally {
       setSwitchingNode('')
     }
-  }, [requestedNodeSelect, apiCall, fetchProxies, showToast, switchingNode, setSwitchingNode])
+  }, [requestedNodeSelect, apiCall, fetchProxies, presentFeedback, showToast, switchingNode, setSwitchingNode])
 
   const handleAddSubscription = useCallback(async (url: string): Promise<boolean> => {
     const trimmed = url.trim()
@@ -261,15 +250,13 @@ export function useAppActions(data: AppData) {
       )
       clearDelays()
       const read = await fetchSubs()
-      showMutationResult(response.data
-        ? `已新增 ${response.data.added} 条订阅地址，跳过 ${response.data.skipped} 条已有订阅。请查看节点获取状态。`
-        : '订阅导入请求已完成，请查看订阅列表和节点获取状态。', read, '导入', response.data?.added ? 'success' : 'info')
+      presentFeedback(vergeImportFeedback(response.data, read))
       return true
     } catch (error) {
       showToast(errorMessage(error), 'error')
       return false
     }
-  }, [apiCall, clearDelays, fetchSubs, showToast, showMutationResult])
+  }, [apiCall, clearDelays, fetchSubs, presentFeedback, showToast])
 
   const deleteResource = useCallback(async (endpoint: string, body: SubRequest | DeleteNodeRequest | DeleteRuleRequest, action: string, refresh: () => Promise<ResourceReadResult<unknown>>, label: string) => {
     if (deleting.current.has(action)) return
@@ -295,22 +282,11 @@ export function useAppActions(data: AppData) {
       const response = await apiCall<SubscriptionRefreshResult>('subs/refresh', { method: 'POST' }, 'refreshSubs')
       await Promise.all([fetchSubs(), fetchStatus()])
       clearDelays()
-      const result = response.data
-      if (!result) {
-        showToast('刷新请求已处理；后端未提供详细结果，请查看订阅状态。', 'info')
-      } else if (!result.fetch_succeeded) {
-        showToast('订阅获取失败，已保留原配置。请查看订阅错误详情。', 'error')
-      } else if (result.report?.failed_sources > 0) {
-        showToast(`订阅部分获取成功：成功 ${result.report.successful_sources} 个，失败 ${result.report.failed_sources} 个。请查看订阅详情。${result.warning || ''}`, 'error')
-      } else if (result.warning) {
-        showToast(`订阅刷新有告警：${result.warning}`, 'error')
-      } else {
-        showToast(result.runtime_updated ? '订阅已获取，代理配置已更新' : '订阅已获取，代理运行状态未改变', 'success')
-      }
+      presentFeedback(subscriptionRefreshFeedback(response.data))
     } catch (error) {
       showToast(errorMessage(error), 'error')
     }
-  }, [apiCall, clearDelays, fetchSubs, fetchStatus, showToast])
+  }, [apiCall, clearDelays, fetchSubs, fetchStatus, presentFeedback, showToast])
 
   const handleOpenRefreshSubscriptionsConfirm = useCallback(() => {
     openConfirm(
@@ -373,17 +349,12 @@ export function useAppActions(data: AppData) {
         clearDelays()
         showMutationResult(`已添加 ${result.added.length} 个节点`, read, '导入')
       }
-      if (result.failed.length > 0) {
-        const failures = result.failed.map((item) => `${item.tag}: ${item.message}`)
-        const shown = failures.slice(0, 2).join('; ')
-        const more = failures.length > 2 ? ` 等 ${failures.length} 项` : ''
-        showToast(`导入失败: ${shown}${more}`, 'error')
-      }
+      presentFeedback(batchNodeFailuresFeedback(result.failed))
       return result
     } catch (error) {
       showToast(errorMessage(error), 'error')
     }
-  }, [apiCall, clearDelays, fetchNodes, showToast, showMutationResult])
+  }, [apiCall, clearDelays, fetchNodes, presentFeedback, showToast, showMutationResult])
 
   const handleDeleteNode = useCallback((tag: string) => deleteResource('nodes', { tag }, 'deleteNode', fetchNodes, '节点'), [deleteResource, fetchNodes])
 
@@ -415,6 +386,33 @@ export function useAppActions(data: AppData) {
     }
   }, [apiCall, fetchProxies, fetchStatus, showToast])
 
+  const runConfirmedUpgrade = useCallback(async (currentVersion: string, targetVersion: string) => {
+    setUpgrading(true)
+    setUpgradeMessage(`正在请求升级 ${currentVersion} → ${targetVersion}；后端可能需要下载、校验和安装，请勿关闭或刷新页面。`)
+    try {
+      let installedVersion = targetVersion
+      try {
+        const response = await apiCall<string>('upgrade', { method: 'POST' })
+        if (!response.data) {
+          await fetchVersion()
+          showToast('后端已是最新版本，无需升级', 'info')
+          return
+        }
+        installedVersion = response.data
+        setUpgradeMessage(`后端已完成安装，正在确认 ${installedVersion} 启动；短暂断连属于正常现象，请勿重复升级。`)
+      } catch (error) {
+        if (!isUncertainRequestError(error)) throw error
+        setUpgradeMessage(`升级请求连接中断，结果未知；正在核对 ${installedVersion} 是否启动，请勿重复升级。`)
+      }
+      await waitForUpgrade(installedVersion, currentVersion)
+      window.location.reload()
+    } catch (error) {
+      showToast(errorMessage(error), 'error')
+    } finally {
+      setUpgrading(false)
+    }
+  }, [apiCall, fetchVersion, setUpgrading, showToast])
+
   const handleUpgradeClick = useCallback(async () => {
     if (versionInfo.upgrade_supported === false) {
       showToast('当前平台请下载安装包，退出后覆盖安装', 'info')
@@ -424,46 +422,19 @@ export function useAppActions(data: AppData) {
     if (!versionInfo.has_update) {
       const read = await fetchVersion()
       const fresh = read.status === 'success' ? read.data : undefined
-      if (fresh?.has_update) {
-        showToast(`发现新版本 ${fresh.latest}`, 'success')
-      } else if (!fresh?.latest) {
-        showToast('暂未获取到最新版本信息，请稍后重试', 'info')
-      } else {
-        showToast('当前已是最新版本', 'info')
-      }
+      presentFeedback(describeVersionCheckResult(fresh))
       return
     }
 
     const targetVersion = versionInfo.latest
     if (!targetVersion) return
     const currentVersion = versionInfo.current
-    openConfirm('更新确认', `确定要从 ${currentVersion} 更新到 ${targetVersion} 吗？更新过程中服务会短暂中断。`, async () => {
-      setUpgrading(true)
-      setUpgradeMessage(`正在请求升级 ${currentVersion} → ${targetVersion}；后端可能需要下载、校验和安装，请勿关闭或刷新页面。`)
-      try {
-        let installedVersion = targetVersion
-        try {
-          const response = await apiCall<string>('upgrade', { method: 'POST' })
-          if (!response.data) {
-            await fetchVersion()
-            showToast('后端已是最新版本，无需升级', 'info')
-            return
-          }
-          installedVersion = response.data
-          setUpgradeMessage(`后端已完成安装，正在确认 ${installedVersion} 启动；短暂断连属于正常现象，请勿重复升级。`)
-        } catch (error) {
-          if (!(error instanceof RequestInterruptedError || error instanceof TypeError)) throw error
-          setUpgradeMessage(`升级请求连接中断，结果未知；正在核对 ${installedVersion} 是否启动，请勿重复升级。`)
-        }
-        await waitForUpgrade(installedVersion, currentVersion)
-        window.location.reload()
-      } catch (error) {
-        showToast(errorMessage(error), 'error')
-      } finally {
-        setUpgrading(false)
-      }
-    })
-  }, [versionInfo, fetchVersion, showToast, openConfirm, setUpgrading, apiCall])
+    openConfirm(
+      '更新确认',
+      `确定要从 ${currentVersion} 更新到 ${targetVersion} 吗？更新过程中服务会短暂中断。`,
+      () => runConfirmedUpgrade(currentVersion, targetVersion),
+    )
+  }, [versionInfo, fetchVersion, presentFeedback, showToast, openConfirm, runConfirmedUpgrade])
 
   const handleOpenDeleteNodeConfirm = useCallback((tag: string) => {
     openConfirm('删除节点', `确定要删除节点 "${tag}" 吗？`, () => handleDeleteNode(tag))
