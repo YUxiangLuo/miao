@@ -31,6 +31,7 @@ use super::persist::{
 use super::warnings::{ALL_SUBS_FAILED, NO_USABLE_MANUAL, NO_USABLE_SUBS, REGION_FALLBACK};
 
 /// 订阅刷新策略：机制（拉取 → 生成 → 校验 → 激活）只有一条，差异显式表达
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RefreshPolicy {
     /// 手动刷新（面板「刷新订阅」等独立路径）：生成+校验成功后，运行字节
     /// 有变化才激活（Unix reload / 未在跑则 start）；全部订阅失败也用现有
@@ -44,6 +45,50 @@ pub enum RefreshPolicy {
     /// 内核未在跑时（恢复路径）不把失败当成「保持运行」：有可用生成
     /// 结果则激活，否则由调用方回退到兼容缓存启动。
     Startup,
+}
+
+impl RefreshPolicy {
+    /// Startup refreshes publish effective selection, snapshots, and diagnostics
+    /// immediately; foreground refreshes defer publication to their outer transaction.
+    fn commits_diagnostics_immediately(self) -> bool {
+        matches!(self, Self::Startup)
+    }
+
+    fn keeps_running_on_validation_failure(self, runtime_ready: bool) -> bool {
+        matches!(self, Self::Startup) && runtime_ready
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RefreshGateDecision {
+    /// Startup fetch failed while data plane is already healthy: keep current runtime.
+    KeepRunningOnTotalFailure,
+    /// Candidate bytes match active runtime while data plane is healthy: skip kernel reload.
+    SkipUnchanged,
+    /// Validate candidate and activate (reload or start) sing-box.
+    ValidateAndActivate {
+        /// Startup fetch failed while data plane is down: log why local/cached
+        /// fallback candidate is being activated.
+        log_unhealthy_startup_fallback: bool,
+    },
+}
+
+fn decide_refresh_gate(
+    policy: RefreshPolicy,
+    runtime_ready: bool,
+    subscription_fetch_failed: bool,
+    bytes_changed: bool,
+) -> RefreshGateDecision {
+    if matches!(policy, RefreshPolicy::Startup) && subscription_fetch_failed && runtime_ready {
+        return RefreshGateDecision::KeepRunningOnTotalFailure;
+    }
+    if runtime_ready && !bytes_changed {
+        return RefreshGateDecision::SkipUnchanged;
+    }
+    RefreshGateDecision::ValidateAndActivate {
+        log_unhealthy_startup_fallback: matches!(policy, RefreshPolicy::Startup)
+            && subscription_fetch_failed,
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -300,7 +345,6 @@ pub async fn refresh_subscriptions(
     policy: RefreshPolicy,
     source: SubSource,
 ) -> AppResult<RefreshOutcome> {
-    let startup = matches!(policy, RefreshPolicy::Startup);
     let active_bytes = snapshot_runtime_config(state).await;
     let generated = match source {
         SubSource::SnapshotOrLocal => gen_config_from_snapshot(config, state).await,
@@ -310,8 +354,16 @@ pub async fn refresh_subscriptions(
     info!("Config regenerated successfully");
 
     let runtime_ready = state.lifecycle.snapshot().ready && is_sing_box_running(state).await;
-    if startup && generated.subscription_fetch_failed() {
-        if runtime_ready {
+    let bytes_changed =
+        config_changed_after_refresh(active_bytes.as_deref(), Some(&generated.bytes));
+
+    match decide_refresh_gate(
+        policy,
+        runtime_ready,
+        generated.subscription_fetch_failed(),
+        bytes_changed,
+    ) {
+        RefreshGateDecision::KeepRunningOnTotalFailure => {
             return Ok(RefreshOutcome {
                 effect: RefreshEffect::KeptRunningOnTotalFailure,
                 runtime_update: RuntimeUpdate::None,
@@ -319,33 +371,36 @@ pub async fn refresh_subscriptions(
                 generated: None,
             });
         }
-        info!(
-            "Startup fetch produced no subscription nodes; activating generated config because the data plane is not running"
-        );
-    }
-
-    if runtime_ready
-        && !config_changed_after_refresh(active_bytes.as_deref(), Some(&generated.bytes))
-    {
-        info!("Generated runtime config is unchanged; sing-box keeps running");
-        save_node_bindings(state, &generated.node_bindings).await?;
-        // Foreground refreshes belong to an outer transaction which publishes
-        // preferences and diagnostics only after persistence succeeds.
-        if matches!(policy, RefreshPolicy::Startup) {
-            persist_effective_node_select(state, generated.node_select).await?;
-            record_fresh_snapshot(config, state, &generated).await;
-            publish_generation_diagnostics(state, &generated).await;
+        RefreshGateDecision::SkipUnchanged => {
+            info!("Generated runtime config is unchanged; sing-box keeps running");
+            save_node_bindings(state, &generated.node_bindings).await?;
+            // Foreground refreshes belong to an outer transaction which publishes
+            // preferences and diagnostics only after persistence succeeds.
+            if policy.commits_diagnostics_immediately() {
+                persist_effective_node_select(state, generated.node_select).await?;
+                record_fresh_snapshot(config, state, &generated).await;
+                publish_generation_diagnostics(state, &generated).await;
+            }
+            return Ok(RefreshOutcome {
+                effect: RefreshEffect::SkippedUnchanged,
+                runtime_update: RuntimeUpdate::None,
+                node_select: generated.node_select,
+                generated: Some(generated),
+            });
         }
-        return Ok(RefreshOutcome {
-            effect: RefreshEffect::SkippedUnchanged,
-            runtime_update: RuntimeUpdate::None,
-            node_select: generated.node_select,
-            generated: Some(generated),
-        });
+        RefreshGateDecision::ValidateAndActivate {
+            log_unhealthy_startup_fallback,
+        } => {
+            if log_unhealthy_startup_fallback {
+                info!(
+                    "Startup fetch produced no subscription nodes; activating generated config because the data plane is not running"
+                );
+            }
+        }
     }
 
     if let Err(e) = validate_prepared_config(state, &generated.bytes).await {
-        if startup && runtime_ready {
+        if policy.keeps_running_on_validation_failure(runtime_ready) {
             return Ok(RefreshOutcome {
                 effect: RefreshEffect::KeptRunningOnValidationFailure,
                 runtime_update: RuntimeUpdate::None,
@@ -365,7 +420,7 @@ pub async fn refresh_subscriptions(
     );
     // Foreground callers commit node_select and diagnostics transactionally.
     // Startup remains availability-first after a successful activation.
-    if matches!(policy, RefreshPolicy::Startup) {
+    if policy.commits_diagnostics_immediately() {
         if let Err(err) = persist_effective_node_select(state, generated.node_select).await {
             warn!(error = %err, "Failed to persist effective node_select after startup refresh");
         }
@@ -415,3 +470,50 @@ mod transaction_tests;
 
 #[cfg(test)]
 pub use transaction::regenerate_preserving_service_state;
+
+#[cfg(test)]
+mod gate_tests {
+    use super::{decide_refresh_gate, RefreshGateDecision, RefreshPolicy};
+
+    #[test]
+    fn refresh_gate_matrix_preserves_startup_vs_foreground_invariants() {
+        // Healthy startup runtime survives total fetch failure without reloading.
+        assert_eq!(
+            decide_refresh_gate(RefreshPolicy::Startup, true, true, true),
+            RefreshGateDecision::KeepRunningOnTotalFailure
+        );
+        // Unhealthy startup runtime activates fallback candidate even on fetch failure.
+        assert_eq!(
+            decide_refresh_gate(RefreshPolicy::Startup, false, true, false),
+            RefreshGateDecision::ValidateAndActivate {
+                log_unhealthy_startup_fallback: true
+            }
+        );
+        // Foreground refreshes do not short-circuit to KeptRunningOnTotalFailure;
+        // unchanged bytes skip reload, changed bytes validate and activate.
+        for policy in [RefreshPolicy::Manual, RefreshPolicy::ManualInApply] {
+            assert_eq!(
+                decide_refresh_gate(policy, true, true, false),
+                RefreshGateDecision::SkipUnchanged
+            );
+            assert_eq!(
+                decide_refresh_gate(policy, true, true, true),
+                RefreshGateDecision::ValidateAndActivate {
+                    log_unhealthy_startup_fallback: false
+                }
+            );
+            assert!(!policy.commits_diagnostics_immediately());
+            assert!(!policy.keeps_running_on_validation_failure(true));
+        }
+        // Unchanged bytes still activate when the desired process is not ready/running.
+        assert_eq!(
+            decide_refresh_gate(RefreshPolicy::Manual, false, false, false),
+            RefreshGateDecision::ValidateAndActivate {
+                log_unhealthy_startup_fallback: false
+            }
+        );
+        assert!(RefreshPolicy::Startup.commits_diagnostics_immediately());
+        assert!(RefreshPolicy::Startup.keeps_running_on_validation_failure(true));
+        assert!(!RefreshPolicy::Startup.keeps_running_on_validation_failure(false));
+    }
+}

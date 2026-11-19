@@ -10,7 +10,7 @@ use crate::models::{
     node_multiplier, Config, DisabledNode, NodeMultiplier, NodeSelect, SubStatus,
     SubscriptionFailureKind, SubscriptionFetchReport, SubscriptionState,
 };
-use crate::services::subscription::{fetch_sub, is_informational_subscription_node};
+use crate::services::subscription::{fetch_sub, is_informational_subscription_node, FetchResult};
 use crate::state::{AppState, SkippedRule};
 
 use super::bindings::{assign_subscription_tags, reserved_node_tags, NodeTagBindings};
@@ -93,20 +93,7 @@ pub(super) async fn retained_subscription_nodes(
         return Some(FetchedSubscriptions::default());
     }
     let snapshot = read_sub_nodes_snapshot(state).await?;
-    let previous_sources: BTreeSet<_> = before
-        .subs
-        .iter()
-        .map(|url| subscription_source_id(url))
-        .collect();
-    if !snapshot.matches_subs(&before.subs)
-        || snapshot.version != 1
-        || snapshot.node_names.len() != snapshot.outbounds.len()
-        || snapshot.source_ids.len() != snapshot.outbounds.len()
-        || snapshot
-            .source_ids
-            .iter()
-            .any(|source| !previous_sources.contains(source))
-    {
+    if !snapshot.has_complete_source_ownership(&before.subs) {
         return None;
     }
     let retained_sources: BTreeSet<_> = candidate
@@ -323,6 +310,33 @@ pub async fn gen_config_from_nodes(
     Ok(outcome)
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum OfflineManualFallbackDecision {
+    /// Active runtime has no subscription nodes (or neither active runtime nor
+    /// cache exists), so rebuilding from manual nodes drops nothing active.
+    RebuildFromManualNodes,
+    /// Active runtime contains subscription nodes, or active runtime is unreadable
+    /// while a config cache exists: refuse to drop subscription nodes silently.
+    RejectMissingSnapshot,
+}
+
+fn decide_offline_manual_fallback(
+    manual_names: &[String],
+    active_runtime: Option<&serde_json::Value>,
+    has_cache: bool,
+) -> OfflineManualFallbackDecision {
+    let has_subscription_runtime = active_runtime.is_some_and(|json| {
+        runtime_config_node_tags(json)
+            .iter()
+            .any(|tag| !manual_names.contains(tag))
+    });
+    if has_subscription_runtime || (active_runtime.is_none() && has_cache) {
+        OfflineManualFallbackDecision::RejectMissingSnapshot
+    } else {
+        OfflineManualFallbackDecision::RebuildFromManualNodes
+    }
+}
+
 /// 用订阅节点集快照零网络重建配置；缺失时仅允许可证明完整的手动节点重建。
 /// 本地语义变更（节点选择/路由模式/规则/手动节点）走这里：
 /// 切换不是刷新，不该被订阅网络故障拖累。
@@ -349,20 +363,20 @@ pub async fn gen_config_from_snapshot(
         .await
         .ok()
         .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok());
-    let has_subscription_runtime = active.as_ref().is_some_and(|json| {
-        runtime_config_node_tags(json)
-            .iter()
-            .any(|tag| !manual_names.contains(tag))
-    });
-    if !config.subs.is_empty()
-        && (has_subscription_runtime
-            || (active.is_none() && super::persist::has_config_cache(state)))
-    {
-        return Err(crate::error::AppError::message(
-            "订阅节点快照不可用，当前运行配置已保留；请先刷新订阅后重试",
-        ));
+    match decide_offline_manual_fallback(
+        &manual_names,
+        active.as_ref(),
+        super::persist::has_config_cache(state),
+    ) {
+        OfflineManualFallbackDecision::RebuildFromManualNodes => {
+            build_prepared(config, state, Vec::new()).await
+        }
+        OfflineManualFallbackDecision::RejectMissingSnapshot => {
+            Err(crate::error::AppError::message(
+                "订阅节点快照不可用，当前运行配置已保留；请先刷新订阅后重试",
+            ))
+        }
     }
-    build_prepared(config, state, Vec::new()).await
 }
 
 /// 校验通过/启动成功后调用：把本次真拉取的节点集落成快照（best-effort，写失败只告警）。
@@ -380,6 +394,220 @@ pub async fn record_fresh_snapshot(
     }
 }
 
+type RawSubFetchResult = Result<FetchResult, (SubscriptionFailureKind, String)>;
+
+async fn load_cached_nodes_by_source(state: &AppState) -> HashMap<String, Vec<FetchedNode>> {
+    let mut cached: HashMap<String, Vec<FetchedNode>> = HashMap::new();
+    if let Some(snapshot) = read_sub_nodes_snapshot(state).await {
+        for node in snapshot.to_fetched_nodes() {
+            cached.entry(node.source_id.clone()).or_default().push(node);
+        }
+    }
+    cached
+}
+
+async fn mark_subscriptions_refreshing(
+    config: &Config,
+    state: &AppState,
+    expected_generation: Option<u64>,
+) -> bool {
+    let mut status_map = state.sub_status.lock().await;
+    // Re-check after acquiring the status lock. A foreground refresh may
+    // have advanced the generation while this task was waiting for it.
+    if !refresh_generation_is_current(state, expected_generation) {
+        return false;
+    }
+    status_map.retain(|url, _| config.subs.contains(url));
+    for url in &config.subs {
+        let status = status_map.entry(url.clone()).or_insert_with(|| SubStatus {
+            url: url.clone(),
+            success: false,
+            node_count: 0,
+            disabled_count: 0,
+            state: SubscriptionState::Pending,
+            failure_kind: None,
+            error: None,
+        });
+        status.state = SubscriptionState::Refreshing;
+    }
+    drop(status_map);
+    state.data_revision.fetch_add(1, Ordering::Relaxed);
+    true
+}
+
+async fn fetch_single_subscription(
+    sub: String,
+    client: reqwest::Client,
+    deadline: Option<Instant>,
+) -> (String, RawSubFetchResult) {
+    info!(url = %sub, "Fetching subscription");
+    let request_budget = deadline
+        .map(|deadline| deadline.saturating_duration_since(Instant::now()))
+        .unwrap_or(Duration::from_secs(30))
+        .min(Duration::from_secs(30));
+    let result = tokio::time::timeout(request_budget, fetch_sub(&sub, &client)).await;
+
+    match result {
+        Ok(Ok(fetch_result)) => {
+            let valid_count = fetch_result.node_names.len();
+            let total_count = fetch_result.total_count;
+            let error_count = fetch_result.parse_errors.len();
+            let filtered_info_count = fetch_result.filtered_info_count;
+
+            if filtered_info_count > 0 {
+                info!(
+                    url = %sub,
+                    filtered = filtered_info_count,
+                    "Filtered informational subscription entries"
+                );
+            }
+            if error_count > 0 {
+                warn!(
+                    url = %sub,
+                    valid = valid_count,
+                    total = total_count,
+                    errors = error_count,
+                    "Partial fetch: some nodes failed to parse"
+                );
+            } else {
+                info!(
+                    url = %sub,
+                    nodes = valid_count,
+                    "Subscription fetched successfully"
+                );
+            }
+
+            (sub, Ok(fetch_result))
+        }
+        Ok(Err(e)) => {
+            error!(url = %sub, error = %e, "Failed to fetch subscription");
+            (sub, Err((e.kind, e.to_string())))
+        }
+        Err(_) => {
+            error!(url = %sub, timeout_ms = request_budget.as_millis(), "Subscription fetch timed out");
+            let message = if deadline.is_some() {
+                "Startup refresh budget exhausted"
+            } else {
+                "Request timeout"
+            };
+            (
+                sub,
+                Err((SubscriptionFailureKind::Timeout, message.to_string())),
+            )
+        }
+    }
+}
+
+/// A body whose non-informational entries all failed parsing is a failed source,
+/// not an authoritative empty list. Keep its last good nodes just like HTTP errors.
+fn promote_total_parse_failure(fetched: FetchResult) -> RawSubFetchResult {
+    if fetched.node_names.is_empty() && fetched.total_count > fetched.filtered_info_count {
+        Err((
+            SubscriptionFailureKind::Parse,
+            "All subscription nodes failed to parse; keeping previous nodes".to_string(),
+        ))
+    } else {
+        Ok(fetched)
+    }
+}
+
+fn accepted_fetch_diagnostic(
+    valid_count: usize,
+    total_count: usize,
+    filtered_info_count: usize,
+    parse_error_count: usize,
+) -> Option<String> {
+    if parse_error_count > 0 {
+        Some(format!(
+            "{parse_error_count} nodes skipped due to parse errors"
+        ))
+    } else if valid_count == 0 && filtered_info_count > 0 {
+        Some(format!(
+            "No proxy nodes found ({filtered_info_count} informational entries filtered)"
+        ))
+    } else if valid_count == 0 && total_count > 0 {
+        Some("All nodes invalid (missing required fields)".into())
+    } else if valid_count == 0 {
+        Some("No nodes found".into())
+    } else {
+        None
+    }
+}
+
+struct SourceFetchResolution {
+    status: SubStatus,
+    nodes: Vec<FetchedNode>,
+    fresh_nodes: usize,
+    cached_nodes: usize,
+    succeeded: bool,
+}
+
+fn resolve_source_fetch(
+    url: &str,
+    raw_result: RawSubFetchResult,
+    cached_by_source: &mut HashMap<String, Vec<FetchedNode>>,
+) -> SourceFetchResolution {
+    match raw_result.and_then(promote_total_parse_failure) {
+        Ok(fetch_result) => {
+            let count = fetch_result.node_names.len();
+            let error_info = accepted_fetch_diagnostic(
+                count,
+                fetch_result.total_count,
+                fetch_result.filtered_info_count,
+                fetch_result.parse_errors.len(),
+            );
+            let source_id = subscription_source_id(url);
+            let nodes = fetch_result
+                .node_names
+                .into_iter()
+                .zip(fetch_result.outbounds)
+                .map(|(name, outbound)| FetchedNode {
+                    source_id: source_id.clone(),
+                    name,
+                    outbound,
+                })
+                .collect();
+
+            SourceFetchResolution {
+                status: SubStatus {
+                    url: url.to_string(),
+                    success: true,
+                    node_count: count,
+                    disabled_count: 0,
+                    state: SubscriptionState::Ready,
+                    failure_kind: None,
+                    error: error_info,
+                },
+                nodes,
+                fresh_nodes: count,
+                cached_nodes: 0,
+                succeeded: true,
+            }
+        }
+        Err((kind, message)) => {
+            let old_nodes = cached_by_source
+                .remove(&subscription_source_id(url))
+                .unwrap_or_default();
+            let count = old_nodes.len();
+            SourceFetchResolution {
+                status: SubStatus {
+                    url: url.to_string(),
+                    success: false,
+                    node_count: count,
+                    disabled_count: 0,
+                    state: SubscriptionState::Failed,
+                    failure_kind: Some(kind),
+                    error: Some(message),
+                },
+                nodes: old_nodes,
+                fresh_nodes: 0,
+                cached_nodes: count,
+                succeeded: false,
+            }
+        }
+    }
+}
+
 /// 并发拉取全部订阅并逐条更新 sub_status；返回合并后的节点名与 outbounds。
 async fn fetch_all_subs(
     config: &Config,
@@ -388,100 +616,16 @@ async fn fetch_all_subs(
     expected_generation: Option<u64>,
 ) -> FetchedSubscriptions {
     let mut fetched = FetchedSubscriptions::default();
-    let mut cached: HashMap<String, Vec<FetchedNode>> = HashMap::new();
-    if let Some(snapshot) = read_sub_nodes_snapshot(state).await {
-        for node in snapshot.to_fetched_nodes() {
-            cached.entry(node.source_id.clone()).or_default().push(node);
-        }
+    let mut cached = load_cached_nodes_by_source(state).await;
+    if !mark_subscriptions_refreshing(config, state, expected_generation).await {
+        return fetched;
     }
 
-    {
-        let mut status_map = state.sub_status.lock().await;
-        // Re-check after acquiring the status lock. A foreground refresh may
-        // have advanced the generation while this task was waiting for it.
-        if !refresh_generation_is_current(state, expected_generation) {
-            return fetched;
-        }
-        status_map.retain(|url, _| config.subs.contains(url));
-        for url in &config.subs {
-            let status = status_map.entry(url.clone()).or_insert_with(|| SubStatus {
-                url: url.clone(),
-                success: false,
-                node_count: 0,
-                disabled_count: 0,
-                state: SubscriptionState::Pending,
-                failure_kind: None,
-                error: None,
-            });
-            status.state = SubscriptionState::Refreshing;
-        }
-    }
-
-    state.data_revision.fetch_add(1, Ordering::Relaxed);
-
-    let sub_futures: Vec<_> = config
+    let sub_futures = config
         .subs
         .iter()
-        .map(|sub| {
-            let sub = sub.clone();
-            let client = state.http_client.clone();
-            async move {
-                info!(url = %sub, "Fetching subscription");
-                let request_budget = deadline
-                    .map(|deadline| deadline.saturating_duration_since(Instant::now()))
-                    .unwrap_or(Duration::from_secs(30))
-                    .min(Duration::from_secs(30));
-                let result = tokio::time::timeout(request_budget, fetch_sub(&sub, &client)).await;
-
-                match result {
-                    Ok(Ok(fetch_result)) => {
-                        let valid_count = fetch_result.node_names.len();
-                        let total_count = fetch_result.total_count;
-                        let error_count = fetch_result.parse_errors.len();
-                        let filtered_info_count = fetch_result.filtered_info_count;
-
-                        if filtered_info_count > 0 {
-                            info!(
-                                url = %sub,
-                                filtered = filtered_info_count,
-                                "Filtered informational subscription entries"
-                            );
-                        }
-                        if error_count > 0 {
-                            warn!(
-                                url = %sub,
-                                valid = valid_count,
-                                total = total_count,
-                                errors = error_count,
-                                "Partial fetch: some nodes failed to parse"
-                            );
-                        } else {
-                            info!(
-                                url = %sub,
-                                nodes = valid_count,
-                                "Subscription fetched successfully"
-                            );
-                        }
-
-                        (sub.clone(), Ok(fetch_result))
-                    }
-                    Ok(Err(e)) => {
-                        error!(url = %sub, error = %e, "Failed to fetch subscription");
-                        (sub.clone(), Err((e.kind, e.to_string())))
-                    }
-                    Err(_) => {
-                        error!(url = %sub, timeout_ms = request_budget.as_millis(), "Subscription fetch timed out");
-                        let message = if deadline.is_some() {
-                            "Startup refresh budget exhausted"
-                        } else {
-                            "Request timeout"
-                        };
-                        (sub.clone(), Err((SubscriptionFailureKind::Timeout, message.to_string())))
-                    }
-                }
-            }
-        })
-        .collect();
+        .cloned()
+        .map(|sub| fetch_single_subscription(sub, state.http_client.clone(), deadline));
 
     // 使用 buffer_unordered 限制并发数，避免同时发起过多请求
     let mut results: Vec<_> = stream::iter(sub_futures)
@@ -490,9 +634,9 @@ async fn fetch_all_subs(
         .await;
 
     // 按原始顺序排序结果
-    let subs_order: Vec<String> = config.subs.clone();
     results.sort_by_key(|(url, _)| {
-        subs_order
+        config
+            .subs
             .iter()
             .position(|s| s == url)
             .unwrap_or(usize::MAX)
@@ -502,84 +646,16 @@ async fn fetch_all_subs(
         if !refresh_generation_is_current(state, expected_generation) {
             break;
         }
-        // A body whose entries all failed parsing is a failed source, not an
-        // authoritative empty list. Keep its last good nodes just like HTTP errors.
-        let result = result.and_then(|fetched| {
-            if fetched.node_names.is_empty() && fetched.total_count > fetched.filtered_info_count {
-                Err((
-                    SubscriptionFailureKind::Parse,
-                    "All subscription nodes failed to parse; keeping previous nodes".to_string(),
-                ))
-            } else {
-                Ok(fetched)
-            }
-        });
-        let status = match result {
-            Ok(fetch_result) => {
-                let count = fetch_result.node_names.len();
-                let filtered_info_count = fetch_result.filtered_info_count;
-                let source_id = subscription_source_id(&url);
-                fetched.report.successful_sources += 1;
-                fetched.report.fresh_nodes += count;
-                fetched.nodes.extend(
-                    fetch_result
-                        .node_names
-                        .into_iter()
-                        .zip(fetch_result.outbounds)
-                        .map(|(name, outbound)| FetchedNode {
-                            source_id: source_id.clone(),
-                            name,
-                            outbound,
-                        }),
-                );
+        let resolution = resolve_source_fetch(&url, result, &mut cached);
+        if resolution.succeeded {
+            fetched.report.successful_sources += 1;
+            fetched.report.fresh_nodes += resolution.fresh_nodes;
+        } else {
+            fetched.report.failed_sources += 1;
+            fetched.report.cached_nodes += resolution.cached_nodes;
+        }
+        fetched.nodes.extend(resolution.nodes);
 
-                let error_info = if !fetch_result.parse_errors.is_empty() {
-                    Some(format!(
-                        "{} nodes skipped due to parse errors",
-                        fetch_result.parse_errors.len()
-                    ))
-                } else if count == 0 && filtered_info_count > 0 {
-                    Some(format!(
-                        "No proxy nodes found ({} informational entries filtered)",
-                        filtered_info_count
-                    ))
-                } else if count == 0 && fetch_result.total_count > 0 {
-                    Some("All nodes invalid (missing required fields)".into())
-                } else if count == 0 {
-                    Some("No nodes found".into())
-                } else {
-                    None
-                };
-
-                SubStatus {
-                    url: url.clone(),
-                    success: true,
-                    node_count: count,
-                    disabled_count: 0,
-                    state: SubscriptionState::Ready,
-                    failure_kind: None,
-                    error: error_info,
-                }
-            }
-            Err((kind, message)) => {
-                fetched.report.failed_sources += 1;
-                let old_nodes = cached
-                    .remove(&subscription_source_id(&url))
-                    .unwrap_or_default();
-                let count = old_nodes.len();
-                fetched.report.cached_nodes += count;
-                fetched.nodes.extend(old_nodes);
-                SubStatus {
-                    url: url.clone(),
-                    success: false,
-                    node_count: count,
-                    disabled_count: 0,
-                    state: SubscriptionState::Failed,
-                    failure_kind: Some(kind),
-                    error: Some(message),
-                }
-            }
-        };
         let mut status_map = state.sub_status.lock().await;
         // Keep the generation check and status publication in the same
         // critical section so stale startup work cannot overwrite a newer
@@ -587,7 +663,7 @@ async fn fetch_all_subs(
         if !refresh_generation_is_current(state, expected_generation) {
             break;
         }
-        status_map.insert(url, status);
+        status_map.insert(url, resolution.status);
         state.data_revision.fetch_add(1, Ordering::Relaxed);
     }
 
@@ -765,6 +841,12 @@ pub(super) fn runtime_config_node_tags(config_json: &serde_json::Value) -> Vec<S
         .unwrap_or_default()
 }
 
+fn push_unique_tag(tags: &mut Vec<String>, tag: String) {
+    if !tags.contains(&tag) {
+        tags.push(tag);
+    }
+}
+
 /// 自定义规则可选的节点目标:手动节点(配置直读)+ 订阅节点(最近一次生成的运行时配置)。
 /// 仅供规则校验给出友好报错,最终正确性由 sing-box check 保证。
 pub async fn known_rule_targets(config: &Config, state: &AppState) -> Vec<String> {
@@ -773,9 +855,7 @@ pub async fn known_rule_targets(config: &Config, state: &AppState) -> Vec<String
     let mut tags: Vec<String> = Vec::new();
     for node_str in &config.nodes {
         if let Ok((info, _)) = parse_node_json(node_str) {
-            if !tags.contains(&info.tag) {
-                tags.push(info.tag);
-            }
+            push_unique_tag(&mut tags, info.tag);
         }
     }
 
@@ -783,26 +863,20 @@ pub async fn known_rule_targets(config: &Config, state: &AppState) -> Vec<String
     // is the fail-closed fallback when node-bindings.json is missing or invalid:
     // a future same-name node must not silently inherit a dormant rule.
     for tag in ParsedCustomRules::parse(&config.custom_rules).outbound_tags() {
-        if !tags.contains(&tag) {
-            tags.push(tag);
-        }
+        push_unique_tag(&mut tags, tag);
     }
 
     let runtime_config_path = &state.runtime_paths.active_config;
     if let Ok(content) = tokio::fs::read_to_string(&runtime_config_path).await {
         if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
             for tag in runtime_config_node_tags(&json) {
-                if !tags.contains(&tag) {
-                    tags.push(tag);
-                }
+                push_unique_tag(&mut tags, tag);
             }
         }
     }
 
     for tag in reserved_node_tags(state).await {
-        if !tags.contains(&tag) {
-            tags.push(tag);
-        }
+        push_unique_tag(&mut tags, tag);
     }
 
     tags
@@ -1276,6 +1350,101 @@ mod tests {
 
         assert!(err.is_no_usable_nodes());
         assert_eq!(attempts.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn offline_manual_fallback_protects_subscription_runtime_and_cache() {
+        use super::{decide_offline_manual_fallback, OfflineManualFallbackDecision};
+        use serde_json::json;
+
+        let manual_only_runtime = json!({
+            "outbounds": [
+                {"tag": "proxy", "type": "selector"},
+                {"tag": "direct", "type": "direct"},
+                {"tag": "manual-a", "type": "trojan"}
+            ]
+        });
+        let mixed_runtime = json!({
+            "outbounds": [
+                {"tag": "manual-a", "type": "trojan"},
+                {"tag": "sub-node", "type": "trojan"}
+            ]
+        });
+        let manual = vec!["manual-a".to_string()];
+
+        assert_eq!(
+            decide_offline_manual_fallback(&manual, Some(&manual_only_runtime), true),
+            OfflineManualFallbackDecision::RebuildFromManualNodes
+        );
+        assert_eq!(
+            decide_offline_manual_fallback(&manual, Some(&mixed_runtime), false),
+            OfflineManualFallbackDecision::RejectMissingSnapshot
+        );
+        assert_eq!(
+            decide_offline_manual_fallback(&manual, None, true),
+            OfflineManualFallbackDecision::RejectMissingSnapshot
+        );
+        assert_eq!(
+            decide_offline_manual_fallback(&manual, None, false),
+            OfflineManualFallbackDecision::RebuildFromManualNodes
+        );
+    }
+
+    #[test]
+    fn source_fetch_resolution_distinguishes_informational_empty_from_all_parse_failed() {
+        use super::resolve_source_fetch;
+        use crate::models::{SubscriptionFailureKind, SubscriptionState};
+        use crate::services::subscription::FetchResult;
+        use std::collections::HashMap;
+
+        let url = "https://a.example/sub";
+        let mut cached = HashMap::from([(
+            subscription_source_id(url),
+            vec![fetched_node(url, "cached-node")],
+        )]);
+
+        // Only informational entries -> authoritative empty list; cached nodes replaced.
+        let info_only = resolve_source_fetch(
+            url,
+            Ok(FetchResult {
+                node_names: vec![],
+                outbounds: vec![],
+                parse_errors: vec![],
+                total_count: 2,
+                filtered_info_count: 2,
+            }),
+            &mut cached,
+        );
+        assert!(info_only.succeeded);
+        assert!(info_only.nodes.is_empty());
+        assert_eq!(info_only.status.state, SubscriptionState::Ready);
+        assert!(info_only
+            .status
+            .error
+            .as_deref()
+            .unwrap()
+            .contains("2 informational entries filtered"));
+
+        // Non-informational entries that all failed parsing -> Parse failure; cached nodes kept.
+        let parse_failed = resolve_source_fetch(
+            url,
+            Ok(FetchResult {
+                node_names: vec![],
+                outbounds: vec![],
+                parse_errors: vec!["bad proxy".into()],
+                total_count: 3,
+                filtered_info_count: 1,
+            }),
+            &mut cached,
+        );
+        assert!(!parse_failed.succeeded);
+        assert_eq!(parse_failed.cached_nodes, 1);
+        assert_eq!(parse_failed.nodes.len(), 1);
+        assert_eq!(parse_failed.status.state, SubscriptionState::Failed);
+        assert_eq!(
+            parse_failed.status.failure_kind,
+            Some(SubscriptionFailureKind::Parse)
+        );
     }
 }
 

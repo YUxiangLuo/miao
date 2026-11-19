@@ -4,6 +4,94 @@ use super::super::{
 };
 use super::*;
 
+/// How runtime rollback should reconcile the sing-box process and disk files.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RollbackMode {
+    /// Service is intentionally stopped: repair disk artifacts without starting sing-box.
+    StoppedDiskOnly,
+    /// Service should run, and the candidate was not newly activated: if the
+    /// running kernel is still healthy on the previous config, only sync disk
+    /// bytes; otherwise validate and restart/reload from local fallback tiers.
+    RunningPreserveHealthy,
+    /// Service should run, and the candidate was already activated before
+    /// commit failed: even a healthy kernel is running uncommitted bytes and
+    /// must be reloaded/restarted back onto the previous configuration.
+    RunningReactivatePrevious,
+}
+
+impl RollbackMode {
+    fn for_apply_failure(should_run: bool) -> Self {
+        if should_run {
+            Self::RunningPreserveHealthy
+        } else {
+            Self::StoppedDiskOnly
+        }
+    }
+
+    fn for_commit_failure(should_run: bool, runtime_update: RuntimeUpdate) -> Self {
+        if !should_run {
+            Self::StoppedDiskOnly
+        } else if runtime_update.updated() {
+            Self::RunningReactivatePrevious
+        } else {
+            Self::RunningPreserveHealthy
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+struct RollbackErrorCopy<'a> {
+    restored_context: Option<&'static str>,
+    failure_prefix: &'a str,
+    rollback_prefix: &'static str,
+}
+
+impl<'a> RollbackErrorCopy<'a> {
+    const fn preserving_cause(failure_prefix: &'a str) -> Self {
+        Self {
+            restored_context: None,
+            failure_prefix,
+            rollback_prefix: "Runtime rollback failed",
+        }
+    }
+
+    const fn with_context(
+        restored_context: &'static str,
+        failure_prefix: &'a str,
+        rollback_prefix: &'static str,
+    ) -> Self {
+        Self {
+            restored_context: Some(restored_context),
+            failure_prefix,
+            rollback_prefix,
+        }
+    }
+}
+
+const REFRESH_COMMIT_ROLLBACK_COPY: RollbackErrorCopy<'static> = RollbackErrorCopy::with_context(
+    "Failed to commit refreshed configuration; restored previous runtime config",
+    "Failed to commit refreshed configuration",
+    "Runtime rollback failed",
+);
+
+const CONFIG_PERSIST_ROLLBACK_COPY: RollbackErrorCopy<'static> = RollbackErrorCopy::with_context(
+    "Failed to persist config change; restored previous runtime config",
+    "Failed to persist config change",
+    "Runtime rollback failed",
+);
+
+const EMPTY_POOL_REJECT_ROLLBACK_COPY: RollbackErrorCopy<'static> = RollbackErrorCopy::with_context(
+    "配置变更后没有可用节点，已保留当前运行配置；请恢复订阅获取或添加可用手动节点后重试",
+    "配置变更后没有可用节点",
+    "恢复先前运行状态失败",
+);
+
+const CONFIG_APPLY_ROLLBACK_COPY: RollbackErrorCopy<'static> = RollbackErrorCopy::with_context(
+    "Failed to apply config change; restored previous runtime config",
+    "Failed to apply config change",
+    "Runtime rollback failed",
+);
+
 /// Rollback material is captured before generation/installation, under the
 /// transaction lock. Unreadable files reject the edit rather than losing the
 /// ability to restore tag bindings or the active runtime.
@@ -22,22 +110,75 @@ impl RuntimeCheckpoint {
         })
     }
 
+    fn has_any_rollback_material(&self, state: &AppState) -> bool {
+        self.runtime.is_some() || has_config_cache(state) || has_sub_nodes_snapshot(state)
+    }
+
     async fn restore(
         &self,
         config: &Config,
         state: &Arc<AppState>,
-        should_run: bool,
-        force_restart: bool,
+        mode: RollbackMode,
     ) -> AppResult<()> {
         restore_after_apply_failure(
             config,
             state,
-            should_run,
+            mode,
             self.runtime.as_deref(),
             self.bindings.as_deref(),
-            force_restart,
         )
         .await
+    }
+
+    async fn restore_and_format_error(
+        &self,
+        config: &Config,
+        state: &Arc<AppState>,
+        mode: RollbackMode,
+        copy: RollbackErrorCopy<'_>,
+        cause: AppError,
+    ) -> AppError {
+        match self.restore(config, state, mode).await {
+            Ok(()) => match copy.restored_context {
+                Some(context) => AppError::context(context, cause),
+                None => cause,
+            },
+            Err(rollback_err) => AppError::message(format!(
+                "{}: {cause}. {}: {rollback_err}",
+                copy.failure_prefix, copy.rollback_prefix
+            )),
+        }
+    }
+}
+
+struct PreparedCandidateRuntime {
+    outcome: GenConfigOutcome,
+    runtime_update: RuntimeUpdate,
+}
+
+async fn prepare_candidate_runtime(
+    config: &Config,
+    state: &Arc<AppState>,
+    should_run: bool,
+    policy: RefreshPolicy,
+    source: SubSource,
+) -> AppResult<PreparedCandidateRuntime> {
+    if should_run {
+        let refresh = regenerate_and_restart_runtime(config, state, policy, source).await?;
+        let runtime_update = refresh.runtime_update;
+        let outcome = refresh
+            .generated
+            .ok_or_else(|| AppError::message("Runtime refresh kept the previous configuration"))?;
+        Ok(PreparedCandidateRuntime {
+            outcome,
+            runtime_update,
+        })
+    } else {
+        let outcome = regenerate_without_restart_runtime(config, state, source).await?;
+        Ok(PreparedCandidateRuntime {
+            outcome,
+            runtime_update: RuntimeUpdate::None,
+        })
     }
 }
 
@@ -60,6 +201,36 @@ fn is_subscription_removal(before: &[String], after: &[String]) -> bool {
     after.len() < before.len() && after.iter().all(|url| before.contains(url))
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SubscriptionMaterialPlan {
+    NoOp,
+    PreferRetainedSnapshotThenFetch,
+    FetchFromNetwork,
+}
+
+fn decide_subscription_material_plan(
+    force_refresh: bool,
+    before_subs: &[String],
+    candidate_subs: &[String],
+) -> SubscriptionMaterialPlan {
+    if !force_refresh && candidate_subs == before_subs {
+        SubscriptionMaterialPlan::NoOp
+    } else if !force_refresh && is_subscription_removal(before_subs, candidate_subs) {
+        SubscriptionMaterialPlan::PreferRetainedSnapshotThenFetch
+    } else {
+        SubscriptionMaterialPlan::FetchFromNetwork
+    }
+}
+
+fn rebase_subscription_list(latest_config: &Config, subs: Vec<String>) -> Config {
+    let mut rebased = latest_config.clone();
+    rebased.subs = subs;
+    rebased
+        .disabled_nodes
+        .retain(|entry| rebased.subs.contains(&entry.sub));
+    rebased
+}
+
 /// Source removal reuses the retained sources' accepted nodes when possible.
 /// Network fetches never own the configuration transaction lock. Only the
 /// newest subscription operation may commit; local edits made during the
@@ -78,7 +249,8 @@ pub async fn edit_subscriptions<T>(
     let before = state.config_with_preferences().await;
     let mut candidate = before.clone();
     let value = mutate(&mut candidate.subs).map_err(ConfigMutationError::Rejected)?;
-    if !force_refresh && candidate.subs == before.subs {
+    let plan = decide_subscription_material_plan(force_refresh, &before.subs, &candidate.subs);
+    if plan == SubscriptionMaterialPlan::NoOp {
         return Ok((value, RuntimeUpdate::None, Default::default()));
     }
     let generation = state.next_sub_refresh();
@@ -86,12 +258,15 @@ pub async fn edit_subscriptions<T>(
     // Do this before preparing the candidate, including when that edit later
     // fails: the previous fetch has already been cancelled in either case.
     state.settle_cancelled_sub_statuses().await;
-    let retained = if !force_refresh && is_subscription_removal(&before.subs, &candidate.subs) {
-        super::super::generate::retained_subscription_nodes(&before, &candidate, state).await
-    } else {
-        None
+    let retained = match plan {
+        SubscriptionMaterialPlan::PreferRetainedSnapshotThenFetch => {
+            super::super::generate::retained_subscription_nodes(&before, &candidate, state).await
+        }
+        SubscriptionMaterialPlan::FetchFromNetwork => None,
+        SubscriptionMaterialPlan::NoOp => unreachable!("no-op handled above"),
     };
     drop(guard);
+
     let fetched = match retained {
         Some(nodes) => nodes,
         None => {
@@ -104,6 +279,7 @@ pub async fn edit_subscriptions<T>(
             .await
         }
     };
+
     let _guard = state.config_update.lock().await;
     if state.lifecycle.is_shutting_down()
         || state.sub_refresh_generation.load(Ordering::Relaxed) != generation
@@ -111,11 +287,7 @@ pub async fn edit_subscriptions<T>(
         return Err(ConfigMutationError::Superseded);
     }
     let old_config = state.config.read().await.clone();
-    let mut new_config = old_config.clone();
-    new_config.subs = candidate.subs;
-    new_config
-        .disabled_nodes
-        .retain(|entry| new_config.subs.contains(&entry.sub));
+    let new_config = rebase_subscription_list(&old_config, candidate.subs);
     let report = fetched.report;
     let accepted_response = report.accepted_response();
     let update = if new_config.subs == old_config.subs {
@@ -205,95 +377,77 @@ async fn regenerate_from_source(
     }
 
     let checkpoint = RuntimeCheckpoint::capture(state).await?;
-
-    let (runtime_update, accepted_response) = if should_run {
-        match regenerate_and_restart_runtime(config, state, RefreshPolicy::Manual, source).await {
-            Ok(refresh) => {
-                let outcome = refresh
-                    .generated
-                    .as_ref()
-                    .expect("checked generated outcome");
-                if let Err(commit_err) =
-                    commit_generated(config, state, outcome, CommitScope::EffectiveSelection).await
-                {
-                    error!(error = %commit_err, "Foreground runtime refresh could not commit effective preferences; restoring previous runtime state");
-                    return Err(rollback_failed_foreground_commit(
-                        previous_config,
-                        state,
-                        true,
-                        &checkpoint,
-                        refresh.runtime_update.updated(),
-                        commit_err,
-                    )
-                    .await);
-                }
-                let runtime_update = if refresh.effect == RefreshEffect::Activated {
-                    finalize_started_config(config, state, outcome.subscription_fetch_failed())
-                        .await;
-                    refresh.runtime_update
-                } else {
-                    update_config_warning(config, state, outcome.subscription_fetch_failed()).await;
-                    RuntimeUpdate::None
-                };
-                (runtime_update, outcome.accepted_subscription_response())
-            }
-            Err(err) => {
-                // Candidate validation never replaces config.json. Activation
-                // may have, so rewind runtime + bindings before surfacing err.
+    let prepared = match prepare_candidate_runtime(
+        config,
+        state,
+        should_run,
+        RefreshPolicy::Manual,
+        source,
+    )
+    .await
+    {
+        Ok(prepared) => prepared,
+        Err(err) => {
+            // Candidate validation never replaces config.json. Activation
+            // may have, so rewind runtime + bindings before surfacing err.
+            let failure_prefix = if should_run {
                 error!(error = %err, "Failed to refresh subscriptions, restoring previous runtime state");
-                let restore = checkpoint
-                    .restore(previous_config, state, true, false)
-                    .await;
-                return match restore {
-                    Ok(()) => Err(err),
-                    Err(restore_err) => Err(AppError::message(format!(
-                        "Failed to refresh subscriptions: {}. Runtime rollback failed: {}",
-                        err, restore_err
-                    ))),
-                };
-            }
-        }
-    } else {
-        let accepted_response = match regenerate_without_restart_runtime(config, state, source)
-            .await
-        {
-            Ok(outcome) => {
-                if let Err(commit_err) =
-                    commit_generated(config, state, &outcome, CommitScope::EffectiveSelection).await
-                {
-                    error!(error = %commit_err, "Stopped runtime refresh could not commit effective preferences; restoring previous runtime files");
-                    return Err(rollback_failed_foreground_commit(
-                        previous_config,
-                        state,
-                        false,
-                        &checkpoint,
-                        false,
-                        commit_err,
-                    )
-                    .await);
-                }
-                update_config_warning(config, state, outcome.subscription_fetch_failed()).await;
-                outcome.accepted_subscription_response()
-            }
-            Err(err) => {
+                "Failed to refresh subscriptions"
+            } else {
                 error!(error = %err, "Failed to regenerate config, restoring previous runtime config");
-                return match checkpoint.restore(previous_config, state, false, false).await {
-                    Ok(()) => Err(err),
-                    Err(rollback_err) => Err(AppError::message(format!(
-                        "Failed to regenerate config: {err}. Runtime rollback failed: {rollback_err}"
-                    ))),
-                };
-            }
-        };
-        (RuntimeUpdate::None, accepted_response)
+                "Failed to regenerate config"
+            };
+            return Err(checkpoint
+                .restore_and_format_error(
+                    previous_config,
+                    state,
+                    RollbackMode::for_apply_failure(should_run),
+                    RollbackErrorCopy::preserving_cause(failure_prefix),
+                    err,
+                )
+                .await);
+        }
     };
 
-    if accepted_response {
+    if let Err(commit_err) = commit_generated(
+        config,
+        state,
+        &prepared.outcome,
+        CommitScope::EffectiveSelection,
+    )
+    .await
+    {
+        if should_run {
+            error!(error = %commit_err, "Foreground runtime refresh could not commit effective preferences; restoring previous runtime state");
+        } else {
+            error!(error = %commit_err, "Stopped runtime refresh could not commit effective preferences; restoring previous runtime files");
+        }
+        return Err(checkpoint
+            .restore_and_format_error(
+                previous_config,
+                state,
+                RollbackMode::for_commit_failure(should_run, prepared.runtime_update),
+                REFRESH_COMMIT_ROLLBACK_COPY,
+                commit_err,
+            )
+            .await);
+    }
+
+    publish_runtime_warning_and_proxy(
+        config,
+        state,
+        should_run,
+        prepared.runtime_update,
+        prepared.outcome.subscription_fetch_failed(),
+    )
+    .await;
+
+    if prepared.outcome.accepted_subscription_response() {
         state
             .sub_refresh_success_generation
             .store(refresh_generation, Ordering::Relaxed);
     }
-    Ok(runtime_update)
+    Ok(prepared.runtime_update)
 }
 
 pub(in crate::services::config) async fn finalize_started_config(
@@ -304,6 +458,30 @@ pub(in crate::services::config) async fn finalize_started_config(
     update_config_warning(config, state, subscription_fetch_failed).await;
 
     spawn_restore_last_proxy(state);
+}
+
+async fn publish_runtime_warning_and_proxy(
+    config: &Config,
+    state: &Arc<AppState>,
+    should_run: bool,
+    runtime_update: RuntimeUpdate,
+    subscription_fetch_failed: bool,
+) {
+    if should_run && runtime_update.updated() {
+        finalize_started_config(config, state, subscription_fetch_failed).await;
+    } else {
+        update_config_warning(config, state, subscription_fetch_failed).await;
+    }
+}
+
+fn classify_apply_effect(should_run: bool, runtime_update: RuntimeUpdate) -> ConfigApplyEffect {
+    if !should_run {
+        ConfigApplyEffect::Regenerated
+    } else if runtime_update.updated() {
+        ConfigApplyEffect::Activated(runtime_update)
+    } else {
+        ConfigApplyEffect::Unchanged
+    }
 }
 
 enum CommitScope {
@@ -338,29 +516,6 @@ async fn commit_generated(
     record_fresh_snapshot(config, state, outcome).await;
     publish_generation_diagnostics(state, outcome).await;
     Ok(())
-}
-
-async fn rollback_failed_foreground_commit(
-    config: &Config,
-    state: &Arc<AppState>,
-    should_run: bool,
-    checkpoint: &RuntimeCheckpoint,
-    force_restart: bool,
-    commit_err: AppError,
-) -> AppError {
-    match checkpoint
-        .restore(config, state, should_run, force_restart)
-        .await
-    {
-        Ok(()) => AppError::context(
-            "Failed to commit refreshed configuration; restored previous runtime config",
-            commit_err,
-        ),
-        Err(restore_err) => AppError::message(format!(
-            "Failed to commit refreshed configuration: {}. Runtime rollback failed: {}",
-            commit_err, restore_err
-        )),
-    }
 }
 
 async fn update_config_warning(
@@ -477,6 +632,14 @@ pub(in crate::services::config) fn no_usable_nodes_warning(config: &Config) -> S
     }
 }
 
+async fn publish_empty_pool_state(state: &AppState, persisted_config: Config) {
+    let warning = no_usable_nodes_warning(&persisted_config);
+    *state.config.write().await = persisted_config;
+    *state.config_warning.lock().await = Some(warning);
+    state.skipped_rules.lock().await.clear();
+    state.available_multipliers.write().await.clear();
+}
+
 pub(in crate::services::config) async fn persist_config_without_usable_nodes_at(
     state: &Arc<AppState>,
     persisted_config: Config,
@@ -489,10 +652,7 @@ pub(in crate::services::config) async fn persist_config_without_usable_nodes_at(
     remove_runtime_config_files_at(runtime_config_path, cache_path, sub_nodes_path).await;
     *state.sub_nodes_cache.write().await = None;
     state.data_revision.fetch_add(1, Ordering::Relaxed);
-    *state.config.write().await = persisted_config.clone();
-    *state.config_warning.lock().await = Some(no_usable_nodes_warning(&persisted_config));
-    state.skipped_rules.lock().await.clear();
-    state.available_multipliers.write().await.clear();
+    publish_empty_pool_state(state, persisted_config).await;
     Ok(())
 }
 
@@ -550,24 +710,20 @@ async fn persist_config_without_usable_nodes(
 
     stop_sing_internal(state).await;
     retired.discard().await;
-    *state.config.write().await = persisted_config.clone();
     // Publishes to memory even if the derived disk write fails. The committed
     // fingerprint then prevents an older snapshot being reused after restart.
     if let Err(err) = save_sub_nodes_snapshot(state, &snapshot).await {
         warn!(error = %err, "Failed to save subscription snapshot without usable nodes");
     }
-    *state.config_warning.lock().await = Some(no_usable_nodes_warning(&persisted_config));
-    state.skipped_rules.lock().await.clear();
-    state.available_multipliers.write().await.clear();
+    publish_empty_pool_state(state, persisted_config).await;
     Ok(())
 }
 
 async fn restore_previous_config(
     old_config: &Config,
     state: &Arc<AppState>,
-    should_run: bool,
+    mode: RollbackMode,
     snapshot: Option<&[u8]>,
-    force_restart: bool,
 ) -> AppResult<()> {
     if !has_configured_sources(old_config) {
         stop_sing_internal(state).await;
@@ -575,33 +731,29 @@ async fn restore_previous_config(
         return Ok(());
     }
 
-    if should_run && force_restart {
-        restart_with_previous_config(old_config, state, snapshot).await
-    } else if should_run {
-        restore_previous_running_config(old_config, state, snapshot).await
-    } else {
-        restore_previous_stopped_config(old_config, state, snapshot).await
+    match mode {
+        RollbackMode::RunningReactivatePrevious => {
+            restart_with_previous_config(old_config, state, snapshot).await
+        }
+        RollbackMode::RunningPreserveHealthy => {
+            restore_previous_running_config(old_config, state, snapshot).await
+        }
+        RollbackMode::StoppedDiskOnly => {
+            restore_previous_stopped_config(old_config, state, snapshot).await
+        }
     }
 }
 
 async fn restore_after_apply_failure(
     old_config: &Config,
     state: &Arc<AppState>,
-    should_run: bool,
+    mode: RollbackMode,
     runtime_snapshot: Option<&[u8]>,
     bindings_snapshot: Option<&[u8]>,
-    force_restart: bool,
 ) -> AppResult<()> {
     // Bindings commit together with config.json. Restore them even if runtime
     // recovery failed so the next successful transaction starts from old state.
-    let runtime_restore = restore_previous_config(
-        old_config,
-        state,
-        should_run,
-        runtime_snapshot,
-        force_restart,
-    )
-    .await;
+    let runtime_restore = restore_previous_config(old_config, state, mode, runtime_snapshot).await;
     let bindings_restore =
         restore_file_snapshot(&state.runtime_paths.node_bindings, bindings_snapshot).await;
 
@@ -633,6 +785,55 @@ pub async fn apply_config_change(
     apply_config_change_with_source(state, old_config, new_config, source).await
 }
 
+#[derive(Clone, Debug)]
+enum EmptyNodePoolDecision {
+    /// Fetch failed (or concurrent edit emptied a cached pool) while previous
+    /// local material exists: reject the change and restore previous state.
+    KeepPreviousRuntime,
+    /// Authoritative subscription removal, or initial setup without rollback
+    /// material: persist the empty-pool config, stop sing-box, and retain
+    /// remaining canonical nodes (including disabled ones) when present.
+    AcceptWithoutRuntime {
+        retained_snapshot: Option<SubNodesSnapshot>,
+    },
+}
+
+/// A successful empty response (or deleting the final subscription) is
+/// authoritative: a removal must not be undone just because it leaves no usable
+/// nodes. By contrast, a total fetch failure or unverified local snapshot keeps
+/// `None` so existing runtime material can protect the data plane.
+fn authoritative_removal_snapshot(
+    old_subs: &[String],
+    new_subs: &[String],
+    source: &SubSource,
+) -> Option<SubNodesSnapshot> {
+    match source {
+        SubSource::Prefetched(fetched)
+            if is_subscription_removal(old_subs, new_subs)
+                && (new_subs.is_empty() || fetched.report.accepted_response()) =>
+        {
+            Some(SubNodesSnapshot::from_fetched_nodes(
+                new_subs.to_vec(),
+                fetched.nodes.clone(),
+            ))
+        }
+        _ => None,
+    }
+}
+
+fn decide_empty_node_pool(
+    removal_snapshot: Option<SubNodesSnapshot>,
+    has_rollback_material: bool,
+) -> EmptyNodePoolDecision {
+    if removal_snapshot.is_some() || !has_rollback_material {
+        EmptyNodePoolDecision::AcceptWithoutRuntime {
+            retained_snapshot: removal_snapshot,
+        }
+    } else {
+        EmptyNodePoolDecision::KeepPreviousRuntime
+    }
+}
+
 pub(super) async fn apply_config_change_with_source(
     state: &Arc<AppState>,
     old_config: &Config,
@@ -646,21 +847,6 @@ pub(super) async fn apply_config_change_with_source(
     let new_config = &preferred_new_config;
     let should_run = state.lifecycle.snapshot().should_run;
     let apply_mode = config_apply_mode(new_config, should_run);
-    // A successful empty response is authoritative. A removal must not be
-    // undone just because it leaves no nodes; only a total fetch failure with
-    // no usable retained/manual nodes warrants keeping the old configuration.
-    let empty_removal_snapshot = match &source {
-        SubSource::Prefetched(fetched)
-            if is_subscription_removal(&old_config.subs, &new_config.subs)
-                && (new_config.subs.is_empty() || fetched.report.accepted_response()) =>
-        {
-            Some(SubNodesSnapshot::from_fetched_nodes(
-                new_config.subs.clone(),
-                fetched.nodes.clone(),
-            ))
-        }
-        _ => None,
-    };
 
     if apply_mode == ConfigApplyMode::Clear {
         let _activity = state
@@ -675,138 +861,99 @@ pub(super) async fn apply_config_change_with_source(
         return Ok(ConfigApplyEffect::Cleared);
     }
 
+    let removal_snapshot =
+        authoritative_removal_snapshot(&old_config.subs, &new_config.subs, &source);
     let checkpoint = RuntimeCheckpoint::capture(state).await?;
     let _activity = state
         .lifecycle
         .activity(crate::state::lifecycle::RuntimeActivity::ApplyingConfig);
 
-    let apply_result: AppResult<(GenConfigOutcome, RuntimeUpdate)> = match apply_mode {
-        ConfigApplyMode::Restart => {
-            regenerate_and_restart_runtime(new_config, state, RefreshPolicy::ManualInApply, source)
-                .await
-                .and_then(|refresh| {
-                    let runtime_update = refresh.runtime_update;
-                    refresh
-                        .generated
-                        .map(|outcome| (outcome, runtime_update))
-                        .ok_or_else(|| {
-                            AppError::message("Runtime refresh kept the previous configuration")
-                        })
-                })
-        }
-        ConfigApplyMode::RegenerateOnly => {
-            regenerate_without_restart_runtime(new_config, state, source)
-                .await
-                .map(|outcome| (outcome, RuntimeUpdate::None))
-        }
+    let should_activate = match apply_mode {
+        ConfigApplyMode::Restart => true,
+        ConfigApplyMode::RegenerateOnly => false,
         ConfigApplyMode::Clear => unreachable!("clear mode handled above"),
     };
 
-    match apply_result {
-        Ok((outcome, runtime_update)) => {
-            match commit_generated(new_config, state, &outcome, CommitScope::Configuration).await {
-                Ok(()) => {
-                    if should_run {
-                        if runtime_update.updated() {
-                            finalize_started_config(
-                                new_config,
-                                state,
-                                outcome.subscription_fetch_failed(),
-                            )
-                            .await;
-                        } else {
-                            update_config_warning(
-                                new_config,
-                                state,
-                                outcome.subscription_fetch_failed(),
-                            )
-                            .await;
-                        }
-                    } else {
-                        update_config_warning(
-                            new_config,
-                            state,
-                            outcome.subscription_fetch_failed(),
-                        )
-                        .await;
-                    }
-                    Ok(if should_run {
-                        if runtime_update.updated() {
-                            ConfigApplyEffect::Activated(runtime_update)
-                        } else {
-                            ConfigApplyEffect::Unchanged
-                        }
-                    } else {
-                        ConfigApplyEffect::Regenerated
-                    })
-                }
-                Err(save_err) => {
-                    error!(error = %save_err, "Runtime config applied but persistent config write failed, attempting runtime rollback");
-                    match checkpoint
-                        .restore(old_config, state, should_run, runtime_update.updated())
-                        .await
-                    {
-                        Ok(()) => Err(AppError::context(
-                            "Failed to persist config change; restored previous runtime config",
-                            save_err,
-                        )),
-                        Err(rollback_err) => Err(AppError::message(format!(
-                            "Failed to persist config change: {}. Runtime rollback failed: {}",
-                            save_err, rollback_err
-                        ))),
-                    }
-                }
+    match prepare_candidate_runtime(
+        new_config,
+        state,
+        should_activate,
+        RefreshPolicy::ManualInApply,
+        source,
+    )
+    .await
+    {
+        Ok(prepared) => {
+            if let Err(save_err) = commit_generated(
+                new_config,
+                state,
+                &prepared.outcome,
+                CommitScope::Configuration,
+            )
+            .await
+            {
+                error!(error = %save_err, "Runtime config applied but persistent config write failed, attempting runtime rollback");
+                return Err(checkpoint
+                    .restore_and_format_error(
+                        old_config,
+                        state,
+                        RollbackMode::for_commit_failure(should_run, prepared.runtime_update),
+                        CONFIG_PERSIST_ROLLBACK_COPY,
+                        save_err,
+                    )
+                    .await);
             }
+
+            publish_runtime_warning_and_proxy(
+                new_config,
+                state,
+                should_run,
+                prepared.runtime_update,
+                prepared.outcome.subscription_fetch_failed(),
+            )
+            .await;
+            Ok(classify_apply_effect(should_run, prepared.runtime_update))
         }
         Err(apply_err) if apply_err.is_no_usable_nodes() => {
-            if empty_removal_snapshot.is_none()
-                && (checkpoint.runtime.is_some()
-                    || has_config_cache(state)
-                    || has_sub_nodes_snapshot(state))
-            {
-                warn!(error = %apply_err, "Config change left no usable nodes; keeping previous runtime state");
-                match checkpoint
-                    .restore(old_config, state, should_run, false)
-                    .await
-                {
-                    Ok(()) => Err(AppError::context(
-                        "配置变更后没有可用节点，已保留当前运行配置；请恢复订阅获取或添加可用手动节点后重试",
-                        apply_err,
-                    )),
-                    Err(rollback_err) => Err(AppError::message(format!(
-                        "配置变更后没有可用节点: {}. 恢复先前运行状态失败: {}",
-                        apply_err, rollback_err
-                    ))),
+            match decide_empty_node_pool(
+                removal_snapshot,
+                checkpoint.has_any_rollback_material(state),
+            ) {
+                EmptyNodePoolDecision::KeepPreviousRuntime => {
+                    warn!(error = %apply_err, "Config change left no usable nodes; keeping previous runtime state");
+                    Err(checkpoint
+                        .restore_and_format_error(
+                            old_config,
+                            state,
+                            RollbackMode::for_apply_failure(should_run),
+                            EMPTY_POOL_REJECT_ROLLBACK_COPY,
+                            apply_err,
+                        )
+                        .await)
                 }
-            } else {
-                // Accept an authoritative removal, or initial setup without
-                // rollback material. Clear runtime/cache, retaining only the
-                // remaining sources' canonical nodes (including disabled ones).
-                warn!(error = %apply_err, "Config change left no usable nodes; persisting it and stopping sing-box");
-                persist_config_without_usable_nodes(
-                    state,
-                    new_config.clone(),
-                    empty_removal_snapshot,
-                )
-                .await
-                .map(|()| ConfigApplyEffect::Cleared)
+                EmptyNodePoolDecision::AcceptWithoutRuntime { retained_snapshot } => {
+                    warn!(error = %apply_err, "Config change left no usable nodes; persisting it and stopping sing-box");
+                    persist_config_without_usable_nodes(
+                        state,
+                        new_config.clone(),
+                        retained_snapshot,
+                    )
+                    .await
+                    .map(|()| ConfigApplyEffect::Cleared)
+                }
             }
         }
         Err(apply_err) => {
             error!(error = %apply_err, "Failed to apply runtime config change, attempting runtime rollback");
-            match checkpoint
-                .restore(old_config, state, should_run, false)
-                .await
-            {
-                Ok(()) => Err(AppError::context(
-                    "Failed to apply config change; restored previous runtime config",
+            Err(checkpoint
+                .restore_and_format_error(
+                    old_config,
+                    state,
+                    RollbackMode::for_apply_failure(should_run),
+                    CONFIG_APPLY_ROLLBACK_COPY,
                     apply_err,
-                )),
-                Err(rollback_err) => Err(AppError::message(format!(
-                    "Failed to apply config change: {}. Runtime rollback failed: {}",
-                    apply_err, rollback_err
-                ))),
-            }
+                )
+                .await)
         }
     }
 }
@@ -873,14 +1020,23 @@ pub async fn apply_disabled_nodes(
     apply_config_mutation(state, mutate).await
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum DiskRestoreOutcome {
+    Restored,
+    MissingMaterial,
+}
+
 /// 只用本地材料把磁盘 config.json 恢复到变更前状态：优先内存快照，其次缓存。
-/// Ok(true)=已恢复；Ok(false)=本地无材料；Err=有材料但写回失败（磁盘 I/O 故障，
+/// Restored=已恢复；MissingMaterial=本地无材料；Err=有材料但写回失败（磁盘 I/O 故障，
 /// 此时重新生成同样会卡在写盘，调用方直接上报即可）。
-async fn restore_disk_config(state: &Arc<AppState>, snapshot: Option<&[u8]>) -> AppResult<bool> {
+async fn restore_disk_config(
+    state: &Arc<AppState>,
+    snapshot: Option<&[u8]>,
+) -> AppResult<DiskRestoreOutcome> {
     let mut last_err = None;
     if let Some(bytes) = snapshot {
         match restore_runtime_config_bytes(state, bytes).await {
-            Ok(()) => return Ok(true),
+            Ok(()) => return Ok(DiskRestoreOutcome::Restored),
             Err(err) => {
                 warn!(error = %err, "Failed to restore runtime config from snapshot, trying cache");
                 last_err = Some(err);
@@ -889,7 +1045,7 @@ async fn restore_disk_config(state: &Arc<AppState>, snapshot: Option<&[u8]>) -> 
     }
     if has_config_cache(state) {
         match restore_config_from_cache(state).await {
-            Ok(()) => return Ok(true),
+            Ok(()) => return Ok(DiskRestoreOutcome::Restored),
             Err(err) => {
                 warn!(error = %err, "Failed to restore runtime config from cache");
                 last_err = Some(err);
@@ -898,7 +1054,7 @@ async fn restore_disk_config(state: &Arc<AppState>, snapshot: Option<&[u8]>) -> 
     }
     match last_err {
         Some(err) => Err(err),
-        None => Ok(false),
+        None => Ok(DiskRestoreOutcome::MissingMaterial),
     }
 }
 
@@ -909,17 +1065,12 @@ async fn restore_previous_running_config(
 ) -> AppResult<()> {
     if crate::services::singbox::kernel_status(state).await.ready {
         // 内核还在跑变更前配置：回滚只是让磁盘重新等于运行中的状态，纯本地操作
-        match restore_disk_config(state, snapshot).await {
-            Ok(true) => {
-                return Ok(());
-            }
-            Ok(false) => {
-                return Err(AppError::message(
-                    "运行配置回滚缺少本地快照，请刷新订阅恢复",
-                ));
-            }
-            Err(err) => return Err(err),
-        }
+        return match restore_disk_config(state, snapshot).await? {
+            DiskRestoreOutcome::Restored => Ok(()),
+            DiskRestoreOutcome::MissingMaterial => Err(AppError::message(
+                "运行配置回滚缺少本地快照，请刷新订阅恢复",
+            )),
+        };
     }
 
     restart_with_previous_config(old_config, state, snapshot).await
@@ -987,16 +1138,199 @@ async fn restore_previous_stopped_config(
     }
 
     // 服务本就处于停止态：只需把磁盘修回变更前配置，不起进程；
-    // 本地无材料才退化到重新生成（网络）
-    match restore_disk_config(state, snapshot).await {
-        Ok(true) => Ok(()),
-        Ok(false) => {
+    // 本地无快照/缓存才退化到本地订阅快照/手动节点重建（绝不持锁触网）。
+    match restore_disk_config(state, snapshot).await? {
+        DiskRestoreOutcome::Restored => Ok(()),
+        DiskRestoreOutcome::MissingMaterial => {
             let outcome =
                 regenerate_without_restart_runtime(old_config, state, SubSource::SnapshotOrLocal)
                     .await?;
             update_config_warning(old_config, state, outcome.subscription_fetch_failed()).await;
             Ok(())
         }
-        Err(err) => Err(err),
+    }
+}
+
+#[cfg(test)]
+mod decision_tests {
+    use super::*;
+    use crate::models::{DisabledNode, SubscriptionFetchReport};
+
+    #[test]
+    fn rollback_mode_distinguishes_apply_and_commit_failures() {
+        assert_eq!(
+            RollbackMode::for_apply_failure(false),
+            RollbackMode::StoppedDiskOnly
+        );
+        assert_eq!(
+            RollbackMode::for_apply_failure(true),
+            RollbackMode::RunningPreserveHealthy
+        );
+        assert_eq!(
+            RollbackMode::for_commit_failure(false, RuntimeUpdate::Reloaded),
+            RollbackMode::StoppedDiskOnly
+        );
+        assert_eq!(
+            RollbackMode::for_commit_failure(true, RuntimeUpdate::None),
+            RollbackMode::RunningPreserveHealthy
+        );
+        for update in [
+            RuntimeUpdate::Started,
+            RuntimeUpdate::Reloaded,
+            RuntimeUpdate::Restarted,
+        ] {
+            assert_eq!(
+                RollbackMode::for_commit_failure(true, update),
+                RollbackMode::RunningReactivatePrevious
+            );
+        }
+    }
+
+    #[test]
+    fn subscription_material_plan_reuses_snapshot_only_for_unforced_strict_removal() {
+        let a = "https://a.example/sub".to_string();
+        let b = "https://b.example/sub".to_string();
+        let c = "https://c.example/sub".to_string();
+        let ab = [a.clone(), b.clone()];
+        let ac = [a.clone(), c];
+
+        assert_eq!(
+            decide_subscription_material_plan(
+                false,
+                std::slice::from_ref(&a),
+                std::slice::from_ref(&a)
+            ),
+            SubscriptionMaterialPlan::NoOp
+        );
+        assert_eq!(
+            decide_subscription_material_plan(
+                true,
+                std::slice::from_ref(&a),
+                std::slice::from_ref(&a)
+            ),
+            SubscriptionMaterialPlan::FetchFromNetwork
+        );
+        assert_eq!(
+            decide_subscription_material_plan(false, &ab, std::slice::from_ref(&b)),
+            SubscriptionMaterialPlan::PreferRetainedSnapshotThenFetch
+        );
+        assert_eq!(
+            decide_subscription_material_plan(true, &ab, std::slice::from_ref(&b)),
+            SubscriptionMaterialPlan::FetchFromNetwork
+        );
+        assert_eq!(
+            decide_subscription_material_plan(false, &ab, &ac),
+            SubscriptionMaterialPlan::FetchFromNetwork
+        );
+    }
+
+    #[test]
+    fn empty_pool_decision_accepts_only_authoritative_removal_or_cold_setup() {
+        let a = "https://a.example/sub".to_string();
+        let b = "https://b.example/sub".to_string();
+        let ab = [a.clone(), b.clone()];
+
+        // Snapshot-derived NotRequested material (successful_sources == 0) is NOT
+        // an authoritative empty HTTP response if a concurrent edit disabled all nodes.
+        let unverified_cached = SubSource::Prefetched(FetchedSubscriptions {
+            nodes: Vec::new(),
+            report: SubscriptionFetchReport {
+                cached_nodes: 1,
+                ..Default::default()
+            },
+        });
+        assert!(
+            authoritative_removal_snapshot(&ab, std::slice::from_ref(&b), &unverified_cached)
+                .is_none()
+        );
+        assert!(matches!(
+            decide_empty_node_pool(None, true),
+            EmptyNodePoolDecision::KeepPreviousRuntime
+        ));
+
+        // Total fetch failure also keeps previous runtime when rollback material exists.
+        let failed_fetch = SubSource::Prefetched(FetchedSubscriptions {
+            nodes: Vec::new(),
+            report: SubscriptionFetchReport {
+                failed_sources: 1,
+                ..Default::default()
+            },
+        });
+        assert!(
+            authoritative_removal_snapshot(&ab, std::slice::from_ref(&b), &failed_fetch).is_none()
+        );
+
+        // Fresh accepted empty response (even partial failure) IS authoritative for removal.
+        let accepted_empty = SubSource::Prefetched(FetchedSubscriptions {
+            nodes: Vec::new(),
+            report: SubscriptionFetchReport {
+                successful_sources: 1,
+                failed_sources: 1,
+                ..Default::default()
+            },
+        });
+        let snapshot =
+            authoritative_removal_snapshot(&ab, std::slice::from_ref(&b), &accepted_empty);
+        assert!(snapshot.is_some());
+        assert!(matches!(
+            decide_empty_node_pool(snapshot, true),
+            EmptyNodePoolDecision::AcceptWithoutRuntime {
+                retained_snapshot: Some(_)
+            }
+        ));
+
+        // Deleting the last subscription is authoritative without network responses.
+        let last_removed = SubSource::Prefetched(FetchedSubscriptions::default());
+        assert!(
+            authoritative_removal_snapshot(std::slice::from_ref(&a), &[], &last_removed).is_some()
+        );
+
+        // Cold initial setup with no rollback material accepts empty pool without snapshot.
+        assert!(matches!(
+            decide_empty_node_pool(None, false),
+            EmptyNodePoolDecision::AcceptWithoutRuntime {
+                retained_snapshot: None
+            }
+        ));
+    }
+
+    #[test]
+    fn rebase_subscription_list_preserves_concurrent_local_fields_and_prunes_disabled() {
+        let concurrent = Config {
+            subs: vec!["https://a".into(), "https://b".into()],
+            route_mode: RouteMode::Global,
+            disabled_nodes: vec![
+                DisabledNode {
+                    sub: "https://a".into(),
+                    name: "gone".into(),
+                },
+                DisabledNode {
+                    sub: "https://b".into(),
+                    name: "kept".into(),
+                },
+            ],
+            ..Config::default()
+        };
+        let rebased = rebase_subscription_list(&concurrent, vec!["https://b".into()]);
+        assert_eq!(rebased.route_mode, RouteMode::Global);
+        assert_eq!(rebased.subs, ["https://b"]);
+        assert_eq!(rebased.disabled_nodes.len(), 1);
+        assert_eq!(rebased.disabled_nodes[0].sub, "https://b");
+    }
+
+    #[test]
+    fn classify_apply_effect_maps_stopped_unchanged_and_activated() {
+        assert_eq!(
+            classify_apply_effect(false, RuntimeUpdate::None),
+            ConfigApplyEffect::Regenerated
+        );
+        assert_eq!(
+            classify_apply_effect(true, RuntimeUpdate::None),
+            ConfigApplyEffect::Unchanged
+        );
+        assert_eq!(
+            classify_apply_effect(true, RuntimeUpdate::Reloaded),
+            ConfigApplyEffect::Activated(RuntimeUpdate::Reloaded)
+        );
     }
 }

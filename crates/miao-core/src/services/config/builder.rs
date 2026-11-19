@@ -180,6 +180,26 @@ impl ParsedCustomRules {
     }
 }
 
+/// RouteActionOptions fields on the pinned sing-box kernel. Rewriting a rule
+/// whose outbound is unavailable to `action: "reject"` strips only these
+/// route-action options so every matcher (including logical rules, invert and
+/// compound conditions) stays intact in its original position.
+const ROUTE_ACTION_OPTION_KEYS: &[&str] = &[
+    "outbound",
+    "override_address",
+    "override_port",
+    "network_strategy",
+    "fallback_delay",
+    "udp_disable_domain_unmapping",
+    "udp_connect",
+    "udp_timeout",
+    "tls_fragment",
+    "tls_fragment_fallback_delay",
+    "tls_record_fragment",
+    "tls_spoof",
+    "tls_spoof_method",
+];
+
 fn block_parsed_rules_with_missing_outbound(
     custom_rules: Vec<ParsedCustomRule>,
     available_outbounds: &HashSet<String>,
@@ -200,29 +220,12 @@ fn block_parsed_rules_with_missing_outbound(
                 raw: rule.raw.clone(),
                 description: format!("{summary} → {outbound}"),
             });
-            // Strip only route action options from the pinned kernel's
-            // RouteActionOptions, preserving every matcher (including logical
-            // rules, invert and compound conditions). Reject has no outbound.
             let value = rule
                 .value
                 .as_object_mut()
                 .expect("outbound belongs to an object");
-            for key in [
-                "outbound",
-                "override_address",
-                "override_port",
-                "network_strategy",
-                "fallback_delay",
-                "udp_disable_domain_unmapping",
-                "udp_connect",
-                "udp_timeout",
-                "tls_fragment",
-                "tls_fragment_fallback_delay",
-                "tls_record_fragment",
-                "tls_spoof",
-                "tls_spoof_method",
-            ] {
-                value.remove(key);
+            for key in ROUTE_ACTION_OPTION_KEYS {
+                value.remove(*key);
             }
             value.insert("action".to_string(), serde_json::json!("reject"));
             rule.blocked = true;
@@ -296,6 +299,53 @@ fn resolved_outbound_tags(outbounds: &[serde_json::Value]) -> HashSet<String> {
     }
 }
 
+struct ResolvedProxyGroup {
+    effective_select: NodeSelect,
+    members: Vec<String>,
+}
+
+/// Stable public tags are identifiers. Region and multiplier belong to the
+/// current display metadata, which may change independently of a tag.
+/// When a requested regional/capped pool has no surviving candidates, fall
+/// back to a manual selector over all surviving nodes.
+fn resolve_proxy_group(
+    requested_select: NodeSelect,
+    max_multiplier: Option<NodeMultiplier>,
+    node_names: Vec<String>,
+    metadata: &[NodeMetadata],
+    available_outbounds: &HashSet<String>,
+) -> ResolvedProxyGroup {
+    let automatic_members: Vec<String> = node_names
+        .iter()
+        .zip(metadata)
+        .filter(|(tag, _)| available_outbounds.contains(*tag))
+        .filter(|(_, meta)| {
+            requested_select
+                .region()
+                .is_some_and(|region| node_matches_region(&meta.display_name, region))
+        })
+        .filter(|(_, meta)| {
+            max_multiplier.is_none_or(|cap| meta.multiplier.is_some_and(|value| value <= cap))
+        })
+        .map(|(tag, _)| tag.clone())
+        .collect();
+
+    if requested_select.is_manual() || automatic_members.is_empty() {
+        ResolvedProxyGroup {
+            effective_select: NodeSelect::Manual,
+            members: node_names
+                .into_iter()
+                .filter(|tag| available_outbounds.contains(tag))
+                .collect(),
+        }
+    } else {
+        ResolvedProxyGroup {
+            effective_select: requested_select,
+            members: automatic_members,
+        }
+    }
+}
+
 pub(super) fn build_sing_box_config_with_multipliers(
     config: &Config,
     my_names: Vec<String>,
@@ -318,52 +368,32 @@ pub(super) fn build_sing_box_config_with_multipliers(
     if outbounds.is_empty() {
         return Err(AppError::NoUsableNodes);
     }
-    // Stable public tags are identifiers. Region and multiplier belong to
-    // the current display metadata, which may change independently of a tag.
-    let automatic_members: Vec<String> = node_names
-        .iter()
-        .zip(&metadata)
-        .filter(|(tag, _)| available_outbounds.contains(*tag))
-        .filter(|(_, meta)| {
-            config
-                .node_select
-                .region()
-                .is_some_and(|region| node_matches_region(&meta.display_name, region))
-        })
-        .filter(|(_, meta)| {
-            config
-                .max_multiplier
-                .is_none_or(|cap| meta.multiplier.is_some_and(|value| value <= cap))
-        })
-        .map(|(tag, _)| tag.clone())
-        .collect();
-    let effective_select = if config.node_select.is_manual() || automatic_members.is_empty() {
-        NodeSelect::Manual
-    } else {
-        config.node_select
-    };
-    let group_names = if effective_select.is_manual() {
-        node_names
-            .into_iter()
-            .filter(|tag| available_outbounds.contains(tag))
-            .collect()
-    } else {
-        automatic_members
-    };
+
+    let proxy_group = resolve_proxy_group(
+        config.node_select,
+        config.max_multiplier,
+        node_names,
+        &metadata,
+        &available_outbounds,
+    );
 
     // 缺失出口改为拒绝，防止流量落入后续直连或默认代理规则。
     let (custom_rules, skipped_rules) =
         block_parsed_rules_with_missing_outbound(parsed_rules.rules, &available_outbounds);
 
     let mut sing_box_config = get_config_template();
-    apply_proxy_group(&mut sing_box_config, effective_select, &group_names);
+    apply_proxy_group(
+        &mut sing_box_config,
+        proxy_group.effective_select,
+        &proxy_group.members,
+    );
     if let Some(arr) = sing_box_config["outbounds"].as_array_mut() {
         arr.extend(outbounds);
     }
 
     apply_route_mode(&mut sing_box_config, config, &custom_rules);
 
-    Ok((sing_box_config, skipped_rules, effective_select))
+    Ok((sing_box_config, skipped_rules, proxy_group.effective_select))
 }
 
 fn apply_proxy_group(
@@ -467,6 +497,41 @@ fn dns_server_for_outbound(
     }
 }
 
+enum CustomDnsRuleMirror<'a> {
+    Reject(serde_json::Map<String, serde_json::Value>),
+    Route {
+        matchers: serde_json::Map<String, serde_json::Value>,
+        outbound: &'a str,
+    },
+    NotMirrorable,
+}
+
+fn classify_custom_dns_rule(parsed_rule: &ParsedCustomRule) -> CustomDnsRuleMirror<'_> {
+    let Some(rule) = parsed_rule.value.as_object() else {
+        return CustomDnsRuleMirror::NotMirrorable;
+    };
+    if parsed_rule.blocked {
+        return match mirrored_dns_matchers(rule) {
+            Some(matchers) => CustomDnsRuleMirror::Reject(matchers),
+            None => CustomDnsRuleMirror::NotMirrorable,
+        };
+    }
+    if rule
+        .get("action")
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|action| action != "route")
+    {
+        return CustomDnsRuleMirror::NotMirrorable;
+    }
+    let Some(outbound) = rule.get("outbound").and_then(serde_json::Value::as_str) else {
+        return CustomDnsRuleMirror::NotMirrorable;
+    };
+    match mirrored_dns_matchers(rule) {
+        Some(matchers) => CustomDnsRuleMirror::Route { matchers, outbound },
+        None => CustomDnsRuleMirror::NotMirrorable,
+    }
+}
+
 fn derive_custom_dns_rules(
     custom_rules: &[ParsedCustomRule],
     dns_servers: &mut Vec<serde_json::Value>,
@@ -475,34 +540,22 @@ fn derive_custom_dns_rules(
     let mut node_dns_servers = Vec::new();
 
     for parsed_rule in custom_rules {
-        let Some(rule) = parsed_rule.value.as_object() else {
-            continue;
-        };
-        if parsed_rule.blocked {
-            if let Some(mut dns_rule) = mirrored_dns_matchers(rule) {
+        match classify_custom_dns_rule(parsed_rule) {
+            CustomDnsRuleMirror::Reject(mut dns_rule) => {
                 dns_rule.insert("action".to_string(), serde_json::json!("reject"));
                 dns_rules.push(serde_json::Value::Object(dns_rule));
             }
-            continue;
+            CustomDnsRuleMirror::Route {
+                mut matchers,
+                outbound,
+            } => {
+                let server = dns_server_for_outbound(outbound, dns_servers, &mut node_dns_servers);
+                matchers.insert("action".to_string(), serde_json::json!("route"));
+                matchers.insert("server".to_string(), serde_json::json!(server));
+                dns_rules.push(serde_json::Value::Object(matchers));
+            }
+            CustomDnsRuleMirror::NotMirrorable => {}
         }
-        if rule
-            .get("action")
-            .and_then(serde_json::Value::as_str)
-            .is_some_and(|action| action != "route")
-        {
-            continue;
-        }
-        let Some(outbound) = rule.get("outbound").and_then(serde_json::Value::as_str) else {
-            continue;
-        };
-        let Some(mut dns_rule) = mirrored_dns_matchers(rule) else {
-            continue;
-        };
-
-        let server = dns_server_for_outbound(outbound, dns_servers, &mut node_dns_servers);
-        dns_rule.insert("action".to_string(), serde_json::json!("route"));
-        dns_rule.insert("server".to_string(), serde_json::json!(server));
-        dns_rules.push(serde_json::Value::Object(dns_rule));
     }
 
     dns_rules

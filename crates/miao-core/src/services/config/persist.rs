@@ -81,38 +81,26 @@ fn runtime_input_sha256(config: &Config) -> AppResult<String> {
     Ok(sha256_hex(&serde_json::to_vec(&value)?))
 }
 
-pub async fn cache_compatibility(state: &AppState, config: &Config) -> CacheCompatibility {
-    let cache = match tokio::fs::read(&state.runtime_paths.config_cache).await {
-        Ok(bytes) if !bytes.is_empty() => bytes,
-        Ok(_) => return CacheCompatibility::Incompatible("cache is empty".to_string()),
-        Err(err) => return CacheCompatibility::Incompatible(format!("cache unavailable: {err}")),
-    };
-    let manifest_bytes = match tokio::fs::read(&state.runtime_paths.cache_manifest).await {
-        Ok(bytes) => bytes,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-            if !config.subs.is_empty() {
-                return CacheCompatibility::Incompatible(
-                    "legacy cache cannot prove subscription bootstrap routing".to_string(),
-                );
-            }
-            if !config.custom_rules.is_empty() {
-                return CacheCompatibility::Incompatible(
-                    "legacy cache cannot prove studio routing order or missing-outbound blocking"
-                        .to_string(),
-                );
-            }
-            return CacheCompatibility::Legacy;
-        }
-        Err(err) => {
-            return CacheCompatibility::Incompatible(format!("manifest unavailable: {err}"));
-        }
-    };
-    let manifest: CacheManifest = match serde_json::from_slice(&manifest_bytes) {
-        Ok(manifest) => manifest,
-        Err(err) => {
-            return CacheCompatibility::Incompatible(format!("manifest is invalid: {err}"));
-        }
-    };
+fn legacy_cache_compatibility(config: &Config) -> CacheCompatibility {
+    if !config.subs.is_empty() {
+        return CacheCompatibility::Incompatible(
+            "legacy cache cannot prove subscription bootstrap routing".to_string(),
+        );
+    }
+    if !config.custom_rules.is_empty() {
+        return CacheCompatibility::Incompatible(
+            "legacy cache cannot prove studio routing order or missing-outbound blocking"
+                .to_string(),
+        );
+    }
+    CacheCompatibility::Legacy
+}
+
+fn verify_cache_manifest(
+    manifest: &CacheManifest,
+    cache: &[u8],
+    config: &Config,
+) -> CacheCompatibility {
     if !manifest.verified {
         return CacheCompatibility::Incompatible(
             "legacy cache was already accepted once and remains unverified".to_string(),
@@ -123,7 +111,7 @@ pub async fn cache_compatibility(state: &AppState, config: &Config) -> CacheComp
     {
         return CacheCompatibility::Incompatible("cache schema is incompatible".to_string());
     }
-    if manifest.cache_sha256 != sha256_hex(&cache) {
+    if manifest.cache_sha256 != sha256_hex(cache) {
         return CacheCompatibility::Incompatible("cache content hash does not match".to_string());
     }
     let input = match runtime_input_sha256(config) {
@@ -140,6 +128,27 @@ pub async fn cache_compatibility(state: &AppState, config: &Config) -> CacheComp
         );
     }
     CacheCompatibility::Verified
+}
+
+pub async fn cache_compatibility(state: &AppState, config: &Config) -> CacheCompatibility {
+    let cache = match tokio::fs::read(&state.runtime_paths.config_cache).await {
+        Ok(bytes) if !bytes.is_empty() => bytes,
+        Ok(_) => return CacheCompatibility::Incompatible("cache is empty".to_string()),
+        Err(err) => return CacheCompatibility::Incompatible(format!("cache unavailable: {err}")),
+    };
+    let manifest_bytes = match tokio::fs::read(&state.runtime_paths.cache_manifest).await {
+        Ok(bytes) => bytes,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            return legacy_cache_compatibility(config);
+        }
+        Err(err) => {
+            return CacheCompatibility::Incompatible(format!("manifest unavailable: {err}"));
+        }
+    };
+    match serde_json::from_slice::<CacheManifest>(&manifest_bytes) {
+        Ok(manifest) => verify_cache_manifest(&manifest, &cache, config),
+        Err(err) => CacheCompatibility::Incompatible(format!("manifest is invalid: {err}")),
+    }
 }
 
 async fn write_cache_manifest(state: &AppState, verified: bool) -> AppResult<()> {
@@ -179,19 +188,20 @@ pub async fn load_node_select_preference(path: &Path) -> Option<NodeSelect> {
     NodeSelect::parse(content.trim())
 }
 
+async fn save_preference_line(path: &Path, value: &str) -> AppResult<()> {
+    let content = format!("{value}\n");
+    write_file_transactional(path, content.as_bytes()).await
+}
+
 pub async fn save_node_select_preference(
     state: &AppState,
     node_select: NodeSelect,
 ) -> AppResult<()> {
-    let content = format!("{}\n", node_select.as_str());
-    let path = &state.runtime_paths.node_select_preference;
-    if tokio::fs::read(path)
-        .await
-        .is_ok_and(|existing| existing == content.as_bytes())
-    {
-        return Ok(());
-    }
-    write_file_transactional(path, content.as_bytes()).await
+    save_preference_line(
+        &state.runtime_paths.node_select_preference,
+        node_select.as_str(),
+    )
+    .await
 }
 
 /// 外层 Option 区分“偏好文件不存在/损坏”和“用户明确选择不限”。
@@ -208,18 +218,10 @@ pub async fn save_max_multiplier_preference(
     state: &AppState,
     max_multiplier: Option<NodeMultiplier>,
 ) -> AppResult<()> {
-    let content = max_multiplier
+    let serialized = max_multiplier
         .map(|value| value.as_config_value())
-        .unwrap_or_else(|| "unlimited".to_string())
-        + "\n";
-    let path = &state.runtime_paths.max_multiplier_preference;
-    if tokio::fs::read(path)
-        .await
-        .is_ok_and(|existing| existing == content.as_bytes())
-    {
-        return Ok(());
-    }
-    write_file_transactional(path, content.as_bytes()).await
+        .unwrap_or_else(|| "unlimited".to_string());
+    save_preference_line(&state.runtime_paths.max_multiplier_preference, &serialized).await
 }
 
 /// 原子写入文件：先写入临时文件，再重命名为目标文件
@@ -384,6 +386,31 @@ pub async fn save_config_layered(state: &Arc<AppState>, config: &Config) -> AppR
     save_config_layered_inner(state, config, false, false, false).await
 }
 
+async fn rollback_layered_config_files(
+    state: &AppState,
+    old_stable: &Option<Vec<u8>>,
+    old_volatile: &Option<Vec<u8>>,
+    #[cfg_attr(not(test), allow(unused_variables))] fail_stable_rollback: bool,
+) -> Vec<String> {
+    let mut rollback_errors = Vec::new();
+    #[cfg(test)]
+    let stable_restore = if fail_stable_rollback {
+        Err(AppError::message("injected rollback failure"))
+    } else {
+        restore_file(&state.config_path, old_stable).await
+    };
+    #[cfg(not(test))]
+    let stable_restore = restore_file(&state.config_path, old_stable).await;
+
+    if let Err(err) = stable_restore {
+        rollback_errors.push(format!("stable config: {err}"));
+    }
+    if let Err(err) = restore_file(&state.volatile_path, old_volatile).await {
+        rollback_errors.push(format!("volatile config: {err}"));
+    }
+    rollback_errors
+}
+
 async fn save_config_layered_inner(
     state: &Arc<AppState>,
     config: &Config,
@@ -412,20 +439,8 @@ async fn save_config_layered_inner(
     }
     .await;
     if let Err(write_err) = write_result {
-        let mut rollback_errors = Vec::new();
-        #[cfg(test)]
-        if fail_rollback {
-            rollback_errors.push("stable config: injected rollback failure".to_string());
-        } else if let Err(err) = restore_file(&state.config_path, &old_stable).await {
-            rollback_errors.push(format!("stable config: {err}"));
-        }
-        #[cfg(not(test))]
-        if let Err(err) = restore_file(&state.config_path, &old_stable).await {
-            rollback_errors.push(format!("stable config: {err}"));
-        }
-        if let Err(err) = restore_file(&state.volatile_path, &old_volatile).await {
-            rollback_errors.push(format!("volatile config: {err}"));
-        }
+        let rollback_errors =
+            rollback_layered_config_files(state, &old_stable, &old_volatile, fail_rollback).await;
         let message = if rollback_errors.is_empty() {
             format!("Failed to save layered config: {write_err}; both config files were restored")
         } else {
@@ -649,6 +664,25 @@ impl SubNodesSnapshot {
     /// 快照能否服务于当前订阅列表
     pub fn matches_subs(&self, subs: &[String]) -> bool {
         self.subs == subs
+    }
+
+    /// Whether this snapshot carries complete v1 per-node source ownership for
+    /// `expected_subs`, proving nodes can be filtered locally without fetching.
+    pub(super) fn has_complete_source_ownership(&self, expected_subs: &[String]) -> bool {
+        if !self.matches_subs(expected_subs)
+            || self.version != 1
+            || self.node_names.len() != self.outbounds.len()
+            || self.source_ids.len() != self.outbounds.len()
+        {
+            return false;
+        }
+        let expected_sources: HashSet<_> = expected_subs
+            .iter()
+            .map(|url| super::generate::subscription_source_id(url))
+            .collect();
+        self.source_ids
+            .iter()
+            .all(|source| expected_sources.contains(source))
     }
 
     pub fn from_fetched_nodes(subs: Vec<String>, nodes: Vec<super::generate::FetchedNode>) -> Self {
@@ -1480,5 +1514,36 @@ mod tests {
 
         let _ = tokio::fs::remove_file(&state.config_path).await;
         let _ = tokio::fs::remove_file(&state.volatile_path).await;
+    }
+
+    #[test]
+    fn snapshot_source_ownership_requires_v1_parallel_arrays_and_known_sources() {
+        use crate::services::config::generate::{subscription_source_id, FetchedNode};
+
+        let a = "https://a.example/sub".to_string();
+        let b = "https://b.example/sub".to_string();
+        let ab = [a.clone(), b.clone()];
+        let valid = SubNodesSnapshot::from_fetched_nodes(
+            ab.to_vec(),
+            vec![FetchedNode {
+                source_id: subscription_source_id(&a),
+                name: "node-a".into(),
+                outbound: serde_json::json!({"type": "trojan"}),
+            }],
+        );
+        assert!(valid.has_complete_source_ownership(&ab));
+        assert!(!valid.has_complete_source_ownership(std::slice::from_ref(&a)));
+
+        let mut legacy = valid.clone();
+        legacy.version = 0;
+        assert!(!legacy.has_complete_source_ownership(&ab));
+
+        let mut missing_source_ids = valid.clone();
+        missing_source_ids.source_ids.clear();
+        assert!(!missing_source_ids.has_complete_source_ownership(&ab));
+
+        let mut foreign_source = valid;
+        foreign_source.source_ids[0] = subscription_source_id("https://removed.example/sub");
+        assert!(!foreign_source.has_complete_source_ownership(&ab));
     }
 }

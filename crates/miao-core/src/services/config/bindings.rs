@@ -149,6 +149,141 @@ async fn active_tag_by_fingerprint(state: &AppState) -> HashMap<Vec<u8>, Vec<Str
     result
 }
 
+struct PreparedNodeIdentity {
+    node: FetchedNode,
+    fingerprint: Vec<u8>,
+    stable_key: String,
+    content_key: String,
+    affinity_key: String,
+}
+
+fn prepare_node_identities(nodes: Vec<FetchedNode>) -> Vec<PreparedNodeIdentity> {
+    let mut fingerprint_occurrences: HashMap<(String, Vec<u8>), usize> = HashMap::new();
+    let mut prepared = Vec::with_capacity(nodes.len());
+    for node in nodes {
+        let fingerprint = outbound_bytes(&node.outbound);
+        let occurrence = fingerprint_occurrences
+            .entry((node.source_id.clone(), fingerprint.clone()))
+            .or_default();
+        let stable_key = stable_key(&node.source_id, &fingerprint, *occurrence);
+        let content_key = content_key(&fingerprint, *occurrence);
+        let affinity_key = affinity_key(&node);
+        *occurrence += 1;
+        prepared.push(PreparedNodeIdentity {
+            node,
+            fingerprint,
+            stable_key,
+            content_key,
+            affinity_key,
+        });
+    }
+    prepared
+}
+
+/// Historical identity reservations remain intact for returning nodes and
+/// dormant rules. Index them once; never scan the entire history per node.
+struct BindingHistoryIndex {
+    exact_index: HashMap<String, usize>,
+    content_index: HashMap<String, Vec<usize>>,
+    affinity_index: HashMap<String, Vec<usize>>,
+    old_affinity_counts: HashMap<String, usize>,
+}
+
+impl BindingHistoryIndex {
+    fn build(bindings: &[NodeTagBinding]) -> Self {
+        let mut exact_index = HashMap::new();
+        let mut content_index: HashMap<String, Vec<usize>> = HashMap::new();
+        let mut affinity_index: HashMap<String, Vec<usize>> = HashMap::new();
+        let mut old_affinity_counts: HashMap<String, usize> = HashMap::new();
+
+        for (index, binding) in bindings.iter().enumerate() {
+            *old_affinity_counts
+                .entry(binding.affinity_key.clone())
+                .or_default() += 1;
+            exact_index
+                .entry(binding.stable_key.clone())
+                .or_insert(index);
+            content_index
+                .entry(binding.content_key.clone())
+                .or_default()
+                .push(index);
+            affinity_index
+                .entry(binding.affinity_key.clone())
+                .or_default()
+                .push(index);
+        }
+
+        Self {
+            exact_index,
+            content_index,
+            affinity_index,
+            old_affinity_counts,
+        }
+    }
+
+    /// Match an incoming node against unassigned historical bindings in priority order:
+    /// 1. Exact (`stable_key`: same source + outbound config + duplicate ordinal)
+    /// 2. Content (`content_key`: same outbound config + ordinal across URL change)
+    /// 3. Unique Affinity (`affinity_key`: 1-to-1 endpoint match across credential/name rotation)
+    fn find_reusable_binding(
+        &self,
+        candidate: &PreparedNodeIdentity,
+        current_affinity_counts: &HashMap<String, usize>,
+        bindings: &[NodeTagBinding],
+        assigned_tags: &HashSet<String>,
+    ) -> Option<usize> {
+        let available = |index: &usize| !assigned_tags.contains(&bindings[*index].tag);
+
+        if let Some(exact) = self
+            .exact_index
+            .get(&candidate.stable_key)
+            .copied()
+            .filter(available)
+        {
+            return Some(exact);
+        }
+
+        if let Some(content_match) = self
+            .content_index
+            .get(&candidate.content_key)
+            .and_then(|indexes| indexes.iter().copied().find(available))
+        {
+            return Some(content_match);
+        }
+
+        let unique_endpoint_in_both = current_affinity_counts.get(&candidate.affinity_key)
+            == Some(&1)
+            && self.old_affinity_counts.get(&candidate.affinity_key) == Some(&1);
+        if unique_endpoint_in_both {
+            return self
+                .affinity_index
+                .get(&candidate.affinity_key)
+                .and_then(|indexes| indexes.iter().copied().find(available));
+        }
+
+        None
+    }
+}
+
+fn claim_active_or_unique_tag(
+    candidate: &PreparedNodeIdentity,
+    manual_tags: &[String],
+    assigned_tags: &HashSet<String>,
+    active_tags: &mut HashMap<Vec<u8>, Vec<String>>,
+    used: &mut HashSet<String>,
+) -> String {
+    let active = active_tags
+        .get_mut(&candidate.fingerprint)
+        .and_then(|tags| {
+            tags.iter()
+                .position(|tag| !manual_tags.contains(tag) && !assigned_tags.contains(tag))
+                .map(|index| tags.remove(index))
+        });
+    let tag = active.unwrap_or_else(|| make_unique_tag(&candidate.node.name, used));
+    used.insert(tag.clone());
+    tag
+}
+
 /// Assign stable public tags while retaining the legacy display format.
 pub async fn assign_subscription_tags(
     state: &Arc<AppState>,
@@ -172,111 +307,49 @@ pub async fn assign_subscription_tags(
     used.extend(reserved_rule_tags.iter().cloned());
     used.extend(bindings.bindings.iter().map(|binding| binding.tag.clone()));
 
-    let mut fingerprint_occurrences: HashMap<(String, Vec<u8>), usize> = HashMap::new();
-    let mut prepared = Vec::with_capacity(nodes.len());
-    for node in nodes {
-        let fingerprint = outbound_bytes(&node.outbound);
-        let occurrence = fingerprint_occurrences
-            .entry((node.source_id.clone(), fingerprint.clone()))
-            .or_default();
-        let key = stable_key(&node.source_id, &fingerprint, *occurrence);
-        let content = content_key(&fingerprint, *occurrence);
-        *occurrence += 1;
-        prepared.push((node, key, content));
-    }
-
-    let affinity_counts: HashMap<String, usize> =
-        prepared
-            .iter()
-            .fold(HashMap::new(), |mut counts, (node, _, _)| {
-                *counts.entry(affinity_key(node)).or_default() += 1;
-                counts
-            });
-    let mut old_affinity_counts = HashMap::new();
-    for binding in &bindings.bindings {
-        *old_affinity_counts
-            .entry(binding.affinity_key.clone())
-            .or_insert(0usize) += 1;
-    }
-    // Historical identity reservations remain intact for returning nodes and
-    // dormant rules. Index them once; never scan the entire history per node.
-    let mut exact_index = HashMap::new();
-    let mut content_index: HashMap<&str, Vec<usize>> = HashMap::new();
-    let mut affinity_index: HashMap<&str, Vec<usize>> = HashMap::new();
-    for (index, binding) in bindings.bindings.iter().enumerate() {
-        exact_index
-            .entry(binding.stable_key.clone())
-            .or_insert(index);
-        content_index
-            .entry(&binding.content_key)
-            .or_default()
-            .push(index);
-        affinity_index
-            .entry(&binding.affinity_key)
-            .or_default()
-            .push(index);
-    }
-    // Own only the lookup keys so bindings can be updated without invalidating
-    // the indexes. Assigned tags prevent any old index from being reused.
-    let content_index: HashMap<String, Vec<usize>> = content_index
-        .into_iter()
-        .map(|(key, value)| (key.to_string(), value))
-        .collect();
-    let affinity_index: HashMap<String, Vec<usize>> = affinity_index
-        .into_iter()
-        .map(|(key, value)| (key.to_string(), value))
-        .collect();
+    let prepared = prepare_node_identities(nodes);
+    let current_affinity_counts: HashMap<String, usize> =
+        prepared.iter().fold(HashMap::new(), |mut counts, item| {
+            *counts.entry(item.affinity_key.clone()).or_default() += 1;
+            counts
+        });
+    let history_index = BindingHistoryIndex::build(&bindings.bindings);
     let mut active_tags = active_tag_by_fingerprint(state).await;
     let mut assigned_tags = HashSet::new();
     let mut names = Vec::with_capacity(prepared.len());
     let mut outbounds = Vec::with_capacity(prepared.len());
 
-    for (node, key, content) in prepared {
-        let affinity = affinity_key(&node);
-        let available = |index: &usize| !assigned_tags.contains(&bindings.bindings[*index].tag);
-        let exact = exact_index.get(&key).copied().filter(available);
-        let content_match = exact.or_else(|| {
-            content_index
-                .get(&content)
-                .and_then(|indexes| indexes.iter().copied().find(available))
-        });
-        let transferable = if content_match.is_none()
-            && affinity_counts.get(&affinity) == Some(&1)
-            && old_affinity_counts.get(&affinity) == Some(&1)
-        {
-            affinity_index
-                .get(&affinity)
-                .and_then(|indexes| indexes.iter().copied().find(available))
+    for candidate in prepared {
+        let tag = if let Some(index) = history_index.find_reusable_binding(
+            &candidate,
+            &current_affinity_counts,
+            &bindings.bindings,
+            &assigned_tags,
+        ) {
+            let existing = &mut bindings.bindings[index];
+            existing.stable_key = candidate.stable_key;
+            existing.content_key = candidate.content_key;
+            existing.affinity_key = candidate.affinity_key;
+            existing.tag.clone()
         } else {
-            None
-        };
-
-        let binding_index = content_match.or(transferable);
-        let tag = if let Some(index) = binding_index {
-            bindings.bindings[index].stable_key = key.clone();
-            bindings.bindings[index].content_key = content.clone();
-            bindings.bindings[index].affinity_key = affinity.clone();
-            bindings.bindings[index].tag.clone()
-        } else {
-            let fingerprint = outbound_bytes(&node.outbound);
-            let active = active_tags.get_mut(&fingerprint).and_then(|tags| {
-                tags.iter()
-                    .position(|tag| !manual_tags.contains(tag) && !assigned_tags.contains(tag))
-                    .map(|index| tags.remove(index))
-            });
-            let tag = active.unwrap_or_else(|| make_unique_tag(&node.name, &mut used));
-            used.insert(tag.clone());
+            let tag = claim_active_or_unique_tag(
+                &candidate,
+                manual_tags,
+                &assigned_tags,
+                &mut active_tags,
+                &mut used,
+            );
             bindings.bindings.push(NodeTagBinding {
-                stable_key: key,
-                content_key: content,
-                affinity_key: affinity,
+                stable_key: candidate.stable_key,
+                content_key: candidate.content_key,
+                affinity_key: candidate.affinity_key,
                 tag: tag.clone(),
             });
             tag
         };
 
         assigned_tags.insert(tag.clone());
-        let mut outbound = node.outbound;
+        let mut outbound = candidate.node.outbound;
         if let Some(object) = outbound.as_object_mut() {
             object.insert("tag".to_string(), serde_json::Value::String(tag.clone()));
         }

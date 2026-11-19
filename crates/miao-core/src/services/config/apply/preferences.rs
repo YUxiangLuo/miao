@@ -93,14 +93,17 @@ async fn apply_preference<P: RuntimePreference>(
     // both the in-memory requested value and its exact prior file bytes.
     requested.stage(state).await;
     requested.update(&mut edit.candidate);
-    let result = if edit.candidate == *edit.original() {
-        Ok(RuntimeUpdate::None)
-    } else {
-        // Keep the edit guard until effective state is observed below.
-        edit.apply().await.map(|effect| effect.runtime_update())
-    };
-    match result {
-        Ok(update) => Ok((previous, state.config.read().await.node_select, update)),
+    if edit.candidate == *edit.original() {
+        return Ok((previous, edit.original().node_select, RuntimeUpdate::None));
+    }
+
+    // Keep the edit guard until effective state is observed or rollback completes.
+    match edit.apply().await {
+        Ok(effect) => Ok((
+            previous,
+            state.config.read().await.node_select,
+            effect.runtime_update(),
+        )),
         Err(error) => {
             previous.stage(state).await;
             Err(preference_failure(

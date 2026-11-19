@@ -52,24 +52,22 @@ impl RuntimeRetirement {
                 path.display()
             )));
         }
-        if self.directory.is_none() {
-            // Keep on cancellation too: only an explicit commit discards the
-            // backups. A failed rollback reports their location for recovery.
-            self.directory = Some(
-                tempfile::Builder::new()
+        let directory = match &mut self.directory {
+            Some(directory) => directory,
+            None => {
+                // Keep on cancellation too: only an explicit commit discards the
+                // backups. A failed rollback reports their location for recovery.
+                let created = tempfile::Builder::new()
                     .prefix(".retired-runtime-")
                     .tempdir_in(runtime_dir)
                     .map_err(|err| {
                         AppError::context("Failed to prepare runtime file retirement", err)
                     })?
-                    .keep(),
-            );
-        }
-        let backup = self
-            .directory
-            .as_ref()
-            .unwrap()
-            .join(self.moved.len().to_string());
+                    .keep();
+                self.directory.insert(created)
+            }
+        };
+        let backup = directory.join(self.moved.len().to_string());
         tokio::fs::rename(path, &backup).await.map_err(|err| {
             AppError::context(
                 format!("Failed to retire runtime file {}", path.display()),
@@ -88,10 +86,14 @@ impl RuntimeRetirement {
             }
         }
         if !errors.is_empty() {
+            let retained_suffix = self
+                .directory
+                .as_ref()
+                .map(|dir| format!("; retained backups at {}", dir.display()))
+                .unwrap_or_default();
             return Err(AppError::message(format!(
-                "{}; retained backups at {}",
+                "{}{retained_suffix}",
                 errors.join("; "),
-                self.directory.as_ref().unwrap().display()
             )));
         }
         self.discard().await;
