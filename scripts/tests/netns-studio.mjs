@@ -26,7 +26,7 @@ function dnsAnswer(query, address) {
 }
 
 const role = process.argv[2]
-// master keeps custom rules first; the studio branch bypasses domestic traffic.
+// Default rule mode bypasses domestic/private traffic before custom rules.
 const domesticFirst = role !== '--custom-first'
 if (role === '--upstream') {
   const sockets = []
@@ -271,7 +271,7 @@ if (role === '--upstream') {
     await api('route-mode', { route_mode: 'rule' })
     assert.equal(http('employee-a', '223.5.5.6'), domesticFirst ? 'direct' : 'employee-a')
     assert.deepEqual(dns('employee-a', 'www.qq.com'), { rcode: 0, answer: domesticFirst ? '1.1.1.3' : '1.1.1.10' })
-    console.log('PASS explicit global mode and return to branch routing policy apply to data and DNS')
+    console.log('PASS explicit global mode and return to rule routing policy apply to data and DNS')
 
     // A loopback-only SOCKS server is unreachable from the gateway itself.
     // Successful forwarding proves the raw detour survives configuration

@@ -21,7 +21,7 @@ const CACHE_MANIFEST_VERSION: u32 = 1;
 // Version 4 rejects traffic matching a custom rule whose outbound is missing.
 // Version 5 bootstraps subscription DNS/connections independently of the default proxy.
 // Version 6 puts domestic/private bypass first and binds DNS cache tags to nodes.
-// Version 7 belongs to master and retains custom-first routing; reject it here.
+// Version 7 used custom-first routing before domestic-first became default; reject it too.
 const RUNTIME_CONFIG_SCHEMA_VERSION: u32 = 6;
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -1217,7 +1217,7 @@ mod tests {
             .unwrap();
         let mut manifest: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
         // v3 skipped missing nodes; v5/v7 put custom rules before domestic bypass.
-        // Neither policy may survive a cold start into the studio branch.
+        // Neither policy may survive a cold start into domestic-first routing.
         for version in [3, 5, 7] {
             manifest["runtime_schema_version"] = serde_json::json!(version);
             tokio::fs::write(
