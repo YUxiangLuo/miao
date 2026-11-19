@@ -1,7 +1,7 @@
 diff --git a/shadowaead/method.go b/shadowaead/method.go
 --- a/shadowaead/method.go
 +++ b/shadowaead/method.go
-@@ -119,6 +119,20 @@ type clientConn struct {
+@@ -118,6 +118,20 @@ type clientConn struct {
  	shadowio.WriterInterface
  }
  
@@ -25,7 +25,7 @@ diff --git a/shadowaead/method.go b/shadowaead/method.go
 diff --git a/shadowaead_2022/method.go b/shadowaead_2022/method.go
 --- a/shadowaead_2022/method.go
 +++ b/shadowaead_2022/method.go
-@@ -172,6 +172,20 @@ type clientConn struct {
+@@ -173,6 +173,20 @@ type clientConn struct {
  	shadowio.WriterInterface
  }
  

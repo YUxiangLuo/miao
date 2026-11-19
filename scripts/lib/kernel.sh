@@ -98,7 +98,7 @@ fi
 echo "==> Applying Shadowsocks AEAD half-close fix..."
 ss_module=github.com/sagernet/sing-shadowsocks2
 ss_version=$("${go_command[@]}" list -mod=readonly -m -f '{{.Version}}{{if .Replace}} replaced{{end}}' "$ss_module")
-if [[ "$ss_version" != v0.2.2-0.20260929152114-a69d1086332b ]]; then
+if [[ "$ss_version" != v0.2.2-0.20261110092058-52ade8ab7e95 ]]; then
   echo "Shadowsocks dependency changed; review shadowsocks2-halfclose.patch" >&2
   exit 1
 fi
