@@ -5,7 +5,7 @@ use serde::Serialize;
 
 use crate::models::ApiResponse;
 
-pub type HandlerResult<T = ()> = Result<Json<ApiResponse<T>>, (StatusCode, Json<ApiResponse<T>>)>;
+pub type HandlerResult<T = ()> = Result<Json<ApiResponse<T>>, (StatusCode, Json<ApiResponse<()>>)>;
 
 /// The only mapping from application errors to HTTP status codes.
 pub fn command_result<T: Serialize>(

@@ -26,6 +26,7 @@ fn base_outbound(typ: &str, req: &NodeRequest) -> Map<String, JsonValue> {
     obj.insert("tag".to_string(), json!(req.tag.trim()));
     obj.insert("server".to_string(), json!(req.server.trim()));
     obj.insert("server_port".to_string(), json!(req.server_port));
+    insert_optional_string(&mut obj, "detour", non_empty(&req.detour));
     obj
 }
 
@@ -260,6 +261,44 @@ fn validated_node_json(req: &NodeRequest) -> Result<(String, String), String> {
     Ok((tag, node_json))
 }
 
+fn validate_detour_target_and_cycles(
+    tag: &str,
+    detour: Option<&str>,
+    known_targets: &[String],
+    manual_nodes: &[String],
+) -> Result<(), String> {
+    let Some(detour) = detour.map(str::trim).filter(|s| !s.is_empty()) else {
+        return Ok(());
+    };
+    if !known_targets.iter().any(|existing| existing == detour) {
+        return Err(format!(
+            "前置中转节点 '{}' 不存在，请先添加或刷新该节点",
+            detour
+        ));
+    }
+
+    let mut detour_map = std::collections::HashMap::<String, String>::new();
+    for raw in manual_nodes {
+        if let Ok((info, _)) = parse_node_json(raw) {
+            if let Some(d) = info.detour {
+                detour_map.insert(info.tag, d);
+            }
+        }
+    }
+    detour_map.insert(tag.to_string(), detour.to_string());
+
+    let mut visited = std::collections::HashSet::<String>::new();
+    visited.insert(tag.to_string());
+    let mut cursor = detour.to_string();
+    while let Some(next) = detour_map.get(&cursor) {
+        if !visited.insert(cursor.clone()) || next == tag {
+            return Err("前置中转链路存在环路引用".to_string());
+        }
+        cursor = next.clone();
+    }
+    Ok(())
+}
+
 pub async fn get_nodes(state: Arc<AppState>) -> CommandReply<Vec<NodeInfo>> {
     let config = state.config.read().await;
 
@@ -275,6 +314,7 @@ pub async fn get_nodes(state: Arc<AppState>) -> CommandReply<Vec<NodeInfo>> {
                     server_port: display_info.server_port,
                     node_type: display_info.node_type,
                     sni: display_info.sni,
+                    detour: display_info.detour,
                 });
             }
             Err(e) => {
@@ -300,8 +340,9 @@ pub async fn add_node(state: Arc<AppState>, req: NodeRequest) -> CommandResult {
     let mut edit = ConfigEdit::begin(&state).await;
 
     // 检查所有现有和保留的 runtime tag，防止新增手动节点静默接管订阅规则。
+    let existing_targets = known_rule_targets(edit.original(), &state).await;
     let req_tag_lower = tag.to_lowercase();
-    for existing_tag in known_rule_targets(edit.original(), &state).await {
+    for existing_tag in &existing_targets {
         if existing_tag.to_lowercase() == req_tag_lower {
             return Err(command_error(
                 CommandErrorKind::InvalidInput,
@@ -312,6 +353,13 @@ pub async fn add_node(state: Arc<AppState>, req: NodeRequest) -> CommandResult {
             ));
         }
     }
+    validate_detour_target_and_cycles(
+        &tag,
+        non_empty(&req.detour),
+        &existing_targets,
+        &edit.candidate.nodes,
+    )
+    .map_err(|e| command_error(CommandErrorKind::InvalidInput, e))?;
 
     edit.candidate.nodes.push(node_json);
 
@@ -328,9 +376,9 @@ pub async fn import_nodes(
     super::ensure_initialized(&state)?;
 
     let mut edit = ConfigEdit::begin(&state).await;
-    let existing = known_rule_targets(edit.original(), &state).await;
+    let mut known = known_rule_targets(edit.original(), &state).await;
     let mut used: std::collections::HashSet<String> =
-        existing.into_iter().map(|tag| tag.to_lowercase()).collect();
+        known.iter().map(|tag| tag.to_lowercase()).collect();
     let mut added = Vec::new();
     let mut failed = Vec::new();
 
@@ -347,7 +395,21 @@ pub async fn import_nodes(
                     });
                     continue;
                 }
+                if let Err(message) = validate_detour_target_and_cycles(
+                    &tag,
+                    non_empty(&node.detour),
+                    &known,
+                    &edit.candidate.nodes,
+                ) {
+                    failed.push(BatchNodeFailure {
+                        index,
+                        tag,
+                        message,
+                    });
+                    continue;
+                }
                 used.insert(normalized);
+                known.push(tag.clone());
                 edit.candidate.nodes.push(node_json);
                 added.push(BatchNodeAdded { index, tag });
             }

@@ -25,6 +25,7 @@ async fn router_serves_index_page() {
         node_select: Default::default(),
         max_multiplier: None,
         disabled_nodes: Default::default(),
+        ..Default::default()
     })
     .await;
 
@@ -32,7 +33,7 @@ async fn router_serves_index_page() {
 
     assert_eq!(response.status(), StatusCode::OK);
     let body = response_text(response).await;
-    assert!(body.contains("Miao 控制面板"));
+    assert!(body.contains("HarborGate"));
 }
 
 #[tokio::test]
@@ -48,6 +49,7 @@ async fn router_serves_favicon_with_svg_content_type() {
         node_select: Default::default(),
         max_multiplier: None,
         disabled_nodes: Default::default(),
+        ..Default::default()
     })
     .await;
 
@@ -110,6 +112,7 @@ async fn router_returns_status_payload() {
         node_select: Default::default(),
         max_multiplier: None,
         disabled_nodes: Default::default(),
+        ..Default::default()
     })
     .await;
 
@@ -143,6 +146,7 @@ async fn router_returns_version_capability_flags() {
         node_select: Default::default(),
         max_multiplier: None,
         disabled_nodes: Default::default(),
+        ..Default::default()
     })
     .await;
 
@@ -172,6 +176,7 @@ async fn router_returns_node_list_payload() {
             node_select: Default::default(),
             max_multiplier: None,
             disabled_nodes: Default::default(),
+            ..Default::default()
         })
         .await;
 
@@ -201,6 +206,7 @@ async fn router_returns_subscription_list_payload() {
         node_select: Default::default(),
         max_multiplier: None,
         disabled_nodes: Default::default(),
+        ..Default::default()
     })
     .await;
 
@@ -249,6 +255,7 @@ async fn router_rejects_duplicate_subscription_with_bad_request() {
         node_select: Default::default(),
         max_multiplier: None,
         disabled_nodes: Default::default(),
+        ..Default::default()
     })
     .await;
 
@@ -279,6 +286,7 @@ async fn router_returns_not_found_when_deleting_missing_subscription() {
         node_select: Default::default(),
         max_multiplier: None,
         disabled_nodes: Default::default(),
+        ..Default::default()
     })
     .await;
 
@@ -311,6 +319,7 @@ async fn router_rejects_duplicate_node_with_bad_request() {
             node_select: Default::default(),
             max_multiplier: None,
             disabled_nodes: Default::default(),
+            ..Default::default()
         })
         .await;
 
@@ -385,6 +394,7 @@ async fn router_returns_not_found_when_deleting_missing_node() {
             node_select: Default::default(),
             max_multiplier: None,
             disabled_nodes: Default::default(),
+            ..Default::default()
         })
         .await;
 
@@ -415,6 +425,7 @@ async fn router_rejects_invalid_rule_field_with_bad_request() {
         node_select: Default::default(),
         max_multiplier: None,
         disabled_nodes: Default::default(),
+        ..Default::default()
     })
     .await;
 
@@ -448,6 +459,7 @@ async fn router_returns_not_found_when_deleting_missing_rule() {
         node_select: Default::default(),
         max_multiplier: None,
         disabled_nodes: Default::default(),
+        ..Default::default()
     })
     .await;
 
@@ -480,6 +492,7 @@ async fn router_rejects_rule_delete_when_entry_moved() {
         node_select: Default::default(),
         max_multiplier: None,
         disabled_nodes: Default::default(),
+        ..Default::default()
     })
     .await;
 
@@ -513,6 +526,7 @@ async fn router_returns_rule_list_payload() {
         node_select: Default::default(),
         max_multiplier: None,
         disabled_nodes: Default::default(),
+        ..Default::default()
     })
     .await;
 
@@ -547,6 +561,7 @@ async fn router_rejects_vps_deploy_with_invalid_ip() {
         node_select: Default::default(),
         max_multiplier: None,
         disabled_nodes: Default::default(),
+        ..Default::default()
     })
     .await;
 
@@ -576,6 +591,7 @@ async fn router_rejects_vps_deploy_with_empty_password() {
         node_select: Default::default(),
         max_multiplier: None,
         disabled_nodes: Default::default(),
+        ..Default::default()
     })
     .await;
 
@@ -608,6 +624,7 @@ async fn router_vps_deploy_returns_existing_node_without_ssh() {
             node_select: Default::default(),
             max_multiplier: None,
             disabled_nodes: Default::default(),
+            ..Default::default()
         })
         .await;
 

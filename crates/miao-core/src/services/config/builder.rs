@@ -4,10 +4,36 @@ use tracing::warn;
 use crate::error::{AppError, AppResult};
 #[cfg(test)]
 use crate::models::node_multiplier;
-use crate::models::{Config, NodeMultiplier, NodeSelect, RouteMode};
-use crate::state::SkippedRule;
+use crate::models::{AccessPortConfig, Config, NodeMultiplier, NodeSelect, RouteMode};
+use crate::state::{BlockedAccessPort, SkippedRule};
 
 use super::region::node_matches_region;
+
+pub(crate) fn access_port_inbound_tag(id: &str) -> String {
+    format!("access-port:{id}")
+}
+
+pub(super) fn blocked_access_ports_for_runtime(
+    access_ports: &[AccessPortConfig],
+    runtime: &serde_json::Value,
+) -> Vec<BlockedAccessPort> {
+    let available: HashSet<&str> = runtime["outbounds"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|outbound| outbound["tag"].as_str())
+        .collect();
+    access_ports
+        .iter()
+        .filter(|ap| !available.contains(ap.outbound.as_str()))
+        .map(|ap| BlockedAccessPort {
+            id: ap.id.clone(),
+            name: ap.name.clone(),
+            port: ap.port,
+            outbound: ap.outbound.clone(),
+        })
+        .collect()
+}
 
 pub(super) fn make_unique_tag(tag: &str, used: &mut HashSet<String>) -> String {
     let base = if tag.trim().is_empty() { "node" } else { tag };
@@ -382,6 +408,7 @@ pub(super) fn build_sing_box_config_with_multipliers(
         block_parsed_rules_with_missing_outbound(parsed_rules.rules, &available_outbounds);
 
     let mut sing_box_config = get_config_template();
+    apply_access_port_inbounds(&mut sing_box_config, &config.access_ports);
     apply_proxy_group(
         &mut sing_box_config,
         proxy_group.effective_select,
@@ -391,9 +418,44 @@ pub(super) fn build_sing_box_config_with_multipliers(
         arr.extend(outbounds);
     }
 
-    apply_route_mode(&mut sing_box_config, config, &custom_rules);
+    apply_route_mode(
+        &mut sing_box_config,
+        config,
+        &custom_rules,
+        &available_outbounds,
+    );
 
     Ok((sing_box_config, skipped_rules, proxy_group.effective_select))
+}
+
+fn apply_access_port_inbounds(
+    sing_box_config: &mut serde_json::Value,
+    access_ports: &[AccessPortConfig],
+) {
+    if access_ports.is_empty() {
+        return;
+    }
+    let Some(inbounds) = sing_box_config["inbounds"].as_array_mut() else {
+        return;
+    };
+    for ap in access_ports {
+        let mut inbound = serde_json::json!({
+            "type": "mixed",
+            "tag": access_port_inbound_tag(&ap.id),
+            "listen": "0.0.0.0",
+            "listen_port": ap.port,
+        });
+        if let (Some(username), Some(password)) = (
+            ap.username.as_deref().filter(|s| !s.is_empty()),
+            ap.password.as_deref().filter(|s| !s.is_empty()),
+        ) {
+            inbound["users"] = serde_json::json!([{
+                "username": username,
+                "password": password,
+            }]);
+        }
+        inbounds.push(inbound);
+    }
 }
 
 fn apply_proxy_group(
@@ -535,9 +597,9 @@ fn classify_custom_dns_rule(parsed_rule: &ParsedCustomRule) -> CustomDnsRuleMirr
 fn derive_custom_dns_rules(
     custom_rules: &[ParsedCustomRule],
     dns_servers: &mut Vec<serde_json::Value>,
+    node_dns_servers: &mut Vec<(String, String)>,
 ) -> Vec<serde_json::Value> {
     let mut dns_rules = Vec::new();
-    let mut node_dns_servers = Vec::new();
 
     for parsed_rule in custom_rules {
         match classify_custom_dns_rule(parsed_rule) {
@@ -549,7 +611,7 @@ fn derive_custom_dns_rules(
                 mut matchers,
                 outbound,
             } => {
-                let server = dns_server_for_outbound(outbound, dns_servers, &mut node_dns_servers);
+                let server = dns_server_for_outbound(outbound, dns_servers, node_dns_servers);
                 matchers.insert("action".to_string(), serde_json::json!("route"));
                 matchers.insert("server".to_string(), serde_json::json!(server));
                 dns_rules.push(serde_json::Value::Object(matchers));
@@ -561,16 +623,77 @@ fn derive_custom_dns_rules(
     dns_rules
 }
 
+fn derive_access_port_dns_rules(
+    access_ports: &[AccessPortConfig],
+    available_outbounds: &HashSet<String>,
+    dns_servers: &mut Vec<serde_json::Value>,
+    node_dns_servers: &mut Vec<(String, String)>,
+) -> Vec<serde_json::Value> {
+    access_ports
+        .iter()
+        .map(|ap| {
+            let tag = access_port_inbound_tag(&ap.id);
+            if available_outbounds.contains(&ap.outbound) {
+                let server = dns_server_for_outbound(&ap.outbound, dns_servers, node_dns_servers);
+                serde_json::json!({
+                    "inbound": [tag],
+                    "action": "route",
+                    "server": server,
+                })
+            } else {
+                serde_json::json!({
+                    "inbound": [tag],
+                    "action": "reject",
+                })
+            }
+        })
+        .collect()
+}
+
+fn derive_access_port_route_rules(
+    access_ports: &[AccessPortConfig],
+    available_outbounds: &HashSet<String>,
+) -> Vec<serde_json::Value> {
+    access_ports
+        .iter()
+        .map(|ap| {
+            let tag = access_port_inbound_tag(&ap.id);
+            if available_outbounds.contains(&ap.outbound) {
+                serde_json::json!({
+                    "inbound": [tag],
+                    "action": "route",
+                    "outbound": ap.outbound,
+                })
+            } else {
+                serde_json::json!({
+                    "inbound": [tag],
+                    "action": "reject",
+                })
+            }
+        })
+        .collect()
+}
+
 fn apply_dns_route_mode(
     sing_box_config: &mut serde_json::Value,
     route_mode: RouteMode,
+    access_ports: &[AccessPortConfig],
+    available_outbounds: &HashSet<String>,
     custom_rules: &[ParsedCustomRule],
     subscription_dns: Option<serde_json::Value>,
 ) {
     let Some(dns_servers) = sing_box_config["dns"]["servers"].as_array_mut() else {
         return;
     };
-    let mut custom_dns_rules = derive_custom_dns_rules(custom_rules, dns_servers);
+    let mut node_dns_servers = Vec::new();
+    let access_port_dns_rules = derive_access_port_dns_rules(
+        access_ports,
+        available_outbounds,
+        dns_servers,
+        &mut node_dns_servers,
+    );
+    let mut custom_dns_rules =
+        derive_custom_dns_rules(custom_rules, dns_servers, &mut node_dns_servers);
     custom_dns_rules.extend(subscription_dns);
     let Some(dns_rules) = sing_box_config["dns"]["rules"].as_array_mut() else {
         return;
@@ -581,6 +704,11 @@ fn apply_dns_route_mode(
         // still active, so its derived DNS policy must remain active too.
         dns_rules.clear();
     }
+    if !access_port_dns_rules.is_empty() {
+        // Dedicated store/app ports strictly bind DNS to their assigned outbound
+        // (or reject on missing outbound) ahead of built-in China split and seat rules.
+        dns_rules.splice(0..0, access_port_dns_rules);
+    }
     // Keep domestic DNS ahead of source-IP bindings, just like data routing.
     // Otherwise one employee's missing/remote node would also capture China DNS.
     dns_rules.extend(custom_dns_rules);
@@ -590,13 +718,28 @@ fn apply_route_mode(
     sing_box_config: &mut serde_json::Value,
     config: &Config,
     custom_rules: &[ParsedCustomRule],
+    available_outbounds: &HashSet<String>,
 ) {
     let (subscription_route, subscription_dns) = subscription_bootstrap_rules(&config.subs);
+    let access_port_routes =
+        derive_access_port_route_rules(&config.access_ports, available_outbounds);
     if let Some(rules) = sing_box_config["route"]["rules"].as_array_mut() {
         if config.route_mode == RouteMode::Global {
             // Explicit global mode still removes the built-in direct split.
             // Sniffing and DNS hijacking must precede all terminal rules.
             rules.truncate(2);
+        }
+        if !access_port_routes.is_empty() {
+            // Place dedicated store/app port routes right after sniff + hijack-dns
+            // (+ private LAN bypass in Rule mode), ahead of chinasite/chinaip and
+            // whole-machine source_ip_cidr rules so per-window store ports strictly
+            // lock to their static outbound IP and fail closed when offline.
+            let insert_at = if config.route_mode == RouteMode::Global {
+                2.min(rules.len())
+            } else {
+                3.min(rules.len())
+            };
+            rules.splice(insert_at..insert_at, access_port_routes);
         }
         // Studio policy: private/China destinations bypass employee bindings.
         // Custom rules retain their own order and precede only the subscription
@@ -608,6 +751,8 @@ fn apply_route_mode(
     apply_dns_route_mode(
         sing_box_config,
         config.route_mode,
+        &config.access_ports,
+        available_outbounds,
         custom_rules,
         subscription_dns,
     );
@@ -676,7 +821,7 @@ pub(super) fn tun_inbound() -> serde_json::Value {
 
 fn get_config_template() -> serde_json::Value {
     serde_json::json!({
-        "log": {"disabled": false, "timestamp": true, "level": "info"},
+        "log": {"disabled": false, "timestamp": true, "level": "warn"},
         "experimental": {
             "clash_api": {"external_controller": crate::services::singbox::CLASH_API_HOST},
             "cache_file": {

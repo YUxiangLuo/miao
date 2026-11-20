@@ -87,6 +87,8 @@ pub struct NodeRequest {
     pub obfs_type: Option<String>,
     #[serde(default)]
     pub obfs_password: Option<String>,
+    #[serde(default)]
+    pub detour: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -133,6 +135,9 @@ pub struct NodeInfo {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[cfg_attr(test, ts(optional))]
     pub sni: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
+    pub detour: Option<String>,
 }
 
 #[cfg(test)]

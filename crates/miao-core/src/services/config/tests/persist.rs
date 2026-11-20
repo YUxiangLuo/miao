@@ -19,6 +19,7 @@ async fn save_config_performs_atomic_write() {
         node_select: Default::default(),
         max_multiplier: None,
         disabled_nodes: Default::default(),
+        ..Default::default()
     };
 
     save_config_to(&config_path, &config).await.unwrap();
@@ -62,6 +63,7 @@ async fn save_config_overwrites_existing_file() {
         node_select: Default::default(),
         max_multiplier: None,
         disabled_nodes: Default::default(),
+        ..Default::default()
     };
     save_config_to(&config_path, &config).await.unwrap();
 
@@ -90,6 +92,7 @@ async fn save_config_skips_identical_content() {
         node_select: Default::default(),
         max_multiplier: None,
         disabled_nodes: Default::default(),
+        ..Default::default()
     };
 
     save_config_to(&config_path, &config).await.unwrap();

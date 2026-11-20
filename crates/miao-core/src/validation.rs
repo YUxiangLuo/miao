@@ -207,6 +207,30 @@ impl Validator {
         Self::validate_transport_options(protocol, node_type, req)?;
         Self::validate_tls_and_reality_options(protocol, req)?;
         Self::validate_protocol_extensions(protocol, req)?;
+        if let Some(detour) = non_empty(&req.detour) {
+            Self::detour_tag(detour, req.tag.trim())?;
+        }
+        Ok(())
+    }
+
+    pub fn detour_tag(detour: &str, self_tag: &str) -> Result<(), String> {
+        let detour = detour.trim();
+        if detour.is_empty() {
+            return Ok(());
+        }
+        if detour.chars().count() > 128 {
+            return Err("前置中转节点名称不能超过 128 个字符".to_string());
+        }
+        if detour.chars().any(char::is_control) {
+            return Err("前置中转节点名称不能包含控制字符".to_string());
+        }
+        const RESERVED_DETOUR_TAGS: &[&str] = &["proxy", "direct", "reject"];
+        if RESERVED_DETOUR_TAGS.contains(&detour.to_lowercase().as_str()) {
+            return Err("前置中转节点不能使用保留字 proxy / direct / reject".to_string());
+        }
+        if detour.eq_ignore_ascii_case(self_tag.trim()) {
+            return Err("前置中转节点不能指向自身".to_string());
+        }
         Ok(())
     }
 

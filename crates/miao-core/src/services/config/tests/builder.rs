@@ -135,6 +135,7 @@ fn build_sing_box_config_renames_duplicate_outbound_tags() {
         node_select: Default::default(),
         max_multiplier: None,
         disabled_nodes: Default::default(),
+        ..Default::default()
     };
 
     let my_outbounds = vec![json!({
@@ -196,6 +197,7 @@ fn build_sing_box_config_renames_tags_reserved_by_template() {
         node_select: Default::default(),
         max_multiplier: None,
         disabled_nodes: Default::default(),
+        ..Default::default()
     };
 
     let my_outbounds = vec![
@@ -250,6 +252,7 @@ fn build_sing_box_config_errors_when_no_nodes_available() {
         node_select: Default::default(),
         max_multiplier: None,
         disabled_nodes: Default::default(),
+        ..Default::default()
     };
 
     let err = build_sing_box_config(&config, vec![], vec![], vec![], vec![]).unwrap_err();
@@ -272,6 +275,7 @@ fn collect_manual_outbounds_handles_empty_nodes() {
         node_select: Default::default(),
         max_multiplier: None,
         disabled_nodes: Default::default(),
+        ..Default::default()
     };
 
     let (outbounds, names) = collect_manual_outbounds(&config);
@@ -296,6 +300,7 @@ fn collect_manual_outbounds_handles_all_invalid_nodes() {
         node_select: Default::default(),
         max_multiplier: None,
         disabled_nodes: Default::default(),
+        ..Default::default()
     };
 
     let (outbounds, names) = collect_manual_outbounds(&config);
@@ -317,6 +322,7 @@ fn build_sing_box_config_preserves_node_order() {
         node_select: Default::default(),
         max_multiplier: None,
         disabled_nodes: Default::default(),
+        ..Default::default()
     };
 
     let my_outbounds = vec![
@@ -357,6 +363,7 @@ fn build_sing_box_config_handles_no_custom_rules() {
         node_select: Default::default(),
         max_multiplier: None,
         disabled_nodes: Default::default(),
+        ..Default::default()
     };
 
     let my_outbounds = vec![json!({
@@ -393,6 +400,7 @@ fn build_sing_box_config_splits_direct_route_rules() {
         node_select: Default::default(),
         max_multiplier: None,
         disabled_nodes: Default::default(),
+        ..Default::default()
     };
 
     let my_outbounds = vec![json!({
@@ -475,6 +483,7 @@ fn build_sing_box_config_binds_clash_api_to_localhost() {
         node_select: Default::default(),
         max_multiplier: None,
         disabled_nodes: Default::default(),
+        ..Default::default()
     };
 
     let (built, _skipped, _) = build_sing_box_config(
@@ -514,6 +523,7 @@ fn build_sing_box_config_ignores_all_invalid_custom_rules() {
         node_select: Default::default(),
         max_multiplier: None,
         disabled_nodes: Default::default(),
+        ..Default::default()
     };
 
     let my_outbounds = vec![json!({
@@ -536,4 +546,124 @@ fn build_sing_box_config_ignores_all_invalid_custom_rules() {
     let rules = built["route"]["rules"].as_array().unwrap();
     // Should have only the default direct-split rules.
     assert_eq!(rules.len(), 5);
+}
+
+#[test]
+fn build_sing_box_config_wires_access_ports_and_fails_closed_on_missing_or_broken_detour() {
+    use crate::models::AccessPortConfig;
+    use crate::services::config::builder::blocked_access_ports_for_runtime;
+
+    let config = Config {
+        access_ports: vec![
+            AccessPortConfig {
+                id: "shop-us".to_string(),
+                name: "Amazon US Store 1".to_string(),
+                port: 20101,
+                outbound: "us-static".to_string(),
+                username: Some("store1".to_string()),
+                password: Some("secret-1".to_string()),
+            },
+            AccessPortConfig {
+                id: "shop-broken-chain".to_string(),
+                name: "TikTok UK Store".to_string(),
+                port: 20102,
+                outbound: "uk-static-broken".to_string(),
+                username: None,
+                password: None,
+            },
+            AccessPortConfig {
+                id: "shop-missing".to_string(),
+                name: "Shopify EU Store".to_string(),
+                port: 20103,
+                outbound: "deleted-node".to_string(),
+                username: None,
+                password: None,
+            },
+        ],
+        custom_rules: vec![
+            r#"{"source_ip_cidr":"192.168.8.180/32","action":"route","outbound":"direct"}"#
+                .to_string(),
+        ],
+        ..Default::default()
+    };
+
+    let my_names = vec![
+        "hk-relay".to_string(),
+        "us-static".to_string(),
+        "uk-static-broken".to_string(),
+    ];
+    let my_outbounds = vec![
+        json!({
+            "type": "hysteria2",
+            "tag": "hk-relay",
+            "server": "hk.example.com",
+            "server_port": 443,
+            "password": "secret"
+        }),
+        json!({
+            "type": "socks",
+            "tag": "us-static",
+            "server": "198.51.100.10",
+            "server_port": 1080,
+            "version": "5",
+            "detour": "hk-relay"
+        }),
+        json!({
+            "type": "socks",
+            "tag": "uk-static-broken",
+            "server": "198.51.100.20",
+            "server_port": 1080,
+            "version": "5",
+            "detour": "missing-relay"
+        }),
+    ];
+
+    let (built, _skipped, _) =
+        build_sing_box_config(&config, my_names, my_outbounds, vec![], vec![]).unwrap();
+
+    // 1. Mixed inbounds emitted after tun-in with optional auth
+    let inbounds = built["inbounds"].as_array().unwrap();
+    assert_eq!(inbounds.len(), 4);
+    assert_eq!(inbounds[1]["type"], "mixed");
+    assert_eq!(inbounds[1]["tag"], "access-port:shop-us");
+    assert_eq!(inbounds[1]["listen_port"], 20101);
+    assert_eq!(inbounds[1]["users"][0]["username"], "store1");
+    assert_eq!(inbounds[2]["tag"], "access-port:shop-broken-chain");
+    assert!(inbounds[2].get("users").is_none());
+
+    // 2. Route rules place access ports ahead of chinasite/chinaip and source_ip_cidr,
+    // and rewrite broken detour / missing outbound ports to action: "reject"
+    let route_rules = built["route"]["rules"].as_array().unwrap();
+    assert_eq!(
+        route_rules[3],
+        json!({"inbound": ["access-port:shop-us"], "action": "route", "outbound": "us-static"})
+    );
+    assert_eq!(
+        route_rules[4],
+        json!({"inbound": ["access-port:shop-broken-chain"], "action": "reject"})
+    );
+    assert_eq!(
+        route_rules[5],
+        json!({"inbound": ["access-port:shop-missing"], "action": "reject"})
+    );
+
+    // 3. DNS rules mirror access ports at index 0 ahead of chinasite
+    let dns_rules = built["dns"]["rules"].as_array().unwrap();
+    assert_eq!(
+        dns_rules[0],
+        json!({"inbound": ["access-port:shop-us"], "action": "route", "server": "custom-node-dns:us-static"})
+    );
+    assert_eq!(
+        dns_rules[1],
+        json!({"inbound": ["access-port:shop-broken-chain"], "action": "reject"})
+    );
+    assert_eq!(
+        dns_rules[2],
+        json!({"inbound": ["access-port:shop-missing"], "action": "reject"})
+    );
+
+    // 4. Runtime blocked diagnostics report both broken-detour and deleted-node ports
+    let blocked = blocked_access_ports_for_runtime(&config.access_ports, &built);
+    let blocked_ids: Vec<&str> = blocked.iter().map(|b| b.id.as_str()).collect();
+    assert_eq!(blocked_ids, vec!["shop-broken-chain", "shop-missing"]);
 }

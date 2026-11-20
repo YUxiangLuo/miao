@@ -63,6 +63,8 @@ pub struct AppState {
     pub config_warning: Mutex<Option<String>>,
     /// 最近一次生成配置时因出口节点不存在而改为阻断的规则；沿用历史字段名。
     pub skipped_rules: Mutex<Vec<SkippedRule>>,
+    /// 最近一次生成配置时因绑定出口（或前置中转）不可用而进入防关联熔断阻断态的专属端口。
+    pub blocked_access_ports: Mutex<Vec<BlockedAccessPort>>,
     /// 最近一次成功生成配置时，从完整节点池识别出的倍率选项。
     pub available_multipliers: RwLock<Vec<NodeMultiplier>>,
     pub initializing: AtomicBool,
@@ -168,6 +170,7 @@ impl AppState {
             data_revision: AtomicU64::new(1),
             config_warning: Mutex::new(None),
             skipped_rules: Mutex::new(Vec::new()),
+            blocked_access_ports: Mutex::new(Vec::new()),
             available_multipliers: RwLock::new(Vec::new()),
             initializing: AtomicBool::new(true),
             http_client,
@@ -252,6 +255,15 @@ pub struct SkippedRule {
     pub description: String,
 }
 
+/// 因绑定专线（或其前置跳板）不可用而自动改写为阻断态的多店铺专属端口。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BlockedAccessPort {
+    pub id: String,
+    pub name: String,
+    pub port: u16,
+    pub outbound: String,
+}
+
 pub struct SingBoxProcess {
     pub child: tokio::process::Child,
     pub started_at: Instant,
@@ -303,6 +315,7 @@ mod tests {
             node_select: Default::default(),
             max_multiplier: None,
             disabled_nodes: Default::default(),
+            ..Default::default()
         };
 
         let state = AppState::new(config.clone()).unwrap();
@@ -334,6 +347,7 @@ mod tests {
             node_select: Default::default(),
             max_multiplier: None,
             disabled_nodes: Default::default(),
+            ..Default::default()
         };
 
         let state = AppState::new(config).unwrap();

@@ -11,10 +11,13 @@ use crate::models::{
     SubscriptionFailureKind, SubscriptionFetchReport, SubscriptionState,
 };
 use crate::services::subscription::{fetch_sub, is_informational_subscription_node, FetchResult};
-use crate::state::{AppState, SkippedRule};
+use crate::state::{AppState, BlockedAccessPort, SkippedRule};
 
 use super::bindings::{assign_subscription_tags, reserved_node_tags, NodeTagBindings};
-use super::builder::{build_sing_box_config_with_multipliers, NodeMetadata, ParsedCustomRules};
+use super::builder::{
+    blocked_access_ports_for_runtime, build_sing_box_config_with_multipliers, NodeMetadata,
+    ParsedCustomRules,
+};
 use super::persist::{read_sub_nodes_snapshot, save_sub_nodes_snapshot, SubNodesSnapshot};
 
 #[derive(Clone)]
@@ -26,6 +29,7 @@ pub struct GenConfigOutcome {
     pub subscription_fetch: Option<SubscriptionFetchReport>,
     pub node_select: NodeSelect,
     pub skipped_rules: Vec<SkippedRule>,
+    pub blocked_access_ports: Vec<BlockedAccessPort>,
     /// 完整可用节点池中识别出的倍率，供面板动态生成自动候选上限选项。
     pub available_multipliers: Vec<NodeMultiplier>,
     /// 本轮接受的节点集（含失败来源保留的节点，允许成功空列表）；本地重建为 None。
@@ -703,7 +707,16 @@ async fn build_prepared(
     let available_multipliers: BTreeSet<_> =
         metadata.iter().filter_map(|meta| meta.multiplier).collect();
     let parsed_rules = ParsedCustomRules::parse(&config.custom_rules);
-    let reserved_rule_tags = parsed_rules.outbound_tags();
+    let mut reserved_rule_tags = parsed_rules.outbound_tags();
+    for ap in &config.access_ports {
+        if ap.outbound != "proxy"
+            && ap.outbound != "direct"
+            && ap.outbound != "reject"
+            && !reserved_rule_tags.contains(&ap.outbound)
+        {
+            reserved_rule_tags.push(ap.outbound.clone());
+        }
+    }
     let (final_node_names, final_outbounds, node_bindings) =
         assign_subscription_tags(state, &my_names, &reserved_rule_tags, nodes).await;
 
@@ -716,6 +729,8 @@ async fn build_prepared(
         metadata,
         parsed_rules,
     )?;
+    let blocked_access_ports =
+        blocked_access_ports_for_runtime(&config.access_ports, &sing_box_config);
 
     Ok(GenConfigOutcome {
         bytes: serde_json::to_vec(&sing_box_config)?,
@@ -723,6 +738,7 @@ async fn build_prepared(
         subscription_fetch: None,
         node_select,
         skipped_rules,
+        blocked_access_ports,
         available_multipliers: available_multipliers.into_iter().collect(),
         fresh_sub_nodes: None,
         node_bindings,
@@ -759,6 +775,7 @@ pub(super) fn filter_disabled_nodes(
 /// 在配置事务真正提交后发布候选配置携带的诊断元数据。
 pub async fn publish_generation_diagnostics(state: &AppState, outcome: &GenConfigOutcome) {
     *state.skipped_rules.lock().await = outcome.skipped_rules.clone();
+    *state.blocked_access_ports.lock().await = outcome.blocked_access_ports.clone();
     *state.available_multipliers.write().await = outcome.available_multipliers.clone();
     state.data_revision.fetch_add(1, Ordering::Relaxed);
 }
@@ -801,6 +818,8 @@ pub async fn publish_cached_rule_diagnostics(config: &Config, state: &AppState) 
         .collect();
     *state.skipped_rules.lock().await =
         ParsedCustomRules::parse(&config.custom_rules).missing_outbound_diagnostics(&available);
+    *state.blocked_access_ports.lock().await =
+        blocked_access_ports_for_runtime(&config.access_ports, &runtime);
     state.data_revision.fetch_add(1, Ordering::Relaxed);
 }
 
@@ -864,6 +883,11 @@ pub async fn known_rule_targets(config: &Config, state: &AppState) -> Vec<String
     // a future same-name node must not silently inherit a dormant rule.
     for tag in ParsedCustomRules::parse(&config.custom_rules).outbound_tags() {
         push_unique_tag(&mut tags, tag);
+    }
+    for ap in &config.access_ports {
+        if ap.outbound != "proxy" && ap.outbound != "direct" && ap.outbound != "reject" {
+            push_unique_tag(&mut tags, ap.outbound.clone());
+        }
     }
 
     let runtime_config_path = &state.runtime_paths.active_config;

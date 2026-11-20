@@ -4,6 +4,7 @@ compile_error!("Miao supports Linux/OpenWrt only");
 mod cli;
 mod error;
 mod handlers;
+mod logging;
 mod models;
 mod paths;
 mod privilege;

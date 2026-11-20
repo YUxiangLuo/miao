@@ -59,6 +59,7 @@ mod tests {
             node_select: Default::default(),
             max_multiplier: None,
             disabled_nodes: Default::default(),
+            ..Default::default()
         });
 
         let Json(response) = get_nodes(State(state)).await;
@@ -142,6 +143,7 @@ mod tests {
             node_select: Default::default(),
             max_multiplier: None,
             disabled_nodes: Default::default(),
+            ..Default::default()
         });
 
         let Json(response) = get_nodes(State(state)).await;
@@ -175,6 +177,7 @@ mod tests {
             node_select: Default::default(),
             max_multiplier: None,
             disabled_nodes: Default::default(),
+            ..Default::default()
         });
 
         let Json(response) = get_nodes(State(state)).await;
@@ -197,6 +200,7 @@ mod tests {
             node_select: Default::default(),
             max_multiplier: None,
             disabled_nodes: Default::default(),
+            ..Default::default()
         });
 
         let Json(response) = get_nodes(State(state)).await;
@@ -223,6 +227,7 @@ mod tests {
             node_select: Default::default(),
             max_multiplier: None,
             disabled_nodes: Default::default(),
+            ..Default::default()
         });
 
         let Json(response) = get_nodes(State(state)).await;
@@ -248,6 +253,7 @@ mod tests {
             node_select: Default::default(),
             max_multiplier: None,
             disabled_nodes: Default::default(),
+            ..Default::default()
         });
 
         let Json(response) = get_nodes(State(state)).await;
@@ -278,6 +284,7 @@ mod tests {
             node_select: Default::default(),
             max_multiplier: None,
             disabled_nodes: Default::default(),
+            ..Default::default()
         });
 
         let Json(response) = get_nodes(State(state)).await;
@@ -305,6 +312,7 @@ mod tests {
             node_select: Default::default(),
             max_multiplier: None,
             disabled_nodes: Default::default(),
+            ..Default::default()
         });
 
         let Json(response) = get_nodes(State(state)).await;
@@ -331,6 +339,7 @@ mod tests {
             node_select: Default::default(),
             max_multiplier: None,
             disabled_nodes: Default::default(),
+            ..Default::default()
         });
 
         let Json(response) = get_nodes(State(state)).await;
@@ -340,5 +349,57 @@ mod tests {
         assert_eq!(nodes.len(), 2);
         assert_eq!(nodes[0].tag, "香港节点");
         assert_eq!(nodes[1].tag, "日本サーバー");
+    }
+
+    #[tokio::test]
+    async fn residential_socks5_detour_roundtrips_and_rejects_cycles() {
+        use crate::services::commands::nodes::add_node;
+        use crate::test_support::{install_fake_kernel, isolated_stopped_state};
+
+        let (_root, state) = isolated_stopped_state(Config {
+            nodes: vec![
+                r#"{"type":"hysteria2","tag":"hk-relay","server":"hk.example.com","server_port":443,"password":"secret-password","tls":{"enabled":true}}"#.to_string(),
+            ],
+            ..Default::default()
+        });
+        install_fake_kernel(&state);
+
+        add_node(
+            state.clone(),
+            NodeRequest {
+                node_type: Some("socks".to_string()),
+                tag: "us-isp-socks".to_string(),
+                server: "198.51.100.88".to_string(),
+                server_port: 1080,
+                username: Some("isp_user".to_string()),
+                password: Some("isp_pass".to_string()),
+                detour: Some("hk-relay".to_string()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+        let Json(response) = get_nodes(State(state.clone())).await;
+        let nodes = response.data.unwrap();
+        assert_eq!(nodes.len(), 2);
+        assert_eq!(nodes[1].tag, "us-isp-socks");
+        assert_eq!(nodes[1].detour.as_deref(), Some("hk-relay"));
+
+        // Non-existent detour target rejected
+        let missing_err = add_node(
+            state,
+            NodeRequest {
+                node_type: Some("socks".to_string()),
+                tag: "bad-chain".to_string(),
+                server: "198.51.100.89".to_string(),
+                server_port: 1080,
+                detour: Some("ghost-relay".to_string()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap_err();
+        assert!(missing_err.message.contains("不存在"));
     }
 }

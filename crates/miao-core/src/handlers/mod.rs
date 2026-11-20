@@ -1,3 +1,4 @@
+pub mod access_ports;
 pub mod clash;
 pub mod mcp;
 pub mod nodes;
@@ -10,6 +11,7 @@ pub mod service;
 )]
 pub mod static_assets;
 pub mod subs;
+pub mod terminals;
 pub mod version;
 
 pub mod vps;

@@ -72,18 +72,28 @@ custom_rules:
 
 底层手动配置使用 sing-box 的 `type: socks`、`version: '5'`、`username` 和 `password` 字段。标准 SOCKS5 的 UDP 转发仍取决于服务端与网络是否支持；添加节点并不代表已验证 UDP。支持 SOCKS5 的内核版本从 `miao.15` 开始，旧版本需先升级。
 
-### 后台配置前置代理
+### 前置跳板中转（`detour`）与局域网多店铺专属端口（`access_ports`）
 
-手动节点的原始 JSON 会保留 `detour`。需要经已有节点连接 SOCKS5 服务时，可在 `config.yaml` 的对应节点中添加该字段：
+手动节点的 JSON 与面板「新增独享专线 → 手动 / 静态住宅」均支持 `detour` 前置跳板字段（禁止填保留字 `proxy` / `direct` / `reject`、禁止自引用或构成环路）：
 
 ```yaml
 nodes:
-  - '{"type":"socks","tag":"业务出口","server":"proxy.example.com","server_port":1080,"version":"5","username":"user","password":"password","detour":"前置节点"}'
+  - '{"type":"socks","tag":"美区静态住宅A","server":"198.51.100.10","server_port":1080,"version":"5","username":"user","password":"password","detour":"香港跳板"}'
+terminals:
+  - ip: "192.168.8.180"
+    name: "李运营"
+    department: "Amazon 美区组"
+access_ports:
+  - id: "ap-20101"
+    name: "Amazon 美区一店"
+    port: 20101
+    outbound: "美区静态住宅A"
+    username: "shop1"
+    password: "secret"
 ```
 
-`前置节点` 须替换为已存在且启用的具体节点 tag。链路为「网关 → 前置节点 → SOCKS5 出口 → 目标网站」。前置不要填包含当前节点的 `proxy` 选择器，也不能引用自身或形成循环。能否使用 UDP 还取决于前置节点和 SOCKS5 服务端的支持。
-
-目前仅通过配置文件管理 `detour`，面板表单、添加/批量导入 API 和节点列表不提供该字段。修改文件不会更新运行进程的内存配置；维护时停止 Miao 后落盘，再启动主程序，避免旧面板保存时覆盖手工修改。需要延后切换时先保存独立的待生效配置。
+- `terminals` 保存在稳定层 `config.yaml`，修改备注不触发内核重载；面板「工位与终端」自动合并 OpenWrt `/tmp/dhcp.leases`（及 `/var/lib/misc/dnsmasq.leases`）与工位档案，并通过 `POST /api/terminals/assign` 单事务原子切换整机出口。
+- `access_ports` 为每个条目生成 `mixed`（HTTP + SOCKS5 TCP/UDP）局域网入站 `access-port:<id>`，并在路由与 DNS 规则中置于大陆分流与工位规则之前；当绑定出口（或其 `detour` 前置节点）不可用时，路由与 DNS 同步原位改写为 `reject` 离线熔断。
 
 面板与 MCP 的手动测速允许 8 秒完成探测，HTTP 请求保留 10 秒上限，为链式代理的额外握手留出时间。
 

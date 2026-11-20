@@ -81,6 +81,23 @@ pub async fn runtime_warnings(state: &AppState) -> Vec<RuntimeWarning> {
             severity: RuntimeWarningSeverity::Warning,
         });
     }
+
+    let blocked_ports = state.blocked_access_ports.lock().await;
+    if !blocked_ports.is_empty() {
+        warnings.push(RuntimeWarning {
+            code: "access_port_outbound_missing",
+            message: format!(
+                "{} 个多店铺专属端口因绑定专线不可用已自动进入防关联熔断保护: {}",
+                blocked_ports.len(),
+                blocked_ports
+                    .iter()
+                    .map(|port| format!("{} (:{} → {})", port.name, port.port, port.outbound))
+                    .collect::<Vec<_>>()
+                    .join(";")
+            ),
+            severity: RuntimeWarningSeverity::Warning,
+        });
+    }
     warnings
 }
 

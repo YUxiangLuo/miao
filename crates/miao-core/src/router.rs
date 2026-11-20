@@ -14,6 +14,7 @@ use crate::handlers::version::upgrade;
 
 use crate::handlers::vps::deploy_vps;
 use crate::handlers::{
+    access_ports::{delete_access_port, get_access_ports, save_access_port},
     clash::{proxy_clash_http, proxy_clash_traffic},
     mcp::{handle_mcp, handle_mcp_get, set_mcp},
     nodes::{add_node, delete_node, get_nodes, import_nodes},
@@ -31,6 +32,7 @@ use crate::handlers::{
         add_sub, add_subs_batch, delete_sub, get_sub_nodes, get_subs, get_verge_import,
         refresh_subs, set_node_disabled,
     },
+    terminals::{assign_terminal, delete_terminal, get_terminals, upsert_terminal},
     version::get_version,
 };
 use crate::state::AppState;
@@ -75,6 +77,19 @@ pub fn build_router(app_state: Arc<AppState>) -> Router {
         .route("/api/rules", get(get_rules))
         .route("/api/rules", post(add_rule))
         .route("/api/rules", delete(delete_rule))
+        .route(
+            "/api/terminals",
+            get(get_terminals)
+                .post(upsert_terminal)
+                .delete(delete_terminal),
+        )
+        .route("/api/terminals/assign", post(assign_terminal))
+        .route(
+            "/api/access-ports",
+            get(get_access_ports)
+                .post(save_access_port)
+                .delete(delete_access_port),
+        )
         .route("/api/mcp", post(set_mcp))
         .route("/api/last-proxy", post(set_last_proxy))
         .route("/api/proxy/switch", post(switch_proxy))

@@ -435,3 +435,28 @@ fn temporary_profile_rejects_paths_escaping_its_directory_and_normalizes_missing
         .expect("escaped log path must be rejected");
     assert!(err.to_string().contains("Temporary profile paths"));
 }
+
+#[test]
+fn non_systemd_cli_launches_default_to_bounded_tmpfs_log_without_touching_disk() {
+    let (_root, mut env) = environment();
+    env.preferences = PreferenceStore::Runtime;
+    let cli_profile = resolve(
+        RuntimeOptions {
+            install_tracing: true,
+            ..Default::default()
+        },
+        &env,
+    );
+    assert_eq!(cli_profile.log, Some(env.runtime_root.join("miao.log")));
+    assert!(!env.runtime_root.exists());
+
+    env.preferences = PreferenceStore::Working;
+    let systemd_profile = resolve(
+        RuntimeOptions {
+            install_tracing: true,
+            ..Default::default()
+        },
+        &env,
+    );
+    assert_eq!(systemd_profile.log, None);
+}

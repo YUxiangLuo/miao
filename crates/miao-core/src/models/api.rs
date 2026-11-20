@@ -361,3 +361,103 @@ pub enum SubscriptionState {
     Ready,
     Failed,
 }
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+pub struct TerminalSummary {
+    pub ip: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
+    pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
+    pub department: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
+    pub note: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
+    pub dhcp_hostname: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
+    pub mac: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+pub struct UpsertTerminalRequest {
+    pub ip: String,
+    pub name: String,
+    #[serde(default)]
+    #[cfg_attr(test, ts(optional))]
+    pub department: Option<String>,
+    #[serde(default)]
+    #[cfg_attr(test, ts(optional))]
+    pub note: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+pub struct DeleteTerminalRequest {
+    pub ip: String,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[serde(rename_all = "snake_case")]
+pub enum TerminalAssignMode {
+    Dedicated,
+    Pool,
+    Direct,
+    BlockOverseas,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+pub struct AssignTerminalRequest {
+    pub ip: String,
+    pub mode: TerminalAssignMode,
+    #[serde(default)]
+    #[cfg_attr(test, ts(optional))]
+    pub target: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+pub struct AccessPortStatus {
+    pub id: String,
+    pub name: String,
+    pub port: u16,
+    pub outbound: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
+    pub username: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
+    pub password: Option<String>,
+    pub has_auth: bool,
+    pub blocked: bool,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+pub struct SaveAccessPortRequest {
+    #[serde(default)]
+    #[cfg_attr(test, ts(optional))]
+    pub id: Option<String>,
+    pub name: String,
+    pub port: u16,
+    pub outbound: String,
+    #[serde(default)]
+    #[cfg_attr(test, ts(optional))]
+    pub username: Option<String>,
+    #[serde(default)]
+    #[cfg_attr(test, ts(optional))]
+    pub password: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+pub struct DeleteAccessPortRequest {
+    pub id: String,
+}

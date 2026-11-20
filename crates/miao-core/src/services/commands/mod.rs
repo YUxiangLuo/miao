@@ -2,11 +2,13 @@
 //! replies/errors; application code must never call an HTTP handler.
 use std::fmt::{self, Display};
 
+pub mod access_ports;
 pub mod nodes;
 pub mod rules;
 pub mod service;
 pub mod settings;
 pub mod subs;
+pub mod terminals;
 #[cfg(test)]
 mod tests;
 

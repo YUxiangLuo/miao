@@ -1,6 +1,6 @@
+use std::io;
 use std::path::PathBuf;
 use std::sync::{atomic::Ordering, Arc};
-use std::{fs, io};
 
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
@@ -142,14 +142,10 @@ pub(crate) async fn spawn_resolved(
     profile: crate::profile::ResolvedProfile,
 ) -> AppResult<ServerHandle> {
     let log_path = profile.log.clone();
-    if let Some(path) = log_path.as_deref() {
-        rotate_oversized_log(path);
-    }
     if options.install_tracing {
         install_tracing(log_path.as_deref());
-    }
-    if let Some(path) = log_path.clone() {
-        let _ = crate::paths::set_active_log_path(path);
+    } else if let Some(path) = log_path.as_deref() {
+        rotate_oversized_log(path);
     }
 
     crate::services::version::reconcile_pending_upgrade()?;
@@ -352,50 +348,23 @@ async fn wait_os_shutdown() {
     }
 }
 
-/// 日志文件（tracing + sing-box 输出）只追加不清理，长期常驻会无限增长。
-/// 启动时把超限的日志改名为 `.old`（覆盖上一份），实现单份滚动。
-const MAX_LOG_FILE_BYTES: u64 = 8 * 1024 * 1024;
-
-fn rotate_oversized_log(path: &std::path::Path) {
-    let Ok(metadata) = fs::metadata(path) else {
-        return;
-    };
-    if metadata.len() <= MAX_LOG_FILE_BYTES {
-        return;
-    }
-    let rotated = rotated_log_path(path);
-    match fs::rename(path, &rotated) {
-        Ok(()) => info!(log = ?path, rotated_to = ?rotated, "Rotated oversized log file"),
-        Err(err) => warn!(log = ?path, error = %err, "Failed to rotate oversized log file"),
-    }
-}
-
-fn rotated_log_path(path: &std::path::Path) -> PathBuf {
-    let mut name = path
-        .file_name()
-        .map(|n| n.to_os_string())
-        .unwrap_or_default();
-    name.push(".old");
-    path.with_file_name(name)
-}
+use crate::logging::rotate_oversized_log;
+#[cfg(test)]
+use crate::logging::{rotated_log_path, MAX_LOG_FILE_BYTES};
 
 fn install_tracing(log_path: Option<&std::path::Path>) {
-    use tracing_subscriber::fmt::writer::MakeWriterExt;
-
     let filter = || {
         tracing_subscriber::EnvFilter::from_default_env().add_directive(tracing::Level::INFO.into())
     };
 
     if let Some(path) = log_path {
-        if let Some(parent) = path.parent() {
-            let _ = fs::create_dir_all(parent);
-        }
-        match fs::OpenOptions::new().create(true).append(true).open(path) {
-            Ok(file) => {
-                let writer = std::io::stdout.and(std::sync::Mutex::new(file));
+        match crate::logging::BoundedLogWriter::open(path.to_path_buf()) {
+            Ok(writer) => {
+                crate::logging::set_active_log_writer(writer.clone());
                 let _ = tracing_subscriber::fmt()
                     .with_env_filter(filter())
-                    .with_writer(writer)
+                    .with_ansi(false)
+                    .with_writer(crate::logging::BoundedWriterHandle(writer))
                     .try_init();
                 return;
             }

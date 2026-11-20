@@ -1,15 +1,4 @@
 use std::path::PathBuf;
-use std::sync::OnceLock;
-
-static ACTIVE_LOG_PATH: OnceLock<PathBuf> = OnceLock::new();
-
-pub fn set_active_log_path(path: PathBuf) -> Result<(), PathBuf> {
-    ACTIVE_LOG_PATH.set(path)
-}
-
-pub fn active_log_path() -> Option<&'static PathBuf> {
-    ACTIVE_LOG_PATH.get()
-}
 
 use crate::error::{AppError, AppResult};
 

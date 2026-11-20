@@ -222,11 +222,15 @@ impl ResolvedProfile {
             Some(path) => resolve_path(path, &env.cwd)?,
             None => runtime_dir.join("volatile.yaml"),
         };
-        let log = options
-            .log_path
-            .as_deref()
-            .map(|path| resolve_path(path, &env.cwd))
-            .transpose()?;
+        let log = match &options.log_path {
+            Some(path) => Some(resolve_path(path, &env.cwd)?),
+            // 在 OpenWrt / 非 systemd 环境（无 journald 托管）下，CLI 常驻默认将日志写入
+            // tmpfs 运行目录并启用体积封顶轮转，既保留排障现场又避免写穿闪存或无限膨胀。
+            None if env.preferences == PreferenceStore::Runtime && options.install_tracing => {
+                Some(runtime_dir.join("miao.log"))
+            }
+            None => None,
+        };
         let runtime = RuntimePaths::new(runtime_dir, &config_path).with_preferences(
             preference_dir.join(".last_proxy"),
             preference_dir.join(".node_select"),

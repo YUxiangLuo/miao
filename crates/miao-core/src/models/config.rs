@@ -128,6 +128,36 @@ impl ScheduledRefresh {
     }
 }
 
+/// 局域网办公工位档案（稳定层字段，随 `config.yaml` 持久化，修改不触发内核重载）。
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+pub struct TerminalRecord {
+    pub ip: String,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
+    pub department: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
+    pub note: Option<String>,
+}
+
+/// 多店铺/多应用局域网专属代理端口配置（HTTP + SOCKS5 mixed 入站）。
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+pub struct AccessPortConfig {
+    pub id: String,
+    pub name: String,
+    pub port: u16,
+    pub outbound: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
+    pub username: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
+    pub password: Option<String>,
+}
+
 /// Runtime-effective configuration.  This is deliberately separate from
 /// [`StableConfig`]: `node_select` and `route_mode` may have been overlaid by
 /// volatile preferences and must never overwrite their boot defaults in
@@ -142,6 +172,9 @@ pub struct Config {
     pub nodes: Vec<String>,
     #[serde(default)]
     pub custom_rules: Vec<String>,
+    /// 多店铺局域网专属端口入站配置（空列表省略以保持旧配置与缓存哈希兼容）。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub access_ports: Vec<AccessPortConfig>,
     /// MCP 端点（POST /mcp，JSON-RPC 工具接口）开关。
     /// Linux 面板绑 0.0.0.0，开启后局域网可达——默认关闭，按需显式开启。
     #[serde(default)]
@@ -189,6 +222,10 @@ pub struct StableConfig {
     pub nodes: Vec<String>,
     #[serde(default)]
     pub custom_rules: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub terminals: Vec<TerminalRecord>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub access_ports: Vec<AccessPortConfig>,
     #[serde(default)]
     pub mcp: bool,
     #[serde(default, skip_serializing_if = "ScheduledRefresh::is_default")]
@@ -237,8 +274,10 @@ impl From<&Config> for StableConfig {
             subs: config.subs.clone(),
             nodes: config.nodes.clone(),
             custom_rules: config.custom_rules.clone(),
+            terminals: Vec::new(),
+            access_ports: config.access_ports.clone(),
             mcp: config.mcp,
-            // 定时刷新只存在于稳定层（没有易变覆盖），不属于从 Config 投影的字段。
+            // 定时刷新与工位档案只存在于稳定层（没有易变覆盖）。
             scheduled_refresh: ScheduledRefresh::default(),
             node_select: config.node_select,
             max_multiplier: config.max_multiplier,
@@ -255,6 +294,7 @@ impl StableConfig {
             subs: self.subs.clone(),
             nodes: self.nodes.clone(),
             custom_rules: self.custom_rules.clone(),
+            access_ports: self.access_ports.clone(),
             mcp: self.mcp,
             node_select: self.node_select,
             max_multiplier: self.max_multiplier,
@@ -272,13 +312,15 @@ impl StableConfig {
 
     /// Apply low-frequency fields from the effective configuration while
     /// retaining the boot defaults that came from `config.yaml`.
-    /// `scheduled_refresh` 没有易变覆盖，直接保留稳定层现值。
+    /// `scheduled_refresh` 与 `terminals` 没有易变覆盖，直接保留稳定层现值。
     pub fn with_stable_fields_from(&self, config: &Config) -> Self {
         Self {
             port: config.port,
             subs: config.subs.clone(),
             nodes: config.nodes.clone(),
             custom_rules: config.custom_rules.clone(),
+            terminals: self.terminals.clone(),
+            access_ports: config.access_ports.clone(),
             mcp: config.mcp,
             scheduled_refresh: self.scheduled_refresh.clone(),
             node_select: self.node_select,
@@ -291,6 +333,14 @@ impl StableConfig {
     pub fn with_scheduled_refresh(&self, scheduled_refresh: ScheduledRefresh) -> Self {
         Self {
             scheduled_refresh,
+            ..self.clone()
+        }
+    }
+
+    /// 替换工位档案备注，其余稳定字段不变。
+    pub fn with_terminals(&self, terminals: Vec<TerminalRecord>) -> Self {
+        Self {
+            terminals,
             ..self.clone()
         }
     }
@@ -341,6 +391,7 @@ nodes: []
             node_select: Default::default(),
             max_multiplier: None,
             disabled_nodes: Default::default(),
+            ..Default::default()
         };
 
         let yaml = yaml_serde::to_string(&config).unwrap();
@@ -360,6 +411,7 @@ nodes: []
             node_select: Default::default(),
             max_multiplier: None,
             disabled_nodes: Default::default(),
+            ..Default::default()
         };
 
         let yaml = yaml_serde::to_string(&config).unwrap();

@@ -453,6 +453,7 @@ mod tests {
             node_select: Default::default(),
             max_multiplier: None,
             disabled_nodes: Default::default(),
+            ..Default::default()
         };
 
         assert_eq!(

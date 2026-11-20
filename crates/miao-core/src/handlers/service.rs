@@ -130,6 +130,7 @@ mod tests {
             node_select: Default::default(),
             max_multiplier: None,
             disabled_nodes: Default::default(),
+            ..Default::default()
         });
 
         let axum::response::Json(response) = get_status(State(state)).await;
@@ -181,6 +182,7 @@ mod tests {
             node_select: Default::default(),
             max_multiplier: None,
             disabled_nodes: Default::default(),
+            ..Default::default()
         });
 
         let axum::response::Json(response) = get_status(State(state)).await;

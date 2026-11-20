@@ -74,6 +74,13 @@ pub fn isolated_stopped_state(config: Config) -> (tempfile::TempDir, Arc<AppStat
     (root, state)
 }
 
+pub fn install_fake_kernel(state: &AppState) {
+    use std::os::unix::fs::PermissionsExt;
+    let kernel = state.runtime_paths.runtime_dir.join("sing-box");
+    std::fs::write(&kernel, FAKE_KERNEL).unwrap();
+    std::fs::set_permissions(&kernel, std::fs::Permissions::from_mode(0o755)).unwrap();
+}
+
 pub async fn reset_version_cache(state: &Arc<AppState>) {
     state
         .version_cache

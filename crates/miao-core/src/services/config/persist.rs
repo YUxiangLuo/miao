@@ -10,7 +10,9 @@ use std::sync::Arc;
 use crate::error::{AppError, AppResult};
 #[cfg(test)]
 use crate::models::StableConfig;
-use crate::models::{Config, NodeMultiplier, NodeSelect, ScheduledRefresh, VolatileConfig};
+use crate::models::{
+    Config, NodeMultiplier, NodeSelect, ScheduledRefresh, TerminalRecord, VolatileConfig,
+};
 use crate::state::AppState;
 
 const CACHE_MANIFEST_VERSION: u32 = 1;
@@ -71,6 +73,9 @@ fn runtime_input_sha256(config: &Config) -> AppResult<String> {
     if !disabled_nodes.is_empty() {
         value["disabled_nodes"] = serde_json::json!(disabled_nodes);
     }
+    if !config.access_ports.is_empty() {
+        value["access_ports"] = serde_json::json!(&config.access_ports);
+    }
     // 最高倍率仅影响自动 urltest 候选；manual 缓存与倍率偏好无关。
     // None 保持旧版输入哈希，既有“不限倍率”缓存无需因功能升级失效。
     if !config.node_select.is_manual() {
@@ -91,6 +96,11 @@ fn legacy_cache_compatibility(config: &Config) -> CacheCompatibility {
         return CacheCompatibility::Incompatible(
             "legacy cache cannot prove studio routing order or missing-outbound blocking"
                 .to_string(),
+        );
+    }
+    if !config.access_ports.is_empty() {
+        return CacheCompatibility::Incompatible(
+            "legacy cache cannot prove access port inbound routing or blocking".to_string(),
         );
     }
     CacheCompatibility::Legacy
@@ -509,6 +519,18 @@ pub async fn save_scheduled_refresh(
         .read()
         .await
         .with_scheduled_refresh(scheduled_refresh);
+    let yaml = yaml_serde::to_string(&stable)?;
+    write_file_transactional(&state.config_path, yaml.as_bytes()).await?;
+    *state.stable_config.write().await = stable;
+    Ok(())
+}
+
+/// 保存局域网工位备注档案（稳定层 config.yaml，不重启 sing-box）。调用方须持有 `config_update`。
+pub async fn save_terminals(
+    state: &Arc<AppState>,
+    terminals: Vec<TerminalRecord>,
+) -> AppResult<()> {
+    let stable = state.stable_config.read().await.with_terminals(terminals);
     let yaml = yaml_serde::to_string(&stable)?;
     write_file_transactional(&state.config_path, yaml.as_bytes()).await?;
     *state.stable_config.write().await = stable;

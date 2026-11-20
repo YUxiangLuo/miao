@@ -11,17 +11,19 @@ pub use subscriptions::{
 pub mod version;
 
 pub use api::{
-    ApiResponse, ConnectivityResult, DeleteRuleRequest, MaxMultiplierRequest, McpRequest,
-    NodeSelectRequest, RouteModeRequest, RuleInfo, RuleRequest, RuntimePhase, RuntimeWarning,
-    RuntimeWarningSeverity, ScheduledRefreshRequest, ScheduledRefreshStatus,
-    SetNodeDisabledRequest, StatusData, SubBatchRequest, SubBatchResult, SubNodeInfo, SubNodesInfo,
-    SubRequest, SubStatus, SubscriptionState, VergeImportItem, VergeImportResult,
+    AccessPortStatus, ApiResponse, AssignTerminalRequest, ConnectivityResult,
+    DeleteAccessPortRequest, DeleteRuleRequest, DeleteTerminalRequest, MaxMultiplierRequest,
+    McpRequest, NodeSelectRequest, RouteModeRequest, RuleInfo, RuleRequest, RuntimePhase,
+    RuntimeWarning, RuntimeWarningSeverity, SaveAccessPortRequest, ScheduledRefreshRequest,
+    ScheduledRefreshStatus, SetNodeDisabledRequest, StatusData, SubBatchRequest, SubBatchResult,
+    SubNodeInfo, SubNodesInfo, SubRequest, SubStatus, SubscriptionState, TerminalAssignMode,
+    TerminalSummary, UpsertTerminalRequest, VergeImportItem, VergeImportResult,
 };
 
 pub use api::{VpsDeployRequest, VpsDeployResponse};
 pub use config::{
-    Config, DisabledNode, NodeSelect, Region, RouteMode, ScheduledRefresh, StableConfig,
-    VolatileConfig, DEFAULT_PORT,
+    AccessPortConfig, Config, DisabledNode, NodeSelect, Region, RouteMode, ScheduledRefresh,
+    StableConfig, TerminalRecord, VolatileConfig, DEFAULT_PORT,
 };
 pub use multiplier::{node_multiplier, NodeMultiplier};
 pub use node::{
@@ -122,6 +124,14 @@ mod typescript_contract {
         push_decl::<BatchNodeFailure>(&mut output, &config);
         push_decl::<BatchNodeResult>(&mut output, &config);
         push_decl::<DeleteNodeRequest>(&mut output, &config);
+        push_decl::<TerminalSummary>(&mut output, &config);
+        push_decl::<UpsertTerminalRequest>(&mut output, &config);
+        push_decl::<DeleteTerminalRequest>(&mut output, &config);
+        push_decl::<TerminalAssignMode>(&mut output, &config);
+        push_decl::<AssignTerminalRequest>(&mut output, &config);
+        push_decl::<AccessPortStatus>(&mut output, &config);
+        push_decl::<SaveAccessPortRequest>(&mut output, &config);
+        push_decl::<DeleteAccessPortRequest>(&mut output, &config);
 
         while output.ends_with("\n\n") {
             output.pop();

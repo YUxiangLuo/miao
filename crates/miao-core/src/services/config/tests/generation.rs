@@ -25,6 +25,7 @@ fn collect_manual_outbounds_ignores_invalid_json_nodes() {
             node_select: Default::default(),
             max_multiplier: None,
             disabled_nodes: Default::default(),
+            ..Default::default()
         };
 
     let (outbounds, names) = collect_manual_outbounds(&config);
@@ -50,6 +51,7 @@ fn collect_manual_outbounds_preserves_hysteria2_without_default_bandwidth() {
             node_select: Default::default(),
             max_multiplier: None,
             disabled_nodes: Default::default(),
+            ..Default::default()
         };
 
     let (outbounds, names) = collect_manual_outbounds(&config);
@@ -145,6 +147,7 @@ fn build_sing_box_config_blocks_rules_with_missing_node() {
         node_select: Default::default(),
         max_multiplier: None,
         disabled_nodes: Default::default(),
+        ..Default::default()
     };
 
     let (built, skipped, _) = build_sing_box_config(
@@ -269,6 +272,7 @@ fn build_sing_box_config_merges_nodes_and_valid_custom_rules() {
         node_select: Default::default(),
         max_multiplier: None,
         disabled_nodes: Default::default(),
+        ..Default::default()
     };
 
     let my_outbounds = vec![json!({
@@ -432,6 +436,7 @@ fn build_sing_box_config_global_mode_removes_split_rules() {
         node_select: Default::default(),
         max_multiplier: None,
         disabled_nodes: Default::default(),
+        ..Default::default()
     };
 
     let my_outbounds = vec![json!({

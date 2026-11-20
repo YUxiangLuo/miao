@@ -265,22 +265,11 @@ async fn publish_kernel_ready(state: &AppState, generation: u64) -> AppResult<()
     Ok(())
 }
 
-fn open_log_stdio(log_path: &std::path::Path) -> Option<(std::fs::File, std::fs::File)> {
-    let stdout = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(log_path)
-        .ok()?;
-    let stderr = stdout.try_clone().ok()?;
-    Some((stdout, stderr))
-}
-
-fn configure_child_stdio(
-    command: &mut tokio::process::Command,
-    log_path: Option<&std::path::Path>,
-) {
-    if let Some((stdout, stderr)) = log_path.and_then(open_log_stdio) {
-        command.stdout(stdout).stderr(stderr);
+fn configure_child_stdio(command: &mut tokio::process::Command, piped: bool) {
+    if piped {
+        command
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
     } else {
         command
             .stdout(std::process::Stdio::inherit())
@@ -317,14 +306,15 @@ async fn spawn_and_probe_sing_box(
 
     // If start is cancelled between spawn and store, Drop must not leak the kernel.
     command.kill_on_drop(true);
-    configure_child_stdio(
-        &mut command,
-        crate::paths::active_log_path().map(PathBuf::as_path),
-    );
+    let log_writer = crate::logging::active_log_writer();
+    configure_child_stdio(&mut command, log_writer.is_some());
 
-    let child = command
+    let mut child = command
         .spawn()
         .map_err(|e| AppError::context("Failed to spawn sing-box process", e))?;
+    if let Some(writer) = log_writer {
+        crate::logging::spawn_child_log_drains(&mut child, writer);
+    }
 
     let pid = child.id();
     info!(pid = pid, "sing-box process spawned");

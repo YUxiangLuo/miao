@@ -22,6 +22,7 @@ pub struct NodeDisplayInfo {
     pub server_port: u16,
     pub node_type: String,
     pub sni: Option<String>,
+    pub detour: Option<String>,
 }
 
 fn parse_valid_port(value: &JsonValue) -> Option<u16> {
@@ -74,12 +75,20 @@ pub fn parse_node_json(node_str: &str) -> Result<(NodeDisplayInfo, JsonValue), S
         .filter(|s| !s.is_empty())
         .map(str::to_string);
 
+    let detour = v
+        .get("detour")
+        .and_then(JsonValue::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string);
+
     let info = NodeDisplayInfo {
         tag,
         server,
         server_port,
         node_type,
         sni,
+        detour,
     };
 
     Ok((info, v))

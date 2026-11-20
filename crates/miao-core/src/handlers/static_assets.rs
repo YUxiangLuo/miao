@@ -99,7 +99,7 @@ mod tests {
         assert_eq!(headers[0].0, axum::http::header::CACHE_CONTROL);
         assert_eq!(headers[0].1, "no-cache");
         assert!(html.to_lowercase().contains("<!doctype html>"));
-        assert!(html.contains("Miao 控制面板"));
+        assert!(html.contains("HarborGate"));
     }
 
     #[tokio::test]

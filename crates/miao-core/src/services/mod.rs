@@ -1,5 +1,6 @@
 pub mod commands;
 pub mod config;
+pub mod dhcp;
 pub mod mcp;
 pub mod node_parser;
 
