@@ -1,7 +1,8 @@
-import { For, Show, createMemo, omit, type Setter } from 'solid-js'
+import { Show, createMemo, omit, type Setter } from 'solid-js'
 import type { JSX } from '@solidjs/web'
 import { ICON } from '../../tokens'
 import { Button } from '../ui'
+import { SelectPopover, type SelectOption } from '../SelectPopover'
 import { buildNodeRequest } from '../../nodeForm'
 import {
   CIPHER_OPTIONS,
@@ -16,7 +17,6 @@ import {
   TUIC_UDP_RELAY_OPTIONS,
   VMESS_CIPHER_OPTIONS,
   type NodeForm,
-  type SelectOption,
 } from '../../utils'
 import type { NodeType } from '../../types/api'
 import { PlusIcon } from '../icons'
@@ -42,22 +42,27 @@ function TextField(props: TextFieldProps) {
   )
 }
 
-interface SelectFieldProps extends JSX.SelectHTMLAttributes<HTMLSelectElement> {
+interface SelectFieldProps {
   label: string
+  value: string
   options: SelectOption[]
+  disabled?: boolean
+  onChange: (value: string) => void
 }
 
 function SelectField(props: SelectFieldProps) {
-  const rest = omit(props, 'label', 'options')
   return (
-    <label class="field">
+    <div class="field">
       <span>{props.label}</span>
-      <select {...rest}>
-        <For each={props.options}>
-          {(option) => <option value={option.value}>{option.label}</option>}
-        </For>
-      </select>
-    </label>
+      <SelectPopover
+        ariaLabel={props.label}
+        value={props.value}
+        options={props.options}
+        disabled={props.disabled}
+        fullWidth
+        onChange={props.onChange}
+      />
+    </div>
   )
 }
 
@@ -92,6 +97,13 @@ export function ManualPane(props: ManualPaneProps) {
     && (!caps().tlsToggle || props.form.tls_enabled || Boolean(props.form.reality_public_key.trim()))
   )
   const pathTransport = () => ['ws', 'http', 'h2'].includes(props.form.transport_type)
+
+  const detourOptions = createMemo<SelectOption[]>(() => [
+    { value: '', label: '直连出境（不使用前置跳板）' },
+    ...(props.relayCandidates || [])
+      .filter((name) => name !== props.form.tag.trim())
+      .map((candidate) => ({ value: candidate, label: candidate })),
+  ])
 
   const handleNodeTypeChange = (value: NodeType) => {
     props.setNodeType(value)
@@ -135,7 +147,8 @@ export function ManualPane(props: ManualPaneProps) {
             label="协议"
             options={NODE_TYPE_OPTIONS}
             value={props.nodeType}
-            onChange={(event) => handleNodeTypeChange(event.currentTarget.value as NodeType)}
+            disabled={props.loading}
+            onChange={(value) => handleNodeTypeChange(value as NodeType)}
           />
         </div>
 
@@ -195,23 +208,22 @@ export function ManualPane(props: ManualPaneProps) {
         </Show>
 
         <div class="form-grid single">
-          <label class="field">
+          <div class="field">
             <span>
               {props.nodeType === 'socks'
                 ? '前置跳板中转（推荐：国内无法直连海外住宅 IP 时指定跳板）'
                 : '前置跳板中转（可选）'}
             </span>
-            <select
-              aria-label="前置跳板中转"
+            <SelectPopover
+              ariaLabel="前置跳板中转"
               value={props.form.detour}
-              onChange={(event) => updateString('detour', event.currentTarget.value)}
-            >
-              <option value="">直连出境（不使用前置跳板）</option>
-              <For each={(props.relayCandidates || []).filter((name) => name !== props.form.tag.trim())}>
-                {(candidate) => <option value={candidate}>{candidate}</option>}
-              </For>
-            </select>
-          </label>
+              options={detourOptions()}
+              disabled={props.loading}
+              searchPlaceholder="搜索跳板节点…"
+              fullWidth
+              onChange={(value) => updateString('detour', value)}
+            />
+          </div>
         </div>
 
         <Show when={caps().uuid}>
@@ -231,7 +243,8 @@ export function ManualPane(props: ManualPaneProps) {
               label="加密方式"
               options={asOptions(CIPHER_OPTIONS)}
               value={props.form.cipher}
-              onChange={(event) => updateString('cipher', event.currentTarget.value)}
+              disabled={props.loading}
+              onChange={(value) => updateString('cipher', value)}
             />
           </div>
         </Show>
@@ -256,7 +269,8 @@ export function ManualPane(props: ManualPaneProps) {
                     label="VMess security"
                     options={asOptions(VMESS_CIPHER_OPTIONS)}
                     value={props.form.vmess_cipher}
-                    onChange={(event) => updateString('vmess_cipher', event.currentTarget.value)}
+                    disabled={props.loading}
+                    onChange={(value) => updateString('vmess_cipher', value)}
                   />
                   <TextField
                     label="Alter ID"
@@ -277,13 +291,15 @@ export function ManualPane(props: ManualPaneProps) {
                     label="Flow"
                     options={VLESS_FLOW_OPTIONS}
                     value={props.form.flow}
-                    onChange={(event) => updateString('flow', event.currentTarget.value)}
+                    disabled={props.loading}
+                    onChange={(value) => updateString('flow', value)}
                   />
                   <SelectField
                     label="Packet encoding"
                     options={PACKET_ENCODING_OPTIONS}
                     value={props.form.packet_encoding}
-                    onChange={(event) => updateString('packet_encoding', event.currentTarget.value)}
+                    disabled={props.loading}
+                    onChange={(value) => updateString('packet_encoding', value)}
                   />
                 </div>
               </Show>
@@ -294,7 +310,8 @@ export function ManualPane(props: ManualPaneProps) {
                     label="Packet encoding"
                     options={PACKET_ENCODING_OPTIONS}
                     value={props.form.packet_encoding}
-                    onChange={(event) => updateString('packet_encoding', event.currentTarget.value)}
+                    disabled={props.loading}
+                    onChange={(value) => updateString('packet_encoding', value)}
                   />
                 </div>
               </Show>
@@ -311,7 +328,8 @@ export function ManualPane(props: ManualPaneProps) {
                     label="TLS 指纹"
                     options={CLIENT_FINGERPRINT_OPTIONS}
                     value={props.form.client_fingerprint}
-                    onChange={(event) => updateString('client_fingerprint', event.currentTarget.value)}
+                    disabled={props.loading}
+                    onChange={(value) => updateString('client_fingerprint', value)}
                   />
                 </div>
                 <div class="form-grid single">
@@ -355,7 +373,8 @@ export function ManualPane(props: ManualPaneProps) {
                     label="传输层"
                     options={TRANSPORT_OPTIONS}
                     value={props.form.transport_type}
-                    onChange={(event) => updateString('transport_type', event.currentTarget.value)}
+                    disabled={props.loading}
+                    onChange={(value) => updateString('transport_type', value)}
                   />
                 </div>
                 <Show when={pathTransport()}>
@@ -392,8 +411,8 @@ export function ManualPane(props: ManualPaneProps) {
                     label="混淆类型"
                     options={HYSTERIA2_OBFS_OPTIONS}
                     value={props.form.obfs_type}
-                    onChange={(event) => {
-                      const obfsType = event.currentTarget.value
+                    disabled={props.loading}
+                    onChange={(obfsType) => {
                       props.setForm((prev) => ({
                         ...prev,
                         obfs_type: obfsType,
@@ -419,13 +438,15 @@ export function ManualPane(props: ManualPaneProps) {
                     label="拥塞控制"
                     options={TUIC_CONGESTION_OPTIONS}
                     value={props.form.tuic_congestion_control}
-                    onChange={(event) => updateString('tuic_congestion_control', event.currentTarget.value)}
+                    disabled={props.loading}
+                    onChange={(value) => updateString('tuic_congestion_control', value)}
                   />
                   <SelectField
                     label="UDP relay mode"
                     options={TUIC_UDP_RELAY_OPTIONS}
                     value={props.form.tuic_udp_relay_mode}
-                    onChange={(event) => updateString('tuic_udp_relay_mode', event.currentTarget.value)}
+                    disabled={props.loading}
+                    onChange={(value) => updateString('tuic_udp_relay_mode', value)}
                   />
                 </div>
                 <div class="form-grid single">

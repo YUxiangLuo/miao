@@ -23,13 +23,13 @@ function stubMatchMedia() {
   window.matchMedia = globalThis.matchMedia
 }
 
-describe('HarborGate App Console integration', () => {
+describe('Harbor Studio Console integration', () => {
   afterEach(() => {
     rs.useRealTimers()
     rs.unstubAllGlobals()
   })
 
-  it('completes first-time SetupWizard onboarding and enters HarborGate Overview', async () => {
+  it('completes first-time SetupWizard onboarding and enters StudioView', async () => {
     let hasSub = false
     const fetchMock = rs.fn(async (input, init?: RequestInit) => {
       const url = String(input)
@@ -63,14 +63,15 @@ describe('HarborGate App Console integration', () => {
     const user = userEvent.setup()
     render(() => <App />)
 
-    expect(await screen.findByText('欢迎启用 HarborGate · 海港网关')).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: '初始化 Harbor 海港网关' })).toBeInTheDocument()
     await user.type(
       screen.getByPlaceholderText(/subscribe\?token=/),
       'https://pool.example.com/sub',
     )
-    await user.click(screen.getByRole('button', { name: '保存订阅并初始化网关' }))
+    await user.click(screen.getByRole('button', { name: '接入订阅并启动网关' }))
 
-    expect(await screen.findByRole('heading', { name: '网络总览' })).toBeInTheDocument()
+    expect(await screen.findByText('局域网入口')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '工作台' })).toHaveAttribute('aria-current', 'page')
   })
 
   it('degrades gracefully when connected to an un-upgraded router returning 404 on /api/terminals and /api/access-ports', async () => {
@@ -104,17 +105,17 @@ describe('HarborGate App Console integration', () => {
     const user = userEvent.setup()
     render(() => <App />)
 
-    expect(await screen.findByRole('heading', { name: '网络总览' })).toBeInTheDocument()
+    expect(await screen.findByText('局域网入口')).toBeInTheDocument()
     expect(await screen.findByText('192.168.8.180')).toBeInTheDocument()
 
-    await user.click(screen.getByRole('button', { name: /工位与终端/ }))
+    await user.click(screen.getByRole('button', { name: '终端与店铺' }))
     expect(await screen.findByText(/只读兼容模式/)).toBeInTheDocument()
 
-    await user.click(screen.getByRole('button', { name: /多店铺专属端口/ }))
+    await user.click(screen.getByRole('button', { name: /店铺端口/ }))
     expect(await screen.findByText(/尚未升级支持局域网多店铺专属端口/)).toBeInTheDocument()
   })
 
-  it('surfaces fail-closed anti-association alerts and creates a dedicated multi-store access port', async () => {
+  it('surfaces fail-closed circuit-breaker banner and creates a dedicated store port via SelectPopover', async () => {
     let ports = [
       {
         id: 'ap-20101',
@@ -133,7 +134,10 @@ describe('HarborGate App Console integration', () => {
       if (url === '/api/nodes') {
         return jsonResponse({
           success: true,
-          data: [nodeMock({ tag: 'us-isp-1', node_type: 'socks', detour: 'hk-01' })],
+          data: [
+            nodeMock({ tag: 'us-isp-1', node_type: 'socks', detour: 'hk-01' }),
+            nodeMock({ tag: 'jp-isp-2', node_type: 'socks' }),
+          ],
         })
       }
       if (url === '/api/rules' || url === '/api/terminals') {
@@ -161,7 +165,9 @@ describe('HarborGate App Console integration', () => {
         return jsonResponse({ success: true, data: { current: '0.50.0', latest: null, has_update: false } })
       }
       if (url === '/api/clash/proxies') {
-        return jsonResponse({ proxies: { proxy: { type: 'Selector', now: 'us-isp-1', all: ['us-isp-1'] } } })
+        return jsonResponse({
+          proxies: { proxy: { type: 'Selector', now: 'us-isp-1', all: ['us-isp-1', 'jp-isp-2'] } },
+        })
       }
       if (url === '/api/clash/connections') {
         return jsonResponse({ connections: [], uploadTotal: 0, downloadTotal: 0 })
@@ -175,35 +181,39 @@ describe('HarborGate App Console integration', () => {
     const user = userEvent.setup()
     render(() => <App />)
 
-    // Fail-closed alert visible on Overview
-    expect(await screen.findByText(/防关联离线熔断保护已生效/)).toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: '查看受阻店铺端口' }))
+    expect(await screen.findByText(/1 项独享绑定因目标专线离线已触发防关联熔断/)).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '查看终端与店铺' }))
 
-    expect(await screen.findByRole('heading', { name: '多店铺专属端口' })).toBeInTheDocument()
-    expect(screen.getByText('TikTok 英区老店')).toBeInTheDocument()
+    expect(await screen.findByText('TikTok 英区老店')).toBeInTheDocument()
 
-    // Create a second dedicated port
-    await user.click(screen.getByRole('button', { name: '新建店铺专属端口' }))
+    await user.click(screen.getByRole('button', { name: '新建店铺端口' }))
     await user.type(screen.getByPlaceholderText('例如：Amazon 美区一店'), 'Amazon 美区旗舰店')
+
+    await user.click(screen.getByRole('button', { name: '绑定独享出口' }))
+    await user.click(await screen.findByRole('option', { name: /jp-isp-2/ }))
+
     await user.click(screen.getByRole('button', { name: '创建并启用端口' }))
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
         '/api/access-ports',
-        expect.objectContaining({ method: 'POST' }),
+        expect.objectContaining({
+          method: 'POST',
+          body: expect.stringContaining('"outbound":"jp-isp-2"'),
+        }),
       )
     })
     expect(await screen.findByText('Amazon 美区旗舰店')).toBeInTheDocument()
   })
 
-  it('assigns workstation seat policy atomically and switches route mode with confirmation in SystemView', async () => {
+  it('assigns workstation seat policy, controls engine/route mode via GatewayPopover, and navigates via CommandPalette (⌘K)', async () => {
     let routeMode = 'rule'
     const fetchMock = rs.fn(async (input, init?: RequestInit) => {
       const url = String(input)
       if (url === '/api/status') {
         return jsonResponse({
           success: true,
-          data: statusMock({ route_mode: routeMode as 'rule' | 'global' }),
+          data: statusMock({ running: true, ready: true, route_mode: routeMode as 'rule' | 'global' }),
         })
       }
       if (url === '/api/subs') return jsonResponse({ success: true, data: [subMock()] })
@@ -241,9 +251,10 @@ describe('HarborGate App Console integration', () => {
     const user = userEvent.setup()
     render(() => <App />)
 
-    await user.click(await screen.findByRole('button', { name: /工位与终端/ }))
-    const seatSelect = await screen.findByRole('combobox', { name: /分配 王财务/ })
-    await user.selectOptions(seatSelect, 'block_overseas')
+    await user.click(await screen.findByRole('button', { name: '终端与店铺' }))
+    const seatPicker = await screen.findByRole('button', { name: /分配 王财务 \(192\.168\.8\.214\) 出口/ })
+    await user.click(seatPicker)
+    await user.click(await screen.findByRole('option', { name: /仅限国内办公/ }))
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
@@ -255,8 +266,12 @@ describe('HarborGate App Console integration', () => {
       )
     })
 
-    await user.click(screen.getByRole('button', { name: /系统与运维/ }))
-    fireEvent.click(await screen.findByRole('button', { name: /全量出海排障模式/ }))
+    // Open GatewayPopover from topbar status pill
+    await user.click(screen.getByRole('button', { name: /运行中/ }))
+    expect(await screen.findByRole('dialog', { name: '网关引擎控制' })).toBeInTheDocument()
+    expect(screen.getByRole('switch', { name: 'MCP 端点开关' })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '全量出海排障' }))
     flush()
     expect(await screen.findByRole('dialog', { name: '切换为全局代理' })).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: '确认' }))
@@ -270,5 +285,14 @@ describe('HarborGate App Console integration', () => {
         }),
       )
     })
+
+    // Open CommandPalette via ⌘K / Ctrl+K shortcut and jump to 全球线路
+    fireEvent.keyDown(window, { key: 'k', ctrlKey: true })
+    expect(await screen.findByRole('dialog', { name: '全局命令面板' })).toBeInTheDocument()
+    await user.type(screen.getByRole('textbox', { name: '搜索命令或节点' }), '全球线路')
+    await user.click(await screen.findByRole('option', { name: /前往 全球线路/ }))
+
+    expect(await screen.findByRole('region', { name: '独享静态 IP' })).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: '公共出海池' })).toBeInTheDocument()
   })
 })

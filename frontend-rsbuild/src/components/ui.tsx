@@ -6,8 +6,8 @@ import type { Toast } from '../hooks/useApi'
 import { CheckIcon, CircleAlertIcon, CircleXIcon, LoaderCircleIcon, XIcon } from './icons'
 
 /**
- * HarborGate · 海港网关 几何港门徽标（无吉祥物）：
- * 深海岩蓝港湾底座 + 双侧航道柱门 H 结构 + 领航青蓝横梁与防关联绿航标。
+ * Harbor · 现代轻量工作室几何徽标：
+ * 纯粹炭黑墨色圆角底座 + 暖纸白信号桥架构 + 克制绿松石在线信标点。
  */
 export function LogoIcon(props: { size?: number; class?: string }) {
   const size = () => props.size ?? 30
@@ -15,18 +15,19 @@ export function LogoIcon(props: { size?: number; class?: string }) {
     <svg
       width={size()}
       height={size()}
-      viewBox="0 0 64 64"
+      viewBox="0 0 512 512"
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
       class={classNames('brand-icon', props.class)}
       aria-hidden="true"
     >
-      <rect class="logo-frame" x="3" y="3" width="58" height="58" rx="14" fill="#0F172A" stroke="#1E293B" stroke-width="2" />
-      <path d="M16 15H23.5V49H16V15Z" fill="#F8FAFC" />
-      <path d="M40.5 15H48V49H40.5V15Z" fill="#F8FAFC" />
-      <path d="M23.5 28.5H40.5V35H23.5V28.5Z" fill="#38BDF8" />
-      <circle cx="32" cy="19.5" r="3" fill="#0EA5E9" />
-      <path d="M27.5 42.5H36.5L32 48.5L27.5 42.5Z" fill="#10B981" />
+      <rect class="logo-frame" width="512" height="512" rx="116" fill="#18181B" />
+      <rect x="18" y="18" width="476" height="476" rx="98" stroke="#FFFFFF" stroke-opacity="0.12" stroke-width="6" />
+      <rect x="132" y="128" width="52" height="256" rx="14" fill="#F7F6F3" />
+      <rect x="328" y="128" width="52" height="256" rx="14" fill="#F7F6F3" />
+      <rect x="176" y="234" width="160" height="44" rx="8" fill="#F7F6F3" />
+      <circle cx="354" cy="154" r="28" fill="#18181B" />
+      <circle cx="354" cy="154" r="17" fill="#10B981" />
     </svg>
   )
 }

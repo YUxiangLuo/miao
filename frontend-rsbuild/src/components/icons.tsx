@@ -462,3 +462,44 @@ export function ArrowRightIcon(props: IconProps) {
     </SvgIcon>
   )
 }
+
+export function ChevronRightIcon(props: IconProps) {
+  return (
+    <SvgIcon {...props}>
+      <path d="m9 18 6-6-6-6" />
+    </SvgIcon>
+  )
+}
+
+export function CommandIcon(props: IconProps) {
+  return (
+    <SvgIcon {...props}>
+      <path d="M15 6v12a3 3 0 1 0 3-3H6a3 3 0 1 0 3 3V6a3 3 0 1 0-3 3h12a3 3 0 1 0-3-3" />
+    </SvgIcon>
+  )
+}
+
+export function CornerDownLeftIcon(props: IconProps) {
+  return (
+    <SvgIcon {...props}>
+      <polyline points="9 10 4 15 9 20" />
+      <path d="M20 4v7a4 4 0 0 1-4 4H4" />
+    </SvgIcon>
+  )
+}
+
+export function SlidersIcon(props: IconProps) {
+  return (
+    <SvgIcon {...props}>
+      <line x1="21" x2="14" y1="4" y2="4" />
+      <line x1="10" x2="3" y1="4" y2="4" />
+      <line x1="21" x2="12" y1="12" y2="12" />
+      <line x1="8" x2="3" y1="12" y2="12" />
+      <line x1="21" x2="16" y1="20" y2="20" />
+      <line x1="12" x2="3" y1="20" y2="20" />
+      <line x1="14" x2="14" y1="2" y2="6" />
+      <line x1="8" x2="8" y1="10" y2="14" />
+      <line x1="16" x2="16" y1="18" y2="22" />
+    </SvgIcon>
+  )
+}

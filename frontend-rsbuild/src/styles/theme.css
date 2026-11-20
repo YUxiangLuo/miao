@@ -1,99 +1,153 @@
+/* Harbor Studio Design Tokens — Warm Paper & Ink + Neutral Carbon Dark */
+
 :root,
 :root[data-theme="light"] {
   color-scheme: light;
-  --bg: #f4f6f9;
-  --surface: #ffffff;
-  --surface-subtle: #f8fafc;
-  --surface-muted: #f1f5f9;
-  --surface-hover: #eff6ff;
 
-  --sidebar-bg: #0f172a;
-  --sidebar-surface: #1e293b;
-  --sidebar-border: rgba(148, 163, 184, 0.16);
-  --sidebar-text: #f8fafc;
-  --sidebar-muted: #94a3b8;
-  --sidebar-active-bg: rgba(14, 165, 233, 0.16);
-  --sidebar-active-text: #38bdf8;
+  /* Core Warm Paper Surfaces */
+  --bg-canvas: #F7F6F3;
+  --bg-surface: #FFFFFF;
+  --bg-subtle: #FAF9F7;
+  --bg-well: #EFECE6;
+  --bg-hover: rgba(24, 24, 27, 0.035);
+  --topbar-bg: rgba(247, 246, 243, 0.84);
 
-  --text: #0f172a;
-  --text-secondary: #334155;
-  --text-muted: #64748b;
-  --border: #e2e8f0;
-  --border-strong: #cbd5e1;
+  /* Crisp Ink Typography */
+  --ink: #18181B;
+  --ink-secondary: #52525B;
+  --ink-muted: #8A8884;
 
-  --accent: #0284c7;
-  --accent-hover: #0369a1;
-  --accent-soft: #e0f2fe;
-  --accent-text: #0369a1;
+  /* Hairlines & Structural Borders */
+  --hairline: rgba(24, 24, 27, 0.08);
+  --border-strong: rgba(24, 24, 27, 0.15);
+  --border-focus: #18181B;
 
-  --emerald: #059669;
-  --emerald-soft: #d1fae5;
-  --emerald-text: #065f46;
+  /* Primary Studio CTA (Matte Ink) */
+  --cta-bg: #18181B;
+  --cta-fg: #FFFFFF;
+  --cta-hover: #27272A;
 
-  --amber: #d97706;
-  --amber-soft: #fef3c7;
-  --amber-text: #92400e;
+  /* Restrained Semantic Signal Accents + 10% Alpha Soft Tints */
+  --signal-emerald: #10B981;
+  --signal-emerald-soft: rgba(16, 185, 129, 0.10);
+  --signal-emerald-text: #047857;
 
-  --danger: #dc2626;
-  --danger-hover: #b91c1c;
-  --danger-soft: #fee2e2;
-  --danger-text: #991b1b;
+  --signal-cobalt: #2563EB;
+  --signal-cobalt-soft: rgba(37, 99, 235, 0.10);
+  --signal-cobalt-text: #1D4ED8;
 
-  --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.04);
-  --shadow-md: 0 4px 12px rgba(15, 23, 42, 0.07);
-  --shadow-lg: 0 16px 40px rgba(15, 23, 42, 0.16);
+  --signal-amber: #D97706;
+  --signal-amber-soft: rgba(217, 119, 6, 0.10);
+  --signal-amber-text: #B45309;
 
-  --radius-sm: 6px;
+  --signal-crimson: #E11D48;
+  --signal-crimson-soft: rgba(225, 29, 72, 0.10);
+  --signal-crimson-text: #BE123C;
+  --signal-crimson-hover: #BE123C;
+
+  /* Shared Component Aliases */
+  --bg: var(--bg-canvas);
+  --surface: var(--bg-surface);
+  --surface-subtle: var(--bg-subtle);
+  --surface-muted: var(--bg-well);
+  --surface-hover: var(--bg-hover);
+  --text: var(--ink);
+  --text-secondary: var(--ink-secondary);
+  --text-muted: var(--ink-muted);
+  --border: var(--hairline);
+
+  --accent: var(--signal-cobalt);
+  --accent-hover: #1D4ED8;
+  --accent-soft: var(--signal-cobalt-soft);
+  --accent-text: var(--signal-cobalt-text);
+
+  --emerald: var(--signal-emerald);
+  --emerald-soft: var(--signal-emerald-soft);
+  --emerald-text: var(--signal-emerald-text);
+
+  --amber: var(--signal-amber);
+  --amber-soft: var(--signal-amber-soft);
+  --amber-text: var(--signal-amber-text);
+
+  --danger: var(--signal-crimson);
+  --danger-hover: var(--signal-crimson-hover);
+  --danger-soft: var(--signal-crimson-soft);
+  --danger-text: var(--signal-crimson-text);
+
+  /* Architectural Grid & Elevation */
+  --grid-dot: rgba(24, 24, 27, 0.04);
+  --focus-ring: rgba(24, 24, 27, 0.10);
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.02);
+  --shadow-sm: 0 1px 2px rgba(24, 24, 27, 0.05);
+  --shadow-md: 0 6px 20px rgba(24, 24, 27, 0.08);
+  --shadow-lg: 0 16px 40px rgba(24, 24, 27, 0.14);
+  --shadow-xl: 0 24px 60px rgba(24, 24, 27, 0.22);
+
+  /* Radii & Type Scale */
+  --radius-xs: 5px;
+  --radius-sm: 7px;
   --radius-md: 10px;
-  --radius-lg: 14px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
 
-  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
-  --font-mono: "JetBrains Mono", "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", "Microsoft YaHei", sans-serif;
+  --font-mono: "JetBrains Mono", "SFMono-Regular", ui-monospace, Consolas, "Liberation Mono", Menlo, monospace;
 }
 
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --bg: #0b1120;
-  --surface: #111827;
-  --surface-subtle: #162033;
-  --surface-muted: #1e293b;
-  --surface-hover: #1e293b;
 
-  --sidebar-bg: #070d19;
-  --sidebar-surface: #111827;
-  --sidebar-border: rgba(148, 163, 184, 0.14);
-  --sidebar-text: #f8fafc;
-  --sidebar-muted: #94a3b8;
-  --sidebar-active-bg: rgba(56, 189, 248, 0.16);
-  --sidebar-active-text: #38bdf8;
+  /* Neutral Carbon Dark Surfaces */
+  --bg-canvas: #111113;
+  --bg-surface: #18181B;
+  --bg-subtle: #1D1D21;
+  --bg-well: #242429;
+  --bg-hover: rgba(255, 255, 255, 0.04);
+  --topbar-bg: rgba(17, 17, 19, 0.84);
 
-  --text: #f1f5f9;
-  --text-secondary: #cbd5e1;
-  --text-muted: #94a3b8;
-  --border: #1e293b;
-  --border-strong: #334155;
+  /* Crisp Light Ink on Carbon */
+  --ink: #F4F4F5;
+  --ink-secondary: #A1A1AA;
+  --ink-muted: #71717A;
 
-  --accent: #0ea5e9;
-  --accent-hover: #38bdf8;
-  --accent-soft: rgba(14, 165, 233, 0.16);
-  --accent-text: #38bdf8;
+  /* Hairlines & Structural Borders */
+  --hairline: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.15);
+  --border-focus: #F4F4F5;
 
-  --emerald: #10b981;
-  --emerald-soft: rgba(16, 185, 129, 0.16);
-  --emerald-text: #34d399;
+  /* Primary Studio CTA (Soft Warm White) */
+  --cta-bg: #F4F4F5;
+  --cta-fg: #111113;
+  --cta-hover: #E4E4E7;
 
-  --amber: #f59e0b;
-  --amber-soft: rgba(245, 158, 11, 0.16);
-  --amber-text: #fbbf24;
+  /* Restrained Semantic Signal Accents in Carbon Mode */
+  --signal-emerald: #10B981;
+  --signal-emerald-soft: rgba(16, 185, 129, 0.12);
+  --signal-emerald-text: #34D399;
 
-  --danger: #ef4444;
-  --danger-hover: #f87171;
-  --danger-soft: rgba(239, 68, 68, 0.16);
-  --danger-text: #fca5a5;
+  --signal-cobalt: #2563EB;
+  --signal-cobalt-soft: rgba(37, 99, 235, 0.15);
+  --signal-cobalt-text: #60A5FA;
 
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.25);
-  --shadow-md: 0 6px 18px rgba(0, 0, 0, 0.35);
-  --shadow-lg: 0 20px 48px rgba(0, 0, 0, 0.55);
+  --signal-amber: #D97706;
+  --signal-amber-soft: rgba(217, 119, 6, 0.14);
+  --signal-amber-text: #FBBF24;
+
+  --signal-crimson: #E11D48;
+  --signal-crimson-soft: rgba(225, 29, 72, 0.14);
+  --signal-crimson-text: #FDA4AF;
+  --signal-crimson-hover: #F43F5E;
+
+  --accent-hover: #3B82F6;
+
+  /* Architectural Grid & Elevation */
+  --grid-dot: rgba(255, 255, 255, 0.04);
+  --focus-ring: rgba(244, 244, 245, 0.14);
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.28);
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.38);
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.48);
+  --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.60);
+  --shadow-xl: 0 24px 60px rgba(0, 0, 0, 0.72);
 }
 
 *,
@@ -107,12 +161,14 @@ body {
   margin: 0;
   padding: 0;
   min-height: 100%;
-  background: var(--bg);
-  color: var(--text);
+  background: var(--bg-canvas);
+  color: var(--ink);
   font-family: var(--font-sans);
-  font-size: 14px;
+  font-size: 13.5px;
   line-height: 1.5;
+  letter-spacing: -0.006em;
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 button,
@@ -121,6 +177,14 @@ select,
 textarea {
   font: inherit;
   color: inherit;
+}
+
+button:focus-visible,
+a:focus-visible,
+summary:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 2px;
 }
 
 .num {
@@ -132,6 +196,30 @@ textarea {
   font-variant-numeric: tabular-nums;
 }
 
+.truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.brand-icon {
+  flex-shrink: 0;
+  display: inline-block;
+  vertical-align: middle;
+}
+
 @keyframes spin {
   to {
     transform: rotate(360deg);
@@ -139,5 +227,5 @@ textarea {
 }
 
 .spin {
-  animation: spin 0.9s linear infinite;
+  animation: spin 0.85s linear infinite;
 }

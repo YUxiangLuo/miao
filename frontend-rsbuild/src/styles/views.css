@@ -1,314 +1,395 @@
-/* HarborGate Six Enterprise Views, Drawers & Setup Wizard */
+/* Harbor Studio Views — Signal Flow Hero, Endpoints, Routes, Pulse & Onboarding */
 
-/* KPI Grid (Overview) */
-.hg-kpi-grid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 14px;
+/* 1. StudioView — 3-Stage Live Signal Flow Canvas */
+.signal-hero {
+  background-color: var(--bg-surface);
+  background-image: radial-gradient(var(--grid-dot) 1px, transparent 1px);
+  background-size: 16px 16px;
+  position: relative;
 }
 
-.hg-kpi-card {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  padding: 16px 18px;
+.signal-grid,
+.signal-stage-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr) minmax(0, 1fr);
+  align-items: stretch;
+  gap: 0;
+}
+
+.signal-stage {
+  padding: 20px 22px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  box-shadow: var(--shadow-sm);
+  justify-content: space-between;
+  gap: 14px;
+  min-width: 0;
 }
 
-.hg-kpi-top {
+.signal-stage-head,
+.signal-label {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  color: var(--text-muted);
-  font-size: 12.5px;
-  font-weight: 600;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ink-muted);
 }
 
-.hg-kpi-value {
-  font-size: 24px;
+.signal-metric,
+.signal-primary {
+  font-size: 20px;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+  line-height: 1.3;
+  font-variant-numeric: tabular-nums;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.signal-stage-foot,
+.signal-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--ink-secondary);
+}
+
+.signal-core {
+  border-left: 1px solid var(--hairline);
+  border-right: 1px solid var(--hairline);
+  background: var(--bg-subtle);
+  position: relative;
+}
+
+@keyframes signalWireFlow {
+  to {
+    stroke-dashoffset: -24;
+  }
+}
+
+.signal-wire-svg {
+  width: 100%;
+  height: 36px;
+  display: block;
+  overflow: visible;
+}
+
+.signal-wire-svg .signal-flow-line,
+.signal-wire-svg .flow-active,
+.signal-wire-svg.active path[stroke-dasharray],
+.signal-wire-svg.ready path[stroke-dasharray],
+.signal-wire-flow {
+  animation: signalWireFlow 1.4s linear infinite;
+}
+
+.signal-throughput {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.signal-split-bar {
+  width: 100%;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--bg-well);
+  overflow: hidden;
+  display: flex;
+  gap: 2px;
+}
+
+.signal-split-proxy,
+.signal-split-overseas {
+  height: 100%;
+  background: var(--signal-cobalt);
+  border-radius: 999px;
+  transition: width 0.3s ease;
+}
+
+.signal-split-direct,
+.signal-split-domestic {
+  height: 100%;
+  background: var(--signal-emerald);
+  border-radius: 999px;
+  transition: width 0.3s ease;
+}
+
+.signal-split-meta,
+.signal-split-legend {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--ink-secondary);
+}
+
+/* Studio Dual Ledgers */
+.studio-dual-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.app-mark {
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  font-size: 10.5px;
   font-weight: 700;
   letter-spacing: -0.02em;
-  color: var(--text);
-  line-height: 1.2;
-}
-
-.hg-kpi-foot {
-  font-size: 12px;
-  color: var(--text-muted);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.hg-overview-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
-  gap: 16px;
-}
-
-/* Platform Matrix */
-.hg-platform-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 230px), 1fr));
-  gap: 10px;
-}
-
-.hg-platform-card {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 12px 14px;
-  border-radius: 8px;
-  border: 1px solid var(--border);
-  background: var(--surface-subtle);
-  min-width: 0;
-}
-
-.hg-policy-preset-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 290px), 1fr));
-  gap: 12px;
-}
-
-.hg-policy-preset-card {
-  flex-direction: column;
-  align-items: stretch;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.hg-policy-preset-title-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  min-width: 0;
-}
-
-.hg-policy-preset-domain {
-  margin-top: 0;
-  padding: 1px 6px;
-  border-radius: 4px;
-  background: var(--surface-muted);
-  font-size: 11px;
-  white-space: nowrap;
-  flex-shrink: 0;
-}
-
-.hg-policy-preset-select {
-  width: 100%;
-}
-
-.hg-platform-left {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-width: 0;
-}
-
-.hg-platform-mark {
-  width: 32px;
-  height: 32px;
-  border-radius: 8px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  color: #ffffff;
-  font-size: 11px;
-  font-weight: 700;
+  color: #FFFFFF;
+  background: var(--ink);
   flex-shrink: 0;
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.16);
 }
 
-.hg-platform-name {
-  font-size: 13px;
-  font-weight: 600;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.hg-platform-meta {
-  font-size: 11.5px;
-  color: var(--text-muted);
-}
-
-/* Terminals & Access Ports Cells */
-.hg-entity-primary {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-  font-weight: 600;
-  color: var(--text);
-}
-
-.hg-entity-primary > span:first-child {
-  white-space: nowrap;
-}
-
-.hg-table td.num {
-  white-space: nowrap;
-}
-
-.hg-entity-sub {
-  font-size: 12px;
-  color: var(--text-muted);
-  margin-top: 2px;
-}
-
-.hg-platform-tags {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  flex-wrap: wrap;
-}
-
-.hg-inline-actions {
-  display: flex;
+/* 2. EndpointsView — LAN Devices & Store Proxy Ports */
+.endpoint-code-pill {
+  display: inline-flex;
   align-items: center;
   gap: 6px;
-  flex-wrap: nowrap;
-}
-
-.hg-inline-actions .hg-select {
-  width: 216px;
-  max-width: 216px;
-  flex: 0 1 216px;
-}
-
-/* Architecture Guide Strip in AccessPortsView */
-.hg-arch-banner {
-  background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
-  color: #f8fafc;
-  border-radius: var(--radius-md);
-  padding: 18px 22px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 20px;
-  flex-wrap: wrap;
-}
-
-.hg-arch-banner h2 {
-  margin: 0 0 5px;
-  font-size: 16px;
-  font-weight: 700;
-}
-
-.hg-arch-banner p {
-  margin: 0;
-  font-size: 12.5px;
-  color: #cbd5e1;
-  max-width: 780px;
-  line-height: 1.6;
-}
-
-.hg-arch-steps {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-  margin-top: 10px;
-}
-
-.hg-arch-step {
-  padding: 4px 10px;
+  padding: 2px 8px;
   border-radius: 6px;
-  background: rgba(56, 189, 248, 0.14);
-  border: 1px solid rgba(56, 189, 248, 0.3);
-  color: #e0f2fe;
+  border: 1px solid var(--hairline);
+  background: var(--bg-subtle);
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
   font-size: 12px;
-  font-weight: 500;
-}
-
-/* Routing Priority Funnel (PoliciesView) */
-.hg-priority-bar {
-  display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 10px;
-}
-
-.hg-priority-step {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: 12px 14px;
-}
-
-.hg-priority-num {
-  font-size: 11px;
-  font-weight: 700;
-  color: var(--accent-text);
-  text-transform: uppercase;
-}
-
-.hg-priority-title {
-  font-size: 13px;
-  font-weight: 700;
-  margin-top: 3px;
-}
-
-.hg-priority-desc {
-  font-size: 11.5px;
-  color: var(--text-muted);
-  margin-top: 3px;
-}
-
-/* Shared Pool Candidate Nodes Grid */
-.hg-pool-nodes-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 230px), 1fr));
-  gap: 8px;
-  max-height: 360px;
-  overflow-y: auto;
-  padding-right: 2px;
-}
-
-.hg-pool-node-btn {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 9px 12px;
-  border-radius: 8px;
-  border: 1px solid var(--border);
-  background: var(--surface-subtle);
-  text-align: left;
   cursor: pointer;
-  min-width: 0;
+  white-space: nowrap;
   transition: border-color 0.15s ease, background-color 0.15s ease;
 }
 
-.hg-pool-node-btn:hover:not(:disabled) {
-  border-color: var(--accent);
+.endpoint-code-pill:hover {
+  border-color: var(--border-strong);
+  background: var(--bg-well);
 }
 
-.hg-pool-node-btn.selected {
-  border-color: var(--accent);
-  background: var(--accent-soft);
+.endpoint-picker-wrap {
+  width: 210px;
+  max-width: 100%;
+  flex-shrink: 0;
 }
 
-.hg-pool-node-name {
+/* Keep right-aligned row pickers inside viewport on narrower desktops */
+@media (max-width: 1240px) {
+  .endpoint-picker-wrap .picker-popover:not(.align-left) {
+    left: auto;
+    right: 0;
+  }
+}
+
+/* 3. RoutesView — Static IP Relay Chains, Subscriptions & Pool Matrix */
+.chain-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: var(--bg-subtle);
+  border: 1px solid var(--hairline);
+  font-size: 11.5px;
+  color: var(--ink-secondary);
+  margin-top: 4px;
+}
+
+.chain-pill.danger {
+  background: var(--signal-crimson-soft);
+  border-color: rgba(225, 29, 72, 0.25);
+  color: var(--signal-crimson-text);
+}
+
+.sub-strip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.surface-box > .sub-strip {
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--hairline);
+  background: var(--bg-subtle);
+}
+
+.sub-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 30px;
+  padding: 0 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-surface);
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  max-width: 100%;
+  transition: border-color 0.14s ease, background-color 0.14s ease;
+}
+
+.sub-chip:has(.icon-button) {
+  padding-right: 5px;
+}
+
+.sub-chip:hover {
+  border-color: var(--ink-muted);
+  background: var(--bg-subtle);
+}
+
+.node-matrix {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 210px), 1fr));
+  gap: 8px;
+}
+
+.node-cell {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  height: 38px;
+  padding: 0 11px;
+  border-radius: 8px;
+  border: 1px solid var(--hairline);
+  background: var(--bg-subtle);
+  color: var(--ink);
   font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+  min-width: 0;
+  text-align: left;
+  transition: border-color 0.14s ease, background-color 0.14s ease, box-shadow 0.14s ease;
+}
+
+.node-cell:hover:not(:disabled) {
+  border-color: var(--border-strong);
+  background: var(--bg-surface);
+}
+
+.node-cell.selected {
+  background: var(--bg-surface);
+  border-color: var(--ink);
+  box-shadow: 0 0 0 1px var(--ink);
   font-weight: 600;
+}
+
+.node-cell:disabled {
+  cursor: default;
+}
+
+.node-cell-main,
+.node-cell > span:first-child:not(.mono-tag):not(.latency-text) {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-/* Virtualized Connections List (AuditView) */
+.node-cell-name,
+.node-cell-main > span:not(.mono-tag):not(.status-dot) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.latency-text {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 11.5px;
+  color: var(--ink-muted);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.latency-text.fast {
+  color: var(--signal-emerald-text);
+}
+
+.latency-text.medium {
+  color: var(--signal-amber-text);
+}
+
+.latency-text.slow,
+.latency-text.timeout {
+  color: var(--signal-crimson-text);
+}
+
+/* 4. PulseView — 5-Stage Priority Strip & Virtualized Connection Stream */
+.priority-strip {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 10px;
+  padding: 10px 16px;
+  border-radius: 10px;
+  border: 1px solid var(--hairline);
+  background: var(--bg-surface);
+  font-size: 12.5px;
+  color: var(--ink-secondary);
+}
+
+.priority-stage,
+.priority-step,
+.priority-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 500;
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+.priority-num,
+.priority-index {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ink-muted);
+}
+
+.priority-sep,
+.priority-arrow {
+  color: var(--ink-muted);
+  font-size: 12px;
+  user-select: none;
+}
+
+/* Virtualized Connections (Must keep 60px item height matching tokens.ts) */
 .conn-rows {
   height: calc(100vh - 280px);
   min-height: 380px;
   overflow-y: auto;
+  overflow-x: hidden;
   position: relative;
-  padding: 4px;
+  padding: 8px;
 }
 
 .conn-virtual-content {
@@ -327,10 +408,16 @@
   height: 60px;
   padding: 8px 14px;
   border-radius: 8px;
-  border: 1px solid var(--border);
-  background: var(--surface);
+  border: 1px solid var(--hairline);
+  background: var(--bg-subtle);
   display: flex;
   align-items: center;
+  transition: border-color 0.14s ease, background-color 0.14s ease;
+}
+
+.conn-row.active {
+  background: var(--bg-surface);
+  border-color: var(--border-strong);
 }
 
 .conn-row-main {
@@ -342,15 +429,15 @@
 }
 
 .site-icon {
-  width: 30px;
-  height: 30px;
+  width: 28px;
+  height: 28px;
   border-radius: 7px;
-  background: var(--surface-muted);
-  color: var(--text-secondary);
+  background: var(--bg-well);
+  color: var(--ink-secondary);
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 12px;
+  font-size: 11.5px;
   font-weight: 700;
   flex-shrink: 0;
 }
@@ -360,11 +447,13 @@
   min-width: 0;
   display: flex;
   flex-direction: column;
+  gap: 1px;
 }
 
 .conn-row-title {
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 500;
+  color: var(--ink);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -372,21 +461,44 @@
 
 .conn-row-sub {
   font-size: 11.5px;
-  color: var(--text-muted);
+  color: var(--ink-muted);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .connection-outbound-chip {
-  background: var(--accent-soft);
-  color: var(--accent-text);
+  background: var(--bg-well);
+  color: var(--ink-secondary);
+  flex-shrink: 0;
+  max-width: 210px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.connection-outbound-code {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.25;
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: var(--bg-surface);
+  color: var(--ink-secondary);
+  border: 1px solid var(--hairline);
   flex-shrink: 0;
 }
 
+.connection-outbound-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
 .connection-outbound-chip.direct {
-  background: var(--emerald-soft);
-  color: var(--emerald-text);
+  background: var(--signal-emerald-soft);
+  color: var(--signal-emerald-text);
 }
 
 .conn-row-speed,
@@ -395,8 +507,11 @@
   flex-direction: column;
   align-items: flex-end;
   gap: 2px;
-  font-size: 11.5px;
-  min-width: 88px;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+  color: var(--ink-secondary);
+  min-width: 84px;
   flex-shrink: 0;
 }
 
@@ -412,14 +527,94 @@
 }
 
 .tone-download svg {
-  color: var(--emerald);
+  color: var(--signal-emerald);
 }
 
 .tone-upload svg {
-  color: var(--accent);
+  color: var(--signal-cobalt);
 }
 
-/* Node / Sub / Schedule / MCP / VPS Task Shared Polish */
+/* 5. SetupWizard — Minimalist Warm-Paper Centered Onboarding */
+.wizard-screen {
+  min-height: 100vh;
+  background-color: var(--bg-canvas);
+  background-image: radial-gradient(var(--grid-dot) 1px, transparent 1px);
+  background-size: 18px 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 20px 64px;
+}
+
+.wizard-sheet {
+  width: 100%;
+  max-width: 680px;
+  background: var(--bg-surface);
+  border: 1px solid var(--hairline);
+  border-radius: 16px;
+  box-shadow: var(--shadow-md);
+  padding: 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.wizard-header,
+.wizard-hero {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.wizard-header h1,
+.wizard-hero h1,
+.wizard-sheet h1 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+}
+
+.wizard-header p,
+.wizard-hero p,
+.wizard-sub {
+  margin: 3px 0 0;
+  font-size: 13px;
+  color: var(--ink-secondary);
+}
+
+.wizard-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.wizard-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--ink-muted);
+  font-size: 11.5px;
+}
+
+.wizard-divider::before,
+.wizard-divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--hairline);
+}
+
+.wizard-alt-grid,
+.wizard-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+/* 6. Shared Panes: NodeModal, LinkImport, VpsPane, SubDetail, Schedule, MCP, VpsTasks */
 .node-pane,
 .schedule-body,
 .sub-detail-list {
@@ -432,24 +627,186 @@
   border: none;
   margin: 0;
   padding: 0;
+  min-width: 0;
+}
+
+.node-submit-status {
+  margin: 0;
+  font-size: 12px;
+  color: var(--ink-secondary);
 }
 
 .advanced-details {
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
   padding: 10px 12px;
-  background: var(--surface-subtle);
+  background: var(--bg-subtle);
 }
 
 .advanced-details summary {
   cursor: pointer;
   font-size: 12.5px;
-  font-weight: 600;
-  color: var(--text-secondary);
+  font-weight: 500;
+  color: var(--ink-secondary);
 }
 
 .advanced-details-body {
   margin-top: 12px;
+}
+
+.share-link-input {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.share-link-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.share-link-empty,
+.share-link-result {
+  margin: 0;
+  padding: 12px;
+  border-radius: 8px;
+  background: var(--bg-subtle);
+  color: var(--ink-muted);
+  font-size: 12px;
+  white-space: pre-line;
+}
+
+.share-link-item {
+  padding: 9px 11px;
+  border-radius: 8px;
+  border: 1px solid var(--hairline);
+  background: var(--bg-subtle);
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 12px;
+}
+
+.share-link-item.error {
+  background: var(--signal-crimson-soft);
+  border-color: rgba(225, 29, 72, 0.25);
+  color: var(--signal-crimson-text);
+}
+
+.share-link-item-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.share-link-type,
+.share-link-chip {
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--bg-well);
+  color: var(--ink-secondary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  flex-shrink: 0;
+}
+
+.share-link-tag {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.share-link-server {
+  color: var(--ink-muted);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  flex-shrink: 0;
+}
+
+.share-link-chips {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+
+.share-link-item-line {
+  font-family: var(--font-mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vps-deploy-hint {
+  margin: 0;
+  font-size: 12px;
+  color: var(--ink-muted);
+  line-height: 1.55;
+}
+
+.vps-deploy-error {
+  padding: 11px 13px;
+  border-radius: 8px;
+  background: var(--signal-crimson-soft);
+  border: 1px solid rgba(225, 29, 72, 0.25);
+  color: var(--signal-crimson-text);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12.5px;
+}
+
+.vps-deploy-error-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.vps-deploy-error-message {
+  white-space: pre-wrap;
+  line-height: 1.5;
+}
+
+.vps-command {
+  position: relative;
+  margin-top: 6px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: var(--bg-canvas);
+  border: 1px solid var(--hairline);
+}
+
+.vps-command pre {
+  margin: 0;
+  overflow-x: auto;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--ink);
+}
+
+.vps-command-copy {
+  float: right;
+  margin-left: 8px;
+  padding: 2px 7px;
+  border-radius: 5px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-surface);
+  color: var(--ink-secondary);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.vps-copy-buffer {
+  position: fixed;
+  opacity: 0;
+  pointer-events: none;
 }
 
 .list-stack {
@@ -465,14 +822,14 @@
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  padding: 10px 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--surface-subtle);
+  padding: 9px 12px;
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  background: var(--bg-subtle);
 }
 
 .list-row.disabled {
-  opacity: 0.58;
+  opacity: 0.56;
 }
 
 .list-row-content {
@@ -481,7 +838,7 @@
 }
 
 .list-row-title {
-  font-weight: 600;
+  font-weight: 500;
   font-size: 13px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -491,12 +848,26 @@
 .list-row-meta,
 .sub-detail-meta,
 .sub-detail-foot,
-.schedule-note,
-.drawer-help,
-.drawer-note,
-.drawer-status-line {
+.schedule-note {
   font-size: 12px;
-  color: var(--text-muted);
+  color: var(--ink-muted);
+}
+
+.sub-stale-block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.schedule-section-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-secondary);
+}
+
+.schedule-empty {
+  font-size: 12px;
+  color: var(--ink-muted);
 }
 
 .schedule-list {
@@ -511,127 +882,145 @@
   gap: 8px;
 }
 
+.schedule-row input[type="time"] {
+  height: 32px;
+  padding: 0 10px;
+  border-radius: 7px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-surface);
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+
+/* MCP Control */
 .mcp-control {
   display: inline-flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   flex-wrap: wrap;
+}
+
+.mcp-control-label {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--ink-secondary);
+}
+
+.mcp-control-divider {
+  width: 1px;
+  height: 16px;
+  background: var(--hairline);
 }
 
 .mcp-agent-buttons {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
 }
 
 .mcp-agent-button {
-  width: 30px;
-  height: 30px;
+  width: 28px;
+  height: 28px;
   border-radius: 6px;
   border: 1px solid var(--border-strong);
-  background: var(--surface-subtle);
+  background: var(--bg-subtle);
+  color: var(--ink-secondary);
   display: inline-flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
+  transition: border-color 0.14s ease, color 0.14s ease, background-color 0.14s ease;
+}
+
+.mcp-agent-button:hover {
+  border-color: var(--ink-muted);
+  color: var(--ink);
+  background: var(--bg-surface);
 }
 
 .mcp-agent-button svg {
-  width: 15px;
-  height: 15px;
+  width: 14px;
+  height: 14px;
   fill: currentColor;
 }
 
+/* Floating VPS Deployment Tasks (Right-aligned — Zero Left Sidebar) */
 .vps-tasks {
   position: fixed;
-  left: 268px;
+  left: auto;
+  right: 20px;
   bottom: 20px;
   z-index: 80;
+  width: 340px;
+  max-width: calc(100vw - 32px);
+  padding: 12px 14px;
+  font-size: 12.5px;
+  box-shadow: var(--shadow-md);
+}
+
+.vps-tasks summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.vps-tasks p {
+  margin: 6px 0;
+  font-size: 11.5px;
+  color: var(--ink-muted);
+}
+
+.vps-tasks-list {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  max-width: 360px;
+  margin-top: 8px;
+  max-height: 240px;
+  overflow-y: auto;
 }
 
-.vps-task {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  box-shadow: var(--shadow-md);
-  padding: 12px 14px;
-  font-size: 12.5px;
+.vps-tasks-list article {
+  padding-top: 8px;
+  border-top: 1px solid var(--hairline);
+  font-size: 12px;
 }
 
-/* System Grid & Setup Wizard */
-.hg-system-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 16px;
-}
-
-.hg-wizard-wrap {
-  min-height: 100vh;
-  background: linear-gradient(180deg, #0f172a 0%, #0f172a 260px, var(--bg) 260px);
-  padding: 44px 20px 60px;
-}
-
-.hg-wizard-container {
-  max-width: 920px;
-  margin: 0 auto;
-  display: flex;
-  flex-direction: column;
-  gap: 24px;
-}
-
-.hg-wizard-hero {
-  color: #f8fafc;
-  display: flex;
-  align-items: center;
-  gap: 16px;
-}
-
-.hg-wizard-hero h1 {
-  margin: 0;
-  font-size: 24px;
-  font-weight: 700;
-}
-
-.hg-wizard-hero p {
-  margin: 4px 0 0;
-  color: #cbd5e1;
-  font-size: 13.5px;
-}
-
-.hg-wizard-cards {
-  display: grid;
-  grid-template-columns: 1.25fr 1fr;
-  gap: 16px;
-}
-
-@media (max-width: 1120px) {
-  .hg-kpi-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+/* Responsive Views */
+@media (max-width: 960px) {
+  .signal-grid,
+  .signal-stage-grid {
+    grid-template-columns: minmax(0, 1fr);
   }
 
-  .hg-overview-grid,
-  .hg-system-grid,
-  .hg-wizard-cards {
-    grid-template-columns: 1fr;
+  .signal-core {
+    border-left: none;
+    border-right: none;
+    border-top: 1px solid var(--hairline);
+    border-bottom: 1px solid var(--hairline);
   }
 
-  .hg-priority-bar {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+  .studio-dual-grid {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 
-@media (max-width: 640px) {
-  .hg-kpi-grid,
-  .hg-priority-bar {
-    grid-template-columns: 1fr;
+@media (max-width: 680px) {
+  .conn-row-total {
+    display: none;
+  }
+
+  .endpoint-picker-wrap {
+    width: 100%;
+    flex: 1 1 180px;
+  }
+
+  .wizard-sheet {
+    padding: 22px 18px;
   }
 
   .vps-tasks {
-    left: 16px;
-    right: 16px;
+    right: 14px;
+    bottom: 76px;
   }
 }

@@ -33,7 +33,7 @@ async fn router_serves_index_page() {
 
     assert_eq!(response.status(), StatusCode::OK);
     let body = response_text(response).await;
-    assert!(body.contains("HarborGate"));
+    assert!(body.contains("Harbor · 海港网关"));
 }
 
 #[tokio::test]

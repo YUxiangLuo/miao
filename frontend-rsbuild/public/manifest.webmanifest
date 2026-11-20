@@ -1,13 +1,18 @@
 {
-  "name": "HarborGate · 海港网关控制台",
-  "short_name": "HarborGate",
-  "description": "外贸企业跨境网络与多店铺防关联网关控制台",
+  "name": "Harbor · 海港网关",
+  "short_name": "Harbor",
+  "description": "现代轻量跨境分流与多店铺独立出口网关",
   "start_url": "/",
   "scope": "/",
   "display": "fullscreen",
-  "background_color": "#f4f6f9",
-  "theme_color": "#0f172a",
+  "background_color": "#F7F6F3",
+  "theme_color": "#F7F6F3",
   "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    },
     {
       "src": "/icon-192.png",
       "sizes": "192x192",

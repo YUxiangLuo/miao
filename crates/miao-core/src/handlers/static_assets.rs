@@ -99,7 +99,7 @@ mod tests {
         assert_eq!(headers[0].0, axum::http::header::CACHE_CONTROL);
         assert_eq!(headers[0].1, "no-cache");
         assert!(html.to_lowercase().contains("<!doctype html>"));
-        assert!(html.contains("HarborGate"));
+        assert!(html.contains("Harbor · 海港网关"));
     }
 
     #[tokio::test]

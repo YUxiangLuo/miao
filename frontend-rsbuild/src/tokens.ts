@@ -8,7 +8,7 @@ export const CONNECTIONS_MODAL_MIN_WIDTH = 841
 
 // 主题存储键及 PWA theme-color 兜底值（运行时优先读取 CSS --bg）
 export const THEME_KEY = 'miao-theme'
-export const THEME_META = { light: '#f4f6f9', dark: '#0b1120' }
+export const THEME_META = { light: '#F7F6F3', dark: '#111113' }
 
 export const ARRIVE_MS = 480
 export const SCAN_STAGGER_CAP = 8

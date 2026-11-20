@@ -32,9 +32,9 @@ export default function App() {
       <Match when={screenMode() === 'loading'}>
         <div class="shell-state-screen">
           <div class="shell-state-card" role="status">
-            <LogoIcon size={42} />
-            <strong>正在连接 HarborGate 海港网关…</strong>
-            <span class="hg-entity-sub">正在同步工位终端、专属端口与跨境线路状态</span>
+            <LogoIcon size={40} />
+            <strong>正在连接 Harbor 网关…</strong>
+            <span class="shell-state-sub">正在同步终端、专属端口与全球线路状态</span>
           </div>
         </div>
       </Match>
@@ -42,9 +42,9 @@ export default function App() {
       <Match when={screenMode() === 'backend-unreachable'}>
         <div class="shell-state-screen">
           <div class="shell-state-card" role="status">
-            <LogoIcon size={42} />
-            <strong>无法连接网关控制面，正在自动重连…</strong>
-            <span class="hg-entity-sub">请确认路由器或网关服务进程处于运行状态</span>
+            <LogoIcon size={40} />
+            <strong>网关控制面暂时离线，正在重连…</strong>
+            <span class="shell-state-sub">请确认路由器或 Harbor 服务进程处于运行状态</span>
           </div>
         </div>
       </Match>

@@ -1,4 +1,4 @@
-import { createMemo } from 'solid-js'
+import { Show, createMemo } from 'solid-js'
 import { ICON } from '../tokens'
 import { classNames, formatBytes, formatSpeed } from '../utils'
 import type { EnrichedConnection } from '../types/clash'
@@ -12,6 +12,7 @@ import {
   isDirectOutbound,
   processNameOf,
 } from './connectionFilters'
+import { cleanNodeDisplay } from './SelectPopover'
 import { connectionAccessPortId } from '../domain/accessPorts'
 import { connectionDomain } from './siteIcons'
 import { AnimatedValue, SiteMark } from './connectionUi'
@@ -25,23 +26,58 @@ export interface ConnectionRowProps {
   portLabels?: Record<string, string>
 }
 
+function formatCleanTarget(raw: string): string {
+  const cleaned = cleanNodeDisplay(raw)
+  return cleaned.code ? `${cleaned.code} · ${cleaned.name}` : cleaned.name
+}
+
+function formatStudioRuleText(rawRule: string): string {
+  const base = humanizeClashRule(rawRule) || displayRuleText(rawRule)
+  if (!base || base === '-') return '-'
+
+  // Normalize sing-box access-port inbound rules (`inbound access-port:ap-... → ...` or `inbound=access-port:... => route(...)`)
+  const inboundPortArrow = /^inbound[\s=]+access-port:[A-Za-z0-9_-]+\s*(?:→|=>)\s*(?:route\(([^)]+)\)|(.+))$/i.exec(base)
+  if (inboundPortArrow) {
+    const target = (inboundPortArrow[1] || inboundPortArrow[2] || '').trim()
+    return target ? `端口锁定 → ${formatCleanTarget(target)}` : '端口锁定'
+  }
+
+  const arrowIdx = base.lastIndexOf(' → ')
+  if (arrowIdx > 0) {
+    const lhsRaw = base.slice(0, arrowIdx).replace(/^inbound\s+/i, '入站 ')
+    const rhsRaw = base.slice(arrowIdx + 3)
+    return `${formatCleanTarget(lhsRaw)} → ${formatCleanTarget(rhsRaw)}`
+  }
+
+  const routeFallback = /^(.+?)\s*=>\s*route\(([^)]+)\)$/i.exec(base)
+  if (routeFallback) {
+    const lhsRaw = routeFallback[1].trim().replace(/^inbound=/i, '入站 ')
+    return `${formatCleanTarget(lhsRaw)} → ${formatCleanTarget(routeFallback[2])}`
+  }
+
+  return formatCleanTarget(base)
+}
+
 export function ConnectionRow(props: ConnectionRowProps) {
   const domain = createMemo(() => connectionDomain(props.connection))
   const outbound = createMemo(() => connectionOutbound(props.connection))
+  const direct = createMemo(() => isDirectOutbound(outbound()))
+  const outboundDisplay = createMemo(() => cleanNodeDisplay(outbound()))
+
   const subtitle = createMemo(() => {
     const meta = props.connection.metadata || {}
     const sourceIp = meta.sourceIP ? (props.seatLabels?.[meta.sourceIP] || meta.sourceIP) : null
     const portId = connectionAccessPortId(props.connection)
     const portTag = portId ? `专属端口: ${props.portLabels?.[portId] || portId}` : null
     const rule = connectionRule(props.connection)
-    const ruleText = humanizeClashRule(rule) || displayRuleText(rule)
+    const ruleText = formatStudioRuleText(rule)
     const processName = processNameOf(meta.processPath)
     const network = [
       meta.network ? String(meta.network).toUpperCase() : '',
       meta.destinationPort || '',
     ].filter(Boolean).join('/')
     const duration = connectionDuration(props.connection)
-    return [sourceIp, portTag, ruleText, processName, network, duration !== '--' ? duration : null]
+    return [sourceIp, portTag, ruleText !== '-' ? ruleText : null, processName, network, duration !== '--' ? duration : null]
       .filter(Boolean)
       .join(' · ')
   })
@@ -62,8 +98,16 @@ export function ConnectionRow(props: ConnectionRowProps) {
           <strong class="conn-row-title" title={domain()}>{domain()}</strong>
           <span class="conn-row-sub" title={subtitle()}>{subtitle()}</span>
         </div>
-        <span class={classNames('badge', 'connection-outbound-chip', isDirectOutbound(outbound()) && 'direct')}>
-          {outbound()}
+        <span
+          class={classNames('badge', 'connection-outbound-chip', direct() && 'direct')}
+          title={direct() ? outbound() : outboundDisplay().name}
+        >
+          <Show when={!direct() && outboundDisplay().code}>
+            {(code) => <span class="connection-outbound-code">{code()}</span>}
+          </Show>
+          <span class="connection-outbound-name">
+            {direct() ? outbound() : outboundDisplay().name}
+          </span>
         </span>
         <span class="conn-row-speed">
           <small class="tone-download">

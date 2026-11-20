@@ -31,13 +31,10 @@ export interface ConfirmState {
 }
 
 export type ConsoleNavKey =
-  | 'overview'
-  | 'terminals'
-  | 'access-ports'
-  | 'lines'
-  | 'policies'
-  | 'audit'
-  | 'system'
+  | 'studio'
+  | 'endpoints'
+  | 'routes'
+  | 'pulse'
 
 export interface OnboardingGateInput {
   firstLoadDone: boolean
@@ -91,7 +88,7 @@ export function shouldAutoTestCurrentNode(state: {
 }
 
 export function useAppData() {
-  const [activeNav, setActiveNav] = createSignal<ConsoleNavKey>('overview')
+  const [activeNav, setActiveNav] = createSignal<ConsoleNavKey>('studio')
   const [upgrading, setUpgrading] = createSignal(false)
   const [nodeForm, setNodeForm] = createSignal<NodeForm>({ ...EMPTY_NODE_FORM })
   const [nodeType, setNodeType] = createSignal<NodeType>('hysteria2')
