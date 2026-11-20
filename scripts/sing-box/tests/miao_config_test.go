@@ -41,14 +41,28 @@ func TestMiaoClientConfigurations(t *testing.T) {
 			var config map[string]any
 			if err := json.Unmarshal([]byte(`{
 				"log":{"disabled":true},
-				"inbounds":[{"type":"tun","tag":"tun-in","interface_name":"sing-tun","address":["172.18.0.1/30"],"mtu":9000,"auto_route":true,"strict_route":true}],
+				"inbounds":[
+					{"type":"tun","tag":"tun-in","interface_name":"sing-tun","address":["172.18.0.1/30"],"mtu":9000,"auto_route":true,"strict_route":true},
+					{"type":"mixed","tag":"access-port:shop-1","listen":"0.0.0.0","listen_port":20101,"users":[{"username":"shop1","password":"secret"}]},
+					{"type":"mixed","tag":"access-port:shop-blocked","listen":"0.0.0.0","listen_port":20102}
+				],
 				"experimental":{"clash_api":{"external_controller":"127.0.0.1:0"}},
 				"dns":{"final":"remote","strategy":"ipv4_only","reverse_mapping":true,"cache_capacity":4096,
 					"optimistic":{"enabled":true,"timeout":"8h"},
-					"servers":[{"type":"https","tag":"remote","server":"1.1.1.1","detour":"proxy"},{"type":"udp","tag":"local","server":"223.5.5.5"}],
-					"rules":[{"rule_set":["test-rules"],"action":"route","server":"local"}]},
+					"servers":[{"type":"https","tag":"remote","server":"1.1.1.1","detour":"proxy"},{"type":"https","tag":"custom-node-dns:node","server":"1.1.1.1","detour":"node"},{"type":"udp","tag":"local","server":"223.5.5.5"}],
+					"rules":[
+						{"inbound":["access-port:shop-1"],"action":"route","server":"custom-node-dns:node"},
+						{"inbound":["access-port:shop-blocked"],"action":"reject"},
+						{"rule_set":["test-rules"],"action":"route","server":"local"}
+					]},
 				"route":{"final":"proxy","auto_detect_interface":true,"find_process":true,"default_domain_resolver":"local",
-					"rules":[{"action":"sniff"},{"protocol":"dns","action":"hijack-dns"},{"rule_set":["test-rules"],"action":"route","outbound":"direct"}]}
+					"rules":[
+						{"action":"sniff"},
+						{"protocol":"dns","action":"hijack-dns"},
+						{"inbound":["access-port:shop-1"],"action":"route","outbound":"node"},
+						{"inbound":["access-port:shop-blocked"],"action":"reject"},
+						{"rule_set":["test-rules"],"action":"route","outbound":"direct"}
+					]}
 			}`), &config); err != nil {
 				t.Fatal(err)
 			}

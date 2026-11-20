@@ -4,11 +4,11 @@
 
 ## 能力与裁剪
 
-[client.patch](../scripts/sing-box/client.patch) 调整组件注册，`miao-client-v2` 保留：
+[client.patch](../scripts/sing-box/client.patch) 调整组件注册，`miao-client-v4` 保留：
 
 | 类别 | 能力 |
 | --- | --- |
-| 入站 | TUN，省略已弃用的 `stack` 字段，默认 GoTUN；保留 system 栈供手动诊断回退 |
+| 入站 | TUN（省略已弃用的 `stack` 字段，默认 GoTUN；保留 system 栈供手动诊断回退）、`mixed`（局域网多店铺专属 HTTP/SOCKS5 代理端口） |
 | 节点出站 | SOCKS5、Shadowsocks、VMess、VLESS、Trojan、AnyTLS、Hysteria2、TUIC，及各协议支持的传输、TLS/uTLS、Reality、复用、Shadowsocks 插件 |
 | 内部出站 | direct、selector、urltest |
 | DNS | UDP、HTTPS、local（隐式兜底） |

@@ -50,6 +50,7 @@ func TestMiaoRegistryCompatibility(t *testing.T) {
 		t.Fatal(err)
 	}
 	var profile struct {
+		Inbounds      []string `json:"inbounds"`
 		NodeProtocols []string `json:"node_protocols"`
 		DNSTransports []string `json:"dns_transports"`
 	}
@@ -72,8 +73,12 @@ func TestMiaoRegistryCompatibility(t *testing.T) {
 			t.Fatalf("retained DNS transport %s is absent upstream", retained)
 		}
 	}
-	if got := include.InboundRegistry().OptionTypes(); !slices.Equal(got, []string{"tun"}) {
-		t.Fatalf("client must expose only TUN inbound, got %v", got)
+	gotInbounds := slices.Clone(include.InboundRegistry().OptionTypes())
+	slices.Sort(gotInbounds)
+	expectedInbounds := slices.Clone(profile.Inbounds)
+	slices.Sort(expectedInbounds)
+	if !slices.Equal(gotInbounds, expectedInbounds) {
+		t.Fatalf("client inbound registry differs from profile: got %v, expected %v", gotInbounds, expectedInbounds)
 	}
 	if got := include.ServiceRegistry().OptionTypes(); len(got) != 0 {
 		t.Fatalf("client unexpectedly includes services: %v", got)
