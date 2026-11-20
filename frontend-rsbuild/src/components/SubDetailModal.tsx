@@ -1,42 +1,38 @@
-import { useCallback, useEffect, useId, useRef, useState } from 'react'
-import { Rss, X } from 'lucide-react'
+import { For, Show, createEffect, createMemo, createSignal, createUniqueId } from 'solid-js'
 import { ICON } from '../tokens'
 import { useDialog } from '../hooks/useDialog'
 import { fetchJson } from '../hooks/request'
 import { Button } from './ui'
 import { classNames, maskSubscription, protocolTone } from '../utils'
 import type { ApiResponse, SubNodeInfo, SubNodesInfo, SubStatus } from '../types/api'
+import { RssIcon, XIcon } from './icons'
 
 export interface SubDetailModalProps {
-  /** null = 关闭；非 null 时展示该订阅的详情与节点列表 */
   sub: SubStatus | null
   onClose: () => void
-  /** 切换节点禁用状态；返回是否成功（成功时本组件重新拉取节点列表） */
   onToggleNode: (sub: string, name: string, disabled: boolean) => Promise<boolean>
 }
 
-// 订阅详情弹窗：订阅信息 + 节点列表 + 单节点禁用开关（易变层，后端热应用）
-export function SubDetailModal({ sub, onClose, onToggleNode }: SubDetailModalProps) {
-  const titleId = useId()
-  const dialogRef = useDialog(sub !== null, onClose)
-  const [nodes, setNodes] = useState<SubNodeInfo[] | null>(null)
-  const [staleDisabled, setStaleDisabled] = useState<string[]>([])
-  const [loadError, setLoadError] = useState('')
-  const [loading, setLoading] = useState(false)
-  const loadingRef = useRef(false)
-  // 操作跨窗口开关保留；同一订阅内的同名节点共享等待状态。
-  const pendingRef = useRef(new Set<string>())
-  const [pendingKeys, setPendingKeys] = useState<ReadonlySet<string>>(new Set())
-  const loadGenerationRef = useRef(0)
-  const activeUrlRef = useRef<string | null>(null)
+export function SubDetailModal(props: SubDetailModalProps) {
+  const titleId = createUniqueId()
+  const dialogRef = useDialog(() => props.sub !== null, () => props.onClose())
+  const [nodes, setNodes] = createSignal<SubNodeInfo[] | null>(null)
+  const [staleDisabled, setStaleDisabled] = createSignal<string[]>([])
+  const [loadError, setLoadError] = createSignal('')
+  const [loading, setLoading] = createSignal(false)
+  let loadingFlag = false
+  const pendingSet = new Set<string>()
+  const [pendingKeys, setPendingKeys] = createSignal<ReadonlySet<string>>(new Set())
+  let loadGeneration = 0
+  let activeUrl: string | null = null
 
-  const load = useCallback(async (url: string) => {
-    const generation = ++loadGenerationRef.current
-    loadingRef.current = true
+  const load = async (url: string) => {
+    const generation = ++loadGeneration
+    loadingFlag = true
     setLoading(true)
     try {
       const payload = await fetchJson<ApiResponse<SubNodesInfo[]>>('/api/subs/nodes')
-      if (generation !== loadGenerationRef.current) return
+      if (generation !== loadGeneration) return
       if (payload.success && payload.data) {
         const group = payload.data.find((item) => item.url === url)
         if (!group) {
@@ -50,149 +46,181 @@ export function SubDetailModal({ sub, onClose, onToggleNode }: SubDetailModalPro
         setLoadError(payload.message || '加载节点列表失败')
       }
     } catch (error) {
-      if (generation === loadGenerationRef.current) setLoadError(error instanceof Error ? error.message : String(error))
+      if (generation === loadGeneration) setLoadError(error instanceof Error ? error.message : String(error))
     } finally {
-      if (generation === loadGenerationRef.current) {
-        loadingRef.current = false
+      if (generation === loadGeneration) {
+        loadingFlag = false
         setLoading(false)
       }
     }
-  }, [])
+  }
 
-  // 打开时拉取；关闭时清空，下次打开重新加载
-  useEffect(() => {
-    activeUrlRef.current = sub?.url ?? null
-    if (!sub) {
-      loadGenerationRef.current += 1
-      loadingRef.current = false
-      setLoading(false)
+  createEffect(
+    () => props.sub?.url ?? null,
+    (url) => {
+      activeUrl = url
+      if (!url) {
+        loadGeneration++
+        loadingFlag = false
+        setLoading(false)
+        setNodes(null)
+        setStaleDisabled([])
+        setLoadError('')
+        return
+      }
       setNodes(null)
       setStaleDisabled([])
       setLoadError('')
-      return
-    }
-    setNodes(null)
-    setStaleDisabled([])
-    setLoadError('')
-    void load(sub.url)
-  }, [sub, load])
+      void load(url)
+    },
+  )
 
-  if (!sub) return null
-
-  const toggle = async (name: string, disabled: boolean) => {
-    const url = sub.url
+  const toggle = async (url: string, name: string, disabled: boolean) => {
     const key = JSON.stringify([url, name])
-    if (pendingRef.current.has(key)) return
-    pendingRef.current.add(key)
-    setPendingKeys(new Set(pendingRef.current))
+    if (pendingSet.has(key)) return
+    pendingSet.add(key)
+    setPendingKeys(new Set(pendingSet))
     try {
-      const ok = await onToggleNode(url, name, disabled)
-      if (ok && activeUrlRef.current === url) await load(url)
+      const ok = await props.onToggleNode(url, name, disabled)
+      if (ok && activeUrl === url) await load(url)
     } finally {
-      pendingRef.current.delete(key)
-      setPendingKeys(new Set(pendingRef.current))
+      pendingSet.delete(key)
+      setPendingKeys(new Set(pendingSet))
     }
   }
 
-  const isPending = (name: string) => pendingKeys.has(JSON.stringify([sub.url, name]))
-
-  const disabledCount = nodes?.filter((node) => node.disabled).length ?? 0
-  // 禁用节点排在最前面；组内保持订阅原始顺序（Array.sort 稳定）
-  const sortedNodes = nodes === null ? null : [...nodes].sort((a, b) => Number(b.disabled) - Number(a.disabled))
+  const isPending = (url: string, name: string) => pendingKeys().has(JSON.stringify([url, name]))
+  const disabledCount = createMemo(() => nodes()?.filter((node) => node.disabled).length ?? 0)
+  const sortedNodes = createMemo(() => {
+    const list = nodes()
+    return list === null ? null : [...list].sort((a, b) => Number(b.disabled) - Number(a.disabled))
+  })
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div
-        ref={dialogRef}
-        className="modal-card sub-detail-modal"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        tabIndex={-1}
-        onClick={(event) => event.stopPropagation()}
-      >
-        <div className="modal-title-row">
-          <div className="modal-title-wrap">
-            <Rss size={ICON.lg} className="icon-accent" />
-            <h3 id={titleId} title={sub.url}>{maskSubscription(sub.url)}</h3>
-          </div>
-          <button className="icon-button" onClick={onClose} aria-label="关闭订阅详情">
-            <X size={ICON.md} />
-          </button>
-        </div>
-        <div className="sub-detail-meta">
-          {loadError
-            ? '节点列表尚未确认'
-            : nodes === null
-            ? '正在读取节点列表…'
-            : `共 ${nodes.length} 个节点${disabledCount > 0 ? ` · 禁用 ${disabledCount}` : ''}`}
-          {sub.state === 'failed' && sub.error ? ` · 上次获取失败：${sub.error}` : ''}
-        </div>
-        <div className="sub-detail-list list-stack">
-          {loadError
-            ? <div className="resource-error" role="alert">
-                <strong>订阅节点读取失败</strong>
-                <p>节点状态未知，不代表订阅没有节点。重试仅读取列表，不刷新订阅或修改配置。</p>
-                <Button tone="secondary" size="sm" loading={loading} onClick={() => {
-                  if (!loadingRef.current) void load(sub.url)
-                }}>重新读取节点</Button>
-                <details><summary>错误详情</summary><p>{loadError}</p></details>
+    <Show when={props.sub}>
+      {(sub) => (
+        <div class="modal-overlay drawer-overlay" onClick={props.onClose}>
+          <div
+            ref={dialogRef}
+            class="modal-card drawer-panel sub-detail-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby={titleId}
+            tabindex={-1}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div class="modal-title-row">
+              <div class="modal-title-wrap">
+                <RssIcon size={ICON.lg} class="icon-accent" />
+                <h3 id={titleId} title={sub().url}>{maskSubscription(sub().url)}</h3>
               </div>
-            : sortedNodes === null
-              ? null
-              : sortedNodes.length === 0
-                ? <div className="empty-block">暂无节点{sub.state === 'pending' ? '，等待首次获取' : ''}</div>
-                : sortedNodes.map((node, index) => (
-                  <div key={`${node.name}-${index}`} className={classNames('list-row', 'sub-node-row', node.disabled && 'disabled')}>
-                    <div className="list-row-content">
-                      <div className="list-row-title" title={node.name}>{node.name}</div>
-                      <div className="list-row-meta">{node.server}:{node.server_port}</div>
-                    </div>
-                    <span className={classNames('badge', protocolTone(node.node_type))}>{node.node_type}</span>
-                    <button
-                      type="button"
-                      role="switch"
-                      aria-checked={!node.disabled}
-                      aria-label={`${node.disabled ? '启用' : '禁用'}节点 ${node.name}`}
-                      title={node.disabled ? '启用该节点' : '禁用该节点（从生成的配置中移除）'}
-                      className={classNames('toggle-switch', !node.disabled && 'on')}
-                      disabled={isPending(node.name)}
-                      aria-busy={isPending(node.name) || undefined}
-                      onClick={() => toggle(node.name, !node.disabled)}
+              <button type="button" class="icon-button" onClick={props.onClose} aria-label="关闭订阅详情">
+                <XIcon size={ICON.md} />
+              </button>
+            </div>
+            <div class="sub-detail-meta">
+              {loadError()
+                ? '节点列表尚未确认'
+                : nodes() === null
+                  ? '正在读取节点列表…'
+                  : `共 ${nodes()!.length} 个节点${disabledCount() > 0 ? ` · 禁用 ${disabledCount()}` : ''}`}
+              {sub().state === 'failed' && sub().error ? ` · 上次获取失败：${sub().error}` : ''}
+            </div>
+            <div class="sub-detail-list list-stack">
+              <Show
+                when={!loadError()}
+                fallback={
+                  <div class="resource-error" role="alert">
+                    <strong>订阅节点读取失败</strong>
+                    <p>节点状态未知，不代表订阅没有节点。重试仅读取列表，不刷新订阅或修改配置。</p>
+                    <Button
+                      tone="secondary"
+                      size="sm"
+                      loading={loading()}
+                      onClick={() => {
+                        if (!loadingFlag) void load(sub().url)
+                      }}
                     >
-                      <span className="toggle-switch-track">
-                        <span className="toggle-switch-thumb" />
-                      </span>
-                    </button>
+                      重新读取节点
+                    </Button>
+                    <details>
+                      <summary>错误详情</summary>
+                      <p>{loadError()}</p>
+                    </details>
                   </div>
-                ))}
-        </div>
-        {!loadError && staleDisabled.length > 0 && (
-          <div className="sub-stale-block">
-            <div className="sub-detail-meta">已失效的禁用（订阅刷新后节点已改名/消失）：</div>
-            {staleDisabled.map((name) => (
-              <div key={name} className="list-row sub-stale-row">
-                <div className="list-row-content">
-                  <div className="list-row-meta" title={name}>{name}</div>
-                </div>
-                <button
-                  type="button"
-                  className="icon-button subtle"
-                  aria-label={`移除失效禁用 ${name}`}
-                  title="移除该失效禁用条目"
-                  disabled={isPending(name)}
-                  onClick={() => toggle(name, false)}
-                >
-                  <X size={ICON.xs} />
-                </button>
+                }
+              >
+                <Show when={sortedNodes()}>
+                  {(list) => (
+                    <Show
+                      when={list().length > 0}
+                      fallback={
+                        <div class="empty-block">
+                          暂无节点{sub().state === 'pending' ? '，等待首次获取' : ''}
+                        </div>
+                      }
+                    >
+                      <For each={list()} keyed={(node) => `${node.name}:${node.server}:${node.server_port}`}>
+                        {(node) => (
+                          <div class={classNames('list-row', 'sub-node-row', node().disabled && 'disabled')}>
+                            <div class="list-row-content">
+                              <div class="list-row-title" title={node().name}>{node().name}</div>
+                              <div class="list-row-meta num">{node().server}:{node().server_port}</div>
+                            </div>
+                            <span class={classNames('badge', protocolTone(node().node_type))}>{node().node_type}</span>
+                            <button
+                              type="button"
+                              role="switch"
+                              aria-checked={!node().disabled ? 'true' : 'false'}
+                              aria-label={`${node().disabled ? '启用' : '禁用'}节点 ${node().name}`}
+                              title={node().disabled ? '启用该节点' : '禁用该节点（从生成的配置中移除）'}
+                              class={classNames('toggle-switch', !node().disabled && 'on')}
+                              disabled={isPending(sub().url, node().name)}
+                              aria-busy={isPending(sub().url, node().name) ? 'true' : undefined}
+                              onClick={() => { void toggle(sub().url, node().name, !node().disabled) }}
+                            >
+                              <span class="toggle-switch-track">
+                                <span class="toggle-switch-thumb" />
+                              </span>
+                            </button>
+                          </div>
+                        )}
+                      </For>
+                    </Show>
+                  )}
+                </Show>
+              </Show>
+            </div>
+            <Show when={!loadError() && staleDisabled().length > 0}>
+              <div class="sub-stale-block">
+                <div class="sub-detail-meta">已失效的禁用（订阅刷新后节点已改名/消失）：</div>
+                <For each={staleDisabled()}>
+                  {(name) => (
+                    <div class="list-row sub-stale-row">
+                      <div class="list-row-content">
+                        <div class="list-row-meta" title={name}>{name}</div>
+                      </div>
+                      <button
+                        type="button"
+                        class="icon-button subtle"
+                        aria-label={`移除失效禁用 ${name}`}
+                        title="移除该失效禁用条目"
+                        disabled={isPending(sub().url, name)}
+                        onClick={() => { void toggle(sub().url, name, false) }}
+                      >
+                        <XIcon size={ICON.xs} />
+                      </button>
+                    </div>
+                  )}
+                </For>
               </div>
-            ))}
+            </Show>
+            <div class="sub-detail-foot">
+              禁用后节点及引用它的规则不再生效；同名节点一起禁用。
+            </div>
           </div>
-        )}
-        <div className="sub-detail-foot">
-          禁用后节点及引用它的规则不再生效；同名节点一起禁用。
         </div>
-      </div>
-    </div>
+      )}
+    </Show>
   )
 }

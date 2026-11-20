@@ -1,4 +1,5 @@
-import { act, render, screen } from '@testing-library/react'
+import { render, screen } from '@solidjs/testing-library'
+import { createSignal, flush } from 'solid-js'
 import userEvent from '@testing-library/user-event'
 import { afterEach, expect, it, rs } from '@rstest/core'
 import { ConnectivityCheck } from './ConnectivityCheck'
@@ -15,7 +16,7 @@ it.each([204, 403])('reports HTTP %s without claiming browser connectivity', asy
   const user = userEvent.setup()
   const fetch = rs.fn(async () => response({ http_status: status }))
   rs.stubGlobal('fetch', fetch)
-  render(<ConnectivityCheck status={statusMock({ running: true })} backendUnreachable={false} />)
+  render(() => <ConnectivityCheck status={statusMock({ running: true })} backendUnreachable={false} />)
   expect(fetch).not.toHaveBeenCalled()
   await user.click(screen.getByRole('button', { name: '连接检查' }))
   await user.clear(screen.getByRole('textbox', { name: '目标网址' }))
@@ -35,17 +36,24 @@ it.each([204, 403])('reports HTTP %s without claiming browser connectivity', asy
 it('retains a pending check across closing and preserves the original service snapshot', async () => {
   const user = userEvent.setup()
   let resolve!: (value: Response) => void
-  const fetch = rs.fn(() => new Promise<Response>(done => { resolve = done }))
+  const fetch = rs.fn(() => new Promise<Response>((done) => { resolve = done }))
   rs.stubGlobal('fetch', fetch)
-  const view = render(<ConnectivityCheck status={statusMock({ running: true })} backendUnreachable={false} />)
+  const [status, setStatus] = createSignal(statusMock({ running: true }))
+  const [unreachable, setUnreachable] = createSignal(false)
+  render(() => <ConnectivityCheck status={status()} backendUnreachable={unreachable()} />)
   await user.click(screen.getByRole('button', { name: '连接检查' }))
   await user.click(screen.getByRole('button', { name: '开始检查' }))
   expect(screen.getByRole('button', { name: '开始检查' })).toBeDisabled()
   await user.click(screen.getByRole('button', { name: '关闭连接检查' }))
-  view.rerender(<ConnectivityCheck status={statusMock()} backendUnreachable={true} />)
-  await act(async () => { resolve(response({ success: false, http_status: null, latency_ms: null, error_kind: 'timeout', error: 'operation timed out' })) })
+  setStatus(statusMock())
+  setUnreachable(true)
+  flush()
+  resolve(response({ success: false, http_status: null, latency_ms: null, error_kind: 'timeout', error: 'operation timed out' }))
+  await Promise.resolve()
+  await Promise.resolve()
+  flush()
   await user.click(screen.getByRole('button', { name: '连接检查' }))
-  const report = screen.getByRole('textbox', { name: '检查报告' }) as HTMLTextAreaElement
+  const report = await screen.findByRole('textbox', { name: '检查报告' }) as HTMLTextAreaElement
   expect(report.value).toContain('检查开始时：代理服务已就绪')
   expect(report.value).toContain('请求超时：5 秒内未完成')
   expect(screen.getAllByText(/后端不可达，服务状态未知/).length).toBeGreaterThan(0)
@@ -56,7 +64,7 @@ it('rejects unsupported URLs and distinguishes backend failure from target failu
   const user = userEvent.setup()
   const fetch = rs.fn().mockRejectedValue(new Error('backend offline'))
   rs.stubGlobal('fetch', fetch)
-  render(<ConnectivityCheck status={statusMock()} backendUnreachable={true} />)
+  render(() => <ConnectivityCheck status={statusMock()} backendUnreachable={true} />)
   await user.click(screen.getByRole('button', { name: '连接检查' }))
   const input = screen.getByRole('textbox', { name: '目标网址' })
   await user.clear(input)

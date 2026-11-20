@@ -1,4 +1,5 @@
-import { act, renderHook } from '@testing-library/react'
+import { renderHook } from '@solidjs/testing-library'
+import { createSignal, flush } from 'solid-js'
 import { afterEach, beforeEach, describe, expect, it, rs } from '@rstest/core'
 import { POLL_INTERVAL } from '../utils'
 import { usePolling } from './usePolling'
@@ -18,19 +19,19 @@ describe('usePolling', () => {
     }))
 
     renderHook(() => usePolling([task], true))
-    await act(async () => Promise.resolve())
+    flush()
+    await Promise.resolve()
     expect(task).toHaveBeenCalledTimes(1)
 
-    act(() => rs.advanceTimersByTime(POLL_INTERVAL * 2))
-    await act(async () => Promise.resolve())
+    rs.advanceTimersByTime(POLL_INTERVAL * 2)
+    await Promise.resolve()
     expect(task).toHaveBeenCalledTimes(1)
 
-    await act(async () => {
-      finishFirstRun?.()
-      await Promise.resolve()
-    })
-    act(() => rs.advanceTimersByTime(POLL_INTERVAL))
-    await act(async () => Promise.resolve())
+    finishFirstRun?.()
+    await Promise.resolve()
+    await Promise.resolve()
+    rs.advanceTimersByTime(POLL_INTERVAL)
+    await Promise.resolve()
 
     expect(task).toHaveBeenCalledTimes(2)
   })
@@ -40,19 +41,16 @@ describe('usePolling', () => {
     const healthyTask = rs.fn(() => Promise.resolve())
 
     renderHook(() => usePolling([stuckTask, healthyTask], true))
-    await act(async () => {
-      await Promise.resolve()
-      await Promise.resolve()
-    })
+    flush()
+    await Promise.resolve()
+    await Promise.resolve()
 
     expect(stuckTask).toHaveBeenCalledTimes(1)
     expect(healthyTask).toHaveBeenCalledTimes(1)
 
-    act(() => rs.advanceTimersByTime(POLL_INTERVAL))
-    await act(async () => {
-      await Promise.resolve()
-      await Promise.resolve()
-    })
+    rs.advanceTimersByTime(POLL_INTERVAL)
+    await Promise.resolve()
+    await Promise.resolve()
 
     expect(stuckTask).toHaveBeenCalledTimes(1)
     expect(healthyTask).toHaveBeenCalledTimes(2)
@@ -61,19 +59,20 @@ describe('usePolling', () => {
   it('runs immediately and adopts a changed interval', async () => {
     const task = rs.fn(() => Promise.resolve())
     const customInterval = 1_000
-    const { rerender } = renderHook(
-      ({ interval }) => usePolling([task], true, interval),
-      { initialProps: { interval: POLL_INTERVAL } },
-    )
-    await act(async () => Promise.resolve())
+    const [interval, setIntervalMs] = createSignal(POLL_INTERVAL)
+
+    renderHook(() => usePolling([task], true, interval))
+    flush()
+    await Promise.resolve()
     expect(task).toHaveBeenCalledTimes(1)
 
-    rerender({ interval: customInterval })
-    await act(async () => Promise.resolve())
+    setIntervalMs(customInterval)
+    flush()
+    await Promise.resolve()
     expect(task).toHaveBeenCalledTimes(2)
 
-    act(() => rs.advanceTimersByTime(customInterval))
-    await act(async () => Promise.resolve())
+    rs.advanceTimersByTime(customInterval)
+    await Promise.resolve()
     expect(task).toHaveBeenCalledTimes(3)
   })
 })

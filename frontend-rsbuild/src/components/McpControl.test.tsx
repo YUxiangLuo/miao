@@ -1,18 +1,18 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen } from '@solidjs/testing-library'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, rs } from '@rstest/core'
-import { McpControl } from './McpControl'
+import { McpControl, type McpControlProps } from './McpControl'
 
-function renderControl(props = {}) {
-  return render(
+function renderControl(props: Partial<McpControlProps> = {}) {
+  return render(() => (
     <McpControl
       enabled={false}
       pending={false}
       onToggle={rs.fn()}
       showToast={rs.fn()}
       {...props}
-    />,
-  )
+    />
+  ))
 }
 
 describe('McpControl', () => {

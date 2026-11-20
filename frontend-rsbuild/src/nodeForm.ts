@@ -47,6 +47,17 @@ export function validateNodeForm(nodeType: NodeType, form: NodeForm): void {
   assertValid(validateServer(form.server.trim()))
   assertValid(validatePort(form.server_port))
 
+  const detour = form.detour?.trim() || ''
+  if (detour) {
+    if (detour.length > 128) throw new Error('前置中转节点名称不能超过 128 个字符')
+    if (['proxy', 'direct', 'reject'].includes(detour.toLowerCase())) {
+      throw new Error('前置中转节点不能使用保留字 proxy / direct / reject')
+    }
+    if (detour.toLowerCase() === form.tag.trim().toLowerCase()) {
+      throw new Error('前置中转节点不能指向自身')
+    }
+  }
+
   if (caps.password) assertValid(validatePassword(form.password.trim()))
   if (caps.uuid) assertValid(validateUuid(form.uuid))
   if (caps.transport) {
@@ -91,11 +102,13 @@ function buildCommonTlsFields(
 export function buildNodeRequest(nodeType: NodeType, form: NodeForm): NodeRequest {
   validateNodeForm(nodeType, form)
 
+  const detour = form.detour?.trim()
   const base: NodeRequest = {
     node_type: nodeType,
     tag: form.tag.trim(),
     server: form.server.trim(),
     server_port: form.server_port,
+    ...(detour ? { detour } : {}),
   }
 
   switch (nodeType) {

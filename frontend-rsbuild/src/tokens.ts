@@ -1,45 +1,25 @@
-// 设计 token 的 JS 镜像：CSS var 无法进入 JS 的角落统一从这里取数。
-// 本文件与 styles/tokens.css、styles/responsive.css 双向绑定——改任何一边，
-// 必须同步另一边（注释互指）。
+// 供 JS 逻辑使用的基础常量（虚拟滚动行高、折叠计算宽度、断点、动效时长等）。
 
-// lucide 图标尺寸四档（对应 tokens.css 音阶约定：只取这四档）
-export const ICON = { xs: 12, sm: 14, md: 16, lg: 18 }
+export const ICON = { xs: 13, sm: 15, md: 16, lg: 18 }
+export const LOGO_SIZE = { topbar: 30, onboarding: 44 }
 
-// LogoIcon 使用场景尺寸
-export const LOGO_SIZE = { topbar: 64, onboarding: 40 }
-
-// 与 styles/responsive.css 的 840px 断点对齐：小于该宽度视为移动端。
-// （@media 无法引用 CSS var，断点在 CSS 侧为硬编码，这里做 JS 镜像）
+// 桌面/移动端分界宽度
 export const CONNECTIONS_MODAL_MIN_WIDTH = 841
 
-// 主题：localStorage 键 + PWA theme-color（与 tokens.css 的 --bg 双主题值同步）
+// 主题存储键及 PWA theme-color 兜底值（运行时优先读取 CSS --bg）
 export const THEME_KEY = 'miao-theme'
-export const THEME_META = { dark: '#1a1d22', light: '#ffffff' }
+export const THEME_META = { light: '#f4f6f9', dark: '#0b1120' }
 
-// 节点切换到位脉冲时长（与 tokens.css 的 --anim-arrive 同步）：
-// 动画结束 ≈ React 移除 .arrive class，交棒给 .active 的 tileGlow 呼吸。
-export const ARRIVE_MS = 900
-
-// 站点卡入场交错序号 --i 的上限（与 tokens.css 的 --stagger-step 配合）。
-export const STAGGER_CAP = 12
-
-// 节点 tile 扫描入场交错序号 --i 的上限（与 tokens.css 的 --stagger-step-scan 配合）：
-// 末位 tile 96ms 内起步，大订阅下整列 ~0.3s 扫完，不会等数秒才出现。
+export const ARRIVE_MS = 480
 export const SCAN_STAGGER_CAP = 8
 
-// 连接行 FLIP 归位时长（WAAPI 只进 JS；与 tokens.css 的 --dur-slow 同步，改任何一边必须同步）
-export const FLIP_MS = 200
+export const FLIP_MS = 260
+export const FLIP_EASING = 'cubic-bezier(0.22, 1, 0.36, 1)'
 
-// 通道卡 favicon 单格宽（tokens.css 的 --size-path-icon-lg 48px + .path-icons 的
-// gap --space-2 10px）：JS 侧用它算「单行放得下几个」，改任何一边必须同步。
-export const PATH_ICON_CELL = 58
-
-// 首页活跃链接条带：站点卡 144px、卡间距 10px、溢出入口 48px。
-// 与 styles/tokens.css、styles/layout.css 对应几何保持同步。
-export const HOME_SITE_CARD_WIDTH = 144
+export const PATH_ICON_CELL = 48
+export const HOME_SITE_CARD_WIDTH = 176
 export const HOME_SITE_CARD_GAP = 10
-export const HOME_CONNECTIONS_MORE_WIDTH = 48
+export const HOME_CONNECTIONS_MORE_WIDTH = 56
 
-// Must match --conn-row-height and --space-1 in styles/tokens.css.
 export const CONNECTION_ROW_HEIGHT = 60
 export const CONNECTION_ROW_GAP = 6

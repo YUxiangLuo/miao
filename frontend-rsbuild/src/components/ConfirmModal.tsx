@@ -1,8 +1,8 @@
-import { useId } from 'react'
-import { CircleAlert, X } from 'lucide-react'
+import { Show, createUniqueId } from 'solid-js'
 import { ICON } from '../tokens'
 import { useDialog } from '../hooks/useDialog'
 import { Button } from './ui'
+import { CircleAlertIcon, XIcon } from './icons'
 
 export interface ConfirmModalProps {
   open: boolean
@@ -12,37 +12,38 @@ export interface ConfirmModalProps {
   onConfirm: () => void
 }
 
-export function ConfirmModal({ open, title, message, onCancel, onConfirm }: ConfirmModalProps) {
-  const titleId = useId()
-  const dialogRef = useDialog(open, onCancel)
+export function ConfirmModal(props: ConfirmModalProps) {
+  const titleId = createUniqueId()
+  const dialogRef = useDialog(() => props.open, () => props.onCancel())
 
-  if (!open) return null
   return (
-    <div className="modal-overlay" onClick={onCancel}>
-      <div
-        ref={dialogRef}
-        className="modal-card modal-confirm"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        tabIndex={-1}
-        onClick={(event) => event.stopPropagation()}
-      >
-        <div className="modal-title-row">
-          <div className="modal-title-wrap">
-            <CircleAlert size={ICON.lg} className="icon-warning" />
-            <h3 id={titleId}>{title}</h3>
+    <Show when={props.open}>
+      <div class="modal-overlay" onClick={props.onCancel}>
+        <div
+          ref={dialogRef}
+          class="modal-card modal-confirm"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby={titleId}
+          tabindex={-1}
+          onClick={(event) => event.stopPropagation()}
+        >
+          <div class="modal-title-row">
+            <div class="modal-title-wrap">
+              <CircleAlertIcon size={ICON.lg} class="icon-warning" />
+              <h3 id={titleId}>{props.title}</h3>
+            </div>
+            <button type="button" class="icon-button" onClick={props.onCancel} aria-label="关闭确认对话框">
+              <XIcon size={ICON.md} />
+            </button>
           </div>
-          <button className="icon-button" onClick={onCancel} aria-label="关闭确认对话框">
-            <X size={ICON.md} />
-          </button>
-        </div>
-        <p className="modal-message">{message}</p>
-        <div className="modal-actions">
-          <Button tone="ghost" size="sm" onClick={onCancel}>取消</Button>
-          <Button tone="danger" size="sm" data-autofocus onClick={onConfirm}>确认</Button>
+          <p class="modal-message">{props.message}</p>
+          <div class="modal-actions">
+            <Button tone="ghost" size="sm" onClick={props.onCancel}>取消</Button>
+            <Button tone="danger" size="sm" data-autofocus onClick={props.onConfirm}>确认</Button>
+          </div>
         </div>
       </div>
-    </div>
+    </Show>
   )
 }

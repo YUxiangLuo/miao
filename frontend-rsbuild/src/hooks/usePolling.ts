@@ -1,81 +1,89 @@
-import { useEffect, useRef, useCallback } from 'react'
+import { createEffect, untrack, type Accessor } from 'solid-js'
 import { POLL_INTERVAL } from '../utils'
 
 // 返回值被轮询器忽略，允许任意签名（Promise 或非 Promise）
 export type PollTask = () => unknown
 
 /**
- * 统一轮询管理 hook
+ * 统一轮询管理原语
  * 合并多个定时任务到单个定时器，减少资源消耗。
  * interval 变化时会重建定时器并立即补跑一轮。
  */
-export function usePolling(tasks: PollTask[], enabled = true, interval = POLL_INTERVAL) {
-  const tasksRef = useRef(tasks)
-  const timerRef = useRef<number | null>(null)
-  const runningTasksRef = useRef(new Set<PollTask>())
+export function usePolling(
+  tasks: Accessor<PollTask[]> | PollTask[],
+  enabled: Accessor<boolean> | boolean = true,
+  interval: Accessor<number> | number = POLL_INTERVAL,
+) {
+  const getTasks = typeof tasks === 'function' ? tasks : () => tasks
+  const getEnabled = typeof enabled === 'function' ? enabled : () => enabled
+  const getInterval = typeof interval === 'function' ? interval : () => interval
 
-  // 保持 tasksRef 最新，避免定时器重建
-  useEffect(() => {
-    tasksRef.current = tasks
-  }, [tasks])
+  let timer: number | null = null
+  const runningTasks = new Set<PollTask>()
 
-  const runTasks = useCallback(() => {
-    const currentTasks = tasksRef.current
+  const runTasks = () => {
+    const currentTasks = untrack(getTasks)
     if (!Array.isArray(currentTasks) || currentTasks.length === 0) {
       return Promise.resolve([])
     }
 
     const startedTasks = currentTasks.flatMap((task) => {
-      if (runningTasksRef.current.has(task)) return []
+      if (runningTasks.has(task)) return []
 
-      runningTasksRef.current.add(task)
-      const promise = Promise.resolve()
-        .then(() => task())
-        .catch(() => undefined)
-        .finally(() => runningTasksRef.current.delete(task))
+      runningTasks.add(task)
+      const finish = () => {
+        runningTasks.delete(task)
+      }
+      let result: unknown
+      try {
+        result = task()
+      } catch {
+        finish()
+        return []
+      }
+      const promise = Promise.resolve(result).then(finish, finish)
       return [promise]
     })
 
     return Promise.allSettled(startedTasks)
-  }, [])
+  }
 
-  useEffect(() => {
-    if (!enabled) {
-      if (timerRef.current) {
-        window.clearInterval(timerRef.current)
-        timerRef.current = null
+  createEffect(
+    () => ({ active: getEnabled(), ms: getInterval() }),
+    ({ active, ms }) => {
+      const stopTimer = () => {
+        if (timer !== null) {
+          window.clearInterval(timer)
+          timer = null
+        }
       }
-      return
-    }
 
-    const stopTimer = () => {
-      if (timerRef.current) {
-        window.clearInterval(timerRef.current)
-        timerRef.current = null
-      }
-    }
-    const startTimer = () => {
-      stopTimer()
-      runTasks()
-      timerRef.current = window.setInterval(runTasks, interval)
-    }
-
-    if (!document.hidden) startTimer()
-
-    // 页面隐藏时暂停轮询，恢复可见时立即补一次
-    const handleVisibilityChange = () => {
-      if (document.hidden) {
+      if (!active) {
         stopTimer()
-      } else {
-        startTimer()
+        return
       }
-    }
-    document.addEventListener('visibilitychange', handleVisibilityChange)
 
-    return () => {
-      stopTimer()
-      document.removeEventListener('visibilitychange', handleVisibilityChange)
-    }
-  }, [enabled, interval, runTasks])
+      const startTimer = () => {
+        stopTimer()
+        void runTasks()
+        timer = window.setInterval(runTasks, ms)
+      }
 
+      if (!document.hidden) startTimer()
+
+      const handleVisibilityChange = () => {
+        if (document.hidden) {
+          stopTimer()
+        } else {
+          startTimer()
+        }
+      }
+      document.addEventListener('visibilitychange', handleVisibilityChange)
+
+      return () => {
+        stopTimer()
+        document.removeEventListener('visibilitychange', handleVisibilityChange)
+      }
+    },
+  )
 }

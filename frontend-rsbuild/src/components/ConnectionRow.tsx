@@ -1,5 +1,4 @@
-import { memo } from 'react'
-import { ArrowDown, ArrowUp } from 'lucide-react'
+import { createMemo } from 'solid-js'
 import { ICON } from '../tokens'
 import { classNames, formatBytes, formatSpeed } from '../utils'
 import type { EnrichedConnection } from '../types/clash'
@@ -13,76 +12,81 @@ import {
   isDirectOutbound,
   processNameOf,
 } from './connectionFilters'
+import { connectionAccessPortId } from '../domain/accessPorts'
 import { connectionDomain } from './siteIcons'
 import { AnimatedValue, SiteMark } from './connectionUi'
+import { ArrowDownIcon, ArrowUpIcon } from './icons'
 
 export interface ConnectionRowProps {
   connection: EnrichedConnection
   position?: number
   total?: number
+  seatLabels?: Record<string, string>
+  portLabels?: Record<string, string>
 }
 
-/**
- * 链接统计的单条链接行：域名为主标识，副行是人话规则 · 进程 · 网络/端口 · 时长；
- * 活跃链接全亮并带速率比例条，空闲链接降为 dim。
- * data-flip-key 供容器 FLIP 动画按连接 id 追踪跨帧位置（见 hooks/useFlip.ts）。
- */
-export const ConnectionRow = memo(function ConnectionRow({ connection, position, total }: ConnectionRowProps) {
-  const domain = connectionDomain(connection)
-  const outbound = connectionOutbound(connection)
-  const meta = connection.metadata || {}
-  const ruleText = humanizeClashRule(connectionRule(connection)) || displayRuleText(connectionRule(connection))
-  const processName = processNameOf(meta.processPath)
-  const network = [
-    meta.network ? String(meta.network).toUpperCase() : '',
-    meta.destinationPort || '',
-  ].filter(Boolean).join('/')
-  const duration = connectionDuration(connection)
-  const subtitle = [ruleText, processName, network, duration !== '--' ? duration : null]
-    .filter(Boolean)
-    .join(' · ')
-
-  const combined = connectionSpeed(connection)
-  const active = combined > 0
+export function ConnectionRow(props: ConnectionRowProps) {
+  const domain = createMemo(() => connectionDomain(props.connection))
+  const outbound = createMemo(() => connectionOutbound(props.connection))
+  const subtitle = createMemo(() => {
+    const meta = props.connection.metadata || {}
+    const sourceIp = meta.sourceIP ? (props.seatLabels?.[meta.sourceIP] || meta.sourceIP) : null
+    const portId = connectionAccessPortId(props.connection)
+    const portTag = portId ? `专属端口: ${props.portLabels?.[portId] || portId}` : null
+    const rule = connectionRule(props.connection)
+    const ruleText = humanizeClashRule(rule) || displayRuleText(rule)
+    const processName = processNameOf(meta.processPath)
+    const network = [
+      meta.network ? String(meta.network).toUpperCase() : '',
+      meta.destinationPort || '',
+    ].filter(Boolean).join('/')
+    const duration = connectionDuration(props.connection)
+    return [sourceIp, portTag, ruleText, processName, network, duration !== '--' ? duration : null]
+      .filter(Boolean)
+      .join(' · ')
+  })
+  const active = createMemo(() => connectionSpeed(props.connection) > 0)
 
   return (
     <article
-      className={classNames('conn-row', active ? 'active' : 'idle')}
-      aria-label={`${domain} 链接`}
-      data-flip-key={connection.id}
-      role="listitem" aria-posinset={position} aria-setsize={total}
+      class={classNames('conn-row', active() ? 'active' : 'idle')}
+      aria-label={`${domain()} 链接`}
+      data-flip-key={props.connection.id}
+      role="listitem"
+      aria-posinset={props.position}
+      aria-setsize={props.total}
     >
-      <div className="conn-row-main">
-        <SiteMark domain={domain} />
-        <div className="conn-row-id">
-          <strong className="conn-row-title" title={domain}>{domain}</strong>
-          <span className="conn-row-sub" title={subtitle}>{subtitle}</span>
+      <div class="conn-row-main">
+        <SiteMark domain={domain()} />
+        <div class="conn-row-id">
+          <strong class="conn-row-title" title={domain()}>{domain()}</strong>
+          <span class="conn-row-sub" title={subtitle()}>{subtitle()}</span>
         </div>
-        <span className={classNames('badge', 'connection-outbound-chip', isDirectOutbound(outbound) && 'direct')}>
-          {outbound}
+        <span class={classNames('badge', 'connection-outbound-chip', isDirectOutbound(outbound()) && 'direct')}>
+          {outbound()}
         </span>
-        <span className="conn-row-speed">
-          <small className="tone-download">
-            <ArrowDown size={ICON.xs} />
-            <AnimatedValue value={formatSpeed(connection.downloadSpeed)} />
+        <span class="conn-row-speed">
+          <small class="tone-download">
+            <ArrowDownIcon size={ICON.xs} />
+            <AnimatedValue value={formatSpeed(props.connection.downloadSpeed)} />
           </small>
-          <small className="tone-upload">
-            <ArrowUp size={ICON.xs} />
-            <AnimatedValue value={formatSpeed(connection.uploadSpeed)} />
+          <small class="tone-upload">
+            <ArrowUpIcon size={ICON.xs} />
+            <AnimatedValue value={formatSpeed(props.connection.uploadSpeed)} />
           </small>
         </span>
-        <span className="conn-row-total">
-          <span className="conn-row-total-label">累计</span>
-          <small className="tone-download">
-            <ArrowDown size={ICON.xs} />
-            <AnimatedValue value={formatBytes(connection.download)} />
+        <span class="conn-row-total">
+          <span class="conn-row-total-label">累计</span>
+          <small class="tone-download">
+            <ArrowDownIcon size={ICON.xs} />
+            <AnimatedValue value={formatBytes(props.connection.download)} />
           </small>
-          <small className="tone-upload">
-            <ArrowUp size={ICON.xs} />
-            <AnimatedValue value={formatBytes(connection.upload)} />
+          <small class="tone-upload">
+            <ArrowUpIcon size={ICON.xs} />
+            <AnimatedValue value={formatBytes(props.connection.upload)} />
           </small>
         </span>
       </div>
     </article>
   )
-})
+}

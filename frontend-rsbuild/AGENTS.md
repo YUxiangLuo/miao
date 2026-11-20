@@ -1,6 +1,6 @@
 # 前端开发约定
 
-使用 Bun，命令在本目录执行。先读 [README](README.md)，遵守 API 类型、mock、设计 token 和生产实例限制。
+使用 Bun，命令在本目录执行。先读 [README](README.md)，遵守 API 类型契约、隔离 mock 和生产实例限制；视觉样式与设计系统可按需自由演进。
 
 - 开发 `bun run dev`，构建 `bun run build`，预览 `bun run preview`。
 - 检查 `bun run lint`、`bun run typecheck`、`bun run test`；调试 `bun run test:watch`。

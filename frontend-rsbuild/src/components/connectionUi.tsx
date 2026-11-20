@@ -1,30 +1,36 @@
+import { Show, createMemo } from 'solid-js'
 import { classNames } from '../utils'
 import { iconForDomain } from './siteIcons'
 
-// 轮询刷新时数值变化会触发 key 变化重新挂载,配合 CSS 淡入提示数据已更新
-export function AnimatedValue({ value, className }: { value: string | number; className?: string }) {
-  return <span key={String(value)} className={classNames('value-anim', 'num', className)}>{value}</span>
+export function AnimatedValue(props: { value: string | number; class?: string }) {
+  return <span class={classNames('value-anim', 'num', props.class)}>{props.value}</span>
 }
 
-/** 站点/连接的品牌图标：命中品牌库取官方几何，否则首字母兜底 */
-export function SiteMark({ domain }: { domain: string }) {
-  const icon = iconForDomain(domain)
-  const isLetter = 'letter' in icon
+export function SiteMark(props: { domain: string }) {
+  const icon = createMemo(() => iconForDomain(props.domain))
+  const isLetter = () => 'letter' in icon()
+
   return (
     <div
-      className={classNames('site-icon', isLetter && 'letter')}
-      style={!isLetter ? { background: icon.background, color: icon.color } : undefined}
-      data-site={icon.id}
-      title={icon.label}
+      class={classNames('site-icon', isLetter() && 'letter')}
+      style={!isLetter()
+        ? {
+          background: (icon() as { background: string }).background,
+          color: (icon() as { color: string }).color,
+        }
+        : undefined}
+      data-site={icon().id}
+      title={icon().label}
       aria-hidden="true"
     >
-      {!isLetter ? (
-        <svg viewBox={icon.viewBox || '0 0 24 24'} width="18" height="18">
-          <path fill="currentColor" d={icon.path} />
+      <Show
+        when={!isLetter()}
+        fallback={<span>{(icon() as { letter: string }).letter}</span>}
+      >
+        <svg viewBox={(icon() as { viewBox?: string }).viewBox || '0 0 24 24'} width="18" height="18">
+          <path fill="currentColor" d={(icon() as { path: string }).path} />
         </svg>
-      ) : (
-        <span>{icon.letter}</span>
-      )}
+      </Show>
     </div>
   )
 }

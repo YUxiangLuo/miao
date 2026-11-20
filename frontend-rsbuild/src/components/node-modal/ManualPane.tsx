@@ -1,5 +1,5 @@
-import { Plus } from 'lucide-react'
-import type { ChangeEvent, Dispatch, InputHTMLAttributes, SelectHTMLAttributes, SetStateAction } from 'react'
+import { For, Show, createMemo, omit, type Setter } from 'solid-js'
+import type { JSX } from '@solidjs/web'
 import { ICON } from '../../tokens'
 import { Button } from '../ui'
 import { buildNodeRequest } from '../../nodeForm'
@@ -19,305 +19,440 @@ import {
   type SelectOption,
 } from '../../utils'
 import type { NodeType } from '../../types/api'
+import { PlusIcon } from '../icons'
 
 const VLESS_FLOW_OPTIONS: SelectOption[] = [
   { value: '', label: '默认' },
   { value: 'xtls-rprx-vision', label: 'xtls-rprx-vision' },
 ]
 
-// 部分选项常量是纯字符串数组,统一成 {value,label} 供 SelectField 渲染
 const asOptions = (items: string[]): SelectOption[] => items.map((item) => ({ value: item, label: item }))
 
-interface TextFieldProps extends InputHTMLAttributes<HTMLInputElement> {
+interface TextFieldProps extends JSX.InputHTMLAttributes<HTMLInputElement> {
   label: string
 }
 
-function TextField({ label, ...inputProps }: TextFieldProps) {
+function TextField(props: TextFieldProps) {
+  const rest = omit(props, 'label')
   return (
-    <label className="field">
-      <span>{label}</span>
-      <input {...inputProps} />
+    <label class="field">
+      <span>{props.label}</span>
+      <input {...rest} />
     </label>
   )
 }
 
-interface SelectFieldProps extends SelectHTMLAttributes<HTMLSelectElement> {
+interface SelectFieldProps extends JSX.SelectHTMLAttributes<HTMLSelectElement> {
   label: string
   options: SelectOption[]
 }
 
-function SelectField({ label, options, ...selectProps }: SelectFieldProps) {
+function SelectField(props: SelectFieldProps) {
+  const rest = omit(props, 'label', 'options')
   return (
-    <label className="field">
-      <span>{label}</span>
-      <select {...selectProps}>
-        {options.map((option) => (
-          <option key={option.value} value={option.value}>{option.label}</option>
-        ))}
+    <label class="field">
+      <span>{props.label}</span>
+      <select {...rest}>
+        <For each={props.options}>
+          {(option) => <option value={option.value}>{option.label}</option>}
+        </For>
       </select>
     </label>
   )
 }
 
-function CheckboxField({ label, ...inputProps }: TextFieldProps) {
+function CheckboxField(props: TextFieldProps) {
+  const rest = omit(props, 'label', 'type')
   return (
-    <label className="field checkbox-field">
-      <input type="checkbox" {...inputProps} />
-      <span>{label}</span>
+    <label class="field checkbox-field">
+      <input type="checkbox" {...rest} />
+      <span>{props.label}</span>
     </label>
   )
 }
 
-// 按值类型拆分的表单字段键：文本绑定只能用于 string 字段，checkbox 只能用于 boolean 字段
 type StringField = { [K in keyof NodeForm]: NodeForm[K] extends string ? K : never }[keyof NodeForm]
 type BooleanField = { [K in keyof NodeForm]: NodeForm[K] extends boolean ? K : never }[keyof NodeForm]
 
 export interface ManualPaneProps {
   nodeType: NodeType
-  setNodeType: Dispatch<SetStateAction<NodeType>>
+  setNodeType: Setter<NodeType>
   form: NodeForm
-  setForm: Dispatch<SetStateAction<NodeForm>>
+  setForm: Setter<NodeForm>
   loading: boolean
   onSubmit: () => void
+  relayCandidates?: string[]
 }
 
-export function ManualPane({ nodeType, setNodeType, form, setForm, loading, onSubmit }: ManualPaneProps) {
-  const activeLabel = NODE_TYPE_OPTIONS.find((option) => option.value === nodeType)?.label || nodeType
-  const caps = nodeCapabilities(nodeType)
-  const requiresPassword = caps.password
-  const requiresUuid = caps.uuid
-  const supportsTransport = caps.transport
-  const showsTlsToggle = caps.tlsToggle
-  const showsTlsFields = !['ss', 'socks'].includes(nodeType) && (!showsTlsToggle || form.tls_enabled || form.reality_public_key.trim())
-  const pathTransport = ['ws', 'http', 'h2'].includes(form.transport_type)
-  const handleNodeTypeChange = (event: ChangeEvent<HTMLSelectElement>) => {
-    const value = event.target.value as NodeType
-    setNodeType(value)
-    setForm((prev) => ({ ...prev, ...nodeTypeDefaults(value) }))
+export function ManualPane(props: ManualPaneProps) {
+  const activeLabel = () => NODE_TYPE_OPTIONS.find((option) => option.value === props.nodeType)?.label || props.nodeType
+  const caps = createMemo(() => nodeCapabilities(props.nodeType))
+  const showsTlsFields = () => (
+    !['ss', 'socks'].includes(props.nodeType)
+    && (!caps().tlsToggle || props.form.tls_enabled || Boolean(props.form.reality_public_key.trim()))
+  )
+  const pathTransport = () => ['ws', 'http', 'h2'].includes(props.form.transport_type)
+
+  const handleNodeTypeChange = (value: NodeType) => {
+    props.setNodeType(value)
+    props.setForm((prev) => ({ ...prev, ...nodeTypeDefaults(value) }))
   }
 
-  // 字段级受控绑定,消掉每个输入框重复的 setForm 内联 handler;
-  // 有联动逻辑的字段(端口/Reality 公钥/混淆类型)仍用自定义 handler
-  const bindField = (field: StringField) => ({
-    value: form[field],
-    onChange: (event: ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setForm((prev) => ({ ...prev, [field]: event.target.value })),
-  })
-  const bindCheckbox = (field: BooleanField) => ({
-    checked: form[field],
-    onChange: (event: ChangeEvent<HTMLInputElement>) => setForm((prev) => ({ ...prev, [field]: event.target.checked })),
-  })
+  const updateString = (field: StringField, value: string) => {
+    props.setForm((prev) => ({ ...prev, [field]: value }))
+  }
 
-  const hasRequiredFields = form.tag.trim()
-    && form.server.trim()
-    && String(form.server_port).length > 0
-    && (!requiresPassword || form.password.trim())
-    && (!requiresUuid || form.uuid.trim())
-    && (nodeType !== 'hysteria2' || !form.obfs_type || form.obfs_password.trim())
+  const updateBoolean = (field: BooleanField, checked: boolean) => {
+    props.setForm((prev) => ({ ...prev, [field]: checked }))
+  }
 
-  let validationError = ''
-  if (hasRequiredFields) {
-    try { buildNodeRequest(nodeType, form) } catch (error) {
-      validationError = error instanceof Error ? error.message : String(error)
+  const hasRequiredFields = createMemo(() => Boolean(
+    props.form.tag.trim()
+    && props.form.server.trim()
+    && String(props.form.server_port).length > 0
+    && (!caps().password || props.form.password.trim())
+    && (!caps().uuid || props.form.uuid.trim())
+    && (props.nodeType !== 'hysteria2' || !props.form.obfs_type || props.form.obfs_password.trim()),
+  ))
+
+  const validationError = createMemo(() => {
+    if (!hasRequiredFields()) return ''
+    try {
+      buildNodeRequest(props.nodeType, props.form)
+      return ''
+    } catch (error) {
+      return error instanceof Error ? error.message : String(error)
     }
-  }
-  const canSubmit = hasRequiredFields && !validationError
+  })
+
+  const canSubmit = () => hasRequiredFields() && !validationError()
 
   return (
-    <div className="node-pane">
-      <fieldset className="node-pane-scroll manual-node-fields" disabled={loading}>
-        <div className="form-grid single">
-          <SelectField label="协议" options={NODE_TYPE_OPTIONS} value={nodeType} onChange={handleNodeTypeChange} />
-        </div>
-
-      <div className="form-grid single">
-        <TextField label="节点名称" placeholder="例如：我的节点" {...bindField('tag')} />
-      </div>
-
-      <div className="form-grid two">
-        <TextField label="服务器地址" placeholder="example.com" {...bindField('server')} />
-        <TextField
-          label="端口"
-          type="number"
-          min="1"
-          max="65535"
-          placeholder="443"
-          value={form.server_port}
-          onChange={(event: ChangeEvent<HTMLInputElement>) => setForm((prev) => ({
-            ...prev,
-            // 清空输入时保留空串（受控组件中间态），NodeForm 声明为 number，收窄仅在表单内成立
-            server_port: (event.target.value === '' ? '' : Number(event.target.value)) as number,
-          }))}
-        />
-      </div>
-
-      {nodeType === 'socks' && (
-        <div className="form-grid single">
-          <TextField label="用户名（可选）" autoComplete="off" placeholder="无认证时与密码一起留空" {...bindField('username')} />
-        </div>
-      )}
-
-      {(requiresPassword || nodeType === 'socks') && (
-        <div className="form-grid single">
-          <TextField
-            label={nodeType === 'socks' ? '密码（可选）' : '密码'}
-            type="password"
-            autoComplete="new-password"
-            placeholder="密码"
-            {...bindField('password')}
+    <div class="node-pane">
+      <fieldset class="node-pane-scroll manual-node-fields" disabled={props.loading}>
+        <div class="form-grid single">
+          <SelectField
+            label="协议"
+            options={NODE_TYPE_OPTIONS}
+            value={props.nodeType}
+            onChange={(event) => handleNodeTypeChange(event.currentTarget.value as NodeType)}
           />
         </div>
-      )}
 
-      {requiresUuid && (
-        <div className="form-grid single">
-          <TextField label="UUID" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" {...bindField('uuid')} />
+        <div class="form-grid single">
+          <TextField
+            label="节点名称"
+            placeholder="例如：我的节点"
+            value={props.form.tag}
+            onInput={(event) => updateString('tag', event.currentTarget.value)}
+          />
         </div>
-      )}
 
-      {nodeType === 'ss' && (
-        <div className="form-grid single">
-          <SelectField label="加密方式" options={asOptions(CIPHER_OPTIONS)} {...bindField('cipher')} />
+        <div class="form-grid two">
+          <TextField
+            label="服务器地址"
+            placeholder="example.com"
+            value={props.form.server}
+            onInput={(event) => updateString('server', event.currentTarget.value)}
+          />
+          <TextField
+            label="端口"
+            type="number"
+            min="1"
+            max="65535"
+            placeholder="443"
+            value={props.form.server_port}
+            onInput={(event) => props.setForm((prev) => ({
+              ...prev,
+              server_port: (event.currentTarget.value === '' ? '' : Number(event.currentTarget.value)) as number,
+            }))}
+          />
         </div>
-      )}
 
-      {showsTlsToggle && (
-        <div className="form-grid single">
-          <CheckboxField label="启用 TLS" {...bindCheckbox('tls_enabled')} />
+        <Show when={props.nodeType === 'socks'}>
+          <div class="form-grid single">
+            <TextField
+              label="用户名（可选）"
+              autocomplete="off"
+              placeholder="无认证时与密码一起留空"
+              value={props.form.username}
+              onInput={(event) => updateString('username', event.currentTarget.value)}
+            />
+          </div>
+        </Show>
+
+        <Show when={caps().password || props.nodeType === 'socks'}>
+          <div class="form-grid single">
+            <TextField
+              label={props.nodeType === 'socks' ? '密码（可选）' : '密码'}
+              type="password"
+              autocomplete="new-password"
+              placeholder="密码"
+              value={props.form.password}
+              onInput={(event) => updateString('password', event.currentTarget.value)}
+            />
+          </div>
+        </Show>
+
+        <div class="form-grid single">
+          <label class="field">
+            <span>
+              {props.nodeType === 'socks'
+                ? '前置跳板中转（推荐：国内无法直连海外住宅 IP 时指定跳板）'
+                : '前置跳板中转（可选）'}
+            </span>
+            <select
+              aria-label="前置跳板中转"
+              value={props.form.detour}
+              onChange={(event) => updateString('detour', event.currentTarget.value)}
+            >
+              <option value="">直连出境（不使用前置跳板）</option>
+              <For each={(props.relayCandidates || []).filter((name) => name !== props.form.tag.trim())}>
+                {(candidate) => <option value={candidate}>{candidate}</option>}
+              </For>
+            </select>
+          </label>
         </div>
-      )}
 
-      {nodeType !== 'socks' && <details className="advanced-details">
-        <summary>高级选项</summary>
-        <div className="advanced-details-body">
-          {nodeType === 'vmess' && (
-            <div className="form-grid two">
-              <SelectField label="VMess security" options={asOptions(VMESS_CIPHER_OPTIONS)} {...bindField('vmess_cipher')} />
-              <TextField
-                label="Alter ID"
-                type="number"
-                min="0"
-                value={form.alter_id}
-                onChange={(event: ChangeEvent<HTMLInputElement>) => setForm((prev) => ({ ...prev, alter_id: Number(event.target.value || 0) }))}
-              />
-            </div>
-          )}
+        <Show when={caps().uuid}>
+          <div class="form-grid single">
+            <TextField
+              label="UUID"
+              placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+              value={props.form.uuid}
+              onInput={(event) => updateString('uuid', event.currentTarget.value)}
+            />
+          </div>
+        </Show>
 
-          {nodeType === 'vless' && (
-            <div className="form-grid two">
-              <SelectField label="Flow" options={VLESS_FLOW_OPTIONS} {...bindField('flow')} />
-              <SelectField label="Packet encoding" options={PACKET_ENCODING_OPTIONS} {...bindField('packet_encoding')} />
-            </div>
-          )}
+        <Show when={props.nodeType === 'ss'}>
+          <div class="form-grid single">
+            <SelectField
+              label="加密方式"
+              options={asOptions(CIPHER_OPTIONS)}
+              value={props.form.cipher}
+              onChange={(event) => updateString('cipher', event.currentTarget.value)}
+            />
+          </div>
+        </Show>
 
-          {nodeType === 'vmess' && (
-            <div className="form-grid single">
-              <SelectField label="Packet encoding" options={PACKET_ENCODING_OPTIONS} {...bindField('packet_encoding')} />
-            </div>
-          )}
+        <Show when={caps().tlsToggle}>
+          <div class="form-grid single">
+            <CheckboxField
+              label="启用 TLS"
+              checked={props.form.tls_enabled}
+              onChange={(event) => updateBoolean('tls_enabled', event.currentTarget.checked)}
+            />
+          </div>
+        </Show>
 
-          {showsTlsFields && (
-            <>
-              <div className="form-grid two">
-                <TextField label="SNI（可选）" placeholder="留空使用服务器地址" {...bindField('sni')} />
-                <SelectField label="TLS 指纹" options={CLIENT_FINGERPRINT_OPTIONS} {...bindField('client_fingerprint')} />
-              </div>
-              <div className="form-grid single">
-                <CheckboxField label="跳过证书验证（不推荐）" {...bindCheckbox('skip_cert_verify')} />
-              </div>
-            </>
-          )}
-
-          {nodeType === 'vless' && (
-            <div className="form-grid two">
-              <TextField
-                label="Reality public key"
-                placeholder="可选"
-                value={form.reality_public_key}
-                onChange={(event: ChangeEvent<HTMLInputElement>) => {
-                  const publicKey = event.target.value
-                  setForm((prev) => ({
-                    ...prev,
-                    reality_public_key: publicKey,
-                    client_fingerprint: publicKey.trim() && !prev.client_fingerprint
-                      ? 'chrome'
-                      : prev.client_fingerprint,
-                  }))
-                }}
-              />
-              <TextField label="Reality short ID" placeholder="可选" {...bindField('reality_short_id')} />
-            </div>
-          )}
-
-          {supportsTransport && (
-            <>
-              <div className="form-grid single">
-                <SelectField label="传输层" options={TRANSPORT_OPTIONS} {...bindField('transport_type')} />
-              </div>
-              {pathTransport && (
-                <div className="form-grid two">
-                  <TextField label="路径" placeholder="/ws" {...bindField('transport_path')} />
-                  <TextField label="Host" placeholder="可选" {...bindField('transport_host')} />
+        <Show when={props.nodeType !== 'socks'}>
+          <details class="advanced-details">
+            <summary>高级选项</summary>
+            <div class="advanced-details-body">
+              <Show when={props.nodeType === 'vmess'}>
+                <div class="form-grid two">
+                  <SelectField
+                    label="VMess security"
+                    options={asOptions(VMESS_CIPHER_OPTIONS)}
+                    value={props.form.vmess_cipher}
+                    onChange={(event) => updateString('vmess_cipher', event.currentTarget.value)}
+                  />
+                  <TextField
+                    label="Alter ID"
+                    type="number"
+                    min="0"
+                    value={props.form.alter_id}
+                    onInput={(event) => props.setForm((prev) => ({
+                      ...prev,
+                      alter_id: Number(event.currentTarget.value || 0),
+                    }))}
+                  />
                 </div>
-              )}
-              {form.transport_type === 'grpc' && (
-                <div className="form-grid single">
-                  <TextField label="gRPC service name" placeholder="可选" {...bindField('grpc_service_name')} />
+              </Show>
+
+              <Show when={props.nodeType === 'vless'}>
+                <div class="form-grid two">
+                  <SelectField
+                    label="Flow"
+                    options={VLESS_FLOW_OPTIONS}
+                    value={props.form.flow}
+                    onChange={(event) => updateString('flow', event.currentTarget.value)}
+                  />
+                  <SelectField
+                    label="Packet encoding"
+                    options={PACKET_ENCODING_OPTIONS}
+                    value={props.form.packet_encoding}
+                    onChange={(event) => updateString('packet_encoding', event.currentTarget.value)}
+                  />
                 </div>
-              )}
-            </>
-          )}
+              </Show>
 
-          {nodeType === 'hysteria2' && (
-            <div className="form-grid two">
-              <SelectField
-                label="混淆类型"
-                options={HYSTERIA2_OBFS_OPTIONS}
-                value={form.obfs_type}
-                onChange={(event: ChangeEvent<HTMLSelectElement>) => {
-                  const obfsType = event.target.value
-                  setForm((prev) => ({
-                    ...prev,
-                    obfs_type: obfsType,
-                    obfs_password: obfsType ? prev.obfs_password : '',
-                  }))
-                }}
-              />
-              <TextField
-                label="混淆密码"
-                type="password"
-                autoComplete="new-password"
-                disabled={!form.obfs_type}
-                placeholder={form.obfs_type ? 'obfs password' : '未启用'}
-                {...bindField('obfs_password')}
-              />
-            </div>
-          )}
+              <Show when={props.nodeType === 'vmess'}>
+                <div class="form-grid single">
+                  <SelectField
+                    label="Packet encoding"
+                    options={PACKET_ENCODING_OPTIONS}
+                    value={props.form.packet_encoding}
+                    onChange={(event) => updateString('packet_encoding', event.currentTarget.value)}
+                  />
+                </div>
+              </Show>
 
-          {nodeType === 'tuic' && (
-            <div className="form-grid two">
-              <SelectField label="拥塞控制" options={TUIC_CONGESTION_OPTIONS} {...bindField('tuic_congestion_control')} />
-              <SelectField label="UDP relay mode" options={TUIC_UDP_RELAY_OPTIONS} {...bindField('tuic_udp_relay_mode')} />
-            </div>
-          )}
+              <Show when={showsTlsFields()}>
+                <div class="form-grid two">
+                  <TextField
+                    label="SNI（可选）"
+                    placeholder="留空使用服务器地址"
+                    value={props.form.sni}
+                    onInput={(event) => updateString('sni', event.currentTarget.value)}
+                  />
+                  <SelectField
+                    label="TLS 指纹"
+                    options={CLIENT_FINGERPRINT_OPTIONS}
+                    value={props.form.client_fingerprint}
+                    onChange={(event) => updateString('client_fingerprint', event.currentTarget.value)}
+                  />
+                </div>
+                <div class="form-grid single">
+                  <CheckboxField
+                    label="跳过证书验证（不推荐）"
+                    checked={props.form.skip_cert_verify}
+                    onChange={(event) => updateBoolean('skip_cert_verify', event.currentTarget.checked)}
+                  />
+                </div>
+              </Show>
 
-          {nodeType === 'tuic' && (
-            <div className="form-grid single">
-              <CheckboxField label="启用 0-RTT" {...bindCheckbox('tuic_zero_rtt')} />
+              <Show when={props.nodeType === 'vless'}>
+                <div class="form-grid two">
+                  <TextField
+                    label="Reality public key"
+                    placeholder="可选"
+                    value={props.form.reality_public_key}
+                    onInput={(event) => {
+                      const publicKey = event.currentTarget.value
+                      props.setForm((prev) => ({
+                        ...prev,
+                        reality_public_key: publicKey,
+                        client_fingerprint: publicKey.trim() && !prev.client_fingerprint
+                          ? 'chrome'
+                          : prev.client_fingerprint,
+                      }))
+                    }}
+                  />
+                  <TextField
+                    label="Reality short ID"
+                    placeholder="可选"
+                    value={props.form.reality_short_id}
+                    onInput={(event) => updateString('reality_short_id', event.currentTarget.value)}
+                  />
+                </div>
+              </Show>
+
+              <Show when={caps().transport}>
+                <div class="form-grid single">
+                  <SelectField
+                    label="传输层"
+                    options={TRANSPORT_OPTIONS}
+                    value={props.form.transport_type}
+                    onChange={(event) => updateString('transport_type', event.currentTarget.value)}
+                  />
+                </div>
+                <Show when={pathTransport()}>
+                  <div class="form-grid two">
+                    <TextField
+                      label="路径"
+                      placeholder="/ws"
+                      value={props.form.transport_path}
+                      onInput={(event) => updateString('transport_path', event.currentTarget.value)}
+                    />
+                    <TextField
+                      label="Host"
+                      placeholder="可选"
+                      value={props.form.transport_host}
+                      onInput={(event) => updateString('transport_host', event.currentTarget.value)}
+                    />
+                  </div>
+                </Show>
+                <Show when={props.form.transport_type === 'grpc'}>
+                  <div class="form-grid single">
+                    <TextField
+                      label="gRPC service name"
+                      placeholder="可选"
+                      value={props.form.grpc_service_name}
+                      onInput={(event) => updateString('grpc_service_name', event.currentTarget.value)}
+                    />
+                  </div>
+                </Show>
+              </Show>
+
+              <Show when={props.nodeType === 'hysteria2'}>
+                <div class="form-grid two">
+                  <SelectField
+                    label="混淆类型"
+                    options={HYSTERIA2_OBFS_OPTIONS}
+                    value={props.form.obfs_type}
+                    onChange={(event) => {
+                      const obfsType = event.currentTarget.value
+                      props.setForm((prev) => ({
+                        ...prev,
+                        obfs_type: obfsType,
+                        obfs_password: obfsType ? prev.obfs_password : '',
+                      }))
+                    }}
+                  />
+                  <TextField
+                    label="混淆密码"
+                    type="password"
+                    autocomplete="new-password"
+                    disabled={!props.form.obfs_type}
+                    placeholder={props.form.obfs_type ? 'obfs password' : '未启用'}
+                    value={props.form.obfs_password}
+                    onInput={(event) => updateString('obfs_password', event.currentTarget.value)}
+                  />
+                </div>
+              </Show>
+
+              <Show when={props.nodeType === 'tuic'}>
+                <div class="form-grid two">
+                  <SelectField
+                    label="拥塞控制"
+                    options={TUIC_CONGESTION_OPTIONS}
+                    value={props.form.tuic_congestion_control}
+                    onChange={(event) => updateString('tuic_congestion_control', event.currentTarget.value)}
+                  />
+                  <SelectField
+                    label="UDP relay mode"
+                    options={TUIC_UDP_RELAY_OPTIONS}
+                    value={props.form.tuic_udp_relay_mode}
+                    onChange={(event) => updateString('tuic_udp_relay_mode', event.currentTarget.value)}
+                  />
+                </div>
+                <div class="form-grid single">
+                  <CheckboxField
+                    label="启用 0-RTT"
+                    checked={props.form.tuic_zero_rtt}
+                    onChange={(event) => updateBoolean('tuic_zero_rtt', event.currentTarget.checked)}
+                  />
+                </div>
+              </Show>
             </div>
-          )}
-        </div>
-      </details>}
+          </details>
+        </Show>
       </fieldset>
 
-      {validationError && <p className="manual-node-error" role="alert">{validationError}</p>}
+      <Show when={validationError()}>
+        {(err) => <p class="manual-node-error" role="alert">{err()}</p>}
+      </Show>
+
       <Button
         tone="primary"
-        loading={loading}
-        icon={<Plus size={ICON.sm} />}
-        disabled={!canSubmit || loading}
-        onClick={onSubmit}
+        loading={props.loading}
+        icon={<PlusIcon size={ICON.sm} />}
+        disabled={!canSubmit() || props.loading}
+        onClick={props.onSubmit}
       >
-        添加 {activeLabel} 节点
+        添加 {activeLabel()} 节点
       </Button>
     </div>
   )

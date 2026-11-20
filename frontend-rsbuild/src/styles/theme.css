@@ -1,0 +1,143 @@
+:root,
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #f4f6f9;
+  --surface: #ffffff;
+  --surface-subtle: #f8fafc;
+  --surface-muted: #f1f5f9;
+  --surface-hover: #eff6ff;
+
+  --sidebar-bg: #0f172a;
+  --sidebar-surface: #1e293b;
+  --sidebar-border: rgba(148, 163, 184, 0.16);
+  --sidebar-text: #f8fafc;
+  --sidebar-muted: #94a3b8;
+  --sidebar-active-bg: rgba(14, 165, 233, 0.16);
+  --sidebar-active-text: #38bdf8;
+
+  --text: #0f172a;
+  --text-secondary: #334155;
+  --text-muted: #64748b;
+  --border: #e2e8f0;
+  --border-strong: #cbd5e1;
+
+  --accent: #0284c7;
+  --accent-hover: #0369a1;
+  --accent-soft: #e0f2fe;
+  --accent-text: #0369a1;
+
+  --emerald: #059669;
+  --emerald-soft: #d1fae5;
+  --emerald-text: #065f46;
+
+  --amber: #d97706;
+  --amber-soft: #fef3c7;
+  --amber-text: #92400e;
+
+  --danger: #dc2626;
+  --danger-hover: #b91c1c;
+  --danger-soft: #fee2e2;
+  --danger-text: #991b1b;
+
+  --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.04);
+  --shadow-md: 0 4px 12px rgba(15, 23, 42, 0.07);
+  --shadow-lg: 0 16px 40px rgba(15, 23, 42, 0.16);
+
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  --font-mono: "JetBrains Mono", "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0b1120;
+  --surface: #111827;
+  --surface-subtle: #162033;
+  --surface-muted: #1e293b;
+  --surface-hover: #1e293b;
+
+  --sidebar-bg: #070d19;
+  --sidebar-surface: #111827;
+  --sidebar-border: rgba(148, 163, 184, 0.14);
+  --sidebar-text: #f8fafc;
+  --sidebar-muted: #94a3b8;
+  --sidebar-active-bg: rgba(56, 189, 248, 0.16);
+  --sidebar-active-text: #38bdf8;
+
+  --text: #f1f5f9;
+  --text-secondary: #cbd5e1;
+  --text-muted: #94a3b8;
+  --border: #1e293b;
+  --border-strong: #334155;
+
+  --accent: #0ea5e9;
+  --accent-hover: #38bdf8;
+  --accent-soft: rgba(14, 165, 233, 0.16);
+  --accent-text: #38bdf8;
+
+  --emerald: #10b981;
+  --emerald-soft: rgba(16, 185, 129, 0.16);
+  --emerald-text: #34d399;
+
+  --amber: #f59e0b;
+  --amber-soft: rgba(245, 158, 11, 0.16);
+  --amber-text: #fbbf24;
+
+  --danger: #ef4444;
+  --danger-hover: #f87171;
+  --danger-soft: rgba(239, 68, 68, 0.16);
+  --danger-text: #fca5a5;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.25);
+  --shadow-md: 0 6px 18px rgba(0, 0, 0, 0.35);
+  --shadow-lg: 0 20px 48px rgba(0, 0, 0, 0.55);
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  min-height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+.num {
+  font-variant-numeric: tabular-nums;
+}
+
+.mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.spin {
+  animation: spin 0.9s linear infinite;
+}

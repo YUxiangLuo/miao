@@ -1,9 +1,10 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@solidjs/testing-library'
+import { createSignal, flush } from 'solid-js'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, rs } from '@rstest/core'
-import { SubDetailModal } from './SubDetailModal'
+import { SubDetailModal, type SubDetailModalProps } from './SubDetailModal'
 import { subMock, subNodeMock, subNodesInfoMock } from '../testFixtures'
-import type { ApiResponse, SubNodesInfo } from '../types/api'
+import type { ApiResponse, SubNodesInfo, SubStatus } from '../types/api'
 
 const SUB_URL = 'https://example.com/subscription-token-abcdef'
 
@@ -18,15 +19,26 @@ function stubSubNodesFetch(groups: SubNodesInfo[]) {
   })))
 }
 
-function renderModal(props = {}) {
-  return render(
+function renderModal(props: Partial<SubDetailModalProps> = {}) {
+  const initialSub = props.sub !== undefined ? props.sub : subMock({ url: SUB_URL, node_count: 2 })
+  const [sub, setSub] = createSignal<SubStatus | null>(initialSub)
+  const onClose = props.onClose ?? rs.fn()
+  const onToggleNode = props.onToggleNode ?? rs.fn().mockResolvedValue(true)
+  const view = render(() => (
     <SubDetailModal
-      sub={subMock({ url: SUB_URL, node_count: 2 })}
-      onClose={rs.fn()}
-      onToggleNode={rs.fn().mockResolvedValue(true)}
-      {...props}
-    />,
-  )
+      sub={sub()}
+      onClose={onClose}
+      onToggleNode={onToggleNode}
+    />
+  ))
+  flush()
+  return {
+    ...view,
+    setSub(next: SubStatus | null) {
+      setSub(next)
+      flush()
+    },
+  }
 }
 
 describe('SubDetailModal', () => {
@@ -57,9 +69,7 @@ describe('SubDetailModal', () => {
     expect(screen.getByText('日本 01')).toBeInTheDocument()
     expect(screen.queryByText('别家节点')).not.toBeInTheDocument()
     expect(screen.getByText('hk.example.com:8443')).toBeInTheDocument()
-    // 头部统计：共 2 个 · 禁用 1
     expect(screen.getByText('共 2 个节点 · 禁用 1')).toBeInTheDocument()
-    // 禁用节点排在最前面（日本 01 被禁用，尽管原始顺序在香港 01 之后）
     const titles = [...document.querySelectorAll('.sub-node-row .list-row-title')].map((el) => el.textContent)
     expect(titles).toEqual(['日本 01', '香港 01'])
   })
@@ -84,7 +94,6 @@ describe('SubDetailModal', () => {
     await user.click(toggle)
 
     expect(onToggleNode).toHaveBeenCalledWith(SUB_URL, '香港 01', true)
-    // 切换成功后重新拉取，开关翻转为「已禁用」
     await waitFor(() => {
       expect(screen.getByRole('switch', { name: '启用节点 香港 01' })).toHaveAttribute('aria-checked', 'false')
     })
@@ -93,19 +102,24 @@ describe('SubDetailModal', () => {
   it.each(['switch', 'stale'])('guards duplicate %s changes and unlocks after failure', async (kind) => {
     stubSubNodesFetch([subNodesInfoMock({ url: SUB_URL, nodes: [subNodeMock({ name: '香港 01' })], stale_disabled: ['旧节点'] })])
     let finish!: (ok: boolean) => void
-    const onToggleNode = rs.fn(() => new Promise<boolean>(resolve => { finish = resolve }))
+    const onToggleNode = rs.fn(() => new Promise<boolean>((resolve) => { finish = resolve }))
     renderModal({ onToggleNode })
     const button = kind === 'switch'
       ? await screen.findByRole('switch', { name: '禁用节点 香港 01' })
       : await screen.findByRole('button', { name: '移除失效禁用 旧节点' })
-    act(() => { fireEvent.click(button); fireEvent.click(button) })
+    fireEvent.click(button)
+    fireEvent.click(button)
+    flush()
     expect(onToggleNode).toHaveBeenCalledExactlyOnceWith(SUB_URL, kind === 'switch' ? '香港 01' : '旧节点', kind === 'switch')
     expect(button).toBeDisabled()
-    await act(async () => { finish(false) })
+    finish(false)
+    await Promise.resolve()
+    flush()
     expect(button).toBeEnabled()
     fireEvent.click(button)
     expect(onToggleNode).toHaveBeenCalledTimes(2)
-    await act(async () => { finish(false) })
+    finish(false)
+    await Promise.resolve()
   })
 
   it('retains pending changes across reopening without blocking the same name in another subscription', async () => {
@@ -113,25 +127,27 @@ describe('SubDetailModal', () => {
     const first = subMock({ url: SUB_URL })
     const second = subMock({ url: 'https://example.com/second' })
     let disabled = false
-    rs.stubGlobal('fetch', rs.fn(async () => ({ ok: true, json: async () => subNodesPayload([
-      subNodesInfoMock({ url: first.url, nodes: [subNodeMock({ name: '同名节点', disabled })] }),
-      subNodesInfoMock({ url: second.url, nodes: [subNodeMock({ name: '同名节点' })] }),
-    ]) })))
+    rs.stubGlobal('fetch', rs.fn(async () => ({
+      ok: true,
+      json: async () => subNodesPayload([
+        subNodesInfoMock({ url: first.url, nodes: [subNodeMock({ name: '同名节点', disabled })] }),
+        subNodesInfoMock({ url: second.url, nodes: [subNodeMock({ name: '同名节点' })] }),
+      ]),
+    })))
     let finish!: (ok: boolean) => void
-    const onToggleNode = rs.fn(() => new Promise<boolean>(resolve => { finish = resolve }))
-    const onClose = rs.fn()
-    const { rerender } = renderModal({ sub: first, onClose, onToggleNode })
+    const onToggleNode = rs.fn(() => new Promise<boolean>((resolve) => { finish = resolve }))
+    const { setSub } = renderModal({ sub: first, onToggleNode })
     await user.click(await screen.findByRole('switch', { name: '禁用节点 同名节点' }))
-    rerender(<SubDetailModal sub={second} onClose={onClose} onToggleNode={onToggleNode} />)
+    setSub(second)
     expect(await screen.findByRole('switch', { name: '禁用节点 同名节点' })).toBeEnabled()
-    rerender(<SubDetailModal sub={null} onClose={onClose} onToggleNode={onToggleNode} />)
-    rerender(<SubDetailModal sub={first} onClose={onClose} onToggleNode={onToggleNode} />)
+    setSub(null)
+    setSub(first)
     const pending = await screen.findByRole('switch', { name: '禁用节点 同名节点' })
     expect(pending).toBeDisabled()
     await user.click(pending)
     expect(onToggleNode).toHaveBeenCalledTimes(1)
     disabled = true
-    await act(async () => { finish(true) })
+    finish(true)
     expect(await screen.findByRole('switch', { name: '启用节点 同名节点' })).toBeEnabled()
     expect(screen.getByRole('switch', { name: '启用节点 同名节点' })).toHaveAttribute('aria-checked', 'false')
   })
@@ -139,8 +155,9 @@ describe('SubDetailModal', () => {
   it('shows an error block when loading fails', async () => {
     const user = userEvent.setup()
     let finish!: (response: unknown) => void
-    const fetch = rs.fn().mockRejectedValueOnce(new Error('network down'))
-      .mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    const fetch = rs.fn()
+      .mockRejectedValueOnce(new Error('network down'))
+      .mockImplementationOnce(() => new Promise((resolve) => { finish = resolve }))
     rs.stubGlobal('fetch', fetch)
     const onToggleNode = rs.fn()
     renderModal({ onToggleNode })
@@ -150,12 +167,14 @@ describe('SubDetailModal', () => {
     await user.click(screen.getByText('错误详情'))
     expect(screen.getByText('network down')).toBeVisible()
     const retry = screen.getByRole('button', { name: '重新读取节点' })
-    act(() => { fireEvent.click(retry); fireEvent.click(retry) })
+    fireEvent.click(retry)
+    fireEvent.click(retry)
+    flush()
     expect(retry).toBeDisabled()
     expect(fetch).toHaveBeenCalledTimes(2)
-    await act(async () => { finish({ ok: true, json: async () => subNodesPayload([subNodesInfoMock({ url: SUB_URL, nodes: [subNodeMock({ name: '恢复节点', disabled: true })] })]) }) })
+    finish({ ok: true, json: async () => subNodesPayload([subNodesInfoMock({ url: SUB_URL, nodes: [subNodeMock({ name: '恢复节点', disabled: true })] })]) })
+    expect(await screen.findByRole('switch', { name: '启用节点 恢复节点' })).toHaveAttribute('aria-checked', 'false')
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
-    expect(screen.getByRole('switch', { name: '启用节点 恢复节点' })).toHaveAttribute('aria-checked', 'false')
     expect(onToggleNode).not.toHaveBeenCalled()
     for (const [url, options] of fetch.mock.calls) {
       expect(url).toBe('/api/subs/nodes')
@@ -172,9 +191,12 @@ describe('SubDetailModal', () => {
 
   it('hides stale mutation controls when readback fails after a successful change', async () => {
     const user = userEvent.setup()
-    rs.stubGlobal('fetch', rs.fn().mockResolvedValueOnce({ ok: true, json: async () => subNodesPayload([
-      subNodesInfoMock({ url: SUB_URL, nodes: [subNodeMock({ name: '香港 01' })], stale_disabled: ['旧节点'] }),
-    ]) }).mockRejectedValueOnce(new Error('读取超时')))
+    rs.stubGlobal('fetch', rs.fn().mockResolvedValueOnce({
+      ok: true,
+      json: async () => subNodesPayload([
+        subNodesInfoMock({ url: SUB_URL, nodes: [subNodeMock({ name: '香港 01' })], stale_disabled: ['旧节点'] }),
+      ]),
+    }).mockRejectedValueOnce(new Error('读取超时')))
     const onToggleNode = rs.fn().mockResolvedValue(true)
     renderModal({ onToggleNode })
     await user.click(await screen.findByRole('switch', { name: '禁用节点 香港 01' }))
@@ -198,36 +220,28 @@ describe('SubDetailModal', () => {
     })))
     const firstSub = subMock({ url: 'https://example.com/first' })
     const secondSub = subMock({ url: 'https://example.com/second' })
-    const { rerender } = renderModal({ sub: firstSub })
+    const { setSub } = renderModal({ sub: firstSub })
     await waitFor(() => expect(resolvers).toHaveLength(1))
 
-    rerender(
-      <SubDetailModal
-        sub={secondSub}
-        onClose={rs.fn()}
-        onToggleNode={rs.fn().mockResolvedValue(true)}
-      />,
-    )
+    setSub(secondSub)
     await waitFor(() => expect(resolvers).toHaveLength(2))
 
-    await act(async () => {
-      resolvers[1]({
-        ok: true,
-        json: async () => subNodesPayload([
-          subNodesInfoMock({ url: secondSub.url, nodes: [subNodeMock({ name: '新订阅节点' })] }),
-        ]),
-      } as Response)
-    })
-    expect(screen.getByText('新订阅节点')).toBeInTheDocument()
+    resolvers[1]({
+      ok: true,
+      json: async () => subNodesPayload([
+        subNodesInfoMock({ url: secondSub.url, nodes: [subNodeMock({ name: '新订阅节点' })] }),
+      ]),
+    } as Response)
+    expect(await screen.findByText('新订阅节点')).toBeInTheDocument()
 
-    await act(async () => {
-      resolvers[0]({
-        ok: true,
-        json: async () => subNodesPayload([
-          subNodesInfoMock({ url: firstSub.url, nodes: [subNodeMock({ name: '旧订阅节点' })] }),
-        ]),
-      } as Response)
-    })
+    resolvers[0]({
+      ok: true,
+      json: async () => subNodesPayload([
+        subNodesInfoMock({ url: firstSub.url, nodes: [subNodeMock({ name: '旧订阅节点' })] }),
+      ]),
+    } as Response)
+    await Promise.resolve()
+    flush()
     expect(screen.queryByText('旧订阅节点')).not.toBeInTheDocument()
     expect(screen.getByText('新订阅节点')).toBeInTheDocument()
   })
@@ -248,19 +262,13 @@ describe('SubDetailModal', () => {
     const onToggleNode = rs.fn(() => new Promise<boolean>((resolve) => {
       resolveToggle = resolve
     }))
-    const { rerender } = renderModal({ sub: firstSub, onToggleNode })
+    const { setSub } = renderModal({ sub: firstSub, onToggleNode })
 
     await user.click(await screen.findByRole('switch', { name: '禁用节点 旧订阅节点' }))
-    rerender(
-      <SubDetailModal
-        sub={secondSub}
-        onClose={rs.fn()}
-        onToggleNode={onToggleNode}
-      />,
-    )
+    setSub(secondSub)
     expect(await screen.findByText('新订阅节点')).toBeInTheDocument()
 
-    await act(async () => resolveToggle(true))
+    resolveToggle(true)
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
     expect(screen.queryByText('旧订阅节点')).not.toBeInTheDocument()
     expect(screen.getByText('新订阅节点')).toBeInTheDocument()
@@ -285,13 +293,11 @@ describe('SubDetailModal', () => {
     })
     renderModal({ onToggleNode })
 
-    // 失配条目单独成块展示，不计入生效禁用数
     expect(await screen.findByText('剩余流量：45.17 GB')).toBeInTheDocument()
     expect(screen.getByText('共 1 个节点 · 禁用 1')).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: '移除失效禁用 剩余流量：45.17 GB' }))
 
-    // 走 disabled=false 的清理路径
     expect(onToggleNode).toHaveBeenCalledWith(SUB_URL, '剩余流量：45.17 GB', false)
     await waitFor(() => {
       expect(screen.queryByText('剩余流量：45.17 GB')).not.toBeInTheDocument()

@@ -1,10 +1,9 @@
-import {
-  NodeModal,
-  ToastStack,
-  OnboardingScreen,
-} from './components/index'
-import { DashboardScreen } from './components/DashboardScreen'
+import { Match, Switch } from 'solid-js'
+import { LogoIcon, ToastStack } from './components/ui'
+import { NodeModal } from './components/node-modal/NodeModal'
 import { VpsTasks } from './components/VpsTasks'
+import { AppShell } from './components/AppShell'
+import { SetupWizard } from './views/SetupWizard'
 import { useAppController } from './hooks/useAppController'
 
 export type AppScreenMode = 'loading' | 'backend-unreachable' | 'onboarding' | 'dashboard'
@@ -15,8 +14,6 @@ export function resolveAppScreenMode(state: {
   needsOnboarding: boolean
 }): AppScreenMode {
   if (!state.firstLoadDone) return 'loading'
-  // 首载从未拿到过后端响应 = 后端不可达（没起/宕机），不能按默认空数据误判成引导页；
-  // 轮询仍在后台继续，恢复后自动进入正常流程
   if (!state.statusLoaded) return 'backend-unreachable'
   if (state.needsOnboarding) return 'onboarding'
   return 'dashboard'
@@ -24,45 +21,64 @@ export function resolveAppScreenMode(state: {
 
 export default function App() {
   const app = useAppController()
-  const screenMode = resolveAppScreenMode(app)
+  const screenMode = () => resolveAppScreenMode({
+    firstLoadDone: app.firstLoadDone(),
+    statusLoaded: app.statusLoaded(),
+    needsOnboarding: app.needsOnboarding(),
+  })
 
-  if (screenMode === 'loading') {
-    return <div className="shell"><div className="onboarding-loading" role="status">加载中…</div></div>
-  }
+  return (
+    <Switch>
+      <Match when={screenMode() === 'loading'}>
+        <div class="shell-state-screen">
+          <div class="shell-state-card" role="status">
+            <LogoIcon size={42} />
+            <strong>正在连接 HarborGate 海港网关…</strong>
+            <span class="hg-entity-sub">正在同步工位终端、专属端口与跨境线路状态</span>
+          </div>
+        </div>
+      </Match>
 
-  if (screenMode === 'backend-unreachable') {
-    return <div className="shell"><div className="onboarding-loading" role="status">无法连接后端，正在自动重试…</div></div>
-  }
+      <Match when={screenMode() === 'backend-unreachable'}>
+        <div class="shell-state-screen">
+          <div class="shell-state-card" role="status">
+            <LogoIcon size={42} />
+            <strong>无法连接网关控制面，正在自动重连…</strong>
+            <span class="hg-entity-sub">请确认路由器或网关服务进程处于运行状态</span>
+          </div>
+        </div>
+      </Match>
 
-  if (screenMode === 'onboarding') {
-    return (
-      <div className="shell">
-        <OnboardingScreen
+      <Match when={screenMode() === 'onboarding'}>
+        <SetupWizard
           onAddSub={app.handleOnboardingAddSub}
-          pendingActions={app.pendingActions}
+          pendingActions={app.pendingActions()}
           onOpenAddNode={app.openNodeModal}
           showToast={app.showToast}
           onScanVerge={app.scanClashVerge}
           onImportVerge={app.importClashVergeSubs}
         />
-        <VpsTasks tasks={app.vpsTasks} />
-        <ToastStack toasts={app.toasts} onDismiss={app.dismissToast} />
+        <VpsTasks tasks={app.vpsTasks()} />
+        <ToastStack toasts={app.toasts()} onDismiss={app.dismissToast} />
         <NodeModal
-          open={app.showNodeModal}
-          nodeType={app.nodeType}
+          open={app.showNodeModal()}
+          nodeType={app.nodeType()}
           setNodeType={app.setNodeType}
-          form={app.nodeForm}
+          form={app.nodeForm()}
           setForm={app.setNodeForm}
-          loading={app.vpsDeploying || ['addNode', 'importNodes'].some((action) => app.pendingActions.has(action))}
+          loading={app.vpsDeploying() || ['addNode', 'importNodes'].some((action) => app.pendingActions().has(action))}
           onClose={app.closeNodeModal}
           onSubmit={app.handleAddNode}
           onImport={app.handleImportNodes}
           onDeployVps={app.handleDeployVps}
-          vpsSupported={app.status.vps_supported !== false}
+          vpsSupported={app.status().vps_supported !== false}
+          relayCandidates={app.ruleNodeNames()}
         />
-      </div>
-    )
-  }
+      </Match>
 
-  return <DashboardScreen app={app} />
+      <Match when={screenMode() === 'dashboard'}>
+        <AppShell app={app} />
+      </Match>
+    </Switch>
+  )
 }

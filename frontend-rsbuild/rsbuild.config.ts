@@ -1,5 +1,5 @@
 import { defineConfig } from '@rsbuild/core';
-import { pluginReact } from '@rsbuild/plugin-react';
+import { pluginSolid } from '@rsbuild/plugin-solid';
 
 // 本地开发时将控制面 API 代理到正在运行的 miao 后端。
 // 固定默认 loopback 为 IPv4：部分环境会把 localhost 优先解析到 ::1，
@@ -9,7 +9,7 @@ const miaoApiTarget = process.env.MIAO_API ?? 'http://127.0.0.1:6161';
 
 // Docs: https://rsbuild.rs/config/
 export default defineConfig(({ command }) => ({
-  plugins: [pluginReact()],
+  plugins: [pluginSolid()],
   source: {
     entry: {
       index: './src/main.tsx',

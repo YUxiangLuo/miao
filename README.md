@@ -1,17 +1,17 @@
 <div align="center">
-  <img src="frontend-rsbuild/public/icon.svg" width="72" alt="Miao logo" />
-  <h1>MiaoBox</h1>
-  <p><strong>开箱即用的透明代理</strong></p>
+  <img src="frontend-rsbuild/public/icon.svg" width="72" alt="HarborGate logo" />
+  <h1>HarborGate · 海港网关</h1>
+  <p><strong>外贸企业跨境网络与多店铺静态 IP 防关联网关</strong></p>
   <p>
     <a href="https://github.com/YUxiangLuo/miao/releases/latest"><img src="https://img.shields.io/github/v/release/YUxiangLuo/miao?style=flat-square" alt="Release" /></a>
   </p>
 </div>
 
-Miao 将 sing-box 内核、分流规则和 Web 面板打包为单个可执行文件，通过 TUN 接管整机流量。支持 Linux / OpenWrt，提供 amd64、arm64 两种架构。
+HarborGate（底层兼容二进制与路径保持 `miao`）将定制 `sing-box` 内核、大陆/内网直连规则集与 SolidJS 2.0 企业云网关控制台打包为单个可执行文件，专为外贸公司办公网络设计，提供 Linux / OpenWrt 双平台与 `amd64`、`arm64` 双架构支持：
 
-支持订阅管理、按地区自动选最快节点、自定义分流、定时刷新和 MCP 控制。节点协议见[内核能力](docs/kernel.md#能力与裁剪)。
-
-支持工作室统一出口网关：按内网 IP 为电脑指定节点，默认先直连内网和中国大陆，再执行自定义规则。配置步骤与接入边界见[工作室固定出口](docs/config.md#工作室按内网-ip-固定出口)。
+- **双粒度防关联隔离**：既支持按员工电脑/手机局域网 IP 分配整机独享专线（读取 `/tmp/dhcp.leases` 自动发现办公终端，单事务无漏流切换），也支持按需开放局域网多店铺专属混合代理端口（如 `:20101` HTTP/SOCKS5 → 美区静态住宅 IP），供指纹浏览器、Chrome 多分身及独立社媒客户端同机多店隔离使用，上游静态住宅 IP 凭据 100% 封存在网关内。
+- **离线自动熔断保护**：任何锁定独享专线的工位或专属端口，一旦对应专线或其前置中转跳板不可用，网关自动在路由与 DNS 双层原位改写为 `reject` 阻断，严防回退公共池引发账号关联；国内企业微信、飞书、ERP 与对公网银直连不受影响。
+- **静态住宅链式中转（`detour`）与运维可观测性**：面板原生支持录入海外静态住宅 SOCKS5 并绑定前置跳板节点、外贸业务平台一键分流、三维实时流量审计与 MCP 自动化运维接口。
 
 <details>
 <summary>查看控制面板</summary>

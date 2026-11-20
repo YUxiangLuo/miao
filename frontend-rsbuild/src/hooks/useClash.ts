@@ -1,9 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { createEffect, createMemo, createSignal, onCleanup, untrack, type Accessor } from 'solid-js'
 import { CLASH_API_BASE, DELAY_TEST_TIMEOUT_MS, DELAY_TEST_URL } from '../utils'
 import { useWebSocket } from './useWebSocket'
 import { fetchJson } from './request'
 import { useLatestRequest } from './useLatestRequest'
-import type { StatusData } from '../types/api'
 import type {
   ClashConnection,
   ClashConnectionsPayload,
@@ -106,58 +105,58 @@ export function mergeDisplayMeasurements({
   return { delays: mergedDelays, measuredAt: mergedMeasuredAt }
 }
 
-export function useProxies(status: Pick<StatusData, 'ready'>) {
-  const [proxies, setProxies] = useState<ClashProxies>({})
+export function useProxies(ready: Accessor<boolean>) {
+  const [proxies, setProxies] = createSignal<ClashProxies>({})
   const clashApiBase = CLASH_API_BASE
   const { begin, cancel } = useLatestRequest()
-  const readyRef = useRef(status.ready)
-  readyRef.current = status.ready
 
-  const fetchProxies = useCallback(async () => {
-    if (!readyRef.current) return
+  const fetchProxies = async () => {
+    if (!untrack(ready)) return
     const request = begin()
     try {
       const payload = await fetchJson<ClashProxiesPayload>(`${clashApiBase}/proxies`, { signal: request.signal })
-      if (readyRef.current && request.isCurrent()) setProxies(payload.proxies || {})
+      if (untrack(ready) && request.isCurrent()) setProxies(payload.proxies || {})
     } catch {
       // Keep the last snapshot through transient failures.
     }
-  }, [clashApiBase, begin])
+  }
 
-  const { primaryGroupName, primaryGroup } = useMemo(
-    () => selectPrimaryProxyGroup(proxies),
-    [proxies],
+  const selection = createMemo(() => selectPrimaryProxyGroup(proxies()))
+  const primaryGroupName = createMemo(() => selection().primaryGroupName || '')
+  const primaryGroup = createMemo(() => selection().primaryGroup)
+
+  createEffect(
+    () => ready(),
+    (isReady) => {
+      if (!isReady) {
+        cancel()
+        setProxies({})
+      }
+    },
   )
-
-  useEffect(() => {
-    if (!status.ready) {
-      cancel()
-      setProxies({})
-    }
-  }, [status.ready, cancel])
 
   return { proxies, fetchProxies, primaryGroupName, primaryGroup }
 }
 
-export function useTraffic(status: Pick<StatusData, 'ready'>) {
-  const [traffic, setTraffic] = useState<Partial<ClashTraffic>>({})
+export function useTraffic(ready: Accessor<boolean>) {
+  const [traffic, setTraffic] = createSignal<Partial<ClashTraffic>>({})
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+  const trafficUrl = `${protocol}//${window.location.host}/api/clash/traffic`
 
-  const trafficUrl = useMemo(() => {
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    return `${protocol}//${window.location.host}/api/clash/traffic`
-  }, [])
-
-  const handleMessage = useCallback((data: ClashTraffic) => {
+  const handleMessage = (data: ClashTraffic) => {
     if (data && typeof data.up === 'number' && typeof data.down === 'number') {
       setTraffic({ up: data.up, down: data.down })
     }
-  }, [])
+  }
 
-  const { close: closeSockets } = useWebSocket<ClashTraffic>(trafficUrl, handleMessage, Boolean(status.ready))
+  const { close: closeSockets } = useWebSocket<ClashTraffic>(trafficUrl, handleMessage, ready)
 
-  useEffect(() => {
-    if (!status.ready) setTraffic({})
-  }, [status.ready])
+  createEffect(
+    () => ready(),
+    (isReady) => {
+      if (!isReady) setTraffic({})
+    },
+  )
 
   return { traffic, closeSockets }
 }
@@ -208,16 +207,16 @@ export function normalizeClashDelay(delay: number | undefined): number {
   return delay !== undefined && delay > 0 ? delay : -1
 }
 
-export function useConnections(status: Pick<StatusData, 'ready'>, clashApiBase: string) {
-  const [connectionsInfo, setConnectionsInfo] = useState<ConnectionsInfo>(EMPTY_CONNECTIONS)
-  const [connectionsLoading, setConnectionsLoading] = useState(false)
-  const [connectionsError, setConnectionsError] = useState('')
-  const lastConnectionsRef = useRef<ConnectionSnapshot>({ at: 0, connections: new Map() })
+export function useConnections(ready: Accessor<boolean>, clashApiBase: string) {
+  const [connectionsInfo, setConnectionsInfo] = createSignal<ConnectionsInfo>(EMPTY_CONNECTIONS)
+  const [connectionsLoading, setConnectionsLoading] = createSignal(false)
+  const [connectionsError, setConnectionsError] = createSignal('')
+  let lastConnections: ConnectionSnapshot = { at: 0, connections: new Map() }
   const { begin, cancel } = useLatestRequest()
 
-  const fetchConnections = useCallback(async (): Promise<ClashConnectionsPayload | null> => {
+  const fetchConnections = async (): Promise<ClashConnectionsPayload | null> => {
     const request = begin()
-    if (!status.ready) {
+    if (!untrack(ready)) {
       setConnectionsInfo(EMPTY_CONNECTIONS)
       setConnectionsError('')
       return null
@@ -227,8 +226,8 @@ export function useConnections(status: Pick<StatusData, 'ready'>, clashApiBase: 
     try {
       const payload = await fetchJson<ClashConnectionsPayload>(`${clashApiBase}/connections`, { signal: request.signal })
       if (!request.isCurrent()) return null
-      const { snapshot, info } = enrichConnectionsSnapshot(payload, lastConnectionsRef.current, Date.now())
-      lastConnectionsRef.current = snapshot
+      const { snapshot, info } = enrichConnectionsSnapshot(payload, lastConnections, Date.now())
+      lastConnections = snapshot
       setConnectionsInfo(info)
       setConnectionsError('')
       return payload
@@ -240,17 +239,20 @@ export function useConnections(status: Pick<StatusData, 'ready'>, clashApiBase: 
     } finally {
       if (request.isCurrent()) setConnectionsLoading(false)
     }
-  }, [clashApiBase, status.ready, begin])
+  }
 
-  useEffect(() => {
-    if (!status.ready) {
-      cancel()
-      setConnectionsInfo(EMPTY_CONNECTIONS)
-      setConnectionsError('')
-      setConnectionsLoading(false)
-      lastConnectionsRef.current = { at: 0, connections: new Map() }
-    }
-  }, [status.ready, cancel])
+  createEffect(
+    () => ready(),
+    (isReady) => {
+      if (!isReady) {
+        cancel()
+        setConnectionsInfo(EMPTY_CONNECTIONS)
+        setConnectionsError('')
+        setConnectionsLoading(false)
+        lastConnections = { at: 0, connections: new Map() }
+      }
+    },
+  )
 
   return {
     connectionsInfo,
@@ -261,28 +263,28 @@ export function useConnections(status: Pick<StatusData, 'ready'>, clashApiBase: 
 }
 
 export function useDelays() {
-  const [delays, setDelays] = useState<Record<string, number>>({})
-  const [delayMeasuredAt, setDelayMeasuredAt] = useState<Record<string, number>>({})
-  const [testingNodes, setTestingNodes] = useState<Record<string, boolean>>({})
-  const [testingGroup, setTestingGroup] = useState('')
-  const requests = useRef(new Map<string, AbortController>())
-  const generation = useRef(0)
-  const groupRunning = useRef(false)
+  const [delays, setDelays] = createSignal<Record<string, number>>({})
+  const [delayMeasuredAt, setDelayMeasuredAt] = createSignal<Record<string, number>>({})
+  const [testingNodes, setTestingNodes] = createSignal<Record<string, boolean>>({})
+  const [testingGroup, setTestingGroup] = createSignal('')
+  const requests = new Map<string, AbortController>()
+  let generation = 0
+  let groupRunning = false
 
-  const cancel = useCallback(() => {
-    generation.current++
-    requests.current.forEach(controller => controller.abort())
-    requests.current.clear()
-    groupRunning.current = false
-  }, [])
-  useEffect(() => cancel, [cancel])
+  const cancel = () => {
+    generation++
+    requests.forEach((controller) => controller.abort())
+    requests.clear()
+    groupRunning = false
+  }
+  onCleanup(cancel)
 
-  const testDelay = useCallback(async (clashApiBase: string, nodeName: string) => {
-    requests.current.get(nodeName)?.abort()
+  const testDelay = async (clashApiBase: string, nodeName: string) => {
+    requests.get(nodeName)?.abort()
     const controller = new AbortController()
-    requests.current.set(nodeName, controller)
-    const isCurrentProbe = () => requests.current.get(nodeName) === controller
-    setTestingNodes(prev => ({ ...prev, [nodeName]: true }))
+    requests.set(nodeName, controller)
+    const isCurrentProbe = () => requests.get(nodeName) === controller
+    setTestingNodes((prev) => ({ ...prev, [nodeName]: true }))
     let delay = -1
     try {
       const payload = await fetchJson<ClashDelay>(
@@ -294,44 +296,44 @@ export function useDelays() {
       // A current failed measurement is displayed as unavailable.
     } finally {
       if (isCurrentProbe()) {
-        setDelays(prev => ({ ...prev, [nodeName]: delay }))
-        setDelayMeasuredAt(prev => ({ ...prev, [nodeName]: Date.now() }))
-        requests.current.delete(nodeName)
-        setTestingNodes(prev => {
+        setDelays((prev) => ({ ...prev, [nodeName]: delay }))
+        setDelayMeasuredAt((prev) => ({ ...prev, [nodeName]: Date.now() }))
+        requests.delete(nodeName)
+        setTestingNodes((prev) => {
           const next = { ...prev }
           delete next[nodeName]
           return next
         })
       }
     }
-  }, [])
+  }
 
-  const testGroupDelays = useCallback(async (clashApiBase: string, groupName: string, nodeNames: string[]) => {
-    if (groupRunning.current) return
-    groupRunning.current = true
-    const currentGeneration = generation.current
+  const testGroupDelays = async (clashApiBase: string, groupName: string, nodeNames: string[]) => {
+    if (groupRunning) return
+    groupRunning = true
+    const currentGeneration = generation
     setTestingGroup(groupName)
     const queue = [...new Set(nodeNames)]
     let next = 0
     const workers = Array.from({ length: Math.min(DELAY_BATCH_CONCURRENCY, queue.length) }, async () => {
-      while (generation.current === currentGeneration && next < queue.length) {
+      while (generation === currentGeneration && next < queue.length) {
         await testDelay(clashApiBase, queue[next++])
       }
     })
     await Promise.all(workers)
-    if (generation.current === currentGeneration) {
-      groupRunning.current = false
+    if (generation === currentGeneration) {
+      groupRunning = false
       setTestingGroup('')
     }
-  }, [testDelay])
+  }
 
-  const clearDelays = useCallback(() => {
+  const clearDelays = () => {
     cancel()
     setDelays({})
     setDelayMeasuredAt({})
     setTestingNodes({})
     setTestingGroup('')
-  }, [cancel])
+  }
 
   return { delays, delayMeasuredAt, testingNodes, testingGroup, testDelay, testGroupDelays, clearDelays }
 }

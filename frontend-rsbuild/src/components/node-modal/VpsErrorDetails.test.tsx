@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen } from '@solidjs/testing-library'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, rs } from '@rstest/core'
 import { VpsErrorDetails } from './VpsErrorDetails'
@@ -10,7 +10,7 @@ describe('VPS recovery commands', () => {
   it('copies the exact command and leaves raw SSH output as plain text', async () => {
     const user = userEvent.setup()
     const write = rs.spyOn(navigator.clipboard, 'writeText')
-    render(<VpsErrorDetails text={text} />)
+    render(() => <VpsErrorDetails text={text} />)
     expect(screen.getAllByRole('button', { name: '复制命令' })).toHaveLength(1)
     await user.click(screen.getByRole('button', { name: '复制命令' }))
     expect(write).toHaveBeenCalledWith(command)
@@ -22,7 +22,7 @@ describe('VPS recovery commands', () => {
   it('offers manual selection when clipboard permission is denied', async () => {
     const user = userEvent.setup()
     const write = rs.spyOn(navigator.clipboard, 'writeText').mockRejectedValue(new Error('denied'))
-    render(<VpsErrorDetails text={text} />)
+    render(() => <VpsErrorDetails text={text} />)
     await user.click(screen.getByRole('button', { name: '复制命令' }))
     expect(screen.getByRole('button', { name: '复制失败，请选中命令手动复制' })).toBeInTheDocument()
     expect(screen.getByText(command)).toBeInTheDocument()
@@ -40,7 +40,7 @@ describe('VPS recovery commands', () => {
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: undefined })
     Object.defineProperty(document, 'execCommand', { configurable: true, value: exec })
     try {
-      render(<VpsErrorDetails text={text} />)
+      render(() => <VpsErrorDetails text={text} />)
       await user.click(screen.getByRole('button', { name: '复制命令' }))
       expect(exec).toHaveBeenCalledWith('copy')
       expect(document.querySelector('.vps-command textarea')).toBeNull()

@@ -1,141 +1,123 @@
-import { useEffect, useRef, useCallback } from 'react'
+import { createEffect, type Accessor } from 'solid-js'
+
+const BASE_DELAY = 1000
+const MAX_DELAY = 15000
 
 /**
- * 健壮的 WebSocket hook
+ * 健壮的 WebSocket 原语
  * - 指数退避重连（延迟封顶，无次数上限）
  * - 页面可见性感知
  * - 正常/异常关闭区分处理
  */
-export function useWebSocket<T = unknown>(url: string, onMessage: (data: T) => void, enabled = true) {
-  const wsRef = useRef<WebSocket | null>(null)
-  const retryCountRef = useRef(0)
-  const retryTimerRef = useRef<number | null>(null)
-  const onMessageRef = useRef(onMessage)
-  const enabledRef = useRef(enabled)
+export function useWebSocket<T = unknown>(
+  url: Accessor<string> | string,
+  onMessage: (data: T) => void,
+  enabled: Accessor<boolean> | boolean = true,
+) {
+  const getUrl = typeof url === 'function' ? url : () => url
+  const getEnabled = typeof enabled === 'function' ? enabled : () => enabled
 
-  // 保持 ref 最新
-  useEffect(() => {
-    onMessageRef.current = onMessage
-  }, [onMessage])
+  let ws: WebSocket | null = null
+  let retryCount = 0
+  let retryTimer: number | null = null
+  let isEnabled = false
+  let currentUrl = ''
 
-  useEffect(() => {
-    enabledRef.current = enabled
-  }, [enabled])
-
-  const BASE_DELAY = 1000
-  const MAX_DELAY = 15000
-
-  const getRetryDelay = useCallback(() => {
-    // 指数退避：1s, 2s, 4s, 8s, 15s(max)
-    const delay = Math.min(BASE_DELAY * Math.pow(2, retryCountRef.current), MAX_DELAY)
-    // 添加随机抖动，避免多个客户端同时重连
+  const getRetryDelay = () => {
+    const delay = Math.min(BASE_DELAY * Math.pow(2, retryCount), MAX_DELAY)
     return delay + Math.random() * 500
-  }, [])
+  }
 
-  const cleanup = useCallback(() => {
-    if (retryTimerRef.current) {
-      window.clearTimeout(retryTimerRef.current)
-      retryTimerRef.current = null
+  const cleanup = () => {
+    if (retryTimer !== null) {
+      window.clearTimeout(retryTimer)
+      retryTimer = null
     }
-    if (wsRef.current) {
-      // 移除事件处理器，避免触发 onclose 中的重连逻辑
-      wsRef.current.onclose = null
-      wsRef.current.onerror = null
-      wsRef.current.onmessage = null
-      wsRef.current.onopen = null
-      if (
-        wsRef.current.readyState === WebSocket.CONNECTING
-        || wsRef.current.readyState === WebSocket.OPEN
-      ) {
-        wsRef.current.close(1000, 'Normal closure')
+    if (ws) {
+      ws.onclose = null
+      ws.onerror = null
+      ws.onmessage = null
+      ws.onopen = null
+      if (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN) {
+        ws.close(1000, 'Normal closure')
       }
-      wsRef.current = null
+      ws = null
     }
-  }, [])
+  }
 
-  const connect = useCallback(() => {
-    if (!enabledRef.current || document.hidden) return
-    if (wsRef.current && wsRef.current.readyState === WebSocket.CONNECTING) return
+  const connect = () => {
+    if (!isEnabled || document.hidden || !currentUrl) return
+    if (ws && ws.readyState === WebSocket.CONNECTING) return
 
     cleanup()
 
     try {
-      const ws = new WebSocket(url)
-      wsRef.current = ws
+      const socket = new WebSocket(currentUrl)
+      ws = socket
 
-      ws.onopen = () => {
-        // 连接成功，重置重试计数
-        retryCountRef.current = 0
+      socket.onopen = () => {
+        retryCount = 0
       }
 
-      ws.onmessage = (event) => {
+      socket.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data) as T
-          onMessageRef.current?.(data)
+          onMessage(data)
         } catch {
           // ignore parse errors
         }
       }
 
-      ws.onclose = () => {
-        wsRef.current = null
+      socket.onclose = () => {
+        ws = null
+        if (!isEnabled || document.hidden) return
 
-        // cleanup 会先移除 onclose，因此能走到这里的关闭都来自远端。
-        // sing-box 重载可能正常关闭(code 1000)上游；只要功能仍启用就应重连。
-        if (!enabledRef.current || document.hidden) {
-          return
-        }
-
-        // 指数退避重连（无次数上限；退避延迟封顶在 MAX_DELAY）
         const delay = getRetryDelay()
-        retryCountRef.current++
-        retryTimerRef.current = window.setTimeout(() => {
-          if (enabledRef.current) {
-            connect()
-          }
+        retryCount++
+        retryTimer = window.setTimeout(() => {
+          if (isEnabled) connect()
         }, delay)
       }
 
-      ws.onerror = () => {
-        // onerror 之后通常会触发 onclose，重连逻辑在 onclose 中处理
+      socket.onerror = () => {
+        // onclose handles reconnection
       }
     } catch {
-      // WebSocket 构造失败（如无效 URL）
+      // ignore invalid URL errors
     }
-  }, [url, cleanup, getRetryDelay])
+  }
 
-  // 页面可见性变化处理
-  useEffect(() => {
-    const handleVisibilityChange = () => {
-      if (document.hidden) {
-        // 页面不可见时，暂停重连（保留现有连接）
-        if (retryTimerRef.current) {
-          window.clearTimeout(retryTimerRef.current)
-          retryTimerRef.current = null
-        }
+  createEffect(
+    () => ({ targetUrl: getUrl(), active: getEnabled() }),
+    ({ targetUrl, active }) => {
+      currentUrl = targetUrl
+      isEnabled = active
+
+      if (active) {
+        connect()
       } else {
-        // 页面可见时，如果连接断开则立即重连
-        if (enabledRef.current && !wsRef.current) {
-          retryCountRef.current = 0 // 重置重试计数
+        cleanup()
+      }
+
+      const handleVisibilityChange = () => {
+        if (document.hidden) {
+          if (retryTimer !== null) {
+            window.clearTimeout(retryTimer)
+            retryTimer = null
+          }
+        } else if (isEnabled && !ws) {
+          retryCount = 0
           connect()
         }
       }
-    }
 
-    document.addEventListener('visibilitychange', handleVisibilityChange)
-    return () => document.removeEventListener('visibilitychange', handleVisibilityChange)
-  }, [connect])
-
-  // 主连接管理
-  useEffect(() => {
-    if (enabled) {
-      connect()
-    } else {
-      cleanup()
-    }
-
-    return cleanup
-  }, [enabled, connect, cleanup])
+      document.addEventListener('visibilitychange', handleVisibilityChange)
+      return () => {
+        document.removeEventListener('visibilitychange', handleVisibilityChange)
+        cleanup()
+      }
+    },
+  )
 
   return { close: cleanup }
 }

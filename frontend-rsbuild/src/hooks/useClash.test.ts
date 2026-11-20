@@ -1,4 +1,4 @@
-import { act, renderHook } from '@testing-library/react'
+import { renderHook } from '@solidjs/testing-library'
 import { afterEach, describe, expect, it, rs } from '@rstest/core'
 import {
   collectNodeProtocols,
@@ -48,26 +48,18 @@ describe('useConnections', () => {
     rs.stubGlobal('fetch', rs.fn()
       .mockImplementationOnce(() => first.promise)
       .mockImplementationOnce(() => second.promise))
-    const { result } = renderHook(() => useConnections({ ready: true }, '/api/clash'))
+    const { result } = renderHook(() => useConnections(() => true, '/api/clash'))
 
-    let firstCall!: Promise<unknown>
-    let secondCall!: Promise<unknown>
-    act(() => {
-      firstCall = result.current.fetchConnections()
-      secondCall = result.current.fetchConnections()
-    })
+    const firstCall = result.fetchConnections()
+    const secondCall = result.fetchConnections()
 
-    await act(async () => {
-      second.resolve(connectionsResponse('new'))
-      await secondCall
-    })
-    expect(result.current.connectionsInfo.connections[0]?.id).toBe('new')
+    second.resolve(connectionsResponse('new'))
+    await secondCall
+    expect(result.connectionsInfo().connections[0]?.id).toBe('new')
 
-    await act(async () => {
-      first.resolve(connectionsResponse('old'))
-      await firstCall
-    })
-    expect(result.current.connectionsInfo.connections[0]?.id).toBe('new')
+    first.resolve(connectionsResponse('old'))
+    await firstCall
+    expect(result.connectionsInfo().connections[0]?.id).toBe('new')
   })
 })
 
@@ -112,7 +104,6 @@ describe('mergeDisplayMeasurements', () => {
     const merged = mergeDisplayMeasurements({
       proxies,
       isUrlTestGroup: true,
-      // hk-1 has an older manual probe (t1 < t2), hk-2 has a newer manual timeout (t3 > t2)
       delays: { 'hk-1': 210, 'hk-2': -1 },
       delayMeasuredAt: { 'hk-1': t1, 'hk-2': t3 },
     })
@@ -142,7 +133,6 @@ describe('enrichConnectionsSnapshot & Clash node collectors', () => {
     )
     expect(first.info.connections[0]).toMatchObject({ uploadSpeed: 0, downloadSpeed: 0 })
 
-    // 200ms later (< 1s clamp -> 1s divisor), upload reset from 100 -> 40 (clamped to 0), download +300
     const second = enrichConnectionsSnapshot(
       {
         uploadTotal: 140,

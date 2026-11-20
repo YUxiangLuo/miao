@@ -1,13 +1,13 @@
-import { useState } from 'react'
-import { act, fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@solidjs/testing-library'
+import { createSignal, flush } from 'solid-js'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, rs } from '@rstest/core'
-import { NodeModal } from './NodeModal'
+import { NodeModal, type NodeModalProps } from './NodeModal'
 import { EMPTY_NODE_FORM } from '../utils'
 import type { BatchNodeResult } from '../types/api'
 
-function renderModal(props = {}) {
-  return render(
+function renderModal(props: Partial<NodeModalProps> = {}) {
+  return render(() => (
     <NodeModal
       open
       nodeType="hysteria2"
@@ -20,15 +20,15 @@ function renderModal(props = {}) {
       onImport={rs.fn()}
       onDeployVps={rs.fn()}
       {...props}
-    />,
-  )
+    />
+  ))
 }
 
 describe('manual node submission', () => {
   it('shows optional SOCKS5 credentials and accepts short protocol-valid passwords', async () => {
     const user = userEvent.setup()
     renderModal({ nodeType: 'socks', form: { ...EMPTY_NODE_FORM, tag: 'SOCKS5', server: 'proxy.example.com', username: 'u', password: 'p' } })
-    await user.click(screen.getByRole('button', { name: '手动填写' }))
+    await user.click(screen.getByRole('button', { name: '手动 / 静态住宅' }))
     expect(screen.getByLabelText('用户名（可选）')).toHaveValue('u')
     expect(screen.getByLabelText('密码（可选）')).toHaveAttribute('type', 'password')
     expect(screen.queryByLabelText('SNI')).not.toBeInTheDocument()
@@ -39,7 +39,7 @@ describe('manual node submission', () => {
     const user = userEvent.setup()
     const onSubmit = rs.fn()
     renderModal({ onSubmit, form: { ...EMPTY_NODE_FORM, tag: '测试节点', server: 'example.com', password: 'test-password', server_port: port } })
-    await user.click(screen.getByRole('button', { name: '手动填写' }))
+    await user.click(screen.getByRole('button', { name: '手动 / 静态住宅' }))
     expect(screen.getByRole('alert')).toHaveTextContent(port > 65535 ? '端口号超出范围' : '端口号必须为正整数')
     const submit = screen.getByRole('button', { name: '添加 Hysteria2 节点' })
     expect(submit).toBeDisabled()
@@ -50,20 +50,29 @@ describe('manual node submission', () => {
   it.each([1, 65535])('accepts valid port boundary %s', async (port) => {
     const user = userEvent.setup()
     renderModal({ form: { ...EMPTY_NODE_FORM, tag: '测试节点', server: 'example.com', password: 'test-password', server_port: port } })
-    await user.click(screen.getByRole('button', { name: '手动填写' }))
+    await user.click(screen.getByRole('button', { name: '手动 / 静态住宅' }))
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: '添加 Hysteria2 节点' })).toBeEnabled()
   })
 
   it('clears the submission validator error when corrected', async () => {
     const user = userEvent.setup()
-    function Harness() {
-      const [form, setForm] = useState({ ...EMPTY_NODE_FORM, tag: '测试节点', server: 'example.com', password: 'short' })
-      return <NodeModal open nodeType="hysteria2" setNodeType={rs.fn()} form={form} setForm={setForm} loading={false}
-        onClose={rs.fn()} onSubmit={rs.fn()} onImport={rs.fn()} onDeployVps={rs.fn()} />
-    }
-    render(<Harness />)
-    await user.click(screen.getByRole('button', { name: '手动填写' }))
+    const [form, setForm] = createSignal({ ...EMPTY_NODE_FORM, tag: '测试节点', server: 'example.com', password: 'short' })
+    render(() => (
+      <NodeModal
+        open
+        nodeType="hysteria2"
+        setNodeType={rs.fn()}
+        form={form()}
+        setForm={setForm}
+        loading={false}
+        onClose={rs.fn()}
+        onSubmit={rs.fn()}
+        onImport={rs.fn()}
+        onDeployVps={rs.fn()}
+      />
+    ))
+    await user.click(screen.getByRole('button', { name: '手动 / 静态住宅' }))
     expect(screen.getByRole('alert')).toHaveTextContent('密码太短（至少 8 个字符）')
     await user.type(screen.getByLabelText('密码'), '-long-enough')
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
@@ -73,20 +82,31 @@ describe('manual node submission', () => {
   it('locks the draft, prevents duplicate clicks, and does not close a reopened dialog', async () => {
     const user = userEvent.setup()
     let finish!: (added: boolean) => void
-    const onSubmit = rs.fn(() => new Promise<boolean>(resolve => { finish = resolve }))
-    function Harness() {
-      const [open, setOpen] = useState(true)
-      const [form, setForm] = useState({ ...EMPTY_NODE_FORM, tag: '原节点', server: 'example.com', password: 'test-password' })
-      return <>
-        <button onClick={() => setOpen(true)}>重新打开</button>
-        <NodeModal open={open} nodeType="hysteria2" setNodeType={rs.fn()} form={form} setForm={setForm} loading={false}
-          onClose={() => { setOpen(false); setForm({ ...EMPTY_NODE_FORM }) }} onSubmit={onSubmit} onImport={rs.fn()} onDeployVps={rs.fn()} />
+    const onSubmit = rs.fn(() => new Promise<boolean>((resolve) => { finish = resolve }))
+    const [open, setOpen] = createSignal(true)
+    const [form, setForm] = createSignal({ ...EMPTY_NODE_FORM, tag: '原节点', server: 'example.com', password: 'test-password' })
+    render(() => (
+      <>
+        <button type="button" onClick={() => setOpen(true)}>重新打开</button>
+        <NodeModal
+          open={open()}
+          nodeType="hysteria2"
+          setNodeType={rs.fn()}
+          form={form()}
+          setForm={setForm}
+          loading={false}
+          onClose={() => { setOpen(false); setForm({ ...EMPTY_NODE_FORM }) }}
+          onSubmit={onSubmit}
+          onImport={rs.fn()}
+          onDeployVps={rs.fn()}
+        />
       </>
-    }
-    render(<Harness />)
-    await user.click(screen.getByRole('button', { name: '手动填写' }))
+    ))
+    await user.click(screen.getByRole('button', { name: '手动 / 静态住宅' }))
     const submit = screen.getByRole('button', { name: '添加 Hysteria2 节点' })
-    act(() => { fireEvent.click(submit); fireEvent.click(submit) })
+    fireEvent.click(submit)
+    fireEvent.click(submit)
+    flush()
     expect(onSubmit).toHaveBeenCalledTimes(1)
     expect(screen.getByLabelText('节点名称')).toBeDisabled()
     expect(screen.getByLabelText('协议')).toBeDisabled()
@@ -98,10 +118,12 @@ describe('manual node submission', () => {
     await user.click(screen.getByRole('button', { name: '关闭节点对话框' }))
     await user.click(screen.getByRole('button', { name: '重新打开' }))
     await user.type(screen.getByRole('textbox', { name: '节点分享链接' }), '新的草稿')
-    await act(async () => { finish(true) })
+    finish(true)
+    await Promise.resolve()
+    flush()
     expect(screen.getByRole('dialog')).toBeInTheDocument()
     expect(screen.getByRole('textbox', { name: '节点分享链接' })).toHaveValue('新的草稿')
-    expect(screen.getByRole('button', { name: '手动填写' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: '手动 / 静态住宅' })).toBeEnabled()
   })
 
   it('preserves the failed draft for retry and closes after success', async () => {
@@ -109,7 +131,7 @@ describe('manual node submission', () => {
     const onSubmit = rs.fn().mockResolvedValueOnce(false).mockResolvedValueOnce(true)
     const onClose = rs.fn()
     renderModal({ onSubmit, onClose, form: { ...EMPTY_NODE_FORM, tag: '重试节点', server: 'example.net', password: 'test-password' } })
-    await user.click(screen.getByRole('button', { name: '手动填写' }))
+    await user.click(screen.getByRole('button', { name: '手动 / 静态住宅' }))
     await user.click(screen.getByRole('button', { name: '添加 Hysteria2 节点' }))
     expect(onClose).not.toHaveBeenCalled()
     expect(screen.getByLabelText('节点名称')).toHaveValue('重试节点')
@@ -125,7 +147,8 @@ describe('NodeModal link import', () => {
   it('removes only successful request indices and retains invalid lines and backend failures for retry', async () => {
     const user = userEvent.setup()
     const onClose = rs.fn()
-    const onImport = rs.fn().mockResolvedValueOnce({ added: [{ index: 1, tag: '同名' }], failed: [{ index: 0, tag: '同名', message: '模拟错误' }] })
+    const onImport = rs.fn()
+      .mockResolvedValueOnce({ added: [{ index: 1, tag: '同名' }], failed: [{ index: 0, tag: '同名', message: '模拟错误' }] })
       .mockResolvedValueOnce({ added: [{ index: 0, tag: '同名' }], failed: [] })
     renderModal({ onImport, onClose })
     const input = screen.getByRole('textbox', { name: '节点分享链接' })
@@ -146,25 +169,40 @@ describe('NodeModal link import', () => {
   it('guards duplicate import, locks the submitted links, and ignores completion after reopening', async () => {
     const user = userEvent.setup()
     let finish!: (result: BatchNodeResult) => void
-    const onImport = rs.fn(() => new Promise<BatchNodeResult>(resolve => { finish = resolve }))
-    function Harness() {
-      const [open, setOpen] = useState(true)
-      return <><button onClick={() => setOpen(true)}>重新打开</button>
-        <NodeModal open={open} nodeType="hysteria2" setNodeType={rs.fn()} form={{ ...EMPTY_NODE_FORM }} setForm={rs.fn()}
-          loading={false} onClose={() => setOpen(false)} onSubmit={rs.fn()} onImport={onImport} onDeployVps={rs.fn()} /></>
-    }
-    render(<Harness />)
+    const onImport = rs.fn(() => new Promise<BatchNodeResult>((resolve) => { finish = resolve }))
+    const [open, setOpen] = createSignal(true)
+    render(() => (
+      <>
+        <button type="button" onClick={() => setOpen(true)}>重新打开</button>
+        <NodeModal
+          open={open()}
+          nodeType="hysteria2"
+          setNodeType={rs.fn()}
+          form={{ ...EMPTY_NODE_FORM }}
+          setForm={rs.fn()}
+          loading={false}
+          onClose={() => setOpen(false)}
+          onSubmit={rs.fn()}
+          onImport={onImport}
+          onDeployVps={rs.fn()}
+        />
+      </>
+    ))
     await user.click(screen.getByRole('textbox', { name: '节点分享链接' }))
     await user.paste('trojan://password123@example.com:443#x')
     const submit = screen.getByRole('button', { name: '添加 1 个节点' })
-    act(() => { fireEvent.click(submit); fireEvent.click(submit) })
+    fireEvent.click(submit)
+    fireEvent.click(submit)
+    flush()
     expect(onImport).toHaveBeenCalledTimes(1)
     expect(screen.getByRole('textbox', { name: '节点分享链接' })).toBeDisabled()
-    expect(screen.getByRole('button', { name: '手动填写' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '手动 / 静态住宅' })).toBeDisabled()
     await user.click(screen.getByRole('button', { name: '关闭节点对话框' }))
     await user.click(screen.getByRole('button', { name: '重新打开' }))
     await user.type(screen.getByRole('textbox', { name: '节点分享链接' }), '新草稿')
-    await act(async () => { finish({ added: [{ index: 0, tag: 'x' }], failed: [] }) })
+    finish({ added: [{ index: 0, tag: 'x' }], failed: [] })
+    await Promise.resolve()
+    flush()
     expect(screen.getByRole('dialog')).toBeInTheDocument()
     expect(screen.getByRole('textbox', { name: '节点分享链接' })).toHaveValue('新草稿')
   })
@@ -172,7 +210,9 @@ describe('NodeModal link import', () => {
   it('preserves the full draft when the request fails and closes only on complete success', async () => {
     const user = userEvent.setup()
     const onClose = rs.fn()
-    const onImport = rs.fn().mockResolvedValueOnce(undefined).mockResolvedValueOnce({ added: [{ index: 0, tag: 'x' }], failed: [] })
+    const onImport = rs.fn()
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce({ added: [{ index: 0, tag: 'x' }], failed: [] })
     renderModal({ onImport, onClose })
     const input = screen.getByRole('textbox', { name: '节点分享链接' })
     const link = 'trojan://password123@example.com:443#x'
@@ -248,10 +288,9 @@ describe('NodeModal link import', () => {
     const user = userEvent.setup()
     renderModal()
 
-    await user.click(screen.getByRole('button', { name: '手动填写' }))
+    await user.click(screen.getByRole('button', { name: '手动 / 静态住宅' }))
     expect(screen.getByLabelText('协议')).toBeInTheDocument()
     expect(screen.getByLabelText('节点名称')).toBeInTheDocument()
-    // 高级选项默认折叠(SNI 等字段在 details 内但不可见)
     const details = document.querySelector('.advanced-details')
     expect(details).not.toHaveAttribute('open')
     expect(screen.getByLabelText(/SNI/)).toBeInTheDocument()
@@ -284,7 +323,9 @@ describe('NodeModal link import', () => {
 describe('VPS deployment errors', () => {
   it('keeps the detailed failure visible, preserves inputs and allows dismissal and retry', async () => {
     const user = userEvent.setup()
-    const onDeployVps = rs.fn().mockRejectedValueOnce(new Error('SSH 认证被拒绝。请检查 PermitRootLogin 和 PasswordAuthentication。\n\nPermission denied (publickey).')).mockResolvedValueOnce(true)
+    const onDeployVps = rs.fn()
+      .mockRejectedValueOnce(new Error('SSH 认证被拒绝。请检查 PermitRootLogin 和 PasswordAuthentication。\n\nPermission denied (publickey).'))
+      .mockResolvedValueOnce(true)
     renderModal({ onDeployVps })
     await user.click(screen.getByRole('button', { name: 'VPS 部署' }))
     await user.type(screen.getByLabelText('VPS IP 地址'), '203.0.113.10')

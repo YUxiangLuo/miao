@@ -1,8 +1,13 @@
-<svg width="64" height="64" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
-  <circle cx="32" cy="37" r="21" fill="#a78bfa"/>
-  <polygon points="13,30 21,8 30,25" fill="#a78bfa"/>
-  <polygon points="51,30 43,8 34,25" fill="#a78bfa"/>
-  <circle cx="24" cy="35" r="3.5" fill="#fff"/>
-  <circle cx="40" cy="35" r="3.5" fill="#fff"/>
-  <path d="M30 42 L34 42 L32 45Z" fill="#fff"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
+  <rect width="512" height="512" rx="112" fill="#0F172A"/>
+  <rect x="20" y="20" width="472" height="472" rx="94" stroke="#1E293B" stroke-width="8"/>
+  <!-- Left & right harbor piers forming H portal -->
+  <path d="M128 124H188V388H128V124Z" fill="#F8FAFC"/>
+  <path d="M324 124H384V388H324V124Z" fill="#F8FAFC"/>
+  <!-- Cross-harbor bridge beam -->
+  <path d="M188 232H324V284H188V232Z" fill="#38BDF8"/>
+  <!-- Maritime channel signal beacon -->
+  <circle cx="256" cy="156" r="24" fill="#0EA5E9"/>
+  <!-- Isolated outbound lane indicator -->
+  <path d="M220 340H292L256 388L220 340Z" fill="#10B981"/>
 </svg>

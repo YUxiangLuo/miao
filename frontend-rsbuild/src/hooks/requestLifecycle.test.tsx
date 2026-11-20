@@ -1,4 +1,5 @@
-import { act, renderHook } from '@testing-library/react'
+import { renderHook } from '@solidjs/testing-library'
+import { createSignal, flush } from 'solid-js'
 import { afterEach, expect, it, rs } from '@rstest/core'
 import { useStatus, useNodes } from './useResources'
 import { useDelays, useProxies } from './useClash'
@@ -12,9 +13,22 @@ import { resolveAppScreenMode } from '../App'
 import { usePolling } from './usePolling'
 import { READ_TIMEOUT_MS } from './request'
 import { nodeMock, statusMock } from '../testFixtures'
-function deferred() { let resolve!: (value: Response) => void; const promise = new Promise<Response>(done => {resolve=done}); return {resolve,promise} }
-function response(data: unknown) { return {ok:true,json:async()=>data} as Response }
-afterEach(()=>{rs.useRealTimers();rs.unstubAllGlobals()})
+
+function deferred() {
+  let resolve!: (value: Response) => void
+  const promise = new Promise<Response>((done) => { resolve = done })
+  return { resolve, promise }
+}
+
+function response(data: unknown) {
+  return { ok: true, json: async () => data } as Response
+}
+
+afterEach(() => {
+  rs.useRealTimers()
+  rs.unstubAllGlobals()
+})
+
 it('retains cached nodes on read failure and clears the error only after successful recovery', async () => {
   const node = nodeMock({ tag: 'cached-node' })
   const fetch = rs.fn()
@@ -23,90 +37,111 @@ it('retains cached nodes on read failure and clears the error only after success
     .mockResolvedValueOnce(response({ success: true, data: [] }))
   rs.stubGlobal('fetch', fetch)
   const { result } = renderHook(() => useNodes())
-  await act(async () => { expect(await result.current.fetchNodes()).toEqual({ status: 'success', data: [node] }) })
-  await act(async () => { expect(await result.current.fetchNodes()).toEqual({ status: 'error', error: 'connection lost' }) })
-  expect(result.current.nodes).toEqual([node])
-  expect(result.current.nodesError).toBe('connection lost')
-  await act(async () => { await result.current.fetchNodes() })
-  expect(result.current.nodesError).toBe('')
-  expect(result.current.nodes).toEqual([])
+  expect(await result.fetchNodes()).toEqual({ status: 'success', data: [node] })
+  expect(await result.fetchNodes()).toEqual({ status: 'error', error: 'connection lost' })
+  expect(result.nodes()).toEqual([node])
+  expect(result.nodesError()).toBe('connection lost')
+  await result.fetchNodes()
+  expect(result.nodesError()).toBe('')
+  expect(result.nodes()).toEqual([])
 })
 
 it('does not publish an error from an obsolete list request', async () => {
   const old = deferred()
-  rs.stubGlobal('fetch', rs.fn().mockImplementationOnce(() => old.promise)
+  rs.stubGlobal('fetch', rs.fn()
+    .mockImplementationOnce(() => old.promise)
     .mockResolvedValueOnce(response({ success: true, data: [] })))
   const { result } = renderHook(() => useNodes())
-  let previous!: Promise<unknown>
-  act(() => { previous = result.current.fetchNodes() })
-  await act(async () => { await result.current.fetchNodes() })
-  await act(async () => {
-    old.resolve(response({ success: false, message: 'obsolete error' }))
-    expect(await previous).toEqual({ status: 'superseded' })
-  })
-  expect(result.current.nodesError).toBe('')
-  expect(result.current.nodesAvailable).toBe(true)
+  const previous = result.fetchNodes()
+  await result.fetchNodes()
+  old.resolve(response({ success: false, message: 'obsolete error' }))
+  expect(await previous).toEqual({ status: 'superseded' })
+  expect(result.nodesError()).toBe('')
+  expect(result.nodesAvailable()).toBe(true)
 })
 
 it('uses the request-start revision even through a retained refresh callback', async () => {
   const pending = deferred()
   const fetchMock = rs.fn().mockResolvedValue(response({ success: true, data: [] }))
   rs.stubGlobal('fetch', fetchMock)
-  const { result, rerender } = renderHook(({ revision }) => useNodes(revision), { initialProps: { revision: 1 } })
-  const retained = result.current.fetchNodes
-  await act(async () => { await retained() })
-  rerender({ revision: 2 })
-  await act(async () => { await result.current.fetchNodes() })
-  expect(result.current.nodesCurrent).toBe(true)
-  await act(async () => { await retained() })
-  expect(result.current.nodesCurrent).toBe(true)
+  const [revision, setRevision] = createSignal(1)
+  const { result } = renderHook(() => useNodes(revision))
+  const retained = result.fetchNodes
+  await retained()
+  setRevision(2)
+  flush()
+  await result.fetchNodes()
+  expect(result.nodesCurrent()).toBe(true)
+  await retained()
+  expect(result.nodesCurrent()).toBe(true)
 
   fetchMock.mockImplementationOnce(() => pending.promise)
-  let inFlight!: Promise<unknown>
-  act(() => { inFlight = retained() })
-  rerender({ revision: 3 })
-  await act(async () => { pending.resolve(response({ success: true, data: [] })); await inFlight })
-  expect(result.current.nodesCurrent).toBe(false)
-  await act(async () => { await retained() })
-  expect(result.current.nodesCurrent).toBe(true)
+  const inFlight = retained()
+  setRevision(3)
+  flush()
+  pending.resolve(response({ success: true, data: [] }))
+  await inFlight
+  expect(result.nodesCurrent()).toBe(false)
+  await retained()
+  expect(result.nodesCurrent()).toBe(true)
 })
 
-it('keeps the latest status when an older response arrives last',async()=>{
- const old=deferred(),fresh=deferred(); rs.stubGlobal('fetch',rs.fn().mockImplementationOnce(()=>old.promise).mockImplementationOnce(()=>fresh.promise));
- const {result}=renderHook(()=>useStatus());let a!:Promise<unknown>,b!:Promise<unknown>;
- act(()=>{a=result.current.fetchStatus();b=result.current.fetchStatus()});
- await act(async()=>{fresh.resolve(response({success:true,data:statusMock({running:true})}));await b});
- expect(result.current.status.ready).toBe(true);
- await act(async()=>{old.resolve(response({success:true,data:statusMock({running:false})}));await a});
- expect(result.current.status.ready).toBe(true);
+it('keeps the latest status when an older response arrives last', async () => {
+  const old = deferred()
+  const fresh = deferred()
+  rs.stubGlobal('fetch', rs.fn().mockImplementationOnce(() => old.promise).mockImplementationOnce(() => fresh.promise))
+  const { result } = renderHook(() => useStatus())
+  const a = result.fetchStatus()
+  const b = result.fetchStatus()
+  fresh.resolve(response({ success: true, data: statusMock({ running: true }) }))
+  await b
+  expect(result.status().ready).toBe(true)
+  old.resolve(response({ success: true, data: statusMock({ running: false }) }))
+  await a
+  expect(result.status().ready).toBe(true)
 })
-it('discards proxy responses from before the service stopped',async()=>{
- const old=deferred();rs.stubGlobal('fetch',rs.fn(()=>old.promise));
- const {result,rerender}=renderHook(({ready})=>useProxies({ready}),{initialProps:{ready:true}});let a!:Promise<unknown>;
- act(()=>{a=result.current.fetchProxies()});rerender({ready:false});
- expect(result.current.proxies).toEqual({});
- await act(async()=>{old.resolve(response({proxies:{proxy:{type:'Selector',all:['old-node'],now:'old-node'}}}));await a});
- expect(result.current.primaryGroup).toBeNull();
+
+it('discards proxy responses from before the service stopped', async () => {
+  const old = deferred()
+  rs.stubGlobal('fetch', rs.fn(() => old.promise))
+  const [ready, setReady] = createSignal(true)
+  const { result } = renderHook(() => useProxies(ready))
+  const a = result.fetchProxies()
+  setReady(false)
+  flush()
+  expect(result.proxies()).toEqual({})
+  old.resolve(response({ proxies: { proxy: { type: 'Selector', all: ['old-node'], now: 'old-node' } } }))
+  await a
+  expect(result.primaryGroup()).toBeNull()
 })
-it('discards measurements after their generation is cleared',async()=>{
- const old=deferred();rs.stubGlobal('fetch',rs.fn(()=>old.promise));const {result}=renderHook(()=>useDelays());let a!:Promise<unknown>;
- act(()=>{a=result.current.testDelay('/api/clash','old-node')});act(()=>result.current.clearDelays());
- await act(async()=>{old.resolve(response({delay:123}));await a});
- expect(result.current.delays['old-node']).toBeUndefined();
+
+it('discards measurements after their generation is cleared', async () => {
+  const old = deferred()
+  rs.stubGlobal('fetch', rs.fn(() => old.promise))
+  const { result } = renderHook(() => useDelays())
+  const a = result.testDelay('/api/clash', 'old-node')
+  result.clearDelays()
+  old.resolve(response({ delay: 123 }))
+  await a
+  expect(result.delays()['old-node']).toBeUndefined()
 })
 
 it('gates fresh and retained proxy callbacks while stopped and allows restart', async () => {
   const fetchMock = rs.fn(async () => response({ proxies: { proxy: { type: 'Selector', all: ['node'], now: 'node' } } }))
   rs.stubGlobal('fetch', fetchMock)
-  const { result, rerender } = renderHook(({ ready }) => useProxies({ ready }), { initialProps: { ready: true } })
-  const retained = result.current.fetchProxies
-  rerender({ ready: false })
-  await act(async () => { await retained(); await result.current.fetchProxies() })
-  expect(result.current.proxies).toEqual({})
+  const [ready, setReady] = createSignal(true)
+  const { result } = renderHook(() => useProxies(ready))
+  const retained = result.fetchProxies
+  setReady(false)
+  flush()
+  await retained()
+  await result.fetchProxies()
+  expect(result.proxies()).toEqual({})
   expect(fetchMock).not.toHaveBeenCalled()
-  rerender({ ready: true })
-  await act(async () => { await retained() })
-  expect(result.current.primaryGroup?.now).toBe('node')
+  setReady(true)
+  flush()
+  await retained()
+  expect(result.primaryGroup()?.now).toBe('node')
 })
 
 it.each([false, true])('waits for revised configuration before onboarding (new node: %s)', async (hasNode) => {
@@ -119,24 +154,33 @@ it.each([false, true])('waits for revised configuration before onboarding (new n
     return response({ success: true, data: input === '/api/version' ? {} : [] })
   }))
   const { result } = renderHook(() => useAppData())
-  await act(async () => { await rs.advanceTimersByTimeAsync(0) })
-  expect(result.current.needsOnboarding).toBe(true)
+  flush()
+  await rs.advanceTimersByTimeAsync(0)
+  flush()
+  expect(result.needsOnboarding()).toBe(true)
   revision = 2
-  await act(async () => { await result.current.fetchStatus() })
-  expect(result.current.needsOnboarding).toBe(false)
+  await result.fetchStatus()
+  flush()
+  expect(result.needsOnboarding()).toBe(false)
   const nodes = hasNode ? [nodeMock({ tag: 'new-node' })] : []
-  await act(async () => { pending.resolve(response({ success: true, data: nodes })); await rs.advanceTimersByTimeAsync(0) })
-  expect(result.current.needsOnboarding).toBe(!hasNode)
+  pending.resolve(response({ success: true, data: nodes }))
+  await rs.advanceTimersByTimeAsync(0)
+  flush()
+  expect(result.needsOnboarding()).toBe(!hasNode)
   pending = deferred()
-  await act(async () => { await rs.advanceTimersByTimeAsync(30_000) })
-  expect(result.current.needsOnboarding).toBe(!hasNode)
-  await act(async () => { pending.resolve(response({ success: true, data: nodes })); await rs.advanceTimersByTimeAsync(0) })
-  expect(result.current.needsOnboarding).toBe(!hasNode)
+  await rs.advanceTimersByTimeAsync(30_000)
+  flush()
+  expect(result.needsOnboarding()).toBe(!hasNode)
+  pending.resolve(response({ success: true, data: nodes }))
+  await rs.advanceTimersByTimeAsync(0)
+  flush()
+  expect(result.needsOnboarding()).toBe(!hasNode)
 })
 
 it('times out a stuck initial read and recovers through polling', async () => {
   rs.useFakeTimers()
-  const fetchMock = rs.fn().mockImplementationOnce(() => new Promise(() => {}))
+  const fetchMock = rs.fn()
+    .mockImplementationOnce(() => new Promise(() => {}))
     .mockResolvedValue(response({ success: true, data: statusMock({ running: true }) }))
   rs.stubGlobal('fetch', fetchMock)
   const { result } = renderHook(() => {
@@ -144,26 +188,27 @@ it('times out a stuck initial read and recovers through polling', async () => {
     usePolling([status.fetchStatus])
     return status
   })
-  await act(async () => { await Promise.resolve() })
-  await act(async () => { await rs.advanceTimersByTimeAsync(READ_TIMEOUT_MS) })
-  expect(result.current.statusSettled).toBe(true)
-  expect(result.current.statusLoaded).toBe(false)
-  await act(async () => { await rs.advanceTimersByTimeAsync(3000) })
-  expect(result.current.statusLoaded).toBe(true)
-  expect(result.current.status.ready).toBe(true)
+  flush()
+  await Promise.resolve()
+  await rs.advanceTimersByTimeAsync(READ_TIMEOUT_MS)
+  expect(result.statusSettled()).toBe(true)
+  expect(result.statusLoaded()).toBe(false)
+  await rs.advanceTimersByTimeAsync(3000)
+  expect(result.statusLoaded()).toBe(true)
+  expect(result.status().ready).toBe(true)
 })
 
 it('cancels the remaining batch queue when measurements are cleared', async () => {
   const fetchMock = rs.fn(() => new Promise<Response>(() => {}))
   rs.stubGlobal('fetch', fetchMock)
   const { result } = renderHook(() => useDelays())
-  let batch!: Promise<void>
-  act(() => { batch = result.current.testGroupDelays('/api/clash', 'proxy', Array.from({ length: 20 }, (_, i) => `node-${i}`)) })
+  const batch = result.testGroupDelays('/api/clash', 'proxy', Array.from({ length: 20 }, (_, i) => `node-${i}`))
   expect(fetchMock).toHaveBeenCalledTimes(6)
-  await act(async () => { result.current.clearDelays(); await batch })
+  result.clearDelays()
+  await batch
   expect(fetchMock).toHaveBeenCalledTimes(6)
-  expect(result.current.testingGroup).toBe('')
-  expect(result.current.testingNodes).toEqual({})
+  expect(result.testingGroup()).toBe('')
+  expect(result.testingNodes()).toEqual({})
 })
 
 it('refreshes configuration on revision changes instead of every health poll', async () => {
@@ -176,13 +221,16 @@ it('refreshes configuration on revision changes instead of every health poll', a
     return response({ success: true, data: input === '/api/version' ? {} : [] })
   }))
   renderHook(() => useAppData())
-  await act(async () => { await rs.advanceTimersByTimeAsync(0) })
-  expect(reads.filter(path => path === '/api/subs')).toHaveLength(1)
-  await act(async () => { await rs.advanceTimersByTimeAsync(9000) })
-  expect(reads.filter(path => path === '/api/subs')).toHaveLength(1)
+  flush()
+  await rs.advanceTimersByTimeAsync(0)
+  flush()
+  expect(reads.filter((path) => path === '/api/subs')).toHaveLength(1)
+  await rs.advanceTimersByTimeAsync(9000)
+  expect(reads.filter((path) => path === '/api/subs')).toHaveLength(1)
   revision++
-  await act(async () => { await rs.advanceTimersByTimeAsync(3000) })
-  expect(reads.filter(path => path === '/api/subs')).toHaveLength(2)
+  await rs.advanceTimersByTimeAsync(3000)
+  flush()
+  expect(reads.filter((path) => path === '/api/subs')).toHaveLength(2)
 })
 
 it('evaluates startup, onboarding, and auto-probe gates without false positives', () => {

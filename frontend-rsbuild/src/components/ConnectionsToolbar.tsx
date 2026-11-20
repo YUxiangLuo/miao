@@ -1,3 +1,4 @@
+import { For, Show } from 'solid-js'
 import { classNames } from '../utils'
 import { PATH_FILTERS, type PathCounts, type PathFilterOption } from './connectionFilters'
 
@@ -9,24 +10,27 @@ export interface PillGroupProps {
   onChange: (value: string) => void
 }
 
-function PillGroup({ label, value, options, counts, onChange }: PillGroupProps) {
+function PillGroup(props: PillGroupProps) {
   return (
-    <div className="connections-pills" role="group" aria-label={label}>
-      {options.map((option) => {
-        const count = counts?.[option.value as keyof PathCounts]
-        return (
-          <button
-            key={option.value}
-            type="button"
-            className={classNames('connections-pill', value === option.value && 'active')}
-            aria-pressed={value === option.value}
-            onClick={() => onChange(option.value)}
-          >
-            <span>{option.label}</span>
-            {typeof count === 'number' && <em>{count}</em>}
-          </button>
-        )
-      })}
+    <div class="connections-pills" role="group" aria-label={props.label}>
+      <For each={props.options}>
+        {(option) => {
+          const count = () => props.counts?.[option.value as keyof PathCounts]
+          return (
+            <button
+              type="button"
+              class={classNames('connections-pill', props.value === option.value && 'active')}
+              aria-pressed={props.value === option.value ? 'true' : 'false'}
+              onClick={() => props.onChange(option.value)}
+            >
+              <span>{option.label}</span>
+              <Show when={typeof count() === 'number'}>
+                <em class="num">{count()}</em>
+              </Show>
+            </button>
+          )
+        }}
+      </For>
     </div>
   )
 }
@@ -37,18 +41,17 @@ export interface ConnectionsToolbarProps {
   counts: PathCounts
 }
 
-/** 链接统计工具栏：只保留直连/代理路径筛选 */
-export function ConnectionsToolbar({ path, onPathChange, counts }: ConnectionsToolbarProps) {
+export function ConnectionsToolbar(props: ConnectionsToolbarProps) {
   return (
-    <div className="connections-toolbar">
-      <div className="connections-toolbar-row">
-        <div className="connections-toolbar-filters">
+    <div class="connections-toolbar">
+      <div class="connections-toolbar-row">
+        <div class="connections-toolbar-filters">
           <PillGroup
             label="按出口筛选"
-            value={path}
+            value={props.path}
             options={PATH_FILTERS}
-            counts={counts}
-            onChange={onPathChange}
+            counts={props.counts}
+            onChange={props.onPathChange}
           />
         </div>
       </div>

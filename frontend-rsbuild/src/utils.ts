@@ -43,6 +43,7 @@ export interface NodeForm {
   tuic_zero_rtt: boolean
   obfs_type: string
   obfs_password: string
+  detour: string
 }
 
 export const EMPTY_NODE_FORM: NodeForm = {
@@ -72,6 +73,7 @@ export const EMPTY_NODE_FORM: NodeForm = {
   tuic_zero_rtt: false,
   obfs_type: '',
   obfs_password: '',
+  detour: '',
 }
 
 export interface NodeTypeOption {
@@ -192,6 +194,7 @@ export function nodeTypeDefaults(type: string): Partial<NodeForm> {
     tuic_zero_rtt: false,
     obfs_type: '',
     obfs_password: '',
+    detour: '',
   }
 }
 

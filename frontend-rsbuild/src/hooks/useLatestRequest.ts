@@ -1,21 +1,25 @@
-import { useCallback, useEffect, useRef } from 'react'
+import { onCleanup } from 'solid-js'
 
 /** One owner for cancellation and result publication, shared by polling and
  * action-triggered refreshes. Cleanup also invalidates already parsed results. */
 export function useLatestRequest() {
-  const generation = useRef(0)
-  const controller = useRef<AbortController | null>(null)
-  const cancel = useCallback(() => {
-    generation.current++
-    controller.current?.abort()
-    controller.current = null
-  }, [])
-  const begin = useCallback(() => {
+  let generation = 0
+  let controller: AbortController | null = null
+
+  const cancel = () => {
+    generation++
+    controller?.abort()
+    controller = null
+  }
+
+  const begin = () => {
     cancel()
-    const current = generation.current
-    controller.current = new AbortController()
-    return { signal: controller.current.signal, isCurrent: () => current === generation.current }
-  }, [cancel])
-  useEffect(() => cancel, [cancel])
+    const current = generation
+    controller = new AbortController()
+    return { signal: controller.signal, isCurrent: () => current === generation }
+  }
+
+  onCleanup(cancel)
+
   return { begin, cancel }
 }

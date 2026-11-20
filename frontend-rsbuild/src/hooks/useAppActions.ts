@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react'
+import { createMemo, createSignal } from 'solid-js'
 import { CONNECTIONS_MODAL_MIN_WIDTH } from '../tokens'
 import { validateSubscriptionUrl } from '../utils'
 import { buildNodeRequest } from '../nodeForm'
@@ -19,6 +19,10 @@ import type { ResourceReadResult } from './useResources'
 import type { ToastTone } from './useApi'
 import type { useAppData } from './useAppData'
 import type {
+  AccessPortStatus,
+  AssignTerminalRequest,
+  DeleteAccessPortRequest,
+  DeleteTerminalRequest,
   NodeRequest,
   RouteModeRequest,
   MaxMultiplierRequest,
@@ -34,6 +38,7 @@ import type {
   DeleteNodeRequest,
   DeleteRuleRequest,
   McpRequest,
+  SaveAccessPortRequest,
   SwitchProxyResult,
   BatchNodeResult,
   NodeSelect,
@@ -42,6 +47,8 @@ import type {
   RuleRequest,
   ScheduledRefreshRequest,
   SubBatchResult,
+  TerminalSummary,
+  UpsertTerminalRequest,
   VergeImportResult,
   SubscriptionRefreshResult,
 } from '../types/api'
@@ -54,348 +61,435 @@ function errorMessage(error: unknown): string {
 
 export function useAppActions(data: AppData) {
   const { vpsTasks, vpsDeploying, handleDeployVps } = useVpsDeployment(data)
-  const [upgradeMessage, setUpgradeMessage] = useState('')
-  const deleting = useRef(new Set<string>())
-  const [pendingDeletes, setPendingDeletes] = useState<ReadonlySet<string>>(new Set())
-  const {
-    status,
-    apiCall,
-    showToast,
-    clearDelays,
-    fetchStatus,
-    fetchProxies,
-    fetchSubs,
-    fetchNodes,
-    fetchRules,
-    fetchVersion,
-    versionInfo,
-    clashApiBase,
-    switchingNode,
-    setSwitchingNode,
-    nodeType,
-    nodeForm,
-    setShowNodeModal,
-    setShowConnectionsModal,
-    setConfirmState,
-    setUpgrading,
-    resetNodeForm,
-    testDelay,
-    testGroupDelays,
-  } = data
-  const requestedNodeSelect = status.requested_node_select || status.node_select || 'manual'
+  const [upgradeMessage, setUpgradeMessage] = createSignal('')
+  const deleting = new Set<string>()
+  const [pendingDeletes, setPendingDeletes] = createSignal<ReadonlySet<string>>(new Set())
 
-  const presentFeedback = useCallback((feedback: ToastFeedback | null) => {
-    if (feedback) showToast(feedback.message, feedback.tone)
-  }, [showToast])
+  const requestedNodeSelect = () => data.status().requested_node_select || data.status().node_select || 'manual'
 
-  const showMutationResult = useCallback((message: string, read: ResourceReadResult<unknown>, action: string, tone?: ToastTone) => {
+  const presentFeedback = (feedback: ToastFeedback | null) => {
+    if (feedback) data.showToast(feedback.message, feedback.tone)
+  }
+
+  const showMutationResult = (
+    message: string,
+    read: ResourceReadResult<unknown>,
+    action: string,
+    tone?: ToastTone,
+  ) => {
     presentFeedback(mutationFeedback(message, read, action, tone))
-  }, [presentFeedback])
+  }
 
-  const openConfirm = useCallback((title: string, message: string, onConfirm: () => void) => {
-    setConfirmState({ open: true, title, message, onConfirm })
-  }, [setConfirmState])
+  const openConfirm = (title: string, message: string, onConfirm: () => void) => {
+    data.setConfirmState({ open: true, title, message, onConfirm })
+  }
 
-  const closeConfirm = useCallback(() => {
-    setConfirmState({ open: false, title: '', message: '', onConfirm: null })
-  }, [setConfirmState])
+  const closeConfirm = () => {
+    data.setConfirmState({ open: false, title: '', message: '', onConfirm: null })
+  }
 
-  const openNodeModal = useCallback(() => {
-    if (status.initializing) {
-      showToast('初始化完成后才能修改节点', 'info')
+  const openNodeModal = (preset?: 'socks-residential' | 'vps' | 'link') => {
+    if (data.status().initializing) {
+      data.showToast('初始化完成后才能修改专线节点', 'info')
       return
     }
-    setShowNodeModal(true)
-  }, [status.initializing, showToast, setShowNodeModal])
+    if (preset === 'socks-residential') {
+      data.setNodeType('socks')
+      data.setNodeForm((prev) => ({
+        ...prev,
+        server_port: 1080,
+        tls_enabled: false,
+      }))
+    }
+    data.setShowNodeModal(true)
+  }
 
-  const closeNodeModal = useCallback(() => {
-    setShowNodeModal(false)
-    resetNodeForm()
-  }, [resetNodeForm, setShowNodeModal])
+  const closeNodeModal = () => {
+    data.setShowNodeModal(false)
+    data.resetNodeForm()
+  }
 
-  const handleSetRouteMode = useCallback(async (nextMode: RouteMode) => {
-    if (nextMode === status.route_mode) return
+  const handleSetRouteMode = async (nextMode: RouteMode) => {
+    if (nextMode === data.status().route_mode) return
 
     try {
-      await apiCall<RouteModeResult>(
+      await data.apiCall<RouteModeResult>(
         'route-mode',
         { method: 'POST', body: JSON.stringify({ route_mode: nextMode } satisfies RouteModeRequest) },
-        'routeMode'
+        'routeMode',
       )
-      clearDelays()
-      await fetchStatus()
-      await fetchProxies()
-      showToast(nextMode === 'global' ? '已切换为全局代理' : '已切换为分流模式', 'success')
+      data.clearDelays()
+      await data.fetchStatus()
+      await data.fetchProxies()
+      data.showToast(nextMode === 'global' ? '已切换为全局代理' : '已切换为分流模式', 'success')
     } catch (error) {
-      showToast(errorMessage(error), 'error')
+      data.showToast(errorMessage(error), 'error')
     }
-  }, [
-    status.route_mode,
-    apiCall,
-    clearDelays,
-    fetchStatus,
-    fetchProxies,
-    showToast
-  ])
+  }
 
-  const handleOpenSetRouteModeConfirm = useCallback((nextMode: RouteMode) => {
-    if (nextMode === status.route_mode) return
+  const handleOpenSetRouteModeConfirm = (nextMode: RouteMode) => {
+    if (nextMode === data.status().route_mode) return
     const copy = routeModeConfirmCopy(nextMode)
-    openConfirm(copy.title, copy.message, () => handleSetRouteMode(nextMode))
-  }, [status.route_mode, openConfirm, handleSetRouteMode])
+    openConfirm(copy.title, copy.message, () => { void handleSetRouteMode(nextMode) })
+  }
 
-  const handleSetMaxMultiplier = useCallback(async (nextMultiplier: string | null) => {
-    if (nextMultiplier === (status.max_multiplier ?? null)) return
+  const handleSetMaxMultiplier = async (nextMultiplier: string | null) => {
+    if (nextMultiplier === (data.status().max_multiplier ?? null)) return
 
     try {
-      await apiCall<MaxMultiplierResult>(
+      await data.apiCall<MaxMultiplierResult>(
         'max-multiplier',
         { method: 'POST', body: JSON.stringify({ max_multiplier: nextMultiplier } satisfies MaxMultiplierRequest) },
-        'maxMultiplier'
+        'maxMultiplier',
       )
-      clearDelays()
-      await fetchStatus()
-      await fetchProxies()
-      showToast(nextMultiplier === null ? '已取消倍率限制' : `最高倍率已设为 ${nextMultiplier}x`, 'success')
+      data.clearDelays()
+      await data.fetchStatus()
+      await data.fetchProxies()
+      data.showToast(nextMultiplier === null ? '已取消倍率限制' : `最高倍率已设为 ${nextMultiplier}x`, 'success')
     } catch (error) {
-      showToast(errorMessage(error), 'error')
+      data.showToast(errorMessage(error), 'error')
     }
-  }, [
-    status.max_multiplier,
-    apiCall,
-    clearDelays,
-    fetchStatus,
-    fetchProxies,
-    showToast
-  ])
+  }
 
-  const handleSetNodeSelect = useCallback(async (nextSelect: NodeSelect) => {
-    if (nextSelect === requestedNodeSelect) return
+  const handleSetNodeSelect = async (nextSelect: NodeSelect) => {
+    if (nextSelect === requestedNodeSelect()) return
 
     try {
-      const payload = await apiCall<NodeSelectResult>(
+      const payload = await data.apiCall<NodeSelectResult>(
         'node-select',
         { method: 'POST', body: JSON.stringify({ node_select: nextSelect } satisfies NodeSelectRequest) },
-        'nodeSelect'
+        'nodeSelect',
       )
-      clearDelays()
-      const read = await fetchStatus()
-      await fetchProxies()
+      data.clearDelays()
+      const read = await data.fetchStatus()
+      await data.fetchProxies()
       presentFeedback(nodeSelectFeedback(payload.data, read))
     } catch (error) {
-      showToast(errorMessage(error), 'error')
+      data.showToast(errorMessage(error), 'error')
     }
-  }, [
-    requestedNodeSelect,
-    apiCall,
-    clearDelays,
-    fetchStatus,
-    fetchProxies,
-    presentFeedback,
-    showToast
-  ])
+  }
 
-  const handleSwitchProxy = useCallback(async (groupName: string, nodeName: string) => {
-    if (requestedNodeSelect !== 'manual') return
-    if (switchingNode) return
-    setSwitchingNode(nodeName)
+  const handleSwitchProxy = async (groupName: string, nodeName: string) => {
+    if (requestedNodeSelect() !== 'manual') return
+    if (data.switchingNode()) return
+    data.setSwitchingNode(nodeName)
     try {
-      const response = await apiCall<SwitchProxyResult>('proxy/switch', {
-        method: 'POST', body: JSON.stringify({ group: groupName, name: nodeName } satisfies LastProxy),
+      const response = await data.apiCall<SwitchProxyResult>('proxy/switch', {
+        method: 'POST',
+        body: JSON.stringify({ group: groupName, name: nodeName } satisfies LastProxy),
       }, 'switchProxy')
-      await fetchProxies()
+      await data.fetchProxies()
       presentFeedback(switchProxyFeedback(nodeName, response.data))
     } catch (error) {
-      showToast(errorMessage(error) || '切换节点失败', 'error')
+      data.showToast(errorMessage(error) || '切换节点失败', 'error')
     } finally {
-      setSwitchingNode('')
+      data.setSwitchingNode('')
     }
-  }, [requestedNodeSelect, apiCall, fetchProxies, presentFeedback, showToast, switchingNode, setSwitchingNode])
+  }
 
-  const handleAddSubscription = useCallback(async (url: string): Promise<boolean> => {
+  const handleAddSubscription = async (url: string): Promise<boolean> => {
     const trimmed = url.trim()
     const error = validateSubscriptionUrl(trimmed)
     if (error) {
-      showToast(error, 'error')
+      data.showToast(error, 'error')
       return false
     }
     try {
-      await apiCall('subs', { method: 'POST', body: JSON.stringify({ url: trimmed } satisfies SubRequest) }, 'addSub')
-      clearDelays()
-      const read = await fetchSubs()
+      await data.apiCall('subs', { method: 'POST', body: JSON.stringify({ url: trimmed } satisfies SubRequest) }, 'addSub')
+      data.clearDelays()
+      const read = await data.fetchSubs()
       showMutationResult('订阅地址已保存，请查看节点获取状态', read, '添加')
       return true
     } catch (error) {
-      showToast(errorMessage(error), 'error')
+      data.showToast(errorMessage(error), 'error')
       return false
     }
-  }, [apiCall, clearDelays, fetchSubs, showToast, showMutationResult])
+  }
 
-  // 扫描本机 clash-verge-rev 的订阅（只读）；失败/未安装都返回 null，由调用方提示
-  const scanClashVerge = useCallback(async (): Promise<VergeImportResult | null> => {
+  const scanClashVerge = async (): Promise<VergeImportResult | null> => {
     try {
-      const response = await apiCall<VergeImportResult>('import/clash-verge', {}, 'scanVerge')
+      const response = await data.apiCall<VergeImportResult>('import/clash-verge', {}, 'scanVerge')
       return response.data ?? null
     } catch {
       return null
     }
-  }, [apiCall])
+  }
 
-  const importClashVergeSubs = useCallback(async (urls: string[]): Promise<boolean> => {
+  const importClashVergeSubs = async (urls: string[]): Promise<boolean> => {
     try {
-      const response = await apiCall<SubBatchResult>(
+      const response = await data.apiCall<SubBatchResult>(
         'subs/batch',
         { method: 'POST', body: JSON.stringify({ urls } satisfies SubBatchRequest) },
-        'importVerge'
+        'importVerge',
       )
-      clearDelays()
-      const read = await fetchSubs()
+      data.clearDelays()
+      const read = await data.fetchSubs()
       presentFeedback(vergeImportFeedback(response.data, read))
       return true
     } catch (error) {
-      showToast(errorMessage(error), 'error')
+      data.showToast(errorMessage(error), 'error')
       return false
     }
-  }, [apiCall, clearDelays, fetchSubs, presentFeedback, showToast])
+  }
 
-  const deleteResource = useCallback(async (endpoint: string, body: SubRequest | DeleteNodeRequest | DeleteRuleRequest, action: string, refresh: () => Promise<ResourceReadResult<unknown>>, label: string) => {
-    if (deleting.current.has(action)) return
-    deleting.current.add(action)
-    setPendingDeletes(new Set(deleting.current))
+  const deleteResource = async (
+    endpoint: string,
+    body: SubRequest | DeleteNodeRequest | DeleteRuleRequest,
+    action: string,
+    refresh: () => Promise<ResourceReadResult<unknown>>,
+    label: string,
+  ) => {
+    if (deleting.has(action)) return
+    deleting.add(action)
+    setPendingDeletes(new Set(deleting))
     try {
-      await apiCall(endpoint, { method: 'DELETE', body: JSON.stringify(body) }, action)
+      await data.apiCall(endpoint, { method: 'DELETE', body: JSON.stringify(body) }, action)
       const result = await refresh()
-      if (endpoint !== 'rules') clearDelays()
+      if (endpoint !== 'rules') data.clearDelays()
       showMutationResult(`${label}已删除`, result, '删除')
     } catch (error) {
-      showToast(errorMessage(error), 'error')
+      data.showToast(errorMessage(error), 'error')
     } finally {
-      deleting.current.delete(action)
-      setPendingDeletes(new Set(deleting.current))
+      deleting.delete(action)
+      setPendingDeletes(new Set(deleting))
     }
-  }, [apiCall, clearDelays, showToast, showMutationResult])
+  }
 
-  const handleDeleteSubscription = useCallback((url: string) => deleteResource('subs', { url }, 'deleteSub', fetchSubs, '订阅'), [deleteResource, fetchSubs])
+  const handleDeleteSubscription = (url: string) => {
+    void deleteResource('subs', { url }, 'deleteSub', data.fetchSubs, '订阅')
+  }
 
-  const handleRefreshSubscriptions = useCallback(async () => {
+  const handleRefreshSubscriptions = async () => {
     try {
-      const response = await apiCall<SubscriptionRefreshResult>('subs/refresh', { method: 'POST' }, 'refreshSubs')
-      await Promise.all([fetchSubs(), fetchStatus()])
-      clearDelays()
+      const response = await data.apiCall<SubscriptionRefreshResult>('subs/refresh', { method: 'POST' }, 'refreshSubs')
+      await Promise.all([data.fetchSubs(), data.fetchStatus()])
+      data.clearDelays()
       presentFeedback(subscriptionRefreshFeedback(response.data))
     } catch (error) {
-      showToast(errorMessage(error), 'error')
+      data.showToast(errorMessage(error), 'error')
     }
-  }, [apiCall, clearDelays, fetchSubs, fetchStatus, presentFeedback, showToast])
+  }
 
-  const handleOpenRefreshSubscriptionsConfirm = useCallback(() => {
+  const handleOpenRefreshSubscriptionsConfirm = () => {
     openConfirm(
       '刷新订阅',
       '确定要刷新所有订阅吗？这将重新获取订阅节点并更新配置。',
-      () => handleRefreshSubscriptions()
+      () => { void handleRefreshSubscriptions() },
     )
-  }, [openConfirm, handleRefreshSubscriptions])
+  }
 
-  // 禁用/启用订阅节点（易变层变更，后端热应用）；成功后刷新订阅列表更新禁用计数
-  const handleSetNodeDisabled = useCallback(async (sub: string, name: string, disabled: boolean): Promise<boolean> => {
+  const handleSetNodeDisabled = async (sub: string, name: string, disabled: boolean): Promise<boolean> => {
     try {
-      await apiCall(
+      await data.apiCall(
         'subs/nodes/disabled',
         { method: 'POST', body: JSON.stringify({ sub, name, disabled } satisfies SetNodeDisabledRequest) },
-        'toggleSubNode'
+        'toggleSubNode',
       )
-      const read = await fetchSubs()
+      const read = await data.fetchSubs()
       showMutationResult(disabled ? `已禁用节点 ${name}` : `已启用节点 ${name}`, read, '操作')
       return true
     } catch (error) {
-      showToast(errorMessage(error), 'error')
+      data.showToast(errorMessage(error), 'error')
       return false
     }
-  }, [apiCall, fetchSubs, showToast, showMutationResult])
+  }
 
-  const handleAddNode = useCallback(async () => {
+  const handleAddNode = async (): Promise<boolean> => {
     let payload: NodeRequest
     try {
-      payload = buildNodeRequest(nodeType, nodeForm)
+      payload = buildNodeRequest(data.nodeType(), data.nodeForm())
     } catch (error) {
-      showToast(errorMessage(error), 'error')
+      data.showToast(errorMessage(error), 'error')
       return false
     }
 
     try {
-      await apiCall('nodes', { method: 'POST', body: JSON.stringify(payload) }, 'addNode')
-      const read = await fetchNodes()
-      clearDelays()
+      await data.apiCall('nodes', { method: 'POST', body: JSON.stringify(payload) }, 'addNode')
+      const read = await data.fetchNodes()
+      data.clearDelays()
       showMutationResult('节点已添加', read, '添加')
       return true
     } catch (error) {
-      showToast(errorMessage(error), 'error')
+      data.showToast(errorMessage(error), 'error')
       return false
     }
-  }, [nodeForm, nodeType, apiCall, clearDelays, fetchNodes, showToast, showMutationResult])
+  }
 
-  const handleImportNodes = useCallback(async (payloads: NodeRequest[]) => {
+  const handleImportNodes = async (payloads: NodeRequest[]): Promise<BatchNodeResult | undefined> => {
     if (!payloads?.length) return
 
     try {
-      const response = await apiCall<BatchNodeResult>(
+      const response = await data.apiCall<BatchNodeResult>(
         'nodes/import',
         { method: 'POST', body: JSON.stringify({ nodes: payloads } satisfies BatchNodeRequest) },
         'importNodes',
       )
       const result = response.data || { added: [], failed: [] }
       if (result.added.length > 0) {
-        const read = await fetchNodes()
-        clearDelays()
+        const read = await data.fetchNodes()
+        data.clearDelays()
         showMutationResult(`已添加 ${result.added.length} 个节点`, read, '导入')
       }
       presentFeedback(batchNodeFailuresFeedback(result.failed))
       return result
     } catch (error) {
-      showToast(errorMessage(error), 'error')
+      data.showToast(errorMessage(error), 'error')
+      return undefined
     }
-  }, [apiCall, clearDelays, fetchNodes, presentFeedback, showToast, showMutationResult])
+  }
 
-  const handleDeleteNode = useCallback((tag: string) => deleteResource('nodes', { tag }, 'deleteNode', fetchNodes, '节点'), [deleteResource, fetchNodes])
+  const handleDeleteNode = (tag: string) => {
+    void deleteResource('nodes', { tag }, 'deleteNode', data.fetchNodes, '节点')
+  }
 
-  const handleTestDelay = useCallback((nodeName: string) => {
-    testDelay(clashApiBase, nodeName)
-  }, [clashApiBase, testDelay])
+  const handleTestDelay = (nodeName: string) => {
+    void data.testDelay(data.clashApiBase, nodeName)
+  }
 
-  const handleTestGroupDelays = useCallback((groupName: string, nodeNames: string[]) => {
-    testGroupDelays(clashApiBase, groupName, nodeNames)
-  }, [clashApiBase, testGroupDelays])
+  const handleTestGroupDelays = (groupName: string, nodeNames: string[]) => {
+    void data.testGroupDelays(data.clashApiBase, groupName, nodeNames)
+  }
 
-  const handleOpenConnections = useCallback(() => {
+  const handleOpenConnections = () => {
     if (window.matchMedia(`(max-width: ${CONNECTIONS_MODAL_MIN_WIDTH - 1}px)`).matches) {
-      showToast('移动端暂不支持链接统计面板', 'info')
+      data.showToast('移动端暂不支持链接统计面板', 'info')
       return
     }
+    data.setShowConnectionsModal(true)
+  }
 
-    setShowConnectionsModal(true)
-  }, [showToast, setShowConnectionsModal])
-
-  const handleStartService = useCallback(async () => {
+  const handleStartService = async () => {
     try {
-      await apiCall('service/start', { method: 'POST' }, 'startService')
-      await fetchStatus()
-      await fetchProxies()
-      showToast('代理服务已重新启动', 'success')
+      await data.apiCall('service/start', { method: 'POST' }, 'startService')
+      await data.fetchStatus()
+      await data.fetchProxies()
+      data.showToast('网关转发服务已启动', 'success')
     } catch (error) {
-      showToast(errorMessage(error), 'error')
+      data.showToast(errorMessage(error), 'error')
     }
-  }, [apiCall, fetchProxies, fetchStatus, showToast])
+  }
 
-  const runConfirmedUpgrade = useCallback(async (currentVersion: string, targetVersion: string) => {
-    setUpgrading(true)
+  const handleStopService = async () => {
+    try {
+      await data.apiCall('service/stop', { method: 'POST' }, 'stopService')
+      await data.fetchStatus()
+      data.showToast('网关转发服务已停止', 'info')
+    } catch (error) {
+      data.showToast(errorMessage(error), 'error')
+    }
+  }
+
+  const handleOpenStopServiceConfirm = () => {
+    openConfirm(
+      '停止网关转发服务',
+      '停止后局域网终端与多店铺专属端口将暂停跨境转发，确定要停止服务吗？',
+      () => { void handleStopService() },
+    )
+  }
+
+  const handleUpsertTerminal = async (req: UpsertTerminalRequest): Promise<boolean> => {
+    try {
+      await data.apiCall<TerminalSummary>(
+        'terminals',
+        { method: 'POST', body: JSON.stringify(req) },
+        'upsertTerminal',
+      )
+      const read = await data.fetchTerminals()
+      showMutationResult(`已保存工位「${req.name.trim()}」`, read, '保存')
+      return true
+    } catch (error) {
+      data.showToast(errorMessage(error), 'error')
+      return false
+    }
+  }
+
+  const handleDeleteTerminal = async (ip: string): Promise<boolean> => {
+    try {
+      await data.apiCall(
+        'terminals',
+        { method: 'DELETE', body: JSON.stringify({ ip } satisfies DeleteTerminalRequest) },
+        'deleteTerminal',
+      )
+      const read = await data.fetchTerminals()
+      showMutationResult('已清除工位备注', read, '清除')
+      return true
+    } catch (error) {
+      data.showToast(errorMessage(error), 'error')
+      return false
+    }
+  }
+
+  const handleAssignTerminal = async (req: AssignTerminalRequest): Promise<boolean> => {
+    try {
+      await data.apiCall(
+        'terminals/assign',
+        { method: 'POST', body: JSON.stringify(req) },
+        `assignTerminal:${req.ip}`,
+      )
+      const [rulesRead] = await Promise.all([data.fetchRules(), data.fetchTerminals(), data.fetchStatus()])
+      const label = req.mode === 'dedicated'
+        ? `工位 ${req.ip} 已锁定专线「${req.target}」`
+        : req.mode === 'block_overseas'
+          ? `工位 ${req.ip} 已设为仅限国内办公`
+          : req.mode === 'direct'
+            ? `工位 ${req.ip} 已设为全量直连`
+            : `工位 ${req.ip} 已恢复跟随公共出海线路池`
+      showMutationResult(label, rulesRead, '切换')
+      return true
+    } catch (error) {
+      data.showToast(errorMessage(error), 'error')
+      return false
+    }
+  }
+
+  const handleSaveAccessPort = async (req: SaveAccessPortRequest): Promise<boolean> => {
+    try {
+      await data.apiCall<AccessPortStatus>(
+        'access-ports',
+        { method: 'POST', body: JSON.stringify(req) },
+        'saveAccessPort',
+      )
+      const [portsRead] = await Promise.all([data.fetchAccessPorts(), data.fetchStatus()])
+      showMutationResult(`专属入口「${req.name.trim()}」(端口 :${req.port}) 已生效`, portsRead, '保存')
+      return true
+    } catch (error) {
+      data.showToast(errorMessage(error), 'error')
+      return false
+    }
+  }
+
+  const handleDeleteAccessPort = async (id: string, name: string) => {
+    try {
+      await data.apiCall(
+        'access-ports',
+        { method: 'DELETE', body: JSON.stringify({ id } satisfies DeleteAccessPortRequest) },
+        `deleteAccessPort:${id}`,
+      )
+      const [portsRead] = await Promise.all([data.fetchAccessPorts(), data.fetchStatus()])
+      showMutationResult(`专属入口「${name}」已移除`, portsRead, '移除')
+    } catch (error) {
+      data.showToast(errorMessage(error), 'error')
+    }
+  }
+
+  const handleOpenDeleteAccessPortConfirm = (port: AccessPortStatus) => {
+    openConfirm(
+      '移除多店铺专属端口',
+      `确定要关闭并移除「${port.name}」(局域网端口 :${port.port}) 吗？配置了该端口的指纹浏览器窗口将立即无法连接。`,
+      () => { void handleDeleteAccessPort(port.id, port.name) },
+    )
+  }
+
+  const runConfirmedUpgrade = async (currentVersion: string, targetVersion: string) => {
+    data.setUpgrading(true)
     setUpgradeMessage(`正在请求升级 ${currentVersion} → ${targetVersion}；后端可能需要下载、校验和安装，请勿关闭或刷新页面。`)
     try {
       let installedVersion = targetVersion
       try {
-        const response = await apiCall<string>('upgrade', { method: 'POST' })
+        const response = await data.apiCall<string>('upgrade', { method: 'POST' })
         if (!response.data) {
-          await fetchVersion()
-          showToast('后端已是最新版本，无需升级', 'info')
+          await data.fetchVersion()
+          data.showToast('后端已是最新版本，无需升级', 'info')
           return
         }
         installedVersion = response.data
@@ -407,88 +501,95 @@ export function useAppActions(data: AppData) {
       await waitForUpgrade(installedVersion, currentVersion)
       window.location.reload()
     } catch (error) {
-      showToast(errorMessage(error), 'error')
+      data.showToast(errorMessage(error), 'error')
     } finally {
-      setUpgrading(false)
+      data.setUpgrading(false)
     }
-  }, [apiCall, fetchVersion, setUpgrading, showToast])
+  }
 
-  const handleUpgradeClick = useCallback(async () => {
-    if (versionInfo.upgrade_supported === false) {
-      showToast('当前平台请下载安装包，退出后覆盖安装', 'info')
+  const handleUpgradeClick = async () => {
+    const info = data.versionInfo()
+    if (info.upgrade_supported === false) {
+      data.showToast('当前平台请下载安装包，退出后覆盖安装', 'info')
       return
     }
 
-    if (!versionInfo.has_update) {
-      const read = await fetchVersion()
+    if (!info.has_update) {
+      const read = await data.fetchVersion()
       const fresh = read.status === 'success' ? read.data : undefined
       presentFeedback(describeVersionCheckResult(fresh))
       return
     }
 
-    const targetVersion = versionInfo.latest
+    const targetVersion = info.latest
     if (!targetVersion) return
-    const currentVersion = versionInfo.current
+    const currentVersion = info.current
     openConfirm(
       '更新确认',
       `确定要从 ${currentVersion} 更新到 ${targetVersion} 吗？更新过程中服务会短暂中断。`,
-      () => runConfirmedUpgrade(currentVersion, targetVersion),
+      () => { void runConfirmedUpgrade(currentVersion, targetVersion) },
     )
-  }, [versionInfo, fetchVersion, presentFeedback, showToast, openConfirm, runConfirmedUpgrade])
+  }
 
-  const handleOpenDeleteNodeConfirm = useCallback((tag: string) => {
+  const handleOpenDeleteNodeConfirm = (tag: string) => {
     openConfirm('删除节点', `确定要删除节点 "${tag}" 吗？`, () => handleDeleteNode(tag))
-  }, [openConfirm, handleDeleteNode])
+  }
 
-  const handleOpenDeleteSubConfirm = useCallback((url: string) => {
+  const handleOpenDeleteSubConfirm = (url: string) => {
     openConfirm('删除订阅', `确定要删除此订阅吗？\n${url}`, () => handleDeleteSubscription(url))
-  }, [openConfirm, handleDeleteSubscription])
+  }
 
-  const handleAddRule = useCallback(async ({ field, value, target }: RuleRequest): Promise<boolean> => {
+  const handleAddRule = async ({ field, value, target }: RuleRequest): Promise<boolean> => {
     try {
-      await apiCall('rules', { method: 'POST', body: JSON.stringify({ field, value, target } satisfies RuleRequest) }, 'addRule')
-      const read = await fetchRules()
+      await data.apiCall('rules', { method: 'POST', body: JSON.stringify({ field, value, target } satisfies RuleRequest) }, 'addRule')
+      const read = await data.fetchRules()
       showMutationResult('规则已添加', read, '添加')
       return true
     } catch (error) {
-      showToast(errorMessage(error), 'error')
+      data.showToast(errorMessage(error), 'error')
       return false
     }
-  }, [apiCall, fetchRules, showToast, showMutationResult])
+  }
 
-  const handleDeleteRule = useCallback((rule: RuleInfo) => deleteResource('rules', { index: rule.index, raw: rule.raw }, 'deleteRule', fetchRules, '规则'), [deleteResource, fetchRules])
+  const handleDeleteRule = (rule: RuleInfo) => {
+    void deleteResource('rules', { index: rule.index, raw: rule.raw }, 'deleteRule', data.fetchRules, '规则')
+  }
 
-  const handleOpenDeleteRuleConfirm = useCallback((rule: RuleInfo) => {
+  const handleOpenDeleteRuleConfirm = (rule: RuleInfo) => {
     const label = rule?.field && rule?.value ? `${rule.field}: ${rule.value}` : (rule?.raw || '')
     openConfirm('删除规则', `确定要删除此规则吗？\n${label}`, () => handleDeleteRule(rule))
-  }, [openConfirm, handleDeleteRule])
+  }
 
-  const handleToggleMcp = useCallback(async (enabled: boolean) => {
+  const handleToggleMcp = async (enabled: boolean) => {
     try {
-      await apiCall('mcp', { method: 'POST', body: JSON.stringify({ enabled } satisfies McpRequest) }, 'toggleMcp')
-      await fetchStatus()
-      showToast(enabled ? 'MCP 端点已开启' : 'MCP 端点已关闭', 'success')
+      await data.apiCall('mcp', { method: 'POST', body: JSON.stringify({ enabled } satisfies McpRequest) }, 'toggleMcp')
+      await data.fetchStatus()
+      data.showToast(enabled ? 'MCP 端点已开启' : 'MCP 端点已关闭', 'success')
     } catch (error) {
-      showToast(errorMessage(error), 'error')
+      data.showToast(errorMessage(error), 'error')
     }
-  }, [apiCall, fetchStatus, showToast])
+  }
 
-  const handleSaveScheduledRefresh = useCallback(async (request: ScheduledRefreshRequest) => {
+  const handleSaveScheduledRefresh = async (request: ScheduledRefreshRequest) => {
     try {
-      await apiCall('scheduled-refresh', {
+      await data.apiCall('scheduled-refresh', {
         method: 'POST',
         body: JSON.stringify(request),
       }, 'scheduledRefresh')
-      showToast(request.enabled ? '定时刷新已启用' : '定时刷新已关闭', 'success')
+      data.showToast(request.enabled ? '定时刷新已启用' : '定时刷新已关闭', 'success')
       return true
     } catch (error) {
-      showToast(errorMessage(error), 'error')
+      data.showToast(errorMessage(error), 'error')
       return false
     }
-  }, [apiCall, showToast])
+  }
+
+  const pendingActions = createMemo<ReadonlySet<string>>(
+    () => new Set([...data.pendingActions(), ...pendingDeletes()]),
+  )
 
   return {
-    pendingActions: new Set([...data.pendingActions, ...pendingDeletes]),
+    pendingActions,
     openConfirm,
     closeConfirm,
     openNodeModal,
@@ -512,6 +613,13 @@ export function useAppActions(data: AppData) {
     handleTestGroupDelays,
     handleOpenConnections,
     handleStartService,
+    handleStopService,
+    handleOpenStopServiceConfirm,
+    handleUpsertTerminal,
+    handleDeleteTerminal,
+    handleAssignTerminal,
+    handleSaveAccessPort,
+    handleOpenDeleteAccessPortConfirm,
     handleUpgradeClick,
     upgradeMessage,
     handleOpenDeleteNodeConfirm,

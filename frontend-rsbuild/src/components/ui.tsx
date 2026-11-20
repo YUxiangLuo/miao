@@ -1,25 +1,32 @@
-import { LoaderCircle } from 'lucide-react'
-import type { ButtonHTMLAttributes, ReactNode } from 'react'
+import { For, Show, omit } from 'solid-js'
+import type { JSX } from '@solidjs/web'
 import { classNames } from '../utils'
 import { ICON } from '../tokens'
 import type { Toast } from '../hooks/useApi'
+import { CheckIcon, CircleAlertIcon, CircleXIcon, LoaderCircleIcon, XIcon } from './icons'
 
-export function LogoIcon({ size = 20 }: { size?: number }) {
-  // 配色走 chrome.css 的 .brand-icon（fill 取自 --brand/--logo-face），此处只管几何
+/**
+ * HarborGate · 海港网关 几何港门徽标（无吉祥物）：
+ * 深海岩蓝港湾底座 + 双侧航道柱门 H 结构 + 领航青蓝横梁与防关联绿航标。
+ */
+export function LogoIcon(props: { size?: number; class?: string }) {
+  const size = () => props.size ?? 30
   return (
     <svg
-      width={size}
-      height={size}
+      width={size()}
+      height={size()}
       viewBox="0 0 64 64"
+      fill="none"
       xmlns="http://www.w3.org/2000/svg"
-      className="brand-icon"
+      class={classNames('brand-icon', props.class)}
+      aria-hidden="true"
     >
-      <circle className="logo-body" cx="32" cy="37" r="21" />
-      <polygon className="logo-body" points="13,30 21,8 30,25" />
-      <polygon className="logo-body" points="51,30 43,8 34,25" />
-      <circle className="logo-face" cx="24" cy="35" r="3.5" />
-      <circle className="logo-face" cx="40" cy="35" r="3.5" />
-      <path className="logo-face" d="M30 42 L34 42 L32 45Z" />
+      <rect class="logo-frame" x="3" y="3" width="58" height="58" rx="14" fill="#0F172A" stroke="#1E293B" stroke-width="2" />
+      <path d="M16 15H23.5V49H16V15Z" fill="#F8FAFC" />
+      <path d="M40.5 15H48V49H40.5V15Z" fill="#F8FAFC" />
+      <path d="M23.5 28.5H40.5V35H23.5V28.5Z" fill="#38BDF8" />
+      <circle cx="32" cy="19.5" r="3" fill="#0EA5E9" />
+      <path d="M27.5 42.5H36.5L32 48.5L27.5 42.5Z" fill="#10B981" />
     </svg>
   )
 }
@@ -27,95 +34,86 @@ export function LogoIcon({ size = 20 }: { size?: number }) {
 export type ButtonTone = 'primary' | 'secondary' | 'danger' | 'ghost'
 export type ButtonSize = 'md' | 'sm'
 
-export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
+export interface ButtonProps extends Omit<JSX.ButtonHTMLAttributes<HTMLButtonElement>, 'class'> {
   tone: ButtonTone
   size?: ButtonSize
-  icon?: ReactNode
+  icon?: JSX.Element
   loading?: boolean
+  class?: string
 }
 
-export function Button({
-  children,
-  tone,
-  size = 'md',
-  icon,
-  loading,
-  className,
-  disabled,
-  ...props
-}: ButtonProps) {
-  const isDisabled = Boolean(disabled || loading)
+export function Button(props: ButtonProps) {
+  const rest = omit(props, 'children', 'tone', 'size', 'icon', 'loading', 'class', 'disabled', 'type')
+  const size = () => props.size ?? 'md'
+  const isDisabled = () => Boolean(props.disabled || props.loading)
+
   return (
     <button
-      type="button"
-      className={classNames('btn', `btn-${tone}`, `btn-${size}`, className)}
-      {...props}
-      disabled={isDisabled}
-      aria-busy={loading ? true : undefined}
+      type={props.type ?? 'button'}
+      class={classNames('btn', `btn-${props.tone}`, `btn-${size()}`, props.class)}
+      {...rest}
+      disabled={isDisabled()}
+      aria-busy={props.loading ? 'true' : undefined}
     >
-      {loading ? <LoaderCircle className="spin" size={size === 'sm' ? ICON.xs : ICON.sm} /> : icon}
-      <span>{children}</span>
+      <Show
+        when={props.loading}
+        fallback={props.icon}
+      >
+        <LoaderCircleIcon class="spin" size={size() === 'sm' ? ICON.xs : ICON.sm} />
+      </Show>
+      <span>{props.children}</span>
     </button>
   )
 }
 
-export function SectionCard({ header, children, className, bodyClassName }: {
-  header?: ReactNode
-  children?: ReactNode
-  className?: string
-  bodyClassName?: string
+export function SectionCard(props: {
+  header?: JSX.Element
+  children?: JSX.Element
+  class?: string
+  bodyClass?: string
 }) {
   return (
-    <section className={classNames('panel-card', className)}>
-      {header}
-      <div className={classNames('panel-card-body', bodyClassName)}>{children}</div>
+    <section class={classNames('panel-card', props.class)}>
+      {props.header}
+      <div class={classNames('panel-card-body', props.bodyClass)}>{props.children}</div>
     </section>
   )
 }
 
-export function ToastStack({ toasts, onDismiss }: {
+export function ToastStack(props: {
   toasts: Toast[]
   onDismiss?: (id: number) => void
 }) {
-  if (toasts.length === 0) return null
-  
   return (
-    <div className="toast-stack" aria-live="polite" aria-relevant="additions">
-      {toasts.map((toast) => (
-        <div key={toast.id} className={classNames('toast', toast.tone)}>
-          {toast.tone === 'success' ? (
-            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M20 6 9 17l-5-5"/>
-            </svg>
-          ) : toast.tone === 'error' ? (
-            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="12" cy="12" r="10"/>
-              <line x1="15" x2="9" y1="9" y2="15"/>
-              <line x1="9" x2="15" y1="9" y2="15"/>
-            </svg>
-          ) : (
-            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="12" cy="12" r="10"/>
-              <line x1="12" x2="12" y1="16" y2="12"/>
-              <line x1="12" x2="12.01" y1="8" y2="8"/>
-            </svg>
+    <Show when={props.toasts.length > 0}>
+      <div class="toast-stack" aria-live="polite" aria-relevant="additions">
+        <For each={props.toasts} keyed={(toast) => toast.id}>
+          {(toast) => (
+            <div class={classNames('toast', toast().tone)}>
+              <span class="toast-icon" aria-hidden="true">
+                {toast().tone === 'success'
+                  ? <CheckIcon size={14} />
+                  : toast().tone === 'error'
+                    ? <CircleXIcon size={14} />
+                    : <CircleAlertIcon size={14} />}
+              </span>
+              <span class="toast-text">{toast().message}</span>
+              <Show when={props.onDismiss}>
+                {(dismiss) => (
+                  <button
+                    type="button"
+                    class="toast-close"
+                    onClick={() => dismiss()(toast().id)}
+                    aria-label="关闭提示"
+                  >
+                    <XIcon size={12} />
+                  </button>
+                )}
+              </Show>
+            </div>
           )}
-          <span>{toast.message}</span>
-          {onDismiss && (
-            <button
-              type="button"
-              className="toast-close"
-              onClick={() => onDismiss(toast.id)}
-              aria-label="关闭提示"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <line x1="18" y1="6" x2="6" y2="18"/>
-                <line x1="6" y1="6" x2="18" y2="18"/>
-              </svg>
-            </button>
-          )}
-        </div>
-      ))}
-    </div>
+        </For>
+      </div>
+    </Show>
   )
 }

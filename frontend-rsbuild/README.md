@@ -1,6 +1,6 @@
-# Miao Web 控制面板
+# HarborGate · 海港网关 Web 控制台
 
-React、TypeScript strict、Rsbuild，使用 Rslint/Rstest；版本见 [package.json](package.json) 与 lockfile。构建到根目录 `public/`，由 Rust 嵌入，修改后须重建前端和 Miao。
+SolidJS 2.0、TypeScript strict、Rsbuild，使用 Rslint/Rstest；版本见 [package.json](package.json) 与 lockfile。构建到根目录 `public/`，由 Rust 嵌入，修改后须重建前端和网关二进制。
 
 ## 开发
 
@@ -25,7 +25,7 @@ bun run build
 `test:watch` 用于调试，`preview` 预览产物；根目录 `./dev.sh check frontend` 执行上面全部步骤。辅助脚本单独用 `./dev.sh check scripts` 检查。升级 TypeScript 至少跑 lint、typecheck、test。
 
 - API/Clash mock 使用 [testFixtures.ts](src/testFixtures.ts) 工厂，仅覆盖差异字段。App 集成测试 mock `/api/status|subs|nodes|rules|version` 与 Clash 端点；[setupTests.ts](src/setupTests.ts) 提供深色 `matchMedia` 和内存 `localStorage`。
-- 浏览器用 `agent-browser`，截图用 `agent-browser screenshot [--full] <path>`；`eval` 使用 IIFE。修改 React 受控输入须用原生 setter 并触发 input/change 事件。
+- 浏览器用 `agent-browser`，截图用 `agent-browser screenshot [--full] <path>`；`eval` 使用 IIFE。修改表单输入时应触发 `input` / `change` 事件以同步 Solid 信号。
 
 ## API 类型与请求
 
@@ -35,17 +35,10 @@ bun run build
 
 连接列表保留虚拟滚动，使用 `CONNECTION_ROW_HEIGHT` / `CONNECTION_ROW_GAP`；FLIP 只在顺序变化时测量可视行。规则活跃判断先建立连接签名索引，避免全量交叉扫描。
 
-## 设计与静态资源
+## 样式与静态资源
 
-[tokens.css](src/styles/tokens.css) 是颜色、字号、几何、层级和动效的唯一样式来源，组件不硬编码颜色、尺寸、时长。仅断点、≤3px 光学校正、onboarding 门面、第三方品牌色可例外，须注释说明。
+全局企业云网关主题变量位于 [theme.css](src/styles/theme.css)，导航与抽屉骨架位于 [shell.css](src/styles/shell.css)，通用表格/徽标/表单组件位于 [components.css](src/styles/components.css)，各业务视图排版位于 [views.css](src/styles/views.css)，少量供 JS 布局/动效计算的数值常量位于 [tokens.ts](src/tokens.ts)。组件与样式表可根据迭代需要自由调整色板、圆角、间距或局部覆写。
 
-| 约定 | 用法 |
-| --- | --- |
-| 颜色 | 紫：交互/选中/上传；蓝：代理/下载；绿：直连；红：拦截；琥珀：警告。选中背景用 `--accent-tint` |
-| 派生色 | alpha 面/描边用 `color-mix(in srgb, var(--token) N%, transparent)`，不跨语义复用 |
-| 圆角 | `--r-sm` 控件、`--r-md` 内容、`--r-lg` 容器、`--r-xl` 浮层、`--r-pill` 胶囊；外层比内层大一级 |
-| JS 常量 | 图标、logo、断点、列表几何使用 [tokens.ts](src/tokens.ts)，与 CSS 同步 |
-
-主题显式 dark/light，默认深色、不跟随系统；仅 tokens 首段区分主题，`miao-theme`、`useTheme`、`index.html` 防闪烁脚本须一致。
+主题支持显式 `light` / `dark` 切换（键名 `miao-theme`）；如需改动默认主题或首屏背景色，顺手同步 [index.html](index.html) 的防闪烁脚本即可。
 
 PWA 资源在本目录 `public/`；新增资源须在 Rust [静态资源处理器](../crates/miao-core/src/handlers/static_assets.rs) 嵌入并在 [router.rs](../crates/miao-core/src/router.rs) 注册。service worker 仅导航 network-first 兜底，**不缓存 `/api`**。

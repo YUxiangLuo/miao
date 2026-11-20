@@ -3,6 +3,14 @@ export const WRITE_TIMEOUT_MS = 120_000
 
 export class RequestInterruptedError extends Error {}
 
+export class HttpStatusError extends Error {
+  readonly status: number
+  constructor(status: number, message: string) {
+    super(message)
+    this.status = status
+  }
+}
+
 /**
  * Whether a failed write request left backend execution state uncertain.
  * Miao registers HTTP write tasks once the body arrives and finishes commit/rollback
@@ -50,7 +58,10 @@ export async function fetchJson<T>(url: string, options: RequestInit = {}, timeo
       (async () => {
         const response = await fetch(url, { ...options, signal: controller.signal })
         if (!response.ok) {
-          throw new Error(parseErrorResponseMessage(await response.text(), response.status))
+          throw new HttpStatusError(
+            response.status,
+            parseErrorResponseMessage(await response.text(), response.status),
+          )
         }
         return await response.json() as T
       })(),

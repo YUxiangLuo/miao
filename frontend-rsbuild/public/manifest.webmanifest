@@ -1,12 +1,12 @@
 {
-  "name": "Miao 控制面板",
-  "short_name": "Miao",
-  "description": "开箱即用的透明代理",
+  "name": "HarborGate · 海港网关控制台",
+  "short_name": "HarborGate",
+  "description": "外贸企业跨境网络与多店铺防关联网关控制台",
   "start_url": "/",
   "scope": "/",
   "display": "fullscreen",
-  "background_color": "#1a1d22",
-  "theme_color": "#1a1d22",
+  "background_color": "#f4f6f9",
+  "theme_color": "#0f172a",
   "icons": [
     {
       "src": "/icon-192.png",

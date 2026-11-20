@@ -1,13 +1,12 @@
-import { useMemo, useRef, useState } from 'react'
-import { ListPlus } from 'lucide-react'
+import { For, Show, createMemo, createSignal } from 'solid-js'
 import { ICON } from '../../tokens'
 import { Button } from '../ui'
 import { buildNodeRequest } from '../../nodeForm'
 import { parseShareLinks, retainUnimportedShareLinks, type ParsedShareLink } from '../../shareLink'
 import { EMPTY_NODE_FORM, NODE_TYPE_OPTIONS, nodeTypeDefaults } from '../../utils'
 import type { BatchNodeResult, NodeRequest } from '../../types/api'
+import { ListPlusIcon } from '../icons'
 
-/** 预览条目：解析失败（原始或校验失败）与解析成功且通过完整校验 */
 type LinkItem =
   | { line: string; ok: true; parsed: ParsedShareLink; payload: NodeRequest }
   | { line: string; ok: false; error: string }
@@ -26,34 +25,40 @@ function previewChips(parsed: ParsedShareLink): string[] {
   return chips
 }
 
-function ShareLinkItem({ item }: { item: LinkItem }) {
-  if (!item.ok) {
-    return (
-      <div className="share-link-item error">
-        <span className="share-link-item-line" title={item.line}>{item.line}</span>
-        <span className="share-link-item-error">{item.error}</span>
-      </div>
-    )
-  }
-
-  const { parsed } = item
-  const typeLabel = NODE_TYPE_OPTIONS.find((option) => option.value === parsed.nodeType)?.label
-    || parsed.nodeType
-  const chips = previewChips(parsed)
-
+function ShareLinkItem(props: { item: LinkItem }) {
   return (
-    <div className="share-link-item">
-      <div className="share-link-item-top">
-        <span className="share-link-type">{typeLabel}</span>
-        <strong className="share-link-tag" title={parsed.tag}>{parsed.tag}</strong>
-        <span className="share-link-server">{parsed.formPatch.server}:{parsed.formPatch.server_port}</span>
-      </div>
-      {chips.length > 0 && (
-        <div className="share-link-chips">
-          {chips.map((chip) => <span key={chip} className="share-link-chip">{chip}</span>)}
+    <Show
+      when={props.item.ok}
+      fallback={
+        <div class="share-link-item error">
+          <span class="share-link-item-line" title={props.item.line}>{props.item.line}</span>
+          <span class="share-link-item-error">{(props.item as Extract<LinkItem, { ok: false }>).error}</span>
         </div>
-      )}
-    </div>
+      }
+    >
+      {(() => {
+        const okItem = props.item as Extract<LinkItem, { ok: true }>
+        const { parsed } = okItem
+        const typeLabel = NODE_TYPE_OPTIONS.find((option) => option.value === parsed.nodeType)?.label || parsed.nodeType
+        const chips = previewChips(parsed)
+        return (
+          <div class="share-link-item">
+            <div class="share-link-item-top">
+              <span class="share-link-type">{typeLabel}</span>
+              <strong class="share-link-tag" title={parsed.tag}>{parsed.tag}</strong>
+              <span class="share-link-server num">{parsed.formPatch.server}:{parsed.formPatch.server_port}</span>
+            </div>
+            <Show when={chips.length > 0}>
+              <div class="share-link-chips">
+                <For each={chips}>
+                  {(chip) => <span class="share-link-chip">{chip}</span>}
+                </For>
+              </div>
+            </Show>
+          </div>
+        )
+      })()}
+    </Show>
   )
 }
 
@@ -62,14 +67,13 @@ export interface LinkImportPaneProps {
   loading: boolean
 }
 
-export function LinkImportPane({ onImport, loading }: LinkImportPaneProps) {
-  const [text, setText] = useState('')
-  const [importing, setImporting] = useState(false)
-  const inFlight = useRef(false)
-  const [resultMessage, setResultMessage] = useState('')
+export function LinkImportPane(props: LinkImportPaneProps) {
+  const [text, setText] = createSignal('')
+  const [importing, setImporting] = createSignal(false)
+  let inFlight = false
+  const [resultMessage, setResultMessage] = createSignal('')
 
-  // 粘贴即解析,并顺带用 buildNodeRequest 做完整校验(密码长度等),问题直接显示在预览上
-  const items = useMemo<LinkItem[]>(() => parseShareLinks(text).map((item): LinkItem => {
+  const items = createMemo<LinkItem[]>(() => parseShareLinks(text()).map((item): LinkItem => {
     if (!item.ok) return item
     try {
       const { nodeType, formPatch, tag } = item.parsed
@@ -83,67 +87,74 @@ export function LinkImportPane({ onImport, loading }: LinkImportPaneProps) {
     } catch (error) {
       return { line: item.line, ok: false, error: error instanceof Error ? error.message : String(error) }
     }
-  }), [text])
+  }))
 
-  const validPayloads = useMemo(
-    () => items.filter((item): item is Extract<LinkItem, { ok: true }> => item.ok).map((item) => item.payload),
-    [items],
-  )
-  const busy = loading || importing
+  const validPayloads = createMemo(() => (
+    items().filter((item): item is Extract<LinkItem, { ok: true }> => item.ok).map((item) => item.payload)
+  ))
+  const busy = () => props.loading || importing()
 
   const handleImport = async () => {
-    if (!validPayloads.length || busy || inFlight.current) return
-    inFlight.current = true
+    const payloads = validPayloads()
+    if (!payloads.length || busy() || inFlight) return
+    inFlight = true
     setImporting(true)
     setResultMessage('')
     try {
-      const result = await onImport(validPayloads, items.every(item => item.ok))
+      const currentItems = items()
+      const result = await props.onImport(payloads, currentItems.every((item) => item.ok))
       if (!result) return
-      const added = new Set(result.added.map(item => item.index))
-      const remaining = retainUnimportedShareLinks(items, added)
-      setText(remaining.map(item => item.line).join('\n'))
+      const added = new Set(result.added.map((item) => item.index))
+      const remaining = retainUnimportedShareLinks(currentItems, added)
+      setText(remaining.map((item) => item.line).join('\n'))
       setResultMessage([
         `本次已添加 ${result.added.length} 个节点；未成功的链接已保留，可修改后重试。`,
-        ...result.failed.map(item => `${item.tag}：${item.message}`),
+        ...result.failed.map((item) => `${item.tag}：${item.message}`),
       ].join('\n'))
     } finally {
-      inFlight.current = false
+      inFlight = false
       setImporting(false)
     }
   }
 
   return (
-    <div className="node-pane">
+    <div class="node-pane">
       <textarea
-        className="share-link-input"
+        class="share-link-input"
         data-autofocus
         rows={5}
-        value={text}
-        disabled={importing}
-        onChange={(event) => { setText(event.target.value); setResultMessage('') }}
+        value={text()}
+        disabled={importing()}
+        onInput={(event) => {
+          setText(event.currentTarget.value)
+          setResultMessage('')
+        }}
         placeholder={'粘贴节点分享链接,每行一条\n支持 hysteria2 / hy2 / ss / socks5 / vmess / vless / trojan / tuic / anytls\nSOCKS5 也可填写 地址:端口:用户名:密码'}
         aria-label="节点分享链接"
       />
 
-      <div className="share-link-preview node-pane-scroll">
-        {resultMessage && <p className="share-link-result" role="status">{resultMessage}</p>}
-        {items.length > 0 ? (
-          items.map((item, index) => (
-            <ShareLinkItem key={`${item.line}-${index}`} item={item} />
-          ))
-        ) : (
-          <div className="share-link-empty">粘贴后自动识别节点信息,支持一次粘贴多条</div>
-        )}
+      <div class="share-link-preview node-pane-scroll">
+        <Show when={resultMessage()}>
+          {(msg) => <p class="share-link-result" role="status">{msg()}</p>}
+        </Show>
+        <Show
+          when={items().length > 0}
+          fallback={<div class="share-link-empty">粘贴后自动识别节点信息,支持一次粘贴多条</div>}
+        >
+          <For each={items()}>
+            {(item) => <ShareLinkItem item={item} />}
+          </For>
+        </Show>
       </div>
 
       <Button
         tone="primary"
-        icon={<ListPlus size={ICON.sm} />}
-        loading={busy}
-        disabled={!validPayloads.length || busy}
+        icon={<ListPlusIcon size={ICON.sm} />}
+        loading={busy()}
+        disabled={!validPayloads().length || busy()}
         onClick={handleImport}
       >
-        {validPayloads.length > 0 ? `添加 ${validPayloads.length} 个节点` : '添加节点'}
+        {validPayloads().length > 0 ? `添加 ${validPayloads().length} 个节点` : '添加节点'}
       </Button>
     </div>
   )

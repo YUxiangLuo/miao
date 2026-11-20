@@ -1,15 +1,22 @@
-import { useCallback, useMemo, useRef, useState } from 'react'
-import { fetchJson } from './request'
+import { createMemo, createSignal, untrack, type Accessor } from 'solid-js'
+import { fetchJson, HttpStatusError } from './request'
 import { useLatestRequest } from './useLatestRequest'
-import type { ApiResponse, NodeInfo, RuleInfo, StatusData, SubStatus, VersionInfo } from '../types/api'
+import type {
+  AccessPortStatus,
+  ApiResponse,
+  NodeInfo,
+  RuleInfo,
+  StatusData,
+  SubStatus,
+  TerminalSummary,
+  VersionInfo,
+} from '../types/api'
 
 export type ResourceReadResult<T> =
   | { status: 'success'; data: T }
   | { status: 'error'; error: string }
   | { status: 'superseded' }
 
-// 未拿到首个响应前的占位状态。vps_supported: true 与历史上的 undefined 等价
-// 消费方判断 `!== false`，保留旧 API 的默认能力值。
 const INITIAL_STATUS: StatusData = {
   data_revision: 0,
   subscription_refresh: {
@@ -41,30 +48,25 @@ export function normalizeStatusData(value: StatusData): StatusData {
   return { ...value, ready, phase: value.phase ?? fallbackPhase }
 }
 
-function useResource<T>(path: string, initial: T, revision = 0) {
-  const [data, setData] = useState(initial)
-  const revisionRef = useRef(revision)
-  revisionRef.current = revision
-  // Cached emptiness is authoritative only for the revision read successfully.
-  // Do not invalidate it on ordinary polls or an individual read retry.
-  const [readRevision, setReadRevision] = useState<number>()
-  const [loaded, setLoaded] = useState(false)
-  const [settled, setSettled] = useState(false)
-  const [failures, setFailures] = useState(0)
-  const [error, setError] = useState('')
+function useResource<T>(path: string, initial: T, revision: Accessor<number> = () => 0) {
+  const [box, setBox] = createSignal({ value: initial })
+  const data: Accessor<T> = () => box().value
+  const [readRevision, setReadRevision] = createSignal<number | undefined>(undefined)
+  const [loaded, setLoaded] = createSignal(false)
+  const [settled, setSettled] = createSignal(false)
+  const [failures, setFailures] = createSignal(0)
+  const [error, setError] = createSignal('')
   const { begin } = useLatestRequest()
-  const refresh = useCallback(async (): Promise<ResourceReadResult<T>> => {
-    // Retained action callbacks use the revision at request start, not at
-    // callback creation or response completion.
-    const requestRevision = revisionRef.current
+
+  const refresh = async (): Promise<ResourceReadResult<T>> => {
+    const requestRevision = untrack(revision)
     const request = begin()
     try {
       const payload = await fetchJson<ApiResponse<T>>(path, { signal: request.signal })
       if (!request.isCurrent()) return { status: 'superseded' }
       if (!payload.success || payload.data == null) throw new Error(payload.message || '请求失败')
       const next = payload.data
-      // Stable references let memoized rules and lists survive health polling.
-      setData(previous => isSameResourceValue(previous, next) ? previous : next)
+      setBox((previous) => (isSameResourceValue(previous.value, next) ? previous : { value: next }))
       setLoaded(true)
       setReadRevision(requestRevision)
       setFailures(0)
@@ -73,19 +75,22 @@ function useResource<T>(path: string, initial: T, revision = 0) {
     } catch (cause) {
       if (!request.isCurrent()) return { status: 'superseded' }
       const message = cause instanceof Error ? cause.message : String(cause)
-      setFailures(count => count + 1)
+      setFailures((count) => count + 1)
       setError(message)
       return { status: 'error', error: message }
     } finally {
       if (request.isCurrent()) setSettled(true)
     }
-  }, [path, begin])
-  return { data, loaded, settled, failures, error, refresh, current: readRevision === revision }
+  }
+
+  const current = createMemo(() => readRevision() === revision())
+
+  return { data, loaded, settled, failures, error, refresh, current }
 }
 
 export function useStatus() {
   const resource = useResource('/api/status', INITIAL_STATUS)
-  const status = useMemo(() => normalizeStatusData(resource.data), [resource.data])
+  const status = createMemo(() => normalizeStatusData(resource.data()))
   return {
     status,
     statusLoaded: resource.loaded,
@@ -95,19 +100,39 @@ export function useStatus() {
   }
 }
 
-export function useSubs(revision = 0) {
+export function useSubs(revision: Accessor<number> = () => 0) {
   const resource = useResource<SubStatus[]>('/api/subs', [], revision)
-  return { subs: resource.data, subsLoaded: resource.settled, subsAvailable: resource.loaded, subsCurrent: resource.current, subsError: resource.error, fetchSubs: resource.refresh }
+  return {
+    subs: resource.data,
+    subsLoaded: resource.settled,
+    subsAvailable: resource.loaded,
+    subsCurrent: resource.current,
+    subsError: resource.error,
+    fetchSubs: resource.refresh,
+  }
 }
 
-export function useNodes(revision = 0) {
+export function useNodes(revision: Accessor<number> = () => 0) {
   const resource = useResource<NodeInfo[]>('/api/nodes', [], revision)
-  return { nodes: resource.data, nodesLoaded: resource.settled, nodesAvailable: resource.loaded, nodesCurrent: resource.current, nodesError: resource.error, fetchNodes: resource.refresh }
+  return {
+    nodes: resource.data,
+    nodesLoaded: resource.settled,
+    nodesAvailable: resource.loaded,
+    nodesCurrent: resource.current,
+    nodesError: resource.error,
+    fetchNodes: resource.refresh,
+  }
 }
 
-export function useRules(revision = 0) {
+export function useRules(revision: Accessor<number> = () => 0) {
   const resource = useResource<RuleInfo[]>('/api/rules', [], revision)
-  return { rules: resource.data, rulesLoaded: resource.settled, rulesCurrent: resource.current, rulesError: resource.error, fetchRules: resource.refresh }
+  return {
+    rules: resource.data,
+    rulesLoaded: resource.settled,
+    rulesCurrent: resource.current,
+    rulesError: resource.error,
+    fetchRules: resource.refresh,
+  }
 }
 
 const INITIAL_VERSION: VersionInfo = {
@@ -121,4 +146,69 @@ const INITIAL_VERSION: VersionInfo = {
 export function useVersion() {
   const resource = useResource('/api/version', INITIAL_VERSION)
   return { versionInfo: resource.data, fetchVersion: resource.refresh }
+}
+
+/**
+ * 兼容旧版网关二进制的可选资源读取：若远端返回 HTTP 404（尚未升级支持新端点），
+ * 标记 supported=false 并降级为空数组，不向界面抛出红色报错横幅。
+ */
+function useOptionalResource<T>(path: string, initial: T, revision: Accessor<number> = () => 0) {
+  const [box, setBox] = createSignal({ value: initial })
+  const data: Accessor<T> = () => box().value
+  const [supported, setSupported] = createSignal(true)
+  const [settled, setSettled] = createSignal(false)
+  const [error, setError] = createSignal('')
+  const { begin } = useLatestRequest()
+
+  const refresh = async (): Promise<ResourceReadResult<T>> => {
+    void untrack(revision)
+    const request = begin()
+    try {
+      const payload = await fetchJson<ApiResponse<T>>(path, { signal: request.signal })
+      if (!request.isCurrent()) return { status: 'superseded' }
+      if (!payload.success || payload.data == null) throw new Error(payload.message || '请求失败')
+      const next = payload.data
+      setBox((previous) => (isSameResourceValue(previous.value, next) ? previous : { value: next }))
+      setSupported(true)
+      setError('')
+      return { status: 'success', data: next }
+    } catch (cause) {
+      if (!request.isCurrent()) return { status: 'superseded' }
+      if (cause instanceof HttpStatusError && cause.status === 404) {
+        setSupported(false)
+        setBox({ value: initial })
+        setError('')
+        return { status: 'success', data: initial }
+      }
+      const message = cause instanceof Error ? cause.message : String(cause)
+      setError(message)
+      return { status: 'error', error: message }
+    } finally {
+      if (request.isCurrent()) setSettled(true)
+    }
+  }
+
+  return { data, supported, settled, error, refresh }
+}
+
+export function useTerminals(revision: Accessor<number> = () => 0) {
+  const resource = useOptionalResource<TerminalSummary[]>('/api/terminals', [], revision)
+  return {
+    terminals: resource.data,
+    terminalsSupported: resource.supported,
+    terminalsLoaded: resource.settled,
+    terminalsError: resource.error,
+    fetchTerminals: resource.refresh,
+  }
+}
+
+export function useAccessPorts(revision: Accessor<number> = () => 0) {
+  const resource = useOptionalResource<AccessPortStatus[]>('/api/access-ports', [], revision)
+  return {
+    accessPorts: resource.data,
+    accessPortsSupported: resource.supported,
+    accessPortsLoaded: resource.settled,
+    accessPortsError: resource.error,
+    fetchAccessPorts: resource.refresh,
+  }
 }

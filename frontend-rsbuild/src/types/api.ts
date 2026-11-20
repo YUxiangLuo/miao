@@ -90,7 +90,7 @@ success: boolean, http_status: number | null,
  */
 error_kind: string | null, error: string | null, };
 
-export type NodeInfo = { tag: string, server: string, server_port: number, node_type: string, sni?: string, };
+export type NodeInfo = { tag: string, server: string, server_port: number, node_type: string, sni?: string, detour?: string, };
 
 export type RuleInfo = { index: number, field?: string, value?: string, target?: string,
 /**
@@ -173,7 +173,7 @@ export type VpsDeployRequest = { ip: string, password: string, };
 
 export type VpsDeployResponse = { tag: string, };
 
-export type NodeRequest = { node_type?: NodeType, tag: string, server: string, server_port: number, username?: string, password?: string, uuid?: string, alter_id?: number, sni?: string, cipher?: string, skip_cert_verify?: boolean, tls_enabled?: boolean, transport_type?: string, transport_path?: string, transport_host?: string, grpc_service_name?: string, alpn?: Array<string>, client_fingerprint?: string, reality_public_key?: string, reality_short_id?: string, flow?: string, packet_encoding?: string, tuic_congestion_control?: string, tuic_udp_relay_mode?: string, tuic_zero_rtt?: boolean, obfs_type?: string, obfs_password?: string, };
+export type NodeRequest = { node_type?: NodeType, tag: string, server: string, server_port: number, username?: string, password?: string, uuid?: string, alter_id?: number, sni?: string, cipher?: string, skip_cert_verify?: boolean, tls_enabled?: boolean, transport_type?: string, transport_path?: string, transport_host?: string, grpc_service_name?: string, alpn?: Array<string>, client_fingerprint?: string, reality_public_key?: string, reality_short_id?: string, flow?: string, packet_encoding?: string, tuic_congestion_control?: string, tuic_udp_relay_mode?: string, tuic_zero_rtt?: boolean, obfs_type?: string, obfs_password?: string, detour?: string, };
 
 export type BatchNodeRequest = { nodes: Array<NodeRequest>, };
 
@@ -184,3 +184,19 @@ export type BatchNodeFailure = { index: number, tag: string, message: string, };
 export type BatchNodeResult = { added: Array<BatchNodeAdded>, failed: Array<BatchNodeFailure>, };
 
 export type DeleteNodeRequest = { tag: string, };
+
+export type TerminalSummary = { ip: string, name?: string, department?: string, note?: string, dhcp_hostname?: string, mac?: string, };
+
+export type UpsertTerminalRequest = { ip: string, name: string, department?: string, note?: string, };
+
+export type DeleteTerminalRequest = { ip: string, };
+
+export type TerminalAssignMode = "dedicated" | "pool" | "direct" | "block_overseas";
+
+export type AssignTerminalRequest = { ip: string, mode: TerminalAssignMode, target?: string, };
+
+export type AccessPortStatus = { id: string, name: string, port: number, outbound: string, username?: string, password?: string, has_auth: boolean, blocked: boolean, };
+
+export type SaveAccessPortRequest = { id?: string, name: string, port: number, outbound: string, username?: string, password?: string, };
+
+export type DeleteAccessPortRequest = { id: string, };

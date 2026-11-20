@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react'
+import { createMemo, createSignal } from 'solid-js'
 import type { useAppData } from './useAppData'
 import { isUncertainRequestError } from './request'
 import { mutationFeedback } from './mutationFeedback'
@@ -13,20 +13,35 @@ export interface VpsTask {
   message: string
 }
 
-export function useVpsDeployment({ apiCall, fetchNodes, clearDelays, showToast }: Pick<ReturnType<typeof useAppData>, 'apiCall' | 'fetchNodes' | 'clearDelays' | 'showToast'>) {
-  const [vpsTasks, setVpsTasks] = useState<VpsTask[]>([])
-  const sequence = useRef(0)
-  const busy = useRef(false)
-  const handleDeployVps = useCallback(async ({ ip, password }: VpsDeployRequest): Promise<boolean> => {
-    if (busy.current) return false
-    busy.current = true
-    const id = ++sequence.current
-    const task: VpsTask = { id, host: ip.trim(), startedAt: Date.now(), phase: 'waiting', message: '等待后端部署结果；当前接口不提供 SSH 内部进度。' }
-    setVpsTasks(tasks => [task, ...tasks].slice(0, 10))
-    const update = (patch: Partial<VpsTask>) => setVpsTasks(tasks => tasks.map(task => task.id === id ? { ...task, ...patch } : task))
+export function useVpsDeployment({
+  apiCall,
+  fetchNodes,
+  clearDelays,
+  showToast,
+}: Pick<ReturnType<typeof useAppData>, 'apiCall' | 'fetchNodes' | 'clearDelays' | 'showToast'>) {
+  const [vpsTasks, setVpsTasks] = createSignal<VpsTask[]>([])
+  let sequence = 0
+  let busy = false
+
+  const handleDeployVps = async ({ ip, password }: VpsDeployRequest): Promise<boolean> => {
+    if (busy) return false
+    busy = true
+    const id = ++sequence
+    const task: VpsTask = {
+      id,
+      host: ip.trim(),
+      startedAt: Date.now(),
+      phase: 'waiting',
+      message: '等待后端部署结果；当前接口不提供 SSH 内部进度。',
+    }
+    setVpsTasks((tasks) => [task, ...tasks].slice(0, 10))
+    const update = (patch: Partial<VpsTask>) => {
+      setVpsTasks((tasks) => tasks.map((item) => (item.id === id ? { ...item, ...patch } : item)))
+    }
     try {
       const payload = await apiCall<VpsDeployResponse>('vps/deploy', {
-        method: 'POST', body: JSON.stringify({ ip, password } satisfies VpsDeployRequest),
+        method: 'POST',
+        body: JSON.stringify({ ip, password } satisfies VpsDeployRequest),
       }, 'deployVps')
       update({ phase: 'syncing', message: payload.message || '部署接口已确认完成，正在同步节点列表。' })
       const nodes = await fetchNodes()
@@ -39,12 +54,19 @@ export function useVpsDeployment({ apiCall, fetchNodes, clearDelays, showToast }
       const message = error instanceof Error ? error.message : String(error)
       const uncertain = isUncertainRequestError(error)
       update({ phase: uncertain ? 'unknown' : 'error', message, finishedAt: Date.now() })
-      // The pane may already have unmounted. The page-level record owns the result.
-      showToast(uncertain ? 'VPS 部署结果未知，请查看部署记录并核对远端状态。' : 'VPS 部署请求失败，详情已保留在部署记录。', 'error')
+      showToast(
+        uncertain
+          ? 'VPS 部署结果未知，请查看部署记录并核对远端状态。'
+          : 'VPS 部署请求失败，详情已保留在部署记录。',
+        'error',
+      )
       throw error
     } finally {
-      busy.current = false
+      busy = false
     }
-  }, [apiCall, fetchNodes, clearDelays, showToast])
-  return { vpsTasks, vpsDeploying: vpsTasks.some(task => task.finishedAt === undefined), handleDeployVps }
+  }
+
+  const vpsDeploying = createMemo(() => vpsTasks().some((task) => task.finishedAt === undefined))
+
+  return { vpsTasks, vpsDeploying, handleDeployVps }
 }

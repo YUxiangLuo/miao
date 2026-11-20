@@ -1,11 +1,9 @@
-import { render } from '@testing-library/react'
+import { render } from '@solidjs/testing-library'
+import { For, Show, createSignal, flush } from 'solid-js'
 import { beforeEach, describe, expect, it } from '@rstest/core'
 import { useFlipContainer } from './useFlip'
-import { FLIP_MS } from '../tokens'
+import { FLIP_EASING, FLIP_MS } from '../tokens'
 
-// jsdom 的 offsetTop 恒 0：用 defineProperty 在元素实例上模拟布局。
-// 注意时序——hook 在 render/rerender 的 layout effect 里测量，
-// 所以必须先 setOffset 再 rerender，effect 才能量到「新位置」。
 function setOffset(el: HTMLElement, top: number, left = 0) {
   Object.defineProperty(el, 'offsetTop', { value: top, configurable: true })
   Object.defineProperty(el, 'offsetLeft', { value: left, configurable: true })
@@ -27,19 +25,40 @@ function layoutAs(container: HTMLElement, tops: Record<string, number>) {
   for (const [key, top] of Object.entries(tops)) setOffset(row(container, key), top)
 }
 
-function FlipList({ keys, active = true, show = true }: { keys: string[]; active?: boolean; show?: boolean }) {
-  const ref = useFlipContainer<HTMLDivElement>(active)
-  return (
-    <div>
-      {show ? (
-        <div ref={ref} data-testid="container">
-          {keys.map((key) => (
-            <div key={key} data-flip-key={key}>{key}</div>
-          ))}
-        </div>
-      ) : null}
-    </div>
-  )
+function createHarness(initialKeys: string[]) {
+  const [keys, setKeys] = createSignal(initialKeys)
+  const [active, setActive] = createSignal(true)
+  const [show, setShow] = createSignal(true)
+  const [tick, setTick] = createSignal(0)
+
+  const FlipList = () => {
+    const ref = useFlipContainer<HTMLDivElement>(active, () => `${tick()}:${keys().join(',')}`)
+    return (
+      <div>
+        <Show when={show()}>
+          <div ref={ref} data-testid="container">
+            <For each={keys()}>
+              {(key) => <div data-flip-key={key}>{key}</div>}
+            </For>
+          </div>
+        </Show>
+      </div>
+    )
+  }
+
+  const view = render(() => <FlipList />)
+  flush()
+
+  return {
+    ...view,
+    update(next: { keys?: string[]; active?: boolean; show?: boolean }) {
+      if (next.keys !== undefined) setKeys(next.keys)
+      if (next.active !== undefined) setActive(next.active)
+      if (next.show !== undefined) setShow(next.show)
+      setTick((t) => t + 1)
+      flush()
+    },
+  }
 }
 
 describe('useFlipContainer', () => {
@@ -52,50 +71,45 @@ describe('useFlipContainer', () => {
   })
 
   it('records positions on first render without animating', () => {
-    render(<FlipList keys={['a', 'b', 'c']} />)
+    createHarness(['a', 'b', 'c'])
     expect(animateCalls).toHaveLength(0)
   })
 
   it('slides moved rows from their previous position (Invert + Play)', () => {
-    const { getByTestId, rerender } = render(<FlipList keys={['a', 'b', 'c']} />)
+    const { getByTestId, update } = createHarness(['a', 'b', 'c'])
     const container = getByTestId('container')
     layoutAs(container, { a: 0, b: 50, c: 100 })
-    rerender(<FlipList keys={['a', 'b', 'c']} />) // hook 记录当前布局 a=0 b=50 c=100
+    update({ keys: ['a', 'b', 'c'] })
     animateCalls = []
 
-    // c 反超到顶：先让新布局生效（元素实例按 key 复用），再触发渲染
     layoutAs(container, { c: 0, b: 50, a: 100 })
-    rerender(<FlipList keys={['c', 'b', 'a']} />)
+    update({ keys: ['c', 'b', 'a'] })
 
     expect(animateCalls).toHaveLength(2)
     const byKey = new Map(animateCalls.map((call) => [call.el.dataset.flipKey as string, call]))
-    // a 从 0 挪到 100：先视觉放回旧位置（-100）再滑到 0
     expect(byKey.get('a')?.keyframes).toEqual([
       { transform: 'translate(0px, -100px)' },
       { transform: 'translate(0, 0)' },
     ])
-    expect(byKey.get('a')?.options).toEqual({ duration: FLIP_MS, easing: 'ease' })
-    // c 从 100 挪到 0
+    expect(byKey.get('a')?.options).toEqual({ duration: FLIP_MS, easing: FLIP_EASING })
     expect(byKey.get('c')?.keyframes).toEqual([
       { transform: 'translate(0px, 100px)' },
       { transform: 'translate(0, 0)' },
     ])
-    // b 未动，不播
     expect(byKey.has('b')).toBe(false)
   })
 
   it('does not animate when positions are unchanged', () => {
-    const { getByTestId, rerender } = render(<FlipList keys={['a', 'b']} />)
+    const { getByTestId, update } = createHarness(['a', 'b'])
     const container = getByTestId('container')
     layoutAs(container, { a: 0, b: 50 })
-    rerender(<FlipList keys={['a', 'b']} />)
+    update({ keys: ['a', 'b'] })
     animateCalls = []
-    rerender(<FlipList keys={['a', 'b']} />)
+    update({ keys: ['a', 'b'] })
     expect(animateCalls).toHaveLength(0)
   })
 
   it('skips animation when prefers-reduced-motion is set', () => {
-    // setupTests 只在 matchMedia 缺失时补 stub，这里手动替换后必须恢复，避免泄漏给后续用例
     const original = window.matchMedia
     window.matchMedia = (query: string) => ({
       matches: query === '(prefers-reduced-motion: reduce)',
@@ -109,13 +123,13 @@ describe('useFlipContainer', () => {
     }) as unknown as MediaQueryList
 
     try {
-      const { getByTestId, rerender } = render(<FlipList keys={['a', 'b']} />)
+      const { getByTestId, update } = createHarness(['a', 'b'])
       const container = getByTestId('container')
       layoutAs(container, { a: 0, b: 50 })
-      rerender(<FlipList keys={['a', 'b']} />)
+      update({ keys: ['a', 'b'] })
       animateCalls = []
       layoutAs(container, { b: 0, a: 50 })
-      rerender(<FlipList keys={['b', 'a']} />)
+      update({ keys: ['b', 'a'] })
       expect(animateCalls).toHaveLength(0)
     } finally {
       window.matchMedia = original
@@ -123,37 +137,37 @@ describe('useFlipContainer', () => {
   })
 
   it('clears recorded positions while inactive so reopening starts fresh', () => {
-    const { getByTestId, rerender } = render(<FlipList keys={['a', 'b']} />)
+    const { getByTestId, update } = createHarness(['a', 'b'])
     const container = getByTestId('container')
     layoutAs(container, { a: 0, b: 50 })
-    rerender(<FlipList keys={['a', 'b']} />)
-    rerender(<FlipList keys={['a', 'b']} active={false} />)
+    update({ keys: ['a', 'b'] })
+    update({ active: false })
     animateCalls = []
     layoutAs(container, { b: 0, a: 50 })
-    rerender(<FlipList keys={['b', 'a']} />)
+    update({ active: true, keys: ['b', 'a'] })
     expect(animateCalls).toHaveLength(0)
   })
 
   it('clears recorded positions when the rows container unmounts (empty state)', () => {
-    const { getByTestId, rerender } = render(<FlipList keys={['a', 'b']} />)
+    const { getByTestId, update } = createHarness(['a', 'b'])
     layoutAs(getByTestId('container'), { a: 0, b: 50 })
-    rerender(<FlipList keys={['a', 'b']} />)
-    rerender(<FlipList keys={['a', 'b']} show={false} />) // 空态：行容器卸载
+    update({ keys: ['a', 'b'] })
+    update({ show: false })
     animateCalls = []
-    rerender(<FlipList keys={['b', 'a']} />) // 容器重挂，从空白开始
+    update({ show: true, keys: ['b', 'a'] })
     expect(animateCalls).toHaveLength(0)
   })
 
   it('stays silent when WAAPI is unavailable', () => {
-    // @ts-expect-error 模拟无 WAAPI 的环境（如 jsdom）
+    // @ts-expect-error 模拟无 WAAPI 的环境
     delete Element.prototype.animate
-    const { getByTestId, rerender } = render(<FlipList keys={['a', 'b']} />)
+    const { getByTestId, update } = createHarness(['a', 'b'])
     const container = getByTestId('container')
     layoutAs(container, { a: 0, b: 50 })
-    rerender(<FlipList keys={['a', 'b']} />)
+    update({ keys: ['a', 'b'] })
     expect(() => {
       layoutAs(container, { b: 0, a: 50 })
-      rerender(<FlipList keys={['b', 'a']} />)
+      update({ keys: ['b', 'a'] })
     }).not.toThrow()
   })
 })

@@ -1,4 +1,5 @@
-import { act, renderHook } from '@testing-library/react'
+import { renderHook } from '@solidjs/testing-library'
+import { flush } from 'solid-js'
 import { afterEach, describe, expect, it, rs } from '@rstest/core'
 import { useApi, useToast } from './useApi'
 import { WRITE_TIMEOUT_MS } from './request'
@@ -26,22 +27,22 @@ describe('useApi pending actions', () => {
 
   it('keeps errors until dismissed, deduplicates them and expires ordinary notices', async () => {
     rs.useFakeTimers()
-    const { result, unmount } = renderHook(() => useToast())
-    let errorId = 0
-    act(() => {
-      result.current.showToast('已保存', 'success')
-      errorId = result.current.showToast('订阅更新失败，旧节点仍可用', 'error')
-      expect(result.current.showToast('订阅更新失败，旧节点仍可用', 'error')).toBe(errorId)
-    })
-    expect(result.current.toasts).toHaveLength(2)
-    await act(async () => { await rs.advanceTimersByTimeAsync(3500) })
-    expect(result.current.toasts.map(toast => toast.id)).toEqual([errorId])
-    await act(async () => { await rs.advanceTimersByTimeAsync(60_000) })
-    expect(result.current.toasts).toHaveLength(1)
-    act(() => { result.current.dismissToast(errorId) })
-    expect(result.current.toasts).toHaveLength(0)
-    act(() => { result.current.showToast('检查中') })
-    unmount()
+    const { result, cleanup } = renderHook(() => useToast())
+    result.showToast('已保存', 'success')
+    const errorId = result.showToast('订阅更新失败，旧节点仍可用', 'error')
+    expect(result.showToast('订阅更新失败，旧节点仍可用', 'error')).toBe(errorId)
+    flush()
+
+    expect(result.toasts()).toHaveLength(2)
+    await rs.advanceTimersByTimeAsync(3500)
+    expect(result.toasts().map((toast) => toast.id)).toEqual([errorId])
+    await rs.advanceTimersByTimeAsync(60_000)
+    expect(result.toasts()).toHaveLength(1)
+    result.dismissToast(errorId)
+    flush()
+    expect(result.toasts()).toHaveLength(0)
+    result.showToast('检查中')
+    cleanup()
     expect(rs.getTimerCount()).toBe(0)
   })
 
@@ -51,15 +52,12 @@ describe('useApi pending actions', () => {
     const fetchMock = rs.fn(async () => ({ ok: true, json: () => new Promise(() => {}) }))
     rs.stubGlobal('fetch', fetchMock)
     const { result } = renderHook(() => useApi(reconcile))
-    let outcome!: Promise<unknown>
-    act(() => {
-      outcome = result.current.apiCall('nodes', { method: 'POST' }, 'saveNode').catch(error => error)
-    })
-    await act(async () => { await rs.advanceTimersByTimeAsync(WRITE_TIMEOUT_MS - 1) })
-    expect(result.current.pendingActions.has('saveNode')).toBe(true)
-    await act(async () => { await rs.advanceTimersByTimeAsync(1) })
+    const outcome = result.apiCall('nodes', { method: 'POST' }, 'saveNode').catch((error) => error)
+    await rs.advanceTimersByTimeAsync(WRITE_TIMEOUT_MS - 1)
+    expect(result.pendingActions().has('saveNode')).toBe(true)
+    await rs.advanceTimersByTimeAsync(1)
     expect((await outcome as Error).message).toContain('操作结果未知')
-    expect(result.current.pendingActions.size).toBe(0)
+    expect(result.pendingActions().size).toBe(0)
     expect(reconcile).toHaveBeenCalledTimes(1)
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
@@ -69,22 +67,18 @@ describe('useApi pending actions', () => {
     const fetchMock = rs.fn().mockRejectedValue(new TypeError('Failed to fetch'))
     rs.stubGlobal('fetch', fetchMock)
     const { result } = renderHook(() => useApi(reconcile))
-    await act(async () => {
-      await expect(result.current.apiCall('nodes', { method: 'POST' }, 'saveNode')).rejects.toThrow('操作结果未知')
-    })
+    await expect(result.apiCall('nodes', { method: 'POST' }, 'saveNode')).rejects.toThrow('操作结果未知')
     expect(reconcile).toHaveBeenCalledTimes(1)
     expect(fetchMock).toHaveBeenCalledTimes(1)
-    expect(result.current.pendingActions.size).toBe(0)
+    expect(result.pendingActions().size).toBe(0)
   })
 
   it('preserves a server rejection message and clears pending', async () => {
     rs.stubGlobal('fetch', rs.fn(async () => new Response(JSON.stringify({ success: false, message: '节点不可用' }), { status: 400 })))
     const reconcile = rs.fn()
     const { result } = renderHook(() => useApi(reconcile))
-    await act(async () => {
-      await expect(result.current.apiCall('nodes', { method: 'POST' }, 'saveNode')).rejects.toThrow('节点不可用')
-    })
-    expect(result.current.pendingActions.size).toBe(0)
+    await expect(result.apiCall('nodes', { method: 'POST' }, 'saveNode')).rejects.toThrow('节点不可用')
+    expect(result.pendingActions().size).toBe(0)
     expect(reconcile).not.toHaveBeenCalled()
   })
 
@@ -96,25 +90,18 @@ describe('useApi pending actions', () => {
       .mockImplementationOnce(() => second.promise))
     const { result } = renderHook(() => useApi())
 
-    let firstCall!: Promise<unknown>
-    let secondCall!: Promise<unknown>
-    act(() => {
-      firstCall = result.current.apiCall('first', {}, 'first')
-      secondCall = result.current.apiCall('second', {}, 'second')
-    })
-    expect(result.current.pendingActions).toEqual(new Set(['first', 'second']))
+    const firstCall = result.apiCall('first', {}, 'first')
+    const secondCall = result.apiCall('second', {}, 'second')
+    flush()
+    expect(result.pendingActions()).toEqual(new Set(['first', 'second']))
 
-    await act(async () => {
-      first.resolve(successResponse())
-      await firstCall
-    })
-    expect(result.current.pendingActions).toEqual(new Set(['second']))
+    first.resolve(successResponse())
+    await firstCall
+    expect(result.pendingActions()).toEqual(new Set(['second']))
 
-    await act(async () => {
-      second.resolve(successResponse())
-      await secondCall
-    })
-    expect(result.current.pendingActions.size).toBe(0)
+    second.resolve(successResponse())
+    await secondCall
+    expect(result.pendingActions().size).toBe(0)
   })
 
   it('keeps an action pending until every matching call finishes', async () => {
@@ -125,23 +112,15 @@ describe('useApi pending actions', () => {
       .mockImplementationOnce(() => second.promise))
     const { result } = renderHook(() => useApi())
 
-    let firstCall!: Promise<unknown>
-    let secondCall!: Promise<unknown>
-    act(() => {
-      firstCall = result.current.apiCall('subs', {}, 'refreshSubs')
-      secondCall = result.current.apiCall('subs', {}, 'refreshSubs')
-    })
+    const firstCall = result.apiCall('subs', {}, 'refreshSubs')
+    const secondCall = result.apiCall('subs', {}, 'refreshSubs')
 
-    await act(async () => {
-      first.resolve(successResponse())
-      await firstCall
-    })
-    expect(result.current.pendingActions.has('refreshSubs')).toBe(true)
+    first.resolve(successResponse())
+    await firstCall
+    expect(result.pendingActions().has('refreshSubs')).toBe(true)
 
-    await act(async () => {
-      second.resolve(successResponse())
-      await secondCall
-    })
-    expect(result.current.pendingActions.has('refreshSubs')).toBe(false)
+    second.resolve(successResponse())
+    await secondCall
+    expect(result.pendingActions().has('refreshSubs')).toBe(false)
   })
 })

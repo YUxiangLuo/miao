@@ -1,7 +1,8 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@solidjs/testing-library'
+import { createSignal, flush } from 'solid-js'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, rs } from '@rstest/core'
-import { ScheduleModal } from './ScheduleModal'
+import { ScheduleModal, type ScheduleModalProps } from './ScheduleModal'
 import { scheduledRefreshStatusMock } from '../testFixtures'
 import type { ApiResponse, ScheduledRefreshStatus } from '../types/api'
 
@@ -16,13 +17,23 @@ function stubStatus(status: ScheduledRefreshStatus) {
   })))
 }
 
-function renderModal(props = {}) {
+function renderModal(props: Partial<ScheduleModalProps> = {}) {
   const onSave = rs.fn().mockResolvedValue(true)
   const onClose = rs.fn()
-  const utils = render(
-    <ScheduleModal open saving={false} onClose={onClose} onSave={onSave} {...props} />,
-  )
-  return { ...utils, onSave, onClose }
+  const [open, setOpen] = createSignal(props.open ?? true)
+  const utils = render(() => (
+    <ScheduleModal saving={false} onClose={onClose} onSave={onSave} {...props} open={open()} />
+  ))
+  flush()
+  return {
+    ...utils,
+    onSave,
+    onClose,
+    setOpen(next: boolean) {
+      setOpen(next)
+      flush()
+    },
+  }
 }
 
 describe('ScheduleModal', () => {
@@ -34,15 +45,17 @@ describe('ScheduleModal', () => {
   it('leaves loading on timeout and can load again after reopening', async () => {
     rs.useFakeTimers()
     rs.stubGlobal('fetch', rs.fn(() => new Promise(() => {})))
-    const { rerender, onClose, onSave } = renderModal()
+    const { setOpen } = renderModal()
     expect(screen.getByRole('status')).toHaveTextContent('正在读取定时刷新设置')
-    await act(async () => { await rs.advanceTimersByTimeAsync(10_000) })
+    await rs.advanceTimersByTimeAsync(10_000)
+    flush()
     expect(screen.getByRole('alert')).toHaveTextContent('请求已取消或超时')
     expect(screen.getByRole('button', { name: '保存' })).toBeDisabled()
-    rerender(<ScheduleModal open={false} saving={false} onClose={onClose} onSave={onSave} />)
+    setOpen(false)
     stubStatus(scheduledRefreshStatusMock())
-    rerender(<ScheduleModal open saving={false} onClose={onClose} onSave={onSave} />)
-    await act(async () => { await rs.advanceTimersByTimeAsync(0) })
+    setOpen(true)
+    await rs.advanceTimersByTimeAsync(0)
+    flush()
     expect(screen.getByRole('switch', { name: '启用定时刷新' })).toBeInTheDocument()
   })
 
