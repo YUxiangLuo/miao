@@ -3,7 +3,7 @@ import { isSingleSeatRule } from './terminals'
 
 export interface DedicatedLineRow {
   node: NodeInfo
-  isStaticResidential: boolean
+  isSocks: boolean
   protocolLabel: string
   detourRelay?: string
   relayExists: boolean
@@ -14,15 +14,15 @@ export interface DedicatedLineRow {
 }
 
 const PROTOCOL_DISPLAY: Record<string, string> = {
-  socks: '静态住宅 SOCKS5',
-  hysteria2: '自建专线 Hysteria2',
-  vless: '专线 VLESS',
-  trojan: '专线 Trojan',
-  anytls: '专线 AnyTLS',
-  shadowsocks: '专线 SS',
-  ss: '专线 SS',
-  vmess: '专线 VMess',
-  tuic: '专线 TUIC',
+  socks: 'SOCKS5',
+  hysteria2: 'Hysteria2',
+  vless: 'VLESS',
+  trojan: 'Trojan',
+  anytls: 'AnyTLS',
+  shadowsocks: 'Shadowsocks',
+  ss: 'Shadowsocks',
+  vmess: 'VMess',
+  tuic: 'TUIC',
 }
 
 export function buildDedicatedLines(input: {
@@ -55,7 +55,7 @@ export function buildDedicatedLines(input: {
     const detourRelay = node.detour?.trim() || undefined
     return {
       node,
-      isStaticResidential: key === 'socks',
+      isSocks: key === 'socks',
       protocolLabel: PROTOCOL_DISPLAY[key] || node.node_type.toUpperCase(),
       detourRelay,
       relayExists: !detourRelay || knownSet.has(detourRelay),

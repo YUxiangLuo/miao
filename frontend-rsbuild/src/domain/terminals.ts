@@ -1,7 +1,5 @@
 import type { RuleInfo, TerminalAssignMode, TerminalSummary } from '../types/api'
 import type { EnrichedConnection } from '../types/clash'
-import { connectionDomain } from '../components/siteIcons'
-import { matchTradePlatform, type TradePlatform } from './tradeCatalog'
 
 export interface TerminalRow {
   ip: string
@@ -14,13 +12,12 @@ export interface TerminalRow {
   mac?: string
   mode: TerminalAssignMode
   target?: string
-  /** 绑定了不存在或离线中转的独享专线，网关已原位改写为 reject 熔断保护 */
+  /** 绑定了不存在或前置跳板缺失的节点，后端已自动改写为阻断以防流量意外回退 */
   failClosed: boolean
   online: boolean
   connectionCount: number
   uploadSpeed: number
   downloadSpeed: number
-  activePlatforms: TradePlatform[]
   ruleIndex?: number
 }
 
@@ -102,19 +99,14 @@ export function buildTerminalRows(input: {
 
     let uploadSpeed = 0
     let downloadSpeed = 0
-    const platforms = new Map<string, TradePlatform>()
     for (const conn of conns) {
       uploadSpeed += Number(conn.uploadSpeed || 0)
       downloadSpeed += Number(conn.downloadSpeed || 0)
-      const hit = matchTradePlatform(connectionDomain(conn))
-      if (hit && !platforms.has(hit.id)) {
-        platforms.set(hit.id, hit)
-      }
     }
 
     const displayName = summary?.name
       || summary?.dhcp_hostname
-      || `办公终端 .${ip.split('.').pop() || ip}`
+      || ip
 
     rows.push({
       ip,
@@ -132,7 +124,6 @@ export function buildTerminalRows(input: {
       connectionCount: conns.length,
       uploadSpeed,
       downloadSpeed,
-      activePlatforms: [...platforms.values()].slice(0, 5),
       ruleIndex: rule?.index,
     })
   }
@@ -148,11 +139,11 @@ export function buildTerminalRows(input: {
 export function terminalModeLabel(mode: TerminalAssignMode): string {
   switch (mode) {
     case 'dedicated':
-      return '锁定独享专线'
+      return '指定节点'
     case 'pool':
-      return '公共出海线路池'
+      return '默认代理'
     case 'block_overseas':
-      return '仅国内办公'
+      return '禁止走代理'
     case 'direct':
       return '全量直连'
   }

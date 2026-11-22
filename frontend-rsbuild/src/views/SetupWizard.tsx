@@ -3,15 +3,16 @@ import { ICON, LOGO_SIZE } from '../tokens'
 import { Button, LogoIcon } from '../components/ui'
 import type { ToastTone } from '../hooks/useApi'
 import type { VergeImportResult } from '../types/api'
-import { DownloadIcon, LockIcon, PlusIcon, RocketIcon } from '../components/icons'
+import { DownloadIcon, ListPlusIcon, PlusIcon, RocketIcon, ServerIcon } from '../components/icons'
 
 export interface SetupWizardProps {
   onAddSub: (url: string) => Promise<boolean>
   pendingActions: ReadonlySet<string>
-  onOpenAddNode: (preset?: 'socks-residential' | 'vps' | 'link') => void
+  onOpenAddNode: (preset?: 'link' | 'manual' | 'socks' | 'vps') => void
   showToast: (message: string, tone?: ToastTone) => number
   onScanVerge: () => Promise<VergeImportResult | null>
   onImportVerge: (urls: string[]) => Promise<boolean>
+  vpsSupported?: boolean
 }
 
 export function SetupWizard(props: SetupWizardProps) {
@@ -55,9 +56,9 @@ export function SetupWizard(props: SetupWizardProps) {
         <header class="wizard-header">
           <LogoIcon size={LOGO_SIZE.onboarding} />
           <div>
-            <h1>初始化 Harbor</h1>
+            <h1>欢迎使用 Harbor</h1>
             <p class="wizard-sub">
-              接入公共出海池订阅，或直接配置独享静态 IP 开启局域网终端与店铺分流。
+              添加订阅链接或代理节点，即可启用透明分流服务。
             </p>
           </div>
         </header>
@@ -82,7 +83,7 @@ export function SetupWizard(props: SetupWizardProps) {
               loading={props.pendingActions.has('addSub')}
               icon={<PlusIcon size={ICON.sm} />}
             >
-              接入订阅并启动网关
+              添加订阅并启动
             </Button>
             <Button
               tone="secondary"
@@ -95,28 +96,37 @@ export function SetupWizard(props: SetupWizardProps) {
           </div>
         </form>
 
-        <div class="wizard-divider">或直接配置独享静态线路</div>
+        <div class="wizard-divider">其他接入方式</div>
 
         <div class="wizard-section">
           <div class="wizard-actions">
             <Button
               tone="secondary"
-              icon={<LockIcon size={ICON.sm} />}
-              onClick={() => props.onOpenAddNode('socks-residential')}
+              icon={<ListPlusIcon size={ICON.sm} />}
+              onClick={() => props.onOpenAddNode('link')}
             >
-              录入静态住宅 SOCKS5
+              粘贴分享链接
             </Button>
             <Button
               tone="secondary"
-              icon={<RocketIcon size={ICON.sm} />}
-              onClick={() => props.onOpenAddNode('vps')}
+              icon={<ServerIcon size={ICON.sm} />}
+              onClick={() => props.onOpenAddNode('manual')}
             >
-              SSH 部署海外 VPS
+              手动配置节点
             </Button>
+            <Show when={props.vpsSupported !== false}>
+              <Button
+                tone="secondary"
+                icon={<RocketIcon size={ICON.sm} />}
+                onClick={() => props.onOpenAddNode('vps')}
+              >
+                SSH 部署 VPS
+              </Button>
+            </Show>
           </div>
           <Show when={props.pendingActions.size > 0}>
             <p class="drawer-note" role="status" style={{ margin: '0' }}>
-              正在校验并应用网关配置，请稍候…
+              正在校验并应用配置，请稍候…
             </p>
           </Show>
         </div>

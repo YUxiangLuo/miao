@@ -1,4 +1,4 @@
-import { For, Show, createEffect, createMemo, createSignal, createUniqueId } from 'solid-js'
+import { For, Show, createEffect, createMemo, createSignal, createUniqueId, untrack } from 'solid-js'
 import type { JSX } from '@solidjs/web'
 import { ICON } from '../tokens'
 import { Button } from '../components/ui'
@@ -13,24 +13,24 @@ import {
   CopyIcon,
   EditIcon,
   MonitorSmartphoneIcon,
+  NetworkIcon,
   PlusIcon,
   SearchIcon,
-  StoreIcon,
   Trash2Icon,
   XIcon,
 } from '../components/icons'
 
 type AppController = ReturnType<typeof useAppController>
 
-type EndpointSection = 'devices' | 'ports'
+type LanSection = 'devices' | 'ports'
 type DeviceFilter = 'all' | 'dedicated' | 'pool' | 'block_overseas' | 'fail_closed'
 
-const DEVICE_FILTER_OPTIONS: ReadonlyArray<{ key: DeviceFilter; label: string }> = [
-  { key: 'all', label: '全部' },
-  { key: 'dedicated', label: '独享 IP' },
-  { key: 'pool', label: '公共池' },
-  { key: 'block_overseas', label: '仅国内' },
-  { key: 'fail_closed', label: '熔断' },
+const DEVICE_FILTER_OPTIONS: SelectOption[] = [
+  { value: 'all', label: '全部出口策略' },
+  { value: 'dedicated', label: '指定节点' },
+  { value: 'pool', label: '默认代理' },
+  { value: 'block_overseas', label: '禁止走代理' },
+  { value: 'fail_closed', label: '节点不可用（已阻断）' },
 ]
 
 function encodeSeatSelectValue(mode: TerminalAssignMode, target?: string): string {
@@ -46,13 +46,13 @@ function deviceDotTone(row: TerminalRow): 'emerald' | 'cobalt' | 'amber' | 'crim
   return 'cobalt'
 }
 
-export function EndpointsView(props: {
+export function LanView(props: {
   app: AppController
-  initialSection?: EndpointSection
+  initialSection?: LanSection
 }): JSX.Element {
   const app = () => props.app
 
-  const pickInitialSection = (): EndpointSection => {
+  const pickInitialSection = (): LanSection => untrack(() => {
     if (props.initialSection) return props.initialSection
     const hasBlockedPort = app().accessPorts().some((port) => port.blocked)
     const hasFailClosedSeat = buildTerminalRows({
@@ -62,9 +62,9 @@ export function EndpointsView(props: {
     }).some((row) => row.failClosed)
     if (hasBlockedPort && !hasFailClosedSeat) return 'ports'
     return 'devices'
-  }
+  })
 
-  const [section, setSection] = createSignal<EndpointSection>(pickInitialSection())
+  const [section, setSection] = createSignal<LanSection>(pickInitialSection())
   const [deviceFilter, setDeviceFilter] = createSignal<DeviceFilter>('all')
   const [query, setQuery] = createSignal('')
 
@@ -89,7 +89,7 @@ export function EndpointsView(props: {
   const deviceTitleId = createUniqueId()
   const deviceDialogRef = useDialog(deviceDialogOpen, () => setDeviceDialogOpen(false))
 
-  // Store access port dialog state
+  // Independent proxy port dialog state
   const [portDialogOpen, setPortDialogOpen] = createSignal(false)
   const [editPortId, setEditPortId] = createSignal<string | undefined>(undefined)
   const [portName, setPortName] = createSignal('')
@@ -117,9 +117,9 @@ export function EndpointsView(props: {
   const failClosedSeatCount = createMemo(() => terminalRows().filter((row) => row.failClosed).length)
   const failClosedPortCount = createMemo(() => accessPortRows().filter((row) => row.blocked).length)
 
-  const dedicatedNodes = createMemo(() => app().nodes())
+  const manualNodes = createMemo(() => app().nodes())
   const extraPoolNodes = createMemo(() => {
-    const manualSet = new Set(dedicatedNodes().map((node) => node.tag))
+    const manualSet = new Set(manualNodes().map((node) => node.tag))
     return app().ruleNodeNames().filter((tag) => !manualSet.has(tag))
   })
 
@@ -161,17 +161,17 @@ export function EndpointsView(props: {
   const baseDeviceRouteOptions = createMemo<SelectOption[]>(() => {
     const delays = app().delays()
     const base: SelectOption[] = [
-      { value: 'pool', label: '公共出海池', tone: 'cobalt' },
-      { value: 'block_overseas', label: '仅限国内办公', tone: 'amber' },
+      { value: 'pool', label: '默认代理', tone: 'cobalt' },
+      { value: 'block_overseas', label: '禁止走代理（仅允许直连）', tone: 'amber' },
       { value: 'direct', label: '全量直连', tone: 'default' },
     ]
 
-    for (const node of dedicatedNodes()) {
+    for (const node of manualNodes()) {
       const delay = delays[node.tag]
       base.push({
         value: `dedicated:${node.tag}`,
         label: node.tag,
-        group: '独享静态 IP',
+        group: '手动节点',
         badge: delay !== undefined ? formatDelay(delay) : node.node_type.toUpperCase(),
         tone: 'emerald',
       })
@@ -182,7 +182,7 @@ export function EndpointsView(props: {
       base.push({
         value: `dedicated:${tag}`,
         label: tag,
-        group: '公共池单节点',
+        group: '订阅节点',
         badge: delay !== undefined ? formatDelay(delay) : undefined,
         tone: 'cobalt',
       })
@@ -194,7 +194,7 @@ export function EndpointsView(props: {
   const buildRowRouteOptions = (row: TerminalRow): SelectOption[] => {
     const options = baseDeviceRouteOptions().map((opt) => {
       if (row.failClosed && row.target && opt.value === `dedicated:${row.target}`) {
-        return { ...opt, badge: '已熔断', tone: 'crimson' as const }
+        return { ...opt, badge: '已阻断', tone: 'crimson' as const }
       }
       return opt
     })
@@ -204,9 +204,9 @@ export function EndpointsView(props: {
       if (!options.some((opt) => opt.value === encoded)) {
         options.push({
           value: encoded,
-          label: `离线专线 · ${cleanNodeDisplay(row.target).name}`,
-          group: '离线专线',
-          badge: '已熔断',
+          label: `${cleanNodeDisplay(row.target).name}（节点不可用）`,
+          group: '不可用节点',
+          badge: '已阻断',
           tone: 'crimson',
         })
       }
@@ -216,7 +216,7 @@ export function EndpointsView(props: {
   }
 
   const dialogDeviceAssignOptions = createMemo<SelectOption[]>(() => {
-    const keepLabel = ipLocked() ? '保持当前出口策略' : '默认（跟随公共出海池）'
+    const keepLabel = ipLocked() ? '保持当前策略不变' : '默认（跟随默认代理）'
     return [
       { value: 'keep', label: keepLabel, tone: 'default' },
       ...baseDeviceRouteOptions(),
@@ -227,7 +227,7 @@ export function EndpointsView(props: {
     const delays = app().delays()
     const options: SelectOption[] = []
 
-    for (const node of dedicatedNodes()) {
+    for (const node of manualNodes()) {
       const delay = delays[node.tag]
       const proto = node.detour
         ? `${node.node_type.toUpperCase()} · 跳板`
@@ -235,7 +235,7 @@ export function EndpointsView(props: {
       options.push({
         value: node.tag,
         label: node.tag,
-        group: '独享静态 IP',
+        group: '手动节点',
         badge: delay !== undefined ? formatDelay(delay) : proto,
         tone: 'emerald',
       })
@@ -246,22 +246,22 @@ export function EndpointsView(props: {
       options.push({
         value: tag,
         label: tag,
-        group: '公共池单节点',
+        group: '订阅节点',
         badge: delay !== undefined ? formatDelay(delay) : undefined,
         tone: 'cobalt',
       })
     }
 
     options.push(
-      { value: 'proxy', label: '公共出海池（动态选路）', group: '网关内置通道', tone: 'cobalt' },
-      { value: 'direct', label: '本地宽带直连', group: '网关内置通道', tone: 'default' },
+      { value: 'proxy', label: '默认代理（动态选路）', group: '内置出口', tone: 'cobalt' },
+      { value: 'direct', label: '本地直连', group: '内置出口', tone: 'default' },
     )
 
     const current = portOutbound().trim()
     if (current && !options.some((opt) => opt.value === current)) {
       options.unshift({
         value: current,
-        label: `离线专线 · ${cleanNodeDisplay(current).name}`,
+        label: `${cleanNodeDisplay(current).name}（节点不可用）`,
         group: '当前绑定',
         badge: '离线',
         tone: 'crimson',
@@ -281,7 +281,7 @@ export function EndpointsView(props: {
   }
 
   const openCreateDeviceDialog = () => {
-    setEditingIp('192.168.8.')
+    setEditingIp('192.168.')
     setIpLocked(false)
     setFormName('')
     setFormDept('')
@@ -331,7 +331,7 @@ export function EndpointsView(props: {
 
   const openCreatePortDialog = () => {
     const nextPort = suggestNextAccessPort(app().accessPorts())
-    const defaultOutbound = dedicatedNodes()[0]?.tag || extraPoolNodes()[0] || 'proxy'
+    const defaultOutbound = manualNodes()[0]?.tag || extraPoolNodes()[0] || 'proxy'
     setEditPortId(undefined)
     setPortName('')
     setPortNumber(nextPort)
@@ -382,65 +382,12 @@ export function EndpointsView(props: {
 
   return (
     <>
-      {/* Top Studio Toolbar */}
-      <div class="studio-toolbar">
-        <div class="studio-toolbar-left">
-          <div class="seg-rail" role="group" aria-label="终端与店铺切换">
-            <button
-              type="button"
-              class={classNames('seg-btn', section() === 'devices' && 'active')}
-              aria-pressed={section() === 'devices' ? 'true' : 'false'}
-              onClick={() => setSection('devices')}
-            >
-              <span>办公设备 ({terminalRows().length})</span>
-              <Show when={failClosedSeatCount() > 0}>
-                <span class="status-dot crimson" aria-hidden="true" />
-              </Show>
-            </button>
-
-            <button
-              type="button"
-              class={classNames('seg-btn', section() === 'ports' && 'active')}
-              aria-pressed={section() === 'ports' ? 'true' : 'false'}
-              onClick={() => setSection('ports')}
-            >
-              <span>店铺端口 ({accessPortRows().length})</span>
-              <Show when={failClosedPortCount() > 0}>
-                <span class="status-dot crimson" aria-hidden="true" />
-              </Show>
-            </button>
-          </div>
-
-          <Show when={section() === 'devices'}>
-            <div class="seg-rail" role="group" aria-label="设备出口筛选">
-              <For each={DEVICE_FILTER_OPTIONS}>
-                {(opt) => (
-                  <button
-                    type="button"
-                    class={classNames('seg-btn', deviceFilter() === opt.key && 'active')}
-                    aria-pressed={deviceFilter() === opt.key ? 'true' : 'false'}
-                    onClick={() => setDeviceFilter(opt.key)}
-                  >
-                    {opt.label}
-                  </button>
-                )}
-              </For>
-            </div>
-          </Show>
+      <header class="page-header">
+        <div>
+          <h1 class="page-title">设备与端口</h1>
+          <p class="page-subtitle">为局域网设备分配独立出口策略，或创建绑定固定节点的本地代理端口</p>
         </div>
-
-        <div class="studio-toolbar-right">
-          <div class="studio-search">
-            <SearchIcon size={ICON.sm} />
-            <input
-              type="search"
-              aria-label={section() === 'devices' ? '搜索办公设备' : '搜索店铺端口'}
-              placeholder={section() === 'devices' ? '搜索设备名、部门、IP 或 MAC…' : '搜索店铺名、端口或专线…'}
-              value={query()}
-              onInput={(e) => setQuery(e.currentTarget.value)}
-            />
-          </div>
-
+        <div class="page-actions">
           <Show when={section() === 'devices' && app().terminalsSupported()}>
             <Button
               tone="primary"
@@ -448,7 +395,7 @@ export function EndpointsView(props: {
               icon={<PlusIcon size={ICON.xs} />}
               onClick={openCreateDeviceDialog}
             >
-              登记固定 IP
+              登记设备
             </Button>
           </Show>
 
@@ -459,19 +406,72 @@ export function EndpointsView(props: {
               icon={<PlusIcon size={ICON.xs} />}
               onClick={openCreatePortDialog}
             >
-              新建店铺端口
+              新建端口
             </Button>
           </Show>
         </div>
+      </header>
+
+      <div class="studio-toolbar">
+        <div class="seg-rail" role="group" aria-label="局域网与端口切换">
+          <button
+            type="button"
+            class={classNames('seg-btn', section() === 'devices' && 'active')}
+            aria-pressed={section() === 'devices' ? 'true' : 'false'}
+            onClick={() => setSection('devices')}
+          >
+            <span>局域网设备 ({terminalRows().length})</span>
+            <Show when={failClosedSeatCount() > 0}>
+              <span class="status-dot crimson" aria-hidden="true" />
+            </Show>
+          </button>
+
+          <button
+            type="button"
+            class={classNames('seg-btn', section() === 'ports' && 'active')}
+            aria-pressed={section() === 'ports' ? 'true' : 'false'}
+            onClick={() => setSection('ports')}
+          >
+            <span>独立代理端口 ({accessPortRows().length})</span>
+            <Show when={failClosedPortCount() > 0}>
+              <span class="status-dot crimson" aria-hidden="true" />
+            </Show>
+          </button>
+        </div>
+
+        <div class="studio-toolbar-right">
+          <Show when={section() === 'devices'}>
+            <SelectPopover
+              ariaLabel="按出口策略筛选"
+              size="sm"
+              align="right"
+              value={deviceFilter()}
+              options={DEVICE_FILTER_OPTIONS}
+              searchableThreshold={10}
+              onChange={(val) => setDeviceFilter(val as DeviceFilter)}
+            />
+          </Show>
+
+          <div class="studio-search">
+            <SearchIcon size={ICON.sm} />
+            <input
+              type="search"
+              aria-label={section() === 'devices' ? '搜索局域网设备' : '搜索独立端口'}
+              placeholder={section() === 'devices' ? '搜索名称、标签、IP 或 MAC…' : '搜索端口名称、端口号或节点…'}
+              value={query()}
+              onInput={(e) => setQuery(e.currentTarget.value)}
+            />
+          </div>
+        </div>
       </div>
 
-      {/* Graceful Read-Only Router Firmware Banners */}
+      {/* Graceful Read-Only Fallback Banners for Older Backends */}
       <Show when={section() === 'devices' && !app().terminalsSupported()}>
         <div class="circuit-banner warning" role="status">
           <div class="circuit-banner-main">
             <span class="status-dot amber" aria-hidden="true" />
             <span>
-              当前路由器处于只读兼容模式：已从实时连接与路由规则识别在线设备，升级网关固件后可保存设备档案并在线分配出口。
+              当前后端处于只读兼容模式：已从活动连接与分流规则识别设备，更新 Harbor 后可保存设备备注并在线切换出口策略。
             </span>
           </div>
         </div>
@@ -482,20 +482,20 @@ export function EndpointsView(props: {
           <div class="circuit-banner-main">
             <span class="status-dot amber" aria-hidden="true" />
             <span>
-              当前路由器尚未升级支持局域网多店铺专属端口（:20101+ 混合代理入站），升级网关固件后即可开通。
+              当前后端版本暂不支持独立代理端口（HTTP / SOCKS5 混合监听），更新 Harbor 后即可启用。
             </span>
           </div>
         </div>
       </Show>
 
-      {/* Section A: LAN Office Devices */}
+      {/* Section A: LAN Devices */}
       <Show when={section() === 'devices'}>
-        <section class="surface-box" aria-label="办公设备列表">
+        <section class="surface-box" aria-label="局域网设备列表">
           <Show
             when={filteredDevices().length > 0}
             fallback={
-              <div class="empty-state empty-block">
-                暂无匹配的局域网办公设备
+              <div class="empty-state">
+                暂无匹配的局域网设备。当设备通过本机/网关产生流量，或手动登记固定 IP 后会显示在此处。
               </div>
             }
           >
@@ -513,22 +513,17 @@ export function EndpointsView(props: {
                           <Show when={row().department}>
                             {(dept) => <span class="mono-tag">{dept()}</span>}
                           </Show>
-                          <For each={row().activePlatforms} keyed={(p) => p.id}>
-                            {(platform) => <span class="mono-tag">{platform().name}</span>}
-                          </For>
                         </div>
 
-                        <div class="row-sub mono" style={{ display: 'flex', 'align-items': 'center', gap: '6px', 'flex-wrap': 'wrap' }}>
-                          <span>{row().ip}</span>
-                          <Show when={row().dhcpHostname}>
-                            {(host) => <span>· {host()}</span>}
-                          </Show>
-                          <Show when={row().mac}>
-                            {(mac) => <span>· {mac()}</span>}
-                          </Show>
-                          <Show when={row().note}>
-                            {(note) => <span>· {note()}</span>}
-                          </Show>
+                        <div class="row-sub mono">
+                          {[
+                            row().displayName !== row().ip ? row().ip : null,
+                            row().dhcpHostname && row().dhcpHostname !== row().displayName ? row().dhcpHostname : null,
+                            row().mac || null,
+                            row().note || null,
+                          ]
+                            .filter(Boolean)
+                            .join(' · ') || '局域网客户端'}
                         </div>
                       </div>
 
@@ -539,14 +534,14 @@ export function EndpointsView(props: {
 
                         <div class="endpoint-picker-wrap">
                           <SelectPopover
-                            ariaLabel={`分配 ${row().displayName} (${row().ip}) 出口`}
+                            ariaLabel={`设置 ${row().displayName} (${row().ip}) 出口策略`}
                             value={encodeSeatSelectValue(row().mode, row().target)}
                             options={buildRowRouteOptions(row())}
                             disabled={!app().terminalsSupported() || assigning()}
                             onChange={(val) => {
                               void applySeatStrategy(row().ip, val)
                             }}
-                            searchPlaceholder="搜索专线、地区或节点…"
+                            searchPlaceholder="搜索节点…"
                             align="right"
                             size="sm"
                             fullWidth
@@ -568,7 +563,7 @@ export function EndpointsView(props: {
                             <button
                               type="button"
                               class="icon-button danger"
-                              title="清除已存档案"
+                              title="清除已保存备注"
                               aria-label={`清除设备 ${row().ip} 备注`}
                               onClick={() => { void app().handleDeleteTerminal(row().ip) }}
                             >
@@ -586,29 +581,20 @@ export function EndpointsView(props: {
         </section>
       </Show>
 
-      {/* Section B: Multi-Store Browser Access Ports */}
+      {/* Section B: Independent Local Proxy Ports */}
       <Show when={section() === 'ports'}>
-        <section class="surface-box" aria-label="店铺端口列表">
-          <div
-            class="surface-note"
-            style={{
-              display: 'flex',
-              'align-items': 'center',
-              'justify-content': 'space-between',
-              gap: '12px',
-              'flex-wrap': 'wrap',
-            }}
-          >
+        <section class="surface-box" aria-label="独立代理端口列表">
+          <div class="surface-note">
             <span>
-              在指纹浏览器（AdsPower / 比特浏览器）中填入网关局域网地址与对应端口（HTTP 或 SOCKS5 协议自适应），静态住宅 IP 凭证安全封存于网关内
+              每个独立端口同时支持 HTTP 与 SOCKS5 协议，可将不同应用或浏览器配置的流量固定绑定到指定出口节点。
             </span>
-            <Show when={dedicatedNodes().length === 0}>
+            <Show when={manualNodes().length === 0}>
               <Button
                 tone="secondary"
                 size="sm"
-                onClick={() => app().openNodeModal('socks-residential')}
+                onClick={() => app().openNodeModal('socks')}
               >
-                录入静态住宅 IP
+                添加 SOCKS5 节点
               </Button>
             </Show>
           </div>
@@ -616,8 +602,8 @@ export function EndpointsView(props: {
           <Show
             when={filteredPorts().length > 0}
             fallback={
-              <div class="empty-state empty-block">
-                暂未创建店铺专属端口，点击右上角「新建店铺端口」即可为指纹浏览器分配独立入口
+              <div class="empty-state">
+                暂未创建独立代理端口，点击右上角「新建端口」即可添加本地 HTTP / SOCKS5 监听入口。
               </div>
             }
           >
@@ -636,8 +622,6 @@ export function EndpointsView(props: {
                       <div class="row-main">
                         <div class="row-title">
                           <span>{row().name}</span>
-                          <span class="mono-tag">HTTP / SOCKS5</span>
-                          <span class="mono-tag">{row().has_auth ? '已设账密' : '免密内网'}</span>
                           <button
                             type="button"
                             class="endpoint-code-pill mono"
@@ -648,15 +632,15 @@ export function EndpointsView(props: {
                             <span>{row().listenEndpoint}</span>
                             <CopyIcon size={12} />
                           </button>
+                          <Show when={row().has_auth}>
+                            <span class="mono-tag">账号认证</span>
+                          </Show>
                         </div>
 
-                        <Show when={row().detourRelay}>
-                          {(relay) => (
-                            <div class="row-sub">
-                              经 {cleanNodeDisplay(relay()).name} 跳板中转
-                            </div>
-                          )}
-                        </Show>
+                        <div class="row-sub">
+                          HTTP / SOCKS5 混合监听
+                          {row().detourRelay ? ` · 前置跳板: ${cleanNodeDisplay(row().detourRelay!).name}` : ''}
+                        </div>
                       </div>
 
                       <div class="row-end">
@@ -665,7 +649,7 @@ export function EndpointsView(props: {
                           fallback={
                             <span class="status-inline danger">
                               <span class="status-dot crimson" aria-hidden="true" />
-                              <span>专线离线已熔断 ({cleanedOutbound().name})</span>
+                              <span>节点不可用 · 已阻断 ({cleanedOutbound().name})</span>
                             </span>
                           }
                         >
@@ -676,10 +660,10 @@ export function EndpointsView(props: {
                             </Show>
                             <span>
                               {row().outbound === 'proxy'
-                                ? '公共出海池'
+                                ? '默认代理'
                                 : row().outbound === 'direct'
                                   ? '本地直连'
-                                  : `独享 · ${cleanedOutbound().name}`}
+                                  : cleanedOutbound().name}
                             </span>
                           </span>
                         </Show>
@@ -692,8 +676,8 @@ export function EndpointsView(props: {
                           <button
                             type="button"
                             class="icon-button"
-                            title="编辑店铺端口"
-                            aria-label={`编辑专属端口 ${row().name}`}
+                            title="编辑独立端口"
+                            aria-label={`编辑独立端口 ${row().name}`}
                             onClick={() => openEditPortDialog(row())}
                           >
                             <EditIcon size={ICON.sm} />
@@ -702,8 +686,8 @@ export function EndpointsView(props: {
                           <button
                             type="button"
                             class="icon-button danger"
-                            title="删除店铺端口"
-                            aria-label={`删除专属端口 ${row().name}`}
+                            title="删除独立端口"
+                            aria-label={`删除独立端口 ${row().name}`}
                             onClick={() => app().handleOpenDeleteAccessPortConfirm(row())}
                           >
                             <Trash2Icon size={ICON.sm} />
@@ -735,13 +719,13 @@ export function EndpointsView(props: {
               <div class="modal-title-wrap">
                 <MonitorSmartphoneIcon size={ICON.lg} class="icon-accent" />
                 <h3 id={deviceTitleId}>
-                  {ipLocked() ? `编辑设备档案 · ${editingIp()}` : '登记固定 IP 设备'}
+                  {ipLocked() ? `编辑设备备注 · ${editingIp()}` : '登记局域网设备'}
                 </h3>
               </div>
               <button
                 type="button"
                 class="icon-button"
-                aria-label="关闭设备档案面板"
+                aria-label="关闭设备备注窗口"
                 onClick={() => setDeviceDialogOpen(false)}
               >
                 <XIcon size={ICON.md} />
@@ -754,7 +738,7 @@ export function EndpointsView(props: {
                 <input
                   value={editingIp()}
                   disabled={ipLocked() || savingDevice()}
-                  placeholder="例如：192.168.8.180"
+                  placeholder="例如：192.168.1.50"
                   onInput={(e) => setEditingIp(e.currentTarget.value)}
                 />
               </label>
@@ -762,22 +746,22 @@ export function EndpointsView(props: {
 
             <div class="form-grid two">
               <label class="field">
-                <span>备注名称</span>
+                <span>设备名称</span>
                 <input
                   data-autofocus
                   value={formName()}
                   disabled={savingDevice()}
-                  placeholder="例如：李运营-美区工作站"
+                  placeholder="例如：MacBook Pro / NAS"
                   onInput={(e) => setFormName(e.currentTarget.value)}
                 />
               </label>
 
               <label class="field">
-                <span>部门（可选）</span>
+                <span>分组标签（可选）</span>
                 <input
                   value={formDept()}
                   disabled={savingDevice()}
-                  placeholder="例如：美区运营组 / 财务部"
+                  placeholder="例如：书房 / 测试机"
                   onInput={(e) => setFormDept(e.currentTarget.value)}
                 />
               </label>
@@ -785,14 +769,14 @@ export function EndpointsView(props: {
 
             <div class="form-grid single">
               <div class="field">
-                <span>整机出口策略</span>
+                <span>出口策略</span>
                 <SelectPopover
-                  ariaLabel="设备整机出口策略"
+                  ariaLabel="设备出口策略"
                   value={formAssign()}
                   options={dialogDeviceAssignOptions()}
                   disabled={savingDevice()}
                   onChange={setFormAssign}
-                  searchPlaceholder="搜索专线或节点…"
+                  searchPlaceholder="搜索节点…"
                   fullWidth
                 />
               </div>
@@ -800,11 +784,11 @@ export function EndpointsView(props: {
 
             <div class="form-grid single">
               <label class="field">
-                <span>用途说明（可选）</span>
+                <span>备注说明（可选）</span>
                 <input
                   value={formNote()}
                   disabled={savingDevice()}
-                  placeholder="例如：WhatsApp 跟单主机"
+                  placeholder="可选说明"
                   onInput={(e) => setFormNote(e.currentTarget.value)}
                 />
               </label>
@@ -821,14 +805,14 @@ export function EndpointsView(props: {
                 disabled={!editingIp().trim() || !formName().trim()}
                 onClick={() => { void submitDeviceDialog() }}
               >
-                保存设备档案
+                保存
               </Button>
             </div>
           </div>
         </div>
       </Show>
 
-      {/* Dialog 2: Create / Edit Multi-Store Access Port */}
+      {/* Dialog 2: Create / Edit Independent Proxy Port */}
       <Show when={portDialogOpen()}>
         <div class="modal-overlay drawer-overlay" onClick={() => setPortDialogOpen(false)}>
           <div
@@ -842,15 +826,15 @@ export function EndpointsView(props: {
           >
             <div class="modal-title-row">
               <div class="modal-title-wrap">
-                <StoreIcon size={ICON.lg} class="icon-accent" />
+                <NetworkIcon size={ICON.lg} class="icon-accent" />
                 <h3 id={portTitleId}>
-                  {editPortId() ? '编辑店铺端口' : '新建店铺端口'}
+                  {editPortId() ? '编辑独立代理端口' : '新建独立代理端口'}
                 </h3>
               </div>
               <button
                 type="button"
                 class="icon-button"
-                aria-label="关闭店铺端口面板"
+                aria-label="关闭独立端口窗口"
                 onClick={() => setPortDialogOpen(false)}
               >
                 <XIcon size={ICON.md} />
@@ -859,10 +843,10 @@ export function EndpointsView(props: {
 
             <div class="form-grid two">
               <label class="field">
-                <span>店铺名称</span>
+                <span>端口名称</span>
                 <input
                   data-autofocus
-                  placeholder="例如：Amazon 美区一店"
+                  placeholder="例如：独立浏览器 01"
                   value={portName()}
                   disabled={savingPort()}
                   onInput={(e) => setPortName(e.currentTarget.value)}
@@ -884,14 +868,14 @@ export function EndpointsView(props: {
 
             <div class="form-grid single">
               <div class="field">
-                <span>绑定独享出口</span>
+                <span>绑定出口</span>
                 <SelectPopover
-                  ariaLabel="绑定独享出口"
+                  ariaLabel="绑定出口"
                   value={portOutbound()}
                   options={portOutboundOptions()}
                   disabled={savingPort()}
                   onChange={setPortOutbound}
-                  searchPlaceholder="搜索独享 IP 或节点…"
+                  searchPlaceholder="搜索节点…"
                   fullWidth
                 />
               </div>
@@ -899,10 +883,10 @@ export function EndpointsView(props: {
 
             <div class="form-grid two">
               <label class="field">
-                <span>内网账号（可选）</span>
+                <span>认证用户名（可选）</span>
                 <input
                   autocomplete="off"
-                  placeholder="留空则免密内网直连"
+                  placeholder="留空则局域网内免密连接"
                   value={portUsername()}
                   disabled={savingPort()}
                   onInput={(e) => setPortUsername(e.currentTarget.value)}
@@ -910,11 +894,11 @@ export function EndpointsView(props: {
               </label>
 
               <label class="field">
-                <span>内网密码（可选）</span>
+                <span>认证密码（可选）</span>
                 <input
                   type="password"
                   autocomplete="new-password"
-                  placeholder="与账号同时填写或留空"
+                  placeholder="与用户名同时填写或留空"
                   value={portPassword()}
                   disabled={savingPort()}
                   onInput={(e) => setPortPassword(e.currentTarget.value)}
@@ -923,7 +907,7 @@ export function EndpointsView(props: {
             </div>
 
             <Show when={authMismatch()}>
-              <p class="field-error" role="alert">内网账号与密码需同时填写或同时留空。</p>
+              <p class="field-error" role="alert">认证用户名与密码需同时填写或同时留空。</p>
             </Show>
 
             <div class="modal-actions">
@@ -937,7 +921,7 @@ export function EndpointsView(props: {
                 disabled={!portName().trim() || portNumber() < 1024 || portNumber() > 65535 || !portOutbound() || authMismatch()}
                 onClick={() => { void submitPortDialog() }}
               >
-                {editPortId() ? '保存修改' : '创建并启用端口'}
+                {editPortId() ? '保存修改' : '创建端口'}
               </Button>
             </div>
           </div>

@@ -1,267 +1,203 @@
-/* Harbor Studio Views — Signal Flow Hero, Endpoints, Routes, Pulse & Onboarding */
+/* Harbor Workspace Views — Overview, Nodes, Rules, LAN, Connections, Settings & Onboarding */
 
-/* 1. StudioView — 3-Stage Live Signal Flow Canvas */
-.signal-hero {
-  background-color: var(--bg-surface);
-  background-image: radial-gradient(var(--grid-dot) 1px, transparent 1px);
-  background-size: 16px 16px;
-  position: relative;
-}
-
-.signal-grid,
-.signal-stage-grid {
+/* 1. OverviewView — Control Cards, Current Exit Pill & Summary Grid */
+.overview-cards {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr) minmax(0, 1fr);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
   align-items: stretch;
-  gap: 0;
 }
 
-.signal-stage {
-  padding: 20px 22px;
+.overview-card {
+  padding: 15px 18px;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
-  gap: 14px;
-  min-width: 0;
+  gap: 12px;
 }
 
-.signal-stage-head,
-.signal-label {
+.overview-card-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+  min-height: 22px;
+}
+
+.overview-card-label {
   font-size: 12px;
   font-weight: 500;
   color: var(--ink-muted);
 }
 
-.signal-metric,
-.signal-primary {
-  font-size: 20px;
+.overview-card-body {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 32px;
+}
+
+.overview-stat-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.overview-stat-value {
+  font-size: 18px;
   font-weight: 650;
   letter-spacing: -0.02em;
   color: var(--ink);
-  line-height: 1.3;
-  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+}
+
+.overview-rates {
   display: flex;
   align-items: baseline;
-  gap: 10px;
+  gap: 12px;
   flex-wrap: wrap;
-}
-
-.signal-stage-foot,
-.signal-foot {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  flex-wrap: wrap;
-  font-size: 12px;
-  color: var(--ink-secondary);
-}
-
-.signal-core {
-  border-left: 1px solid var(--hairline);
-  border-right: 1px solid var(--hairline);
-  background: var(--bg-subtle);
-  position: relative;
-}
-
-@keyframes signalWireFlow {
-  to {
-    stroke-dashoffset: -24;
-  }
-}
-
-.signal-wire-svg {
-  width: 100%;
-  height: 36px;
-  display: block;
-  overflow: visible;
-}
-
-.signal-wire-svg .signal-flow-line,
-.signal-wire-svg .flow-active,
-.signal-wire-svg.active path[stroke-dasharray],
-.signal-wire-svg.ready path[stroke-dasharray],
-.signal-wire-flow {
-  animation: signalWireFlow 1.4s linear infinite;
-}
-
-.signal-throughput {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
   font-family: var(--font-mono);
-  font-variant-numeric: tabular-nums;
-  font-size: 13.5px;
+  font-size: 16px;
   font-weight: 600;
   color: var(--ink);
+  line-height: 1.25;
 }
 
-.signal-split-bar {
-  width: 100%;
-  height: 6px;
-  border-radius: 999px;
-  background: var(--bg-well);
-  overflow: hidden;
-  display: flex;
-  gap: 2px;
-}
-
-.signal-split-proxy,
-.signal-split-overseas {
-  height: 100%;
-  background: var(--signal-cobalt);
-  border-radius: 999px;
-  transition: width 0.3s ease;
-}
-
-.signal-split-direct,
-.signal-split-domestic {
-  height: 100%;
-  background: var(--signal-emerald);
-  border-radius: 999px;
-  transition: width 0.3s ease;
-}
-
-.signal-split-meta,
-.signal-split-legend {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  flex-wrap: wrap;
-  font-size: 12px;
+.overview-rate-up {
+  font-size: 13.5px;
+  font-weight: 500;
   color: var(--ink-secondary);
 }
 
-/* Studio Dual Ledgers */
-.studio-dual-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
-  gap: 18px;
-  align-items: start;
-}
-
-.app-mark {
-  width: 26px;
-  height: 26px;
-  border-radius: 6px;
-  font-size: 10.5px;
-  font-weight: 700;
-  letter-spacing: -0.02em;
-  display: inline-flex;
+.overview-card-foot {
+  display: flex;
   align-items: center;
-  justify-content: center;
-  color: #FFFFFF;
-  background: var(--ink);
-  flex-shrink: 0;
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.16);
+  gap: 6px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--ink-muted);
+  line-height: 1.4;
 }
 
-/* 2. EndpointsView — LAN Devices & Store Proxy Ports */
-.endpoint-code-pill {
+.current-node-pill {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 2px 8px;
-  border-radius: 6px;
-  border: 1px solid var(--hairline);
+  max-width: min(360px, 100%);
+  padding: 3px 9px;
+  border-radius: 999px;
   background: var(--bg-subtle);
+  border: 1px solid var(--hairline);
+  font-size: 12.5px;
+  font-weight: 500;
   color: var(--ink);
-  font-family: var(--font-mono);
-  font-variant-numeric: tabular-nums;
-  font-size: 12px;
-  cursor: pointer;
-  white-space: nowrap;
-  transition: border-color 0.15s ease, background-color 0.15s ease;
+  min-width: 0;
 }
 
-.endpoint-code-pill:hover {
-  border-color: var(--border-strong);
-  background: var(--bg-well);
-}
-
-.endpoint-picker-wrap {
-  width: 210px;
+.strategy-picker-wrap {
+  min-width: 184px;
   max-width: 100%;
-  flex-shrink: 0;
 }
 
-/* Keep right-aligned row pickers inside viewport on narrower desktops */
-@media (max-width: 1240px) {
-  .endpoint-picker-wrap .picker-popover:not(.align-left) {
-    left: auto;
-    right: 0;
-  }
+.overview-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
 }
 
-/* 3. RoutesView — Static IP Relay Chains, Subscriptions & Pool Matrix */
-.chain-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
-  padding: 2px 8px;
-  border-radius: 6px;
+.summary-card {
+  display: flex;
+  flex-direction: column;
+}
+
+.summary-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.summary-metric-item {
+  padding: 14px 16px;
+  border: none;
+  border-right: 1px solid var(--hairline);
+  background: transparent;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  cursor: pointer;
+  text-align: left;
+  transition: background-color 0.12s ease;
+}
+
+.summary-metric-item:first-child {
+  border-bottom-left-radius: 11px;
+}
+
+.summary-metric-item:last-child {
+  border-right: none;
+  border-bottom-right-radius: 11px;
+}
+
+.summary-metric-item:hover {
   background: var(--bg-subtle);
-  border: 1px solid var(--hairline);
+}
+
+.summary-metric-num {
+  font-size: 18px;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+  line-height: 1.2;
+}
+
+.summary-metric-label {
   font-size: 11.5px;
-  color: var(--ink-secondary);
-  margin-top: 4px;
+  color: var(--ink-muted);
+  line-height: 1.35;
 }
 
-.chain-pill.danger {
-  background: var(--signal-crimson-soft);
-  border-color: rgba(225, 29, 72, 0.25);
-  color: var(--signal-crimson-text);
+/* 2. NodesView — Inline Subscription Bar & Node Pool Matrix */
+.inline-form-bar {
+  padding: 12px 18px;
+  background: var(--bg-subtle);
+  border-bottom: 1px solid var(--hairline);
 }
 
-.sub-strip {
+.inline-form {
   display: flex;
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
 }
 
-.surface-box > .sub-strip {
-  padding: 12px 18px;
-  border-bottom: 1px solid var(--hairline);
-  background: var(--bg-subtle);
-}
-
-.sub-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  height: 30px;
+.inline-form input {
+  flex: 1 1 260px;
+  min-width: 0;
+  height: 32px;
   padding: 0 10px;
   border-radius: 8px;
   border: 1px solid var(--border-strong);
   background: var(--bg-surface);
   color: var(--ink);
-  font-size: 12px;
-  font-weight: 500;
-  cursor: pointer;
-  max-width: 100%;
-  transition: border-color 0.14s ease, background-color 0.14s ease;
+  font-size: 12.5px;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
-.sub-chip:has(.icon-button) {
-  padding-right: 5px;
+.inline-form input::placeholder {
+  color: var(--ink-muted);
 }
 
-.sub-chip:hover {
-  border-color: var(--ink-muted);
-  background: var(--bg-subtle);
+.inline-form input:focus {
+  outline: none;
+  border-color: var(--border-focus);
+  box-shadow: 0 0 0 2px var(--focus-ring);
 }
 
 .node-matrix {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 210px), 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 208px), 1fr));
   gap: 8px;
 }
 
@@ -300,8 +236,7 @@
   cursor: default;
 }
 
-.node-cell-main,
-.node-cell > span:first-child:not(.mono-tag):not(.latency-text) {
+.node-cell-main {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -312,8 +247,7 @@
   white-space: nowrap;
 }
 
-.node-cell-name,
-.node-cell-main > span:not(.mono-tag):not(.status-dot) {
+.node-cell-name {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -342,7 +276,7 @@
   color: var(--signal-crimson-text);
 }
 
-/* 4. PulseView — 5-Stage Priority Strip & Virtualized Connection Stream */
+/* 3. RulesView — Priority Strip & Drawer Preset Chips */
 .priority-strip {
   display: flex;
   align-items: center;
@@ -356,9 +290,14 @@
   color: var(--ink-secondary);
 }
 
-.priority-stage,
-.priority-step,
-.priority-item {
+.priority-prefix {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--ink-muted);
+  margin-right: 2px;
+}
+
+.priority-step {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -367,24 +306,83 @@
   white-space: nowrap;
 }
 
-.priority-num,
-.priority-index {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--ink-muted);
-}
-
-.priority-sep,
-.priority-arrow {
+.priority-sep {
   color: var(--ink-muted);
   font-size: 12px;
   user-select: none;
 }
 
-/* Virtualized Connections (Must keep 60px item height matching tokens.ts) */
+.preset-chips {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.preset-chip {
+  height: 27px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-subtle);
+  color: var(--ink-secondary);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: border-color 0.14s ease, background-color 0.14s ease, color 0.14s ease;
+}
+
+.preset-chip:hover {
+  border-color: var(--ink-muted);
+  color: var(--ink);
+  background: var(--bg-surface);
+}
+
+.preset-chip.active {
+  background: var(--cta-bg);
+  border-color: var(--cta-bg);
+  color: var(--cta-fg);
+}
+
+/* 4. LanView — Device Pickers & Proxy Endpoint Copy Pills */
+.endpoint-code-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--hairline);
+  background: var(--bg-subtle);
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+
+.endpoint-code-pill:hover {
+  border-color: var(--border-strong);
+  background: var(--bg-well);
+}
+
+.endpoint-picker-wrap {
+  width: 214px;
+  max-width: 100%;
+  flex-shrink: 0;
+}
+
+@media (max-width: 1240px) {
+  .endpoint-picker-wrap .picker-popover:not(.align-left) {
+    left: auto;
+    right: 0;
+  }
+}
+
+/* 5. ConnectionsView — Virtualized Stream (Must keep 60px item height matching tokens.ts) */
 .conn-rows {
-  height: calc(100vh - 280px);
+  height: calc(100vh - 250px);
   min-height: 380px;
   overflow-y: auto;
   overflow-x: hidden;
@@ -534,7 +532,7 @@
   color: var(--signal-cobalt);
 }
 
-/* 5. SetupWizard — Minimalist Warm-Paper Centered Onboarding */
+/* 6. SetupWizard — Centered Onboarding */
 .wizard-screen {
   min-height: 100vh;
   background-color: var(--bg-canvas);
@@ -548,7 +546,7 @@
 
 .wizard-sheet {
   width: 100%;
-  max-width: 680px;
+  max-width: 660px;
   background: var(--bg-surface);
   border: 1px solid var(--hairline);
   border-radius: 16px;
@@ -559,15 +557,13 @@
   gap: 24px;
 }
 
-.wizard-header,
-.wizard-hero {
+.wizard-header {
   display: flex;
   align-items: center;
   gap: 14px;
 }
 
 .wizard-header h1,
-.wizard-hero h1,
 .wizard-sheet h1 {
   margin: 0;
   font-size: 20px;
@@ -576,8 +572,6 @@
   color: var(--ink);
 }
 
-.wizard-header p,
-.wizard-hero p,
 .wizard-sub {
   margin: 3px 0 0;
   font-size: 13px;
@@ -606,7 +600,6 @@
   background: var(--hairline);
 }
 
-.wizard-alt-grid,
 .wizard-actions {
   display: flex;
   align-items: center;
@@ -614,7 +607,7 @@
   flex-wrap: wrap;
 }
 
-/* 6. Shared Panes: NodeModal, LinkImport, VpsPane, SubDetail, Schedule, MCP, VpsTasks */
+/* 7. Shared Panes: NodeModal, LinkImport, VpsPane, SubDetail, Schedule, MCP, VpsTasks */
 .node-pane,
 .schedule-body,
 .sub-detail-list {
@@ -945,7 +938,7 @@
   fill: currentColor;
 }
 
-/* Floating VPS Deployment Tasks (Right-aligned — Zero Left Sidebar) */
+/* Floating VPS Deployment Tasks */
 .vps-tasks {
   position: fixed;
   left: auto;
@@ -987,20 +980,14 @@
 }
 
 /* Responsive Views */
-@media (max-width: 960px) {
-  .signal-grid,
-  .signal-stage-grid {
+@media (max-width: 1024px) {
+  .overview-cards {
     grid-template-columns: minmax(0, 1fr);
   }
+}
 
-  .signal-core {
-    border-left: none;
-    border-right: none;
-    border-top: 1px solid var(--hairline);
-    border-bottom: 1px solid var(--hairline);
-  }
-
-  .studio-dual-grid {
+@media (max-width: 820px) {
+  .overview-summary-grid {
     grid-template-columns: minmax(0, 1fr);
   }
 }

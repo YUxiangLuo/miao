@@ -118,11 +118,11 @@ export function routeModeConfirmCopy(nextMode: RouteMode): { title: string; mess
   if (nextMode === 'global') {
     return {
       title: '切换为全局代理',
-      message: '关闭内网和国内直连分流，按自定义规则选择出口，其余流量走默认代理（含国内站点）。切换时服务会短暂中断。',
+      message: '关闭内置的内网与大陆直连分流，先按自定义规则匹配，其余流量全部走默认代理。切换时连接会短暂重连。',
     }
   }
   return {
-    title: '切换为分流模式',
-    message: '内网和中国大陆先直连，再匹配自定义规则；其余流量使用默认代理。切换时服务会短暂中断。',
+    title: '切换为规则分流',
+    message: '内网与中国大陆流量优先直连，再匹配自定义规则，其余流量走默认代理。切换时连接会短暂重连。',
   }
 }

@@ -46,10 +46,10 @@ describe('cleanNodeDisplay', () => {
   })
 
   it('strips leading pictographs without inventing country codes and falls back if empty', () => {
-    expect(cleanNodeDisplay(`${PICTO_GLOBE} 公共出海池`)).toEqual({ code: null, name: '公共出海池' })
-    expect(cleanNodeDisplay(`${PICTO_LOCK} 独享静态 IP`)).toEqual({ code: null, name: '独享静态 IP' })
-    expect(cleanNodeDisplay(`${PICTO_BOLT} 自动最快`)).toEqual({ code: null, name: '自动最快' })
-    expect(cleanNodeDisplay(`${PICTO_STOP} 离线熔断`)).toEqual({ code: null, name: '离线熔断' })
+    expect(cleanNodeDisplay(`${PICTO_GLOBE} 默认代理`)).toEqual({ code: null, name: '默认代理' })
+    expect(cleanNodeDisplay(`${PICTO_LOCK} 手动节点`)).toEqual({ code: null, name: '手动节点' })
+    expect(cleanNodeDisplay(`${PICTO_BOLT} 自动优选`)).toEqual({ code: null, name: '自动优选' })
+    expect(cleanNodeDisplay(`${PICTO_STOP} 已阻断`)).toEqual({ code: null, name: '已阻断' })
     expect(cleanNodeDisplay('vps-34-97-90-168')).toEqual({ code: null, name: 'vps-34-97-90-168' })
     expect(cleanNodeDisplay(`  ${PICTO_GLOBE}  `)).toEqual({ code: null, name: PICTO_GLOBE })
     expect(cleanNodeDisplay('   ')).toEqual({ code: null, name: '' })
@@ -58,20 +58,20 @@ describe('cleanNodeDisplay', () => {
 
 describe('SelectPopover', () => {
   const baseOptions: SelectOption[] = [
-    { value: 'pool', label: '公共出海池', tone: 'cobalt' },
-    { value: 'block_overseas', label: '仅限国内办公', tone: 'amber' },
+    { value: 'pool', label: '默认代理', tone: 'cobalt' },
+    { value: 'block_overseas', label: '禁止走代理', tone: 'amber' },
     { value: 'direct', label: '全量直连', tone: 'default' },
     {
-      value: `dedicated:${FLAG_US} 洛杉矶静态住宅`,
-      label: `${FLAG_US} 洛杉矶静态住宅`,
-      group: '独享静态 IP',
+      value: `dedicated:${FLAG_US} 洛杉矶节点`,
+      label: `${FLAG_US} 洛杉矶节点`,
+      group: '手动节点',
       badge: '42 ms',
       tone: 'emerald',
     },
     {
       value: 'dedicated:offline-line',
-      label: '离线专线节点',
-      group: '独享静态 IP',
+      label: '离线节点',
+      group: '手动节点',
       badge: '离线',
       tone: 'crimson',
       disabled: true,
@@ -88,7 +88,7 @@ describe('SelectPopover', () => {
         value={val()}
         options={baseOptions}
         onChange={onChange}
-        ariaLabel="分配终端出口"
+        ariaLabel="设置设备出口策略"
         fullWidth
       />
     ))
@@ -96,25 +96,25 @@ describe('SelectPopover', () => {
     expect(container.querySelectorAll('select')).toHaveLength(0)
     expect(container.querySelector('.picker-root.full-width')).toBeInTheDocument()
 
-    const trigger = screen.getByRole('button', { name: '分配终端出口' })
+    const trigger = screen.getByRole('button', { name: '设置设备出口策略' })
     expect(trigger).toHaveAttribute('aria-expanded', 'false')
-    expect(trigger).toHaveTextContent('公共出海池')
+    expect(trigger).toHaveTextContent('默认代理')
 
     await user.click(trigger)
     expect(trigger).toHaveAttribute('aria-expanded', 'true')
-    expect(screen.getByRole('listbox', { name: '分配终端出口' })).toBeInTheDocument()
+    expect(screen.getByRole('listbox', { name: '设置设备出口策略' })).toBeInTheDocument()
     expect(container.querySelector('.picker-search')).not.toBeInTheDocument()
-    expect(screen.getByText('独享静态 IP')).toHaveClass('picker-group-label')
+    expect(screen.getByText('手动节点')).toHaveClass('picker-group-label')
 
-    const usOption = screen.getByRole('option', { name: /洛杉矶静态住宅/ })
+    const usOption = screen.getByRole('option', { name: /洛杉矶节点/ })
     expect(usOption).toHaveTextContent('US')
     expect(usOption).toHaveTextContent('42 ms')
 
     await user.click(usOption)
-    expect(onChange).toHaveBeenCalledWith(`dedicated:${FLAG_US} 洛杉矶静态住宅`)
+    expect(onChange).toHaveBeenCalledWith(`dedicated:${FLAG_US} 洛杉矶节点`)
     expect(screen.queryByRole('listbox')).not.toBeInTheDocument()
     expect(trigger).toHaveTextContent('US')
-    expect(trigger).toHaveTextContent('洛杉矶静态住宅')
+    expect(trigger).toHaveTextContent('洛杉矶节点')
   })
 
   it('shows instant search above threshold and filters options by keyword or ISO code', async () => {
@@ -187,7 +187,7 @@ describe('SelectPopover', () => {
     await user.click(trigger)
     expect(screen.getByRole('listbox')).toBeInTheDocument()
     await user.keyboard('{ArrowUp}{Enter}')
-    expect(onChange).toHaveBeenLastCalledWith(`dedicated:${FLAG_US} 洛杉矶静态住宅`)
+    expect(onChange).toHaveBeenLastCalledWith(`dedicated:${FLAG_US} 洛杉矶节点`)
     expect(screen.queryByRole('listbox')).not.toBeInTheDocument()
 
     await user.click(trigger)

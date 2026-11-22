@@ -33,8 +33,8 @@ export default function App() {
         <div class="shell-state-screen">
           <div class="shell-state-card" role="status">
             <LogoIcon size={40} />
-            <strong>正在连接 Harbor 网关…</strong>
-            <span class="shell-state-sub">正在同步终端、专属端口与全球线路状态</span>
+            <strong>正在连接 Harbor…</strong>
+            <span class="shell-state-sub">正在读取运行状态与节点配置</span>
           </div>
         </div>
       </Match>
@@ -43,8 +43,8 @@ export default function App() {
         <div class="shell-state-screen">
           <div class="shell-state-card" role="status">
             <LogoIcon size={40} />
-            <strong>网关控制面暂时离线，正在重连…</strong>
-            <span class="shell-state-sub">请确认路由器或 Harbor 服务进程处于运行状态</span>
+            <strong>无法连接 Harbor 服务，正在重连…</strong>
+            <span class="shell-state-sub">请确认 Harbor 服务进程正在运行</span>
           </div>
         </div>
       </Match>
@@ -57,11 +57,13 @@ export default function App() {
           showToast={app.showToast}
           onScanVerge={app.scanClashVerge}
           onImportVerge={app.importClashVergeSubs}
+          vpsSupported={app.status().vps_supported !== false}
         />
         <VpsTasks tasks={app.vpsTasks()} />
         <ToastStack toasts={app.toasts()} onDismiss={app.dismissToast} />
         <NodeModal
           open={app.showNodeModal()}
+          initialMode={app.nodeModalMode()}
           nodeType={app.nodeType()}
           setNodeType={app.setNodeType}
           form={app.nodeForm()}

@@ -12,7 +12,7 @@ type AppController = ReturnType<typeof useAppController>
 
 function createMockApp(overrides: Partial<Record<string, unknown>> = {}): AppController {
   return {
-    activeNav: () => 'studio',
+    activeNav: () => 'overview',
     setActiveNav: rs.fn(),
     openNodeModal: rs.fn(),
     handleRefreshSubscriptions: rs.fn().mockResolvedValue(undefined),
@@ -26,8 +26,8 @@ function createMockApp(overrides: Partial<Record<string, unknown>> = {}): AppCon
     }),
     delays: () => ({ [`${FLAG_JP} 东京高速 01`]: 36, [`${FLAG_US} 洛杉矶原生 02`]: 128 }),
     subs: () => [{ url: 'https://sub.example.com', success: true, node_count: 12, disabled_count: 0, state: 'ready' }],
-    terminals: () => [{ ip: '192.168.8.21', name: '运营工位 A', department: 'TikTok组' }],
-    accessPorts: () => [{ id: 'p1', name: 'TikTok 英区店', port: 20101, outbound: 'uk-line', has_auth: false, blocked: false }],
+    terminals: () => [{ ip: '192.168.8.21', name: 'MacBook Pro', department: '桌面设备' }],
+    accessPorts: () => [{ id: 'p1', name: '独立浏览器 01', port: 20101, outbound: 'uk-line', has_auth: false, blocked: false }],
     status: () => ({
       ready: true,
       running: true,
@@ -57,7 +57,7 @@ describe('useCommandShortcut', () => {
 })
 
 describe('CommandPalette', () => {
-  it('navigates across the 4 studio workspaces and closes on execution', async () => {
+  it('navigates across the 6 workspaces and closes on execution', async () => {
     const user = userEvent.setup()
     const app = createMockApp()
     const onClose = rs.fn()
@@ -72,9 +72,9 @@ describe('CommandPalette', () => {
       />
     ))
 
-    expect(screen.getByRole('dialog', { name: '全局命令面板' })).toBeInTheDocument()
-    await user.click(screen.getByRole('option', { name: /前往 全球线路/ }))
-    expect(app.setActiveNav).toHaveBeenCalledWith('routes')
+    expect(screen.getByRole('dialog', { name: '命令面板' })).toBeInTheDocument()
+    await user.click(screen.getByRole('option', { name: /前往 节点与订阅/ }))
+    expect(app.setActiveNav).toHaveBeenCalledWith('nodes')
     expect(onClose).toHaveBeenCalledTimes(1)
   })
 
@@ -98,14 +98,14 @@ describe('CommandPalette', () => {
     await user.type(input, 'SOCKS5')
     const options = screen.getAllByRole('option')
     expect(options).toHaveLength(1)
-    expect(options[0]).toHaveTextContent('录入独享静态住宅 SOCKS5')
+    expect(options[0]).toHaveTextContent('添加 SOCKS5 节点')
 
     await user.keyboard('{Enter}')
-    expect(app.openNodeModal).toHaveBeenCalledWith('socks-residential')
+    expect(app.openNodeModal).toHaveBeenCalledWith('socks')
     expect(onClose).toHaveBeenCalledTimes(1)
   })
 
-  it('switches shared exit nodes with ArrowDown + Enter and supports Escape / backdrop dismissal', async () => {
+  it('switches default exit nodes with ArrowDown + Enter and supports Escape / backdrop dismissal', async () => {
     const user = userEvent.setup()
     const app = createMockApp()
     const [open, setOpen] = createSignal(true)
@@ -121,7 +121,7 @@ describe('CommandPalette', () => {
     ))
 
     const input = screen.getByRole('textbox', { name: '搜索命令或节点' })
-    await user.type(input, '出口')
+    await user.type(input, '切换出口')
     const exitOptions = screen.getAllByRole('option')
     expect(exitOptions).toHaveLength(2)
     expect(exitOptions[0]).toHaveTextContent('JP')
@@ -146,7 +146,7 @@ describe('CommandPalette', () => {
     expect(open()).toBe(false)
   })
 
-  it('switches the VPS quick action to link import when vps_supported is false', async () => {
+  it('hides VPS quick action when vps_supported is false while keeping link import', async () => {
     const user = userEvent.setup()
     const app = createMockApp({
       status: () => ({
@@ -171,8 +171,8 @@ describe('CommandPalette', () => {
       />
     ))
 
-    expect(screen.queryByRole('option', { name: /SSH 部署海外 VPS/ })).toBeNull()
-    await user.click(screen.getByRole('option', { name: /导入独享专线 \/ 分享链接/ }))
+    expect(screen.queryByRole('option', { name: /SSH 部署 VPS 节点/ })).toBeNull()
+    await user.click(screen.getByRole('option', { name: /粘贴分享链接添加节点/ }))
     expect(app.openNodeModal).toHaveBeenCalledWith('link')
     expect(onClose).toHaveBeenCalledTimes(1)
   })

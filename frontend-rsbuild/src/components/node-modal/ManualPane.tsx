@@ -99,7 +99,7 @@ export function ManualPane(props: ManualPaneProps) {
   const pathTransport = () => ['ws', 'http', 'h2'].includes(props.form.transport_type)
 
   const detourOptions = createMemo<SelectOption[]>(() => [
-    { value: '', label: '直连出境（不使用前置跳板）' },
+    { value: '', label: '直接连接（不使用前置跳板）' },
     ...(props.relayCandidates || [])
       .filter((name) => name !== props.form.tag.trim())
       .map((candidate) => ({ value: candidate, label: candidate })),
@@ -209,11 +209,7 @@ export function ManualPane(props: ManualPaneProps) {
 
         <div class="form-grid single">
           <div class="field">
-            <span>
-              {props.nodeType === 'socks'
-                ? '前置跳板中转（推荐：国内无法直连海外住宅 IP 时指定跳板）'
-                : '前置跳板中转（可选）'}
-            </span>
+            <span>前置跳板节点（可选）</span>
             <SelectPopover
               ariaLabel="前置跳板中转"
               value={props.form.detour}

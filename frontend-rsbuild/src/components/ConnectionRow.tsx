@@ -39,7 +39,7 @@ function formatStudioRuleText(rawRule: string): string {
   const inboundPortArrow = /^inbound[\s=]+access-port:[A-Za-z0-9_-]+\s*(?:→|=>)\s*(?:route\(([^)]+)\)|(.+))$/i.exec(base)
   if (inboundPortArrow) {
     const target = (inboundPortArrow[1] || inboundPortArrow[2] || '').trim()
-    return target ? `端口锁定 → ${formatCleanTarget(target)}` : '端口锁定'
+    return target ? `独立端口 → ${formatCleanTarget(target)}` : '独立端口'
   }
 
   const arrowIdx = base.lastIndexOf(' → ')
@@ -68,7 +68,7 @@ export function ConnectionRow(props: ConnectionRowProps) {
     const meta = props.connection.metadata || {}
     const sourceIp = meta.sourceIP ? (props.seatLabels?.[meta.sourceIP] || meta.sourceIP) : null
     const portId = connectionAccessPortId(props.connection)
-    const portTag = portId ? `专属端口: ${props.portLabels?.[portId] || portId}` : null
+    const portTag = portId ? `端口: ${props.portLabels?.[portId] || portId}` : null
     const rule = connectionRule(props.connection)
     const ruleText = formatStudioRuleText(rule)
     const processName = processNameOf(meta.processPath)

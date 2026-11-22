@@ -84,88 +84,105 @@ export function CommandPalette(props: CommandPaletteProps): JSX.Element {
     const app = ctrl()
     const entries: CommandEntry[] = [
       {
-        id: 'nav:studio',
-        group: '工作面导航',
-        label: '前往 工作台 (Studio)',
-        keywords: 'studio 工作台 首页 总览 流向 overview',
-        badge: app.activeNav() === 'studio' ? '当前' : undefined,
-        run: () => app.setActiveNav('studio'),
+        id: 'nav:overview',
+        group: '页面导航',
+        label: '前往 概览',
+        keywords: 'overview 概览 首页 控制台 总览',
+        badge: app.activeNav() === 'overview' ? '当前' : undefined,
+        run: () => app.setActiveNav('overview'),
       },
       {
-        id: 'nav:endpoints',
-        group: '工作面导航',
-        label: '前往 终端与店铺',
-        keywords: 'endpoints 终端 设备 工位 店铺 端口 指纹浏览器 terminals ports',
-        badge: app.activeNav() === 'endpoints' ? '当前' : undefined,
-        run: () => app.setActiveNav('endpoints'),
+        id: 'nav:nodes',
+        group: '页面导航',
+        label: '前往 节点与订阅',
+        keywords: 'nodes 节点 订阅 测速 线路 subs proxies',
+        badge: app.activeNav() === 'nodes' ? '当前' : undefined,
+        run: () => app.setActiveNav('nodes'),
       },
       {
-        id: 'nav:routes',
-        group: '工作面导航',
-        label: '前往 全球线路',
-        keywords: 'routes 全球线路 独享 静态 专线 订阅 公共池 lines',
-        badge: app.activeNav() === 'routes' ? '当前' : undefined,
-        run: () => app.setActiveNav('routes'),
+        id: 'nav:rules',
+        group: '页面导航',
+        label: '前往 分流规则',
+        keywords: 'rules 分流 规则 路由 域名 直连 拦截',
+        badge: app.activeNav() === 'rules' ? '当前' : undefined,
+        run: () => app.setActiveNav('rules'),
       },
       {
-        id: 'nav:pulse',
-        group: '工作面导航',
-        label: '前往 分流与脉冲',
-        keywords: 'pulse 分流 规则 脉冲 实时连接 审计 探针 policies audit',
-        badge: app.activeNav() === 'pulse' ? '当前' : undefined,
-        run: () => app.setActiveNav('pulse'),
+        id: 'nav:lan',
+        group: '页面导航',
+        label: '前往 设备与端口',
+        keywords: 'lan 局域网 设备 独立端口 代理端口 terminals ports',
+        badge: app.activeNav() === 'lan' ? '当前' : undefined,
+        run: () => app.setActiveNav('lan'),
+      },
+      {
+        id: 'nav:connections',
+        group: '页面导航',
+        label: '前往 实时连接',
+        keywords: 'connections 实时连接 连接 流量 监控 连通性',
+        badge: app.activeNav() === 'connections' ? '当前' : undefined,
+        run: () => app.setActiveNav('connections'),
+      },
+      {
+        id: 'nav:settings',
+        group: '页面导航',
+        label: '前往 系统设置',
+        keywords: 'settings 系统设置 设置 mcp 更新 版本 外观 定时刷新',
+        badge: app.activeNav() === 'settings' ? '当前' : undefined,
+        run: () => app.setActiveNav('settings'),
+      },
+      {
+        id: 'act:link',
+        group: '快捷操作',
+        label: '粘贴分享链接添加节点',
+        keywords: '导入 分享链接 vless hy2 hysteria2 trojan ss vmess tuic link node',
+        badge: '导入',
+        run: () => app.openNodeModal('link'),
       },
       {
         id: 'act:socks5',
         group: '快捷操作',
-        label: '录入独享静态住宅 SOCKS5',
-        keywords: 'socks5 静态 住宅 独享 专线 新增 ip residential',
+        label: '添加 SOCKS5 节点',
+        keywords: 'socks5 手动 代理 节点 新增',
         badge: 'SOCKS5',
-        run: () => app.openNodeModal('socks-residential'),
+        run: () => app.openNodeModal('socks'),
       },
-      app.status().vps_supported !== false
-        ? {
+      ...(app.status().vps_supported !== false
+        ? [{
             id: 'act:vps',
             group: '快捷操作',
-            label: 'SSH 部署海外 VPS / 导入节点',
-            keywords: 'ssh vps 部署 海外 云服务器 导入 分享链接 hysteria2 node',
+            label: 'SSH 部署 VPS 节点',
+            keywords: 'ssh vps 部署 云服务器 hysteria2',
             badge: 'VPS',
             run: () => app.openNodeModal('vps'),
-          }
-        : {
-            id: 'act:vps',
-            group: '快捷操作',
-            label: '导入独享专线 / 分享链接',
-            keywords: '导入 分享链接 独享 专线 hysteria2 vless trojan ss vmess tuic link node',
-            badge: '导入',
-            run: () => app.openNodeModal('link'),
-          },
-      {
-        id: 'act:theme',
-        group: '快捷操作',
-        label: '切换深色 / 浅色外观',
-        keywords: 'theme dark light 深色 浅色 外观 主题 碳黑 暖纸',
-        badge: props.theme === 'dark' ? '深色' : '浅色',
-        run: () => props.onToggleTheme(),
-      },
+          }]
+        : []),
       {
         id: 'act:refresh-subs',
         group: '快捷操作',
         label: '刷新全部订阅源',
         keywords: 'refresh subs 刷新 更新 订阅 节点池',
-        badge: app.subs?.() ? `${app.subs().length} 源` : undefined,
+        badge: app.subs?.() ? `${app.subs().length} 个` : undefined,
         run: () => { void app.handleRefreshSubscriptions() },
+      },
+      {
+        id: 'act:theme',
+        group: '快捷操作',
+        label: '切换深色 / 浅色外观',
+        keywords: 'theme dark light 深色 浅色 外观 主题',
+        badge: props.theme === 'dark' ? '深色' : '浅色',
+        run: () => props.onToggleTheme(),
       },
     ]
 
     for (const port of app.accessPorts?.() ?? []) {
       entries.push({
         id: `port:${port.id}`,
-        group: '终端与店铺',
-        label: `店铺端口 · ${port.name}`,
-        keywords: `${port.name} ${port.port} ${port.outbound} 店铺 端口`,
+        group: '设备与端口',
+        label: `独立端口 · ${port.name}`,
+        keywords: `${port.name} ${port.port} ${port.outbound} 独立端口 端口`,
         badge: `:${port.port}`,
-        run: () => app.setActiveNav('endpoints'),
+        run: () => app.setActiveNav('lan'),
       })
     }
 
@@ -173,11 +190,11 @@ export function CommandPalette(props: CommandPaletteProps): JSX.Element {
       const title = term.name || term.dhcp_hostname || term.ip
       entries.push({
         id: `term:${term.ip}`,
-        group: '终端与店铺',
-        label: `办公设备 · ${title}`,
-        keywords: `${title} ${term.ip} ${term.department ?? ''} ${term.mac ?? ''} 设备 工位`,
+        group: '设备与端口',
+        label: `局域网设备 · ${title}`,
+        keywords: `${title} ${term.ip} ${term.department ?? ''} ${term.mac ?? ''} 局域网 设备`,
         badge: term.ip,
-        run: () => app.setActiveNav('endpoints'),
+        run: () => app.setActiveNav('lan'),
       })
     }
 
@@ -188,7 +205,7 @@ export function CommandPalette(props: CommandPaletteProps): JSX.Element {
       const isCurrent = currentExitNode() === nodeName
       entries.push({
         id: `exit:${nodeName}`,
-        group: '切换公共池出口',
+        group: '切换默认出口',
         label: `切换出口 · ${display.name}`,
         keywords: `${nodeName} ${display.name} ${display.code ?? ''} 出口 切换 节点 proxy`,
         code: display.code,
@@ -300,7 +317,7 @@ export function CommandPalette(props: CommandPaletteProps): JSX.Element {
           class="cmd-dialog"
           role="dialog"
           aria-modal="true"
-          aria-label="全局命令面板"
+          aria-label="命令面板"
           onClick={(event) => event.stopPropagation()}
           onKeyDown={handleDialogKeyDown}
         >
@@ -310,7 +327,7 @@ export function CommandPalette(props: CommandPaletteProps): JSX.Element {
               ref={(el) => { inputEl = el }}
               type="text"
               aria-label="搜索命令或节点"
-              placeholder="搜索工作面、快捷指令或出口节点…"
+              placeholder="搜索页面、快捷操作或出口节点…"
               value={query()}
               onInput={(event) => {
                 setQuery(event.currentTarget.value)
@@ -323,7 +340,7 @@ export function CommandPalette(props: CommandPaletteProps): JSX.Element {
           <div ref={(el) => { listEl = el }} class="cmd-list" role="listbox" aria-label="命令结果">
             <Show
               when={filteredRows().length > 0}
-              fallback={<div class="cmd-group-title">未找到匹配的命令或节点</div>}
+              fallback={<div class="cmd-empty">未找到匹配的命令或节点</div>}
             >
               <For each={filteredRows()}>
                 {(row, index) => (

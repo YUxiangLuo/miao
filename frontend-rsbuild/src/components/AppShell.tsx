@@ -1,32 +1,46 @@
 import { For, Match, Show, Switch, createEffect, createMemo, createSignal } from 'solid-js'
 import { ICON } from '../tokens'
 import { useTheme } from '../hooks/useTheme'
-import { LogoIcon, ToastStack } from './ui'
+import { Button, LogoIcon, ToastStack } from './ui'
 import { ConfirmModal } from './ConfirmModal'
 import { NodeModal } from './node-modal/NodeModal'
 import { SubDetailModal } from './SubDetailModal'
 import { ScheduleModal } from './ScheduleModal'
 import { VpsTasks } from './VpsTasks'
-import { GatewayPopover } from './GatewayPopover'
 import { CommandPalette, useCommandShortcut } from './CommandPalette'
 import { buildTerminalRows } from '../domain/terminals'
 import { buildAccessPortRows } from '../domain/accessPorts'
-import { StudioView } from '../views/StudioView'
-import { EndpointsView } from '../views/EndpointsView'
-import { RoutesView } from '../views/RoutesView'
-import { PulseView } from '../views/PulseView'
+import { OverviewView } from '../views/OverviewView'
+import { NodesView } from '../views/NodesView'
+import { RulesView } from '../views/RulesView'
+import { LanView } from '../views/LanView'
+import { ConnectionsView } from '../views/ConnectionsView'
+import { SettingsView } from '../views/SettingsView'
 import { classNames, formatSpeed } from '../utils'
 import type { ConsoleNavKey } from '../hooks/useAppData'
-import type { SubStatus } from '../types/api'
+import type { RouteMode, SubStatus } from '../types/api'
 import type { useAppController } from '../hooks/useAppController'
-import { MoonIcon, SearchIcon, SunIcon } from './icons'
+import {
+  ActivityIcon,
+  GlobeIcon,
+  LayoutDashboardIcon,
+  MoonIcon,
+  NetworkIcon,
+  PlayIcon,
+  RouteIcon,
+  SearchIcon,
+  SettingsIcon,
+  SquareIcon,
+  SunIcon,
+  type IconProps,
+} from './icons'
 
 type AppController = ReturnType<typeof useAppController>
 
 function detectMobileViewport(): boolean {
   if (typeof window === 'undefined') return false
-  if (window.innerWidth > 0 && window.innerWidth <= 760) return true
-  return Boolean(window.matchMedia?.('(max-width: 760px)')?.matches)
+  if (window.innerWidth > 0 && window.innerWidth <= 820) return true
+  return Boolean(window.matchMedia?.('(max-width: 820px)')?.matches)
 }
 
 export function AppShell(props: { app: AppController }) {
@@ -45,7 +59,7 @@ export function AppShell(props: { app: AppController }) {
       if (typeof window === 'undefined') return
       const syncViewport = () => setIsMobile(detectMobileViewport())
       window.addEventListener('resize', syncViewport)
-      const mql = window.matchMedia?.('(max-width: 760px)')
+      const mql = window.matchMedia?.('(max-width: 820px)')
       mql?.addEventListener?.('change', syncViewport)
       return () => {
         window.removeEventListener('resize', syncViewport)
@@ -66,121 +80,324 @@ export function AppShell(props: { app: AppController }) {
     connections: app().connectionsInfo().connections,
   }))
 
-  const failClosedCount = createMemo(() => (
+  const lanAlertCount = createMemo(() => (
     terminalRows().filter((r) => r.failClosed).length
     + accessPortRows().filter((r) => r.blocked).length
   ))
 
+  const skippedRuleCount = createMemo(() => (
+    app().rules().filter((r) => r.skipped).length
+  ))
+
+  const statusTone = createMemo(() => {
+    if (app().status().ready) return 'emerald pulse'
+    if (app().status().initializing) return 'amber'
+    return 'muted'
+  })
+
+  const statusText = createMemo(() => {
+    if (app().status().ready) return '运行中'
+    if (app().status().initializing) return '启动中'
+    return '已停止'
+  })
+
+  const switchRouteMode = (mode: RouteMode) => {
+    if (mode === app().status().route_mode) return
+    app().handleOpenSetRouteModeConfirm(mode)
+  }
+
   const navItems: ReadonlyArray<{
     key: ConsoleNavKey
     label: string
-    hasAlert: () => boolean
+    shortLabel: string
+    icon: (props: IconProps) => ReturnType<typeof LayoutDashboardIcon>
+    badge?: () => string | undefined
+    alertTone?: () => 'crimson' | 'emerald' | undefined
   }> = [
-    { key: 'studio', label: '工作台', hasAlert: () => failClosedCount() > 0 },
-    { key: 'endpoints', label: '终端与店铺', hasAlert: () => failClosedCount() > 0 },
-    { key: 'routes', label: '全球线路', hasAlert: () => false },
-    { key: 'pulse', label: '分流与脉冲', hasAlert: () => false },
+    {
+      key: 'overview',
+      label: '概览',
+      shortLabel: '概览',
+      icon: LayoutDashboardIcon,
+    },
+    {
+      key: 'nodes',
+      label: '节点与订阅',
+      shortLabel: '节点',
+      icon: GlobeIcon,
+      badge: () => {
+        const poolCount = app().primaryGroup()?.all?.length ?? 0
+        if (poolCount > 0) return String(poolCount)
+        const manualCount = app().nodes().length
+        return manualCount > 0 ? String(manualCount) : undefined
+      },
+    },
+    {
+      key: 'rules',
+      label: '分流规则',
+      shortLabel: '规则',
+      icon: RouteIcon,
+      badge: () => (app().rules().length > 0 ? String(app().rules().length) : undefined),
+      alertTone: () => (skippedRuleCount() > 0 ? 'crimson' : undefined),
+    },
+    {
+      key: 'lan',
+      label: '设备与端口',
+      shortLabel: '局域网',
+      icon: NetworkIcon,
+      badge: () => {
+        const total = terminalRows().length + accessPortRows().length
+        return total > 0 ? String(total) : undefined
+      },
+      alertTone: () => (lanAlertCount() > 0 ? 'crimson' : undefined),
+    },
+    {
+      key: 'connections',
+      label: '实时连接',
+      shortLabel: '连接',
+      icon: ActivityIcon,
+      badge: () => {
+        const count = app().connectionsInfo().connections.length
+        return app().status().ready && count > 0 ? String(count) : undefined
+      },
+    },
+    {
+      key: 'settings',
+      label: '系统设置',
+      shortLabel: '设置',
+      icon: SettingsIcon,
+      alertTone: () => (app().versionInfo().has_update ? 'emerald' : undefined),
+    },
   ]
 
   return (
-    <div class="studio-shell">
-      <header class="studio-topbar">
-        <div class="studio-topbar-inner">
-          <div class="studio-brand">
-            <LogoIcon size={26} />
-            <span class="studio-brand-name">Harbor</span>
-            <GatewayPopover app={app()} />
-          </div>
-
-          <Show when={!isMobile()}>
-            <nav class="studio-nav-rail" role="navigation" aria-label="主工作区">
-              <For each={navItems}>
-                {(item) => (
-                  <button
-                    type="button"
-                    class={classNames('studio-nav-tab', app().activeNav() === item.key && 'active')}
-                    aria-current={app().activeNav() === item.key ? 'page' : undefined}
-                    onClick={() => app().setActiveNav(item.key)}
-                  >
-                    <span>{item.label}</span>
-                    <Show when={item.hasAlert()}>
-                      <span class="studio-nav-dot" aria-hidden="true" />
-                    </Show>
-                  </button>
+    <div class="app-layout">
+      {/* Desktop Left Sidebar */}
+      <Show when={!isMobile()}>
+        <aside class="app-sidebar" aria-label="侧边栏">
+          <div class="sidebar-top">
+            <div class="sidebar-brand">
+              <div class="sidebar-brand-main">
+                <LogoIcon size={26} />
+                <span class="sidebar-brand-name">Harbor</span>
+              </div>
+              <Show when={app().versionInfo().current}>
+                {(ver) => (
+                  <span class="mono-tag">
+                    v{ver().replace(/^v/, '')}
+                  </span>
                 )}
-              </For>
-            </nav>
-          </Show>
-
-          <div class="studio-topbar-right">
-            <div class="studio-speed-readout num" aria-label="实时总吞吐">
-              <span>↓ {formatSpeed(app().traffic().down ?? 0)}</span>
-              <span style={{ color: 'var(--border-strong)' }}>·</span>
-              <span>↑ {formatSpeed(app().traffic().up ?? 0)}</span>
+              </Show>
             </div>
 
             <button
               type="button"
-              class="studio-cmd-trigger"
-              aria-label="打开全局命令面板"
-              title="全局命令面板 (⌘K)"
+              class="sidebar-cmd-btn"
+              aria-label="打开命令面板"
+              title="快速搜索或跳转 (⌘K)"
               onClick={() => setCmdOpen(true)}
             >
-              <SearchIcon size={13} />
-              <span>命令</span>
+              <span class="sidebar-cmd-label">
+                <SearchIcon size={13} />
+                <span>搜索或跳转…</span>
+              </span>
               <span class="kbd-chip">⌘K</span>
             </button>
 
+            <nav class="sidebar-nav" role="navigation" aria-label="主导航">
+              <For each={navItems}>
+                {(item) => {
+                  const IconComp = item.icon
+                  return (
+                    <button
+                      type="button"
+                      class={classNames('sidebar-nav-item', app().activeNav() === item.key && 'active')}
+                      aria-current={app().activeNav() === item.key ? 'page' : undefined}
+                      onClick={() => app().setActiveNav(item.key)}
+                    >
+                      <span class="sidebar-nav-main">
+                        <IconComp size={16} />
+                        <span>{item.label}</span>
+                      </span>
+                      <span class="sidebar-nav-end">
+                        <Show when={item.alertTone?.()}>
+                          {(tone) => (
+                            <span
+                              class={classNames('status-dot', tone())}
+                              aria-hidden="true"
+                            />
+                          )}
+                        </Show>
+                        <Show when={item.badge?.()}>
+                          {(badgeText) => <span class="sidebar-nav-count num">{badgeText()}</span>}
+                        </Show>
+                      </span>
+                    </button>
+                  )
+                }}
+              </For>
+            </nav>
+          </div>
+
+          {/* Persistent Engine & Route Mode Dock */}
+          <div class="sidebar-dock" aria-label="运行控制栏">
+            <div class="sidebar-dock-row">
+              <span class="sidebar-status">
+                <span class={classNames('status-dot', statusTone())} aria-hidden="true" />
+                <strong>{statusText()}</strong>
+              </span>
+
+              <Show
+                when={app().status().running || app().status().ready}
+                fallback={
+                  <Button
+                    tone="primary"
+                    size="sm"
+                    icon={<PlayIcon size={ICON.xs} />}
+                    loading={app().pendingActions().has('startService')}
+                    onClick={() => { void app().handleStartService() }}
+                  >
+                    启动
+                  </Button>
+                }
+              >
+                <Button
+                  tone="secondary"
+                  size="sm"
+                  icon={<SquareIcon size={ICON.xs} />}
+                  loading={app().pendingActions().has('stopService')}
+                  onClick={() => app().handleOpenStopServiceConfirm()}
+                >
+                  停止
+                </Button>
+              </Show>
+            </div>
+
+            <div class="seg-rail full" role="group" aria-label="分流模式切换">
+              <button
+                type="button"
+                class={classNames('seg-btn', app().status().route_mode === 'rule' && 'active')}
+                aria-pressed={app().status().route_mode === 'rule' ? 'true' : 'false'}
+                disabled={app().pendingActions().has('routeMode')}
+                onClick={() => switchRouteMode('rule')}
+              >
+                规则分流
+              </button>
+              <button
+                type="button"
+                class={classNames('seg-btn', app().status().route_mode === 'global' && 'active')}
+                aria-pressed={app().status().route_mode === 'global' ? 'true' : 'false'}
+                disabled={app().pendingActions().has('routeMode')}
+                onClick={() => switchRouteMode('global')}
+              >
+                全局代理
+              </button>
+            </div>
+
+            <div class="sidebar-dock-foot">
+              <div class="sidebar-speed num" aria-label="实时速率">
+                <span>↓ {formatSpeed(app().traffic().down ?? 0)}</span>
+                <span>↑ {formatSpeed(app().traffic().up ?? 0)}</span>
+              </div>
+              <button
+                type="button"
+                class="icon-button subtle"
+                aria-label={theme() === 'dark' ? '切换为浅色外观' : '切换为深色外观'}
+                title={theme() === 'dark' ? '切换为浅色外观' : '切换为深色外观'}
+                onClick={toggleTheme}
+              >
+                {theme() === 'dark' ? <SunIcon size={14} /> : <MoonIcon size={14} />}
+              </button>
+            </div>
+          </div>
+        </aside>
+      </Show>
+
+      {/* Mobile Compact Header */}
+      <Show when={isMobile()}>
+        <header class="mobile-topbar">
+          <div class="mobile-topbar-left">
+            <LogoIcon size={24} />
+            <span class="sidebar-brand-name">Harbor</span>
+            <span class="status-inline">
+              <span class={classNames('status-dot', statusTone())} aria-hidden="true" />
+              <span>{statusText()}</span>
+            </span>
+          </div>
+          <div class="mobile-topbar-right">
+            <button
+              type="button"
+              class="icon-button"
+              aria-label="打开命令面板"
+              onClick={() => setCmdOpen(true)}
+            >
+              <SearchIcon size={ICON.md} />
+            </button>
             <button
               type="button"
               class="icon-button"
               aria-label={theme() === 'dark' ? '切换为浅色外观' : '切换为深色外观'}
-              title={theme() === 'dark' ? '切换为浅色外观' : '切换为深色外观'}
               onClick={toggleTheme}
             >
               {theme() === 'dark' ? <SunIcon size={ICON.md} /> : <MoonIcon size={ICON.md} />}
             </button>
           </div>
-        </div>
-      </header>
+        </header>
+      </Show>
 
-      <main class="studio-canvas">
-        <Switch>
-          <Match when={app().activeNav() === 'studio'}>
-            <StudioView app={app()} />
-          </Match>
-          <Match when={app().activeNav() === 'endpoints'}>
-            <EndpointsView app={app()} />
-          </Match>
-          <Match when={app().activeNav() === 'routes'}>
-            <RoutesView
-              app={app()}
-              onInspectSub={setInspectingSub}
-              onOpenSchedule={() => setShowScheduleModal(true)}
-            />
-          </Match>
-          <Match when={app().activeNav() === 'pulse'}>
-            <PulseView app={app()} />
-          </Match>
-        </Switch>
+      {/* Main Single Workspace */}
+      <main class="app-main">
+        <div class="app-content">
+          <Switch>
+            <Match when={app().activeNav() === 'overview'}>
+              <OverviewView app={app()} />
+            </Match>
+            <Match when={app().activeNav() === 'nodes'}>
+              <NodesView
+                app={app()}
+                onInspectSub={setInspectingSub}
+                onOpenSchedule={() => setShowScheduleModal(true)}
+              />
+            </Match>
+            <Match when={app().activeNav() === 'rules'}>
+              <RulesView app={app()} />
+            </Match>
+            <Match when={app().activeNav() === 'lan'}>
+              <LanView app={app()} />
+            </Match>
+            <Match when={app().activeNav() === 'connections'}>
+              <ConnectionsView app={app()} />
+            </Match>
+            <Match when={app().activeNav() === 'settings'}>
+              <SettingsView
+                app={app()}
+                theme={theme()}
+                onToggleTheme={toggleTheme}
+                onOpenSchedule={() => setShowScheduleModal(true)}
+              />
+            </Match>
+          </Switch>
+        </div>
       </main>
 
+      {/* Mobile Bottom Navigation */}
       <Show when={isMobile()}>
-        <nav class="studio-mobile-dock" role="navigation" aria-label="主工作区">
+        <nav class="mobile-dock" role="navigation" aria-label="主导航">
           <For each={navItems}>
-            {(item) => (
-              <button
-                type="button"
-                class={classNames('studio-nav-tab', app().activeNav() === item.key && 'active')}
-                aria-current={app().activeNav() === item.key ? 'page' : undefined}
-                onClick={() => app().setActiveNav(item.key)}
-              >
-                <span>{item.label}</span>
-                <Show when={item.hasAlert()}>
-                  <span class="studio-nav-dot" aria-hidden="true" />
-                </Show>
-              </button>
-            )}
+            {(item) => {
+              const IconComp = item.icon
+              return (
+                <button
+                  type="button"
+                  class={classNames('mobile-dock-item', app().activeNav() === item.key && 'active')}
+                  aria-current={app().activeNav() === item.key ? 'page' : undefined}
+                  onClick={() => app().setActiveNav(item.key)}
+                >
+                  <IconComp size={16} />
+                  <span>{item.shortLabel}</span>
+                </button>
+              )
+            }}
           </For>
         </nav>
       </Show>
@@ -198,6 +415,7 @@ export function AppShell(props: { app: AppController }) {
 
       <NodeModal
         open={app().showNodeModal()}
+        initialMode={app().nodeModalMode()}
         nodeType={app().nodeType()}
         setNodeType={app().setNodeType}
         form={app().nodeForm()}

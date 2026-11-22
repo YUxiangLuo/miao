@@ -15,30 +15,31 @@ import type { useAppController } from '../hooks/useAppController'
 import {
   ClockIcon,
   DownloadIcon,
-  LockIcon,
+  ListPlusIcon,
   PlusIcon,
   RefreshCwIcon,
+  RocketIcon,
   SearchIcon,
+  ServerIcon,
   Trash2Icon,
-  XIcon,
   ZapIcon,
 } from '../components/icons'
 
 type AppController = ReturnType<typeof useAppController>
 
-export interface RoutesViewProps {
+export interface NodesViewProps {
   app: AppController
   onInspectSub: (sub: SubStatus) => void
   onOpenSchedule: () => void
 }
 
-const NODE_SELECT_OPTIONS: ReadonlyArray<{ value: NodeSelect; label: string }> = [
-  { value: 'manual', label: '手动选路' },
-  { value: 'fastest_hk', label: '自动 · HK' },
-  { value: 'fastest_jp', label: '自动 · JP' },
-  { value: 'fastest_sg', label: '自动 · SG' },
-  { value: 'fastest_us', label: '自动 · US' },
-  { value: 'fastest_tw', label: '自动 · TW' },
+const STRATEGY_OPTIONS: SelectOption[] = [
+  { value: 'manual', label: '手动选择' },
+  { value: 'fastest_hk', label: '自动优选 · 香港 (HK)' },
+  { value: 'fastest_jp', label: '自动优选 · 日本 (JP)' },
+  { value: 'fastest_sg', label: '自动优选 · 新加坡 (SG)' },
+  { value: 'fastest_us', label: '自动优选 · 美国 (US)' },
+  { value: 'fastest_tw', label: '自动优选 · 台湾 (TW)' },
 ]
 
 const REGION_CODE_LABELS: Record<ProxyRegionId, string> = {
@@ -52,31 +53,20 @@ const REGION_CODE_LABELS: Record<ProxyRegionId, string> = {
   other: '其他',
 }
 
-function formatProtocolTag(nodeType: string): string {
-  switch (nodeType.toLowerCase()) {
-    case 'socks':
-      return 'SOCKS5'
-    case 'hysteria2':
-      return 'HY2'
-    case 'ss':
-    case 'shadowsocks':
-      return 'SS'
-    case 'vless':
-      return 'VLESS'
-    case 'vmess':
-      return 'VMESS'
-    case 'trojan':
-      return 'TROJAN'
-    case 'anytls':
-      return 'ANYTLS'
-    case 'tuic':
-      return 'TUIC'
-    default:
-      return nodeType.toUpperCase()
+function formatSubStateText(sub: SubStatus): string {
+  const enabledCount = Math.max(0, sub.node_count - sub.disabled_count)
+  if (sub.state === 'refreshing') return '正在拉取更新…'
+  if (sub.state === 'failed') {
+    return sub.error ? `拉取失败：${sub.error}` : '拉取失败'
   }
+  if (sub.state === 'pending') return '等待首次拉取'
+  if (sub.disabled_count > 0) {
+    return `已启用 ${enabledCount} / 共 ${sub.node_count} 个节点`
+  }
+  return `共 ${sub.node_count} 个节点`
 }
 
-export function RoutesView(props: RoutesViewProps) {
+export function NodesView(props: NodesViewProps) {
   const app = () => props.app
 
   const [subUrl, setSubUrl] = createSignal('')
@@ -86,7 +76,7 @@ export function RoutesView(props: RoutesViewProps) {
   const [poolRegion, setPoolRegion] = createSignal<ProxyRegionId>('all')
   const [poolQuery, setPoolQuery] = createSignal('')
 
-  const dedicatedLines = createMemo(() => buildDedicatedLines({
+  const manualLines = createMemo(() => buildDedicatedLines({
     nodes: app().nodes(),
     rules: app().rules(),
     accessPorts: app().accessPorts(),
@@ -106,7 +96,7 @@ export function RoutesView(props: RoutesViewProps) {
     { value: '', label: '不限倍率' },
     ...app().status().multiplier_options.map((mult) => ({
       value: mult,
-      label: `最高 ${mult}x`,
+      label: `≤ ${mult}x`,
     })),
   ])
 
@@ -176,144 +166,36 @@ export function RoutesView(props: RoutesViewProps) {
 
   return (
     <>
-      {/* Section 1: Dedicated Static IP Assets */}
-      <section class="surface-box" aria-label="独享静态 IP">
-        <div class="surface-header">
-          <h2 class="surface-title">
-            <span>独享静态 IP</span>
-            <span class="mono-tag num">{dedicatedLines().length}</span>
-          </h2>
-          <div class="surface-actions">
-            <Button
-              tone="secondary"
-              size="sm"
-              icon={<LockIcon size={ICON.xs} />}
-              onClick={() => app().openNodeModal('socks-residential')}
-            >
-              录入住宅 SOCKS5
-            </Button>
-            <Button
-              tone="primary"
-              size="sm"
-              icon={<PlusIcon size={ICON.xs} />}
-              onClick={() => app().openNodeModal('vps')}
-            >
-              部署 VPS / 导入
-            </Button>
-          </div>
+      <header class="page-header">
+        <div>
+          <h1 class="page-title">节点与订阅</h1>
+          <p class="page-subtitle">管理远程订阅链接、手动代理节点与测速选路</p>
         </div>
+        <div class="page-actions">
+          <Button
+            tone="secondary"
+            size="sm"
+            icon={<PlusIcon size={ICON.xs} />}
+            onClick={() => setAddingSubOpen(true)}
+          >
+            添加订阅
+          </Button>
+          <Button
+            tone="primary"
+            size="sm"
+            icon={<ListPlusIcon size={ICON.xs} />}
+            onClick={() => app().openNodeModal('link')}
+          >
+            添加节点
+          </Button>
+        </div>
+      </header>
 
-        <Show
-          when={dedicatedLines().length > 0}
-          fallback={
-            <div class="empty-state empty-block">
-              尚未录入独享静态 IP。可录入海外静态住宅 SOCKS5 或部署独享云服务器。
-            </div>
-          }
-        >
-          <div class="hairline-list">
-            <For each={dedicatedLines()} keyed={(row) => row.node.tag}>
-              {(row) => {
-                const cleaned = () => cleanNodeDisplay(row().node.tag)
-                const tone = () => getDelayTone(row().delay)
-                return (
-                  <div class={classNames('hairline-row', !row().relayExists && 'danger-tint')}>
-                    <div class="row-main">
-                      <div class="row-title">
-                        <span
-                          class={classNames(
-                            'status-dot',
-                            !row().relayExists
-                              ? 'crimson'
-                              : tone() === 'timeout'
-                                ? 'amber'
-                                : row().isStaticResidential
-                                  ? 'emerald'
-                                  : 'cobalt',
-                          )}
-                        />
-                        <Show when={cleaned().code}>
-                          {(code) => <span class="mono-tag">{code()}</span>}
-                        </Show>
-                        <span>{cleaned().name}</span>
-                        <span class="mono-tag">{formatProtocolTag(row().node.node_type)}</span>
-                        <Show when={row().boundSeatCount > 0}>
-                          <span class="mono-tag num">{row().boundSeatCount} 台设备</span>
-                        </Show>
-                        <Show when={row().boundPortCount > 0}>
-                          <span class="mono-tag num">{row().boundPortCount} 个店铺端口</span>
-                        </Show>
-                      </div>
-                      <div
-                        class="row-sub mono"
-                        style={{ display: 'flex', 'align-items': 'center', gap: '8px', 'flex-wrap': 'wrap' }}
-                      >
-                        <span>
-                          {row().node.server}:{row().node.server_port}
-                          {row().node.sni ? ` · ${row().node.sni}` : ''}
-                        </span>
-                        <Show when={row().detourRelay}>
-                          {(detour) => (
-                            <span class={classNames('chain-pill', !row().relayExists && 'danger')}>
-                              {cleanNodeDisplay(detour()).name} ──▶ {cleaned().name}
-                              {!row().relayExists ? '（前置缺失）' : ''}
-                            </span>
-                          )}
-                        </Show>
-                      </div>
-                    </div>
-
-                    <div class="row-end">
-                      <span
-                        class={classNames(
-                          'latency-text',
-                          'num',
-                          tone() === 'fast'
-                            ? 'fast'
-                            : tone() === 'medium'
-                              ? 'medium'
-                              : (tone() === 'slow' || tone() === 'timeout') && 'slow',
-                        )}
-                      >
-                        {row().testing
-                          ? '测速中'
-                          : row().delay == null
-                            ? '测速'
-                            : formatDelay(row().delay)}
-                      </span>
-                      <button
-                        type="button"
-                        class="icon-button"
-                        aria-label={`测速 ${cleaned().name}`}
-                        title="节点测速"
-                        disabled={!app().status().ready || row().testing}
-                        onClick={() => app().handleTestDelay(row().node.tag)}
-                      >
-                        <ZapIcon size={ICON.sm} />
-                      </button>
-                      <button
-                        type="button"
-                        class="icon-button danger"
-                        aria-label={`删除专线 ${row().node.tag}`}
-                        title="删除独享静态 IP"
-                        onClick={() => app().handleOpenDeleteNodeConfirm(row().node.tag)}
-                      >
-                        <Trash2Icon size={ICON.sm} />
-                      </button>
-                    </div>
-                  </div>
-                )
-              }}
-            </For>
-          </div>
-        </Show>
-      </section>
-
-      {/* Section 2: Shared Outbound Subscription Pool */}
-      <section class="surface-box" aria-label="公共出海池">
+      {/* Section 1: Subscriptions */}
+      <section class="surface-box" aria-label="订阅源">
         <div class="surface-header">
           <h2 class="surface-title">
-            <span>公共出海池</span>
+            <span>订阅源</span>
             <span class="mono-tag num">{app().subs().length}</span>
           </h2>
           <div class="surface-actions">
@@ -323,7 +205,7 @@ export function RoutesView(props: RoutesViewProps) {
               icon={<ClockIcon size={ICON.xs} />}
               onClick={props.onOpenSchedule}
             >
-              定时更新
+              定时刷新
             </Button>
             <Button
               tone="secondary"
@@ -333,10 +215,10 @@ export function RoutesView(props: RoutesViewProps) {
               disabled={app().subs().length === 0}
               onClick={app().handleOpenRefreshSubscriptionsConfirm}
             >
-              刷新订阅
+              刷新全部
             </Button>
             <Button
-              tone="primary"
+              tone="secondary"
               size="sm"
               icon={<PlusIcon size={ICON.xs} />}
               onClick={() => setAddingSubOpen((prev) => !prev)}
@@ -346,78 +228,11 @@ export function RoutesView(props: RoutesViewProps) {
           </div>
         </div>
 
-        <Show when={app().subs().length > 0}>
-          <div class="sub-strip" role="list" aria-label="订阅源列表">
-            <For each={app().subs()} keyed={(sub) => sub.url}>
-              {(sub) => {
-                const enabledCount = () => Math.max(0, sub().node_count - sub().disabled_count)
-                const dotTone = () => (
-                  sub().state === 'ready'
-                    ? 'emerald'
-                    : sub().state === 'refreshing'
-                      ? 'cobalt pulse'
-                      : sub().state === 'failed'
-                        ? 'crimson'
-                        : 'amber'
-                )
-                return (
-                  <div class="sub-chip" role="listitem">
-                    <button
-                      type="button"
-                      onClick={() => props.onInspectSub(sub())}
-                      title={`${sub().url} · 点击管理节点启停`}
-                      style={{
-                        display: 'inline-flex',
-                        'align-items': 'center',
-                        gap: '7px',
-                        border: 'none',
-                        background: 'transparent',
-                        padding: '0',
-                        color: 'inherit',
-                        font: 'inherit',
-                        cursor: 'pointer',
-                        'min-width': '0',
-                      }}
-                    >
-                      <span class={classNames('status-dot', dotTone())} />
-                      <span class="mono">{maskSubscription(sub().url)}</span>
-                      <span class="mono-tag num">
-                        {sub().disabled_count > 0
-                          ? `${enabledCount()}/${sub().node_count}`
-                          : `${sub().node_count}`}
-                      </span>
-                    </button>
-                    <button
-                      type="button"
-                      class="icon-button danger"
-                      style={{ width: '22px', height: '22px' }}
-                      aria-label={`删除订阅 ${maskSubscription(sub().url)}`}
-                      title="删除订阅源"
-                      onClick={() => app().handleOpenDeleteSubConfirm(sub().url)}
-                    >
-                      <XIcon size={12} />
-                    </button>
-                  </div>
-                )
-              }}
-            </For>
-          </div>
-        </Show>
-
-        <div class="surface-body" style={{ display: 'flex', 'flex-direction': 'column', gap: '16px' }}>
-          <Show when={addingSubOpen()}>
+        <Show when={addingSubOpen()}>
+          <div class="inline-form-bar">
             <form
+              class="inline-form"
               onSubmit={(e) => { void submitSubscription(e) }}
-              style={{
-                display: 'flex',
-                'align-items': 'center',
-                gap: '8px',
-                'flex-wrap': 'wrap',
-                padding: '10px 12px',
-                'border-radius': '10px',
-                background: 'var(--bg-subtle)',
-                border: '1px solid var(--hairline)',
-              }}
             >
               <input
                 data-autofocus
@@ -426,17 +241,6 @@ export function RoutesView(props: RoutesViewProps) {
                 value={subUrl()}
                 disabled={app().pendingActions().has('addSub')}
                 onInput={(e) => setSubUrl(e.currentTarget.value)}
-                style={{
-                  flex: '1',
-                  'min-width': '240px',
-                  height: '30px',
-                  padding: '0 10px',
-                  'border-radius': '7px',
-                  border: '1px solid var(--border-strong)',
-                  background: 'var(--bg-surface)',
-                  color: 'var(--ink)',
-                  'font-size': '12.5px',
-                }}
               />
               <Button
                 type="submit"
@@ -459,49 +263,247 @@ export function RoutesView(props: RoutesViewProps) {
                 取消
               </Button>
             </form>
-          </Show>
 
-          <Show when={vergeItems()}>
-            {(items) => (
-              <div class="circuit-banner">
-                <span>
-                  检测到 {items().length} 个本机 Clash Verge 订阅源（{items().filter((i) => !i.already_added).length} 个待导入）
-                </span>
-                <div style={{ display: 'flex', 'align-items': 'center', gap: '8px' }}>
-                  <Button
-                    tone="primary"
-                    size="sm"
-                    loading={app().pendingActions().has('importVerge')}
-                    onClick={() => { void importAvailableVerge() }}
-                  >
-                    确认导入
-                  </Button>
-                  <Button tone="ghost" size="sm" onClick={() => setVergeItems(null)}>
-                    取消
-                  </Button>
+            <Show when={vergeItems()}>
+              {(items) => (
+                <div class="circuit-banner" style={{ 'margin-top': '10px' }}>
+                  <span>
+                    检测到 {items().length} 个本机 Clash Verge 订阅源（{items().filter((i) => !i.already_added).length} 个未添加）
+                  </span>
+                  <div class="surface-actions">
+                    <Button
+                      tone="primary"
+                      size="sm"
+                      loading={app().pendingActions().has('importVerge')}
+                      onClick={() => { void importAvailableVerge() }}
+                    >
+                      确认导入
+                    </Button>
+                    <Button tone="ghost" size="sm" onClick={() => setVergeItems(null)}>
+                      取消
+                    </Button>
+                  </div>
                 </div>
-              </div>
-            )}
-          </Show>
+              )}
+            </Show>
+          </div>
+        </Show>
 
-          <div class="studio-toolbar">
-            <div class="seg-rail" role="group" aria-label="公共池选路策略">
-              <For each={NODE_SELECT_OPTIONS}>
-                {(opt) => (
-                  <button
-                    type="button"
-                    class={classNames('seg-btn', requestedSelect() === opt.value && 'active')}
-                    aria-pressed={requestedSelect() === opt.value ? 'true' : 'false'}
-                    disabled={app().pendingActions().has('nodeSelect')}
-                    onClick={() => { void app().handleSetNodeSelect(opt.value) }}
-                  >
-                    {opt.label}
-                  </button>
-                )}
-              </For>
+        <Show
+          when={app().subs().length > 0}
+          fallback={
+            <div class="empty-state">
+              尚未添加订阅源。点击「添加订阅」接入 Clash YAML 订阅链接。
             </div>
+          }
+        >
+          <div class="hairline-list" role="list" aria-label="订阅源列表">
+            <For each={app().subs()} keyed={(sub) => sub.url}>
+              {(sub) => {
+                const dotTone = () => (
+                  sub().state === 'ready'
+                    ? 'emerald'
+                    : sub().state === 'refreshing'
+                      ? 'cobalt pulse'
+                      : sub().state === 'failed'
+                        ? 'crimson'
+                        : 'amber'
+                )
+                return (
+                  <div class="hairline-row" role="listitem">
+                    <div class="row-main">
+                      <div class="row-title">
+                        <span class={classNames('status-dot', dotTone())} aria-hidden="true" />
+                        <span class="mono">{maskSubscription(sub().url)}</span>
+                      </div>
+                      <div class={classNames('row-sub', sub().state === 'failed' && 'text-danger')}>
+                        {formatSubStateText(sub())}
+                      </div>
+                    </div>
+                    <div class="row-end">
+                      <Button
+                        tone="secondary"
+                        size="sm"
+                        onClick={() => props.onInspectSub(sub())}
+                      >
+                        管理节点
+                      </Button>
+                      <button
+                        type="button"
+                        class="icon-button danger"
+                        aria-label={`删除订阅 ${maskSubscription(sub().url)}`}
+                        title="删除订阅源"
+                        onClick={() => app().handleOpenDeleteSubConfirm(sub().url)}
+                      >
+                        <Trash2Icon size={ICON.sm} />
+                      </button>
+                    </div>
+                  </div>
+                )
+              }}
+            </For>
+          </div>
+        </Show>
+      </section>
 
-            <div style={{ display: 'flex', 'align-items': 'center', gap: '8px', 'flex-wrap': 'wrap' }}>
+      {/* Section 2: Manual Nodes */}
+      <section class="surface-box" aria-label="手动节点">
+        <div class="surface-header">
+          <h2 class="surface-title">
+            <span>手动节点</span>
+            <span class="mono-tag num">{manualLines().length}</span>
+          </h2>
+          <div class="surface-actions">
+            <Button
+              tone="secondary"
+              size="sm"
+              icon={<ListPlusIcon size={ICON.xs} />}
+              onClick={() => app().openNodeModal('link')}
+            >
+              粘贴链接
+            </Button>
+            <Button
+              tone="secondary"
+              size="sm"
+              icon={<ServerIcon size={ICON.xs} />}
+              onClick={() => app().openNodeModal('manual')}
+            >
+              手动配置
+            </Button>
+            <Show when={app().status().vps_supported !== false}>
+              <Button
+                tone="secondary"
+                size="sm"
+                icon={<RocketIcon size={ICON.xs} />}
+                onClick={() => app().openNodeModal('vps')}
+              >
+                SSH 部署 VPS
+              </Button>
+            </Show>
+          </div>
+        </div>
+
+        <Show
+          when={manualLines().length > 0}
+          fallback={
+            <div class="empty-state">
+              暂无手动添加的节点。可粘贴分享链接、手动配置协议参数或通过 SSH 一键部署 VPS。
+            </div>
+          }
+        >
+          <div class="hairline-list">
+            <For each={manualLines()} keyed={(row) => row.node.tag}>
+              {(row) => {
+                const cleaned = () => cleanNodeDisplay(row().node.tag)
+                const tone = () => getDelayTone(row().delay)
+                const bindingsSummary = () => {
+                  const parts: string[] = []
+                  if (row().boundSeatCount > 0) parts.push(`已绑定 ${row().boundSeatCount} 台设备`)
+                  if (row().boundPortCount > 0) parts.push(`已绑定 ${row().boundPortCount} 个端口`)
+                  return parts.join(' · ')
+                }
+
+                return (
+                  <div class={classNames('hairline-row', !row().relayExists && 'danger-tint')}>
+                    <div class="row-main">
+                      <div class="row-title">
+                        <span
+                          class={classNames(
+                            'status-dot',
+                            !row().relayExists
+                              ? 'crimson'
+                              : tone() === 'timeout'
+                                ? 'amber'
+                                : 'emerald',
+                          )}
+                        />
+                        <Show when={cleaned().code}>
+                          {(code) => <span class="mono-tag">{code()}</span>}
+                        </Show>
+                        <span>{cleaned().name}</span>
+                        <span class="mono-tag">{row().protocolLabel}</span>
+                      </div>
+                      <div class="row-sub mono">
+                        {row().node.server}:{row().node.server_port}
+                        {row().node.sni ? ` · SNI ${row().node.sni}` : ''}
+                        {row().detourRelay
+                          ? ` · 前置跳板: ${cleanNodeDisplay(row().detourRelay!).name}${!row().relayExists ? ' (缺失)' : ''}`
+                          : ''}
+                        {bindingsSummary() ? ` · ${bindingsSummary()}` : ''}
+                      </div>
+                    </div>
+
+                    <div class="row-end">
+                      <span
+                        class={classNames(
+                          'latency-text',
+                          'num',
+                          tone() === 'fast'
+                            ? 'fast'
+                            : tone() === 'medium'
+                              ? 'medium'
+                              : (tone() === 'slow' || tone() === 'timeout') && 'slow',
+                        )}
+                      >
+                        {row().testing
+                          ? '测速中'
+                          : row().delay == null
+                            ? '—'
+                            : formatDelay(row().delay)}
+                      </span>
+                      <button
+                        type="button"
+                        class="icon-button"
+                        aria-label={`测速 ${cleaned().name}`}
+                        title="节点测速"
+                        disabled={!app().status().ready || row().testing}
+                        onClick={() => app().handleTestDelay(row().node.tag)}
+                      >
+                        <ZapIcon size={ICON.sm} />
+                      </button>
+                      <button
+                        type="button"
+                        class="icon-button danger"
+                        aria-label={`删除节点 ${row().node.tag}`}
+                        title="删除节点"
+                        onClick={() => app().handleOpenDeleteNodeConfirm(row().node.tag)}
+                      >
+                        <Trash2Icon size={ICON.sm} />
+                      </button>
+                    </div>
+                  </div>
+                )
+              }}
+            </For>
+          </div>
+        </Show>
+      </section>
+
+      {/* Section 3: Active Runtime Node Pool */}
+      <Show when={candidateNodes().length > 0}>
+        <section class="surface-box" aria-label="运行节点池">
+          <div class="surface-header">
+            <h2 class="surface-title">
+              <span>运行节点池</span>
+              <span class="mono-tag num">{candidateNodes().length}</span>
+            </h2>
+
+            <div class="surface-actions">
+              <div class="strategy-picker-wrap">
+                <SelectPopover
+                  ariaLabel="选路策略"
+                  size="sm"
+                  align="right"
+                  value={requestedSelect()}
+                  options={STRATEGY_OPTIONS}
+                  disabled={app().pendingActions().has('nodeSelect')}
+                  searchableThreshold={10}
+                  onChange={(val) => {
+                    void app().handleSetNodeSelect(val as NodeSelect)
+                  }}
+                />
+              </div>
+
               <Show when={requestedSelect() !== 'manual' && app().status().multiplier_options.length > 0}>
                 <SelectPopover
                   ariaLabel="最高倍率限制"
@@ -509,13 +511,14 @@ export function RoutesView(props: RoutesViewProps) {
                   align="right"
                   value={app().status().max_multiplier ?? ''}
                   options={multiplierOptions()}
+                  searchableThreshold={12}
                   onChange={(val) => {
                     void app().handleSetMaxMultiplier(val === '' ? null : val)
                   }}
                 />
               </Show>
 
-              <Show when={app().status().ready && candidateNodes().length > 0}>
+              <Show when={app().status().ready}>
                 <Button
                   tone="secondary"
                   size="sm"
@@ -529,16 +532,7 @@ export function RoutesView(props: RoutesViewProps) {
             </div>
           </div>
 
-          <Show
-            when={candidateNodes().length > 0}
-            fallback={
-              <Show when={app().subs().length === 0}>
-                <div class="empty-state empty-block" style={{ padding: '18px 12px' }}>
-                  尚未添加订阅源。点击右上角「添加订阅」拉取公共池出口节点。
-                </div>
-              </Show>
-            }
-          >
+          <div class="surface-body" style={{ display: 'flex', 'flex-direction': 'column', gap: '14px' }}>
             <div class="studio-toolbar">
               <div class="seg-rail" role="group" aria-label="地区筛选">
                 <For each={regionBuckets()}>
@@ -559,7 +553,7 @@ export function RoutesView(props: RoutesViewProps) {
                 <SearchIcon size={ICON.sm} />
                 <input
                   type="search"
-                  aria-label="搜索公共池节点"
+                  aria-label="搜索节点"
                   placeholder="搜索节点或地区…"
                   value={poolQuery()}
                   onInput={(e) => setPoolQuery(e.currentTarget.value)}
@@ -570,12 +564,12 @@ export function RoutesView(props: RoutesViewProps) {
             <Show
               when={visiblePoolNodes().length > 0}
               fallback={
-                <div class="empty-state empty-block" style={{ padding: '20px 12px' }}>
+                <div class="empty-state" style={{ padding: '20px 12px' }}>
                   没有匹配当前筛选条件的节点。
                 </div>
               }
             >
-              <div class="node-matrix" role="group" aria-label="公共池候选节点">
+              <div class="node-matrix" role="group" aria-label="候选节点">
                 <For each={visiblePoolNodes()}>
                   {(nodeName) => {
                     const selected = () => currentSelectedNode() === nodeName
@@ -590,8 +584,8 @@ export function RoutesView(props: RoutesViewProps) {
                         disabled={requestedSelect() !== 'manual' || Boolean(app().switchingNode())}
                         title={
                           requestedSelect() !== 'manual'
-                            ? `${cleaned().name}（切换到「手动选路」后可点选）`
-                            : `切换主出口为 ${cleaned().name}`
+                            ? `${cleaned().name}（切换到「手动选择」后可点选）`
+                            : `切换默认出口为 ${cleaned().name}`
                         }
                         onClick={() => {
                           void app().handleSwitchProxy(app().primaryGroupName() || 'proxy', nodeName)
@@ -636,9 +630,9 @@ export function RoutesView(props: RoutesViewProps) {
                 </For>
               </div>
             </Show>
-          </Show>
-        </div>
-      </section>
+          </div>
+        </section>
+      </Show>
     </>
   )
 }

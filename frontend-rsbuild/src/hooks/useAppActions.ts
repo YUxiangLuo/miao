@@ -88,18 +88,25 @@ export function useAppActions(data: AppData) {
     data.setConfirmState({ open: false, title: '', message: '', onConfirm: null })
   }
 
-  const openNodeModal = (preset?: 'socks-residential' | 'vps' | 'link') => {
+  const openNodeModal = (preset?: 'link' | 'manual' | 'socks' | 'vps') => {
     if (data.status().initializing) {
-      data.showToast('初始化完成后才能修改专线节点', 'info')
+      data.showToast('初始化完成后才能修改节点', 'info')
       return
     }
-    if (preset === 'socks-residential') {
+    if (preset === 'socks') {
       data.setNodeType('socks')
       data.setNodeForm((prev) => ({
         ...prev,
         server_port: 1080,
         tls_enabled: false,
       }))
+      data.setNodeModalMode('manual')
+    } else if (preset === 'manual') {
+      data.setNodeModalMode('manual')
+    } else if (preset === 'vps') {
+      data.setNodeModalMode('vps')
+    } else {
+      data.setNodeModalMode('link')
     }
     data.setShowNodeModal(true)
   }
@@ -121,7 +128,7 @@ export function useAppActions(data: AppData) {
       data.clearDelays()
       await data.fetchStatus()
       await data.fetchProxies()
-      data.showToast(nextMode === 'global' ? '已切换为全局代理' : '已切换为分流模式', 'success')
+      data.showToast(nextMode === 'global' ? '已切换为全局代理' : '已切换为规则分流', 'success')
     } catch (error) {
       data.showToast(errorMessage(error), 'error')
     }
@@ -363,7 +370,7 @@ export function useAppActions(data: AppData) {
       await data.apiCall('service/start', { method: 'POST' }, 'startService')
       await data.fetchStatus()
       await data.fetchProxies()
-      data.showToast('网关转发服务已启动', 'success')
+      data.showToast('代理服务已启动', 'success')
     } catch (error) {
       data.showToast(errorMessage(error), 'error')
     }
@@ -373,7 +380,7 @@ export function useAppActions(data: AppData) {
     try {
       await data.apiCall('service/stop', { method: 'POST' }, 'stopService')
       await data.fetchStatus()
-      data.showToast('网关转发服务已停止', 'info')
+      data.showToast('代理服务已停止', 'info')
     } catch (error) {
       data.showToast(errorMessage(error), 'error')
     }
@@ -381,8 +388,8 @@ export function useAppActions(data: AppData) {
 
   const handleOpenStopServiceConfirm = () => {
     openConfirm(
-      '停止网关转发服务',
-      '停止后局域网终端与多店铺专属端口将暂停跨境转发，确定要停止服务吗？',
+      '停止代理服务',
+      '停止后透明分流与独立代理端口将暂停转发，确定要停止服务吗？',
       () => { void handleStopService() },
     )
   }
@@ -395,7 +402,7 @@ export function useAppActions(data: AppData) {
         'upsertTerminal',
       )
       const read = await data.fetchTerminals()
-      showMutationResult(`已保存工位「${req.name.trim()}」`, read, '保存')
+      showMutationResult(`已保存设备备注「${req.name.trim()}」`, read, '保存')
       return true
     } catch (error) {
       data.showToast(errorMessage(error), 'error')
@@ -411,7 +418,7 @@ export function useAppActions(data: AppData) {
         'deleteTerminal',
       )
       const read = await data.fetchTerminals()
-      showMutationResult('已清除工位备注', read, '清除')
+      showMutationResult('已清除设备备注', read, '清除')
       return true
     } catch (error) {
       data.showToast(errorMessage(error), 'error')
@@ -428,12 +435,12 @@ export function useAppActions(data: AppData) {
       )
       const [rulesRead] = await Promise.all([data.fetchRules(), data.fetchTerminals(), data.fetchStatus()])
       const label = req.mode === 'dedicated'
-        ? `工位 ${req.ip} 已锁定专线「${req.target}」`
+        ? `设备 ${req.ip} 已绑定节点「${req.target}」`
         : req.mode === 'block_overseas'
-          ? `工位 ${req.ip} 已设为仅限国内办公`
+          ? `设备 ${req.ip} 已设为禁止走代理`
           : req.mode === 'direct'
-            ? `工位 ${req.ip} 已设为全量直连`
-            : `工位 ${req.ip} 已恢复跟随公共出海线路池`
+            ? `设备 ${req.ip} 已设为全量直连`
+            : `设备 ${req.ip} 已恢复使用默认代理`
       showMutationResult(label, rulesRead, '切换')
       return true
     } catch (error) {
@@ -450,7 +457,7 @@ export function useAppActions(data: AppData) {
         'saveAccessPort',
       )
       const [portsRead] = await Promise.all([data.fetchAccessPorts(), data.fetchStatus()])
-      showMutationResult(`专属入口「${req.name.trim()}」(端口 :${req.port}) 已生效`, portsRead, '保存')
+      showMutationResult(`独立端口「${req.name.trim()}」(:${req.port}) 已保存`, portsRead, '保存')
       return true
     } catch (error) {
       data.showToast(errorMessage(error), 'error')
@@ -466,7 +473,7 @@ export function useAppActions(data: AppData) {
         `deleteAccessPort:${id}`,
       )
       const [portsRead] = await Promise.all([data.fetchAccessPorts(), data.fetchStatus()])
-      showMutationResult(`专属入口「${name}」已移除`, portsRead, '移除')
+      showMutationResult(`独立端口「${name}」已删除`, portsRead, '删除')
     } catch (error) {
       data.showToast(errorMessage(error), 'error')
     }
@@ -474,8 +481,8 @@ export function useAppActions(data: AppData) {
 
   const handleOpenDeleteAccessPortConfirm = (port: AccessPortStatus) => {
     openConfirm(
-      '移除多店铺专属端口',
-      `确定要关闭并移除「${port.name}」(局域网端口 :${port.port}) 吗？配置了该端口的指纹浏览器窗口将立即无法连接。`,
+      '删除独立代理端口',
+      `确定要关闭并删除「${port.name}」(端口 :${port.port}) 吗？使用该端口的客户端将无法连接。`,
       () => { void handleDeleteAccessPort(port.id, port.name) },
     )
   }

@@ -52,9 +52,9 @@ describe('modal accessibility', () => {
       />
     ))
 
-    expect(screen.getByRole('dialog', { name: '新增独享专线 / 节点' })).toBeInTheDocument()
+    expect(screen.getByRole('dialog', { name: '添加节点' })).toBeInTheDocument()
     expect(screen.getByRole('textbox', { name: '节点分享链接' })).toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: '手动 / 静态住宅' }))
+    await user.click(screen.getByRole('button', { name: '手动配置' }))
     expect(screen.getByLabelText('密码')).toHaveAttribute('type', 'password')
 
     await user.keyboard('{Escape}')

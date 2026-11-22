@@ -8,7 +8,7 @@ export interface AccessPortRow extends AccessPortStatus {
   connectionCount: number
   uploadSpeed: number
   downloadSpeed: number
-  /** AdsPower / BitBrowser / Hubstudio 标准粘贴格式：host:port 或 host:port:user:pass */
+  /** 标准粘贴格式：host:port 或 host:port:user:pass */
   browserPasteText: string
   socks5Uri: string
   httpUri: string
@@ -22,7 +22,7 @@ export function resolveGatewayHost(hostname?: string): string {
   return host
 }
 
-/** 从 Clash 连接元数据或规则文本识别所属专属端口 ID（如 `access-port:ap-20101` -> `ap-20101`） */
+/** 从 Clash 连接元数据或规则文本识别所属独立代理端口 ID（如 `access-port:ap-20101` -> `ap-20101`） */
 export function connectionAccessPortId(conn: ClashConnection): string | null {
   const metaType = conn.metadata?.type || ''
   const tagMatch = metaType.match(/access-port:([A-Za-z0-9_-]+)/)

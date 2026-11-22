@@ -21,7 +21,7 @@
       "icons/icon.png",
       "icons/icon.ico"
     ],
-    "shortDescription": "现代轻量跨境分流与多店铺独立出口网关",
+    "shortDescription": "轻量透明代理与分流服务",
     "category": "Utility",
     "windows": {
       "nsis": {

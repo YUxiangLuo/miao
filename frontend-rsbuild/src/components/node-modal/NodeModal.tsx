@@ -12,6 +12,7 @@ type NodeModalMode = 'link' | 'manual' | 'vps'
 
 export interface NodeModalProps {
   open: boolean
+  initialMode?: NodeModalMode
   nodeType: NodeType
   setNodeType: Setter<NodeType>
   form: NodeForm
@@ -36,13 +37,13 @@ export function NodeModal(props: NodeModalProps) {
   const vpsSupported = () => props.vpsSupported !== false
 
   createEffect(
-    () => ({ open: props.open, type: props.nodeType }),
-    ({ open, type }) => {
+    () => ({ open: props.open, initialMode: props.initialMode }),
+    ({ open, initialMode }) => {
       if (!open) {
         setMode('link')
         generation++
-      } else if (type === 'socks') {
-        setMode('manual')
+      } else if (initialMode) {
+        setMode(initialMode === 'vps' && !vpsSupported() ? 'link' : initialMode)
       }
     },
   )
@@ -98,7 +99,7 @@ export function NodeModal(props: NodeModalProps) {
           <div class="modal-title-row">
             <div class="modal-title-wrap">
               <PlusIcon size={ICON.lg} class="icon-accent" />
-              <h3 id={titleId}>新增独享专线 / 节点</h3>
+              <h3 id={titleId}>添加节点</h3>
             </div>
             <button type="button" class="icon-button" onClick={props.onClose} aria-label="关闭节点对话框">
               <XIcon size={ICON.md} />
@@ -126,7 +127,7 @@ export function NodeModal(props: NodeModalProps) {
               disabled={submitting()}
               onClick={() => setMode('manual')}
             >
-              手动 / 静态住宅
+              手动配置
             </button>
             <Show when={vpsSupported()}>
               <button

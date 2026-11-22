@@ -1,6 +1,6 @@
-/* Harbor Studio Primitives & Shared UI Components */
+/* Harbor Primitives & Shared UI Components */
 
-/* 1. Crisp Studio Buttons */
+/* 1. Crisp Buttons */
 .btn {
   display: inline-flex;
   align-items: center;
@@ -157,6 +157,10 @@
   color: var(--signal-crimson);
 }
 
+.text-danger {
+  color: var(--signal-crimson-text) !important;
+}
+
 /* 2. Clean Paper Surfaces (No overflow:hidden so nested SelectPopover never clips) */
 .surface-box,
 .panel-card {
@@ -175,6 +179,14 @@
   justify-content: space-between;
   gap: 12px;
   flex-wrap: wrap;
+}
+
+.surface-title-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  min-width: 0;
 }
 
 .surface-title,
@@ -213,6 +225,11 @@
   background: var(--bg-subtle);
   border-bottom: 1px solid var(--hairline);
   line-height: 1.5;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
 }
 
 .surface-note:first-child,
@@ -230,7 +247,7 @@
   padding: 0;
 }
 
-/* 3. Tailscale-Style Hairline Rows */
+/* 3. Hairline Rows */
 .hairline-list {
   display: flex;
   flex-direction: column;
@@ -321,7 +338,7 @@
   flex-shrink: 0;
 }
 
-/* 4. Status Dots, Micro-Tags, Keyboard Chips & Circuit Banners */
+/* 4. Status Dots, Micro-Tags, Keyboard Chips & Alert Banners */
 @keyframes statusPulse {
   0%, 100% {
     opacity: 1;
@@ -548,6 +565,19 @@
   border-radius: 9px;
   background: var(--bg-well);
   max-width: 100%;
+}
+
+.seg-rail.full,
+.node-modal-tabs {
+  display: flex;
+  width: 100%;
+  flex-wrap: nowrap;
+}
+
+.seg-rail.full .seg-btn,
+.node-modal-tabs .connections-pill {
+  flex: 1 1 0;
+  padding: 0 8px;
 }
 
 .seg-btn,
@@ -898,121 +928,7 @@
   color: var(--ink-muted);
 }
 
-/* 7. GatewayPopover (Topbar System Control Popover) */
-.gateway-wrap {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-}
-
-.gateway-trigger {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 26px;
-  padding: 0 9px;
-  border-radius: 999px;
-  border: 1px solid var(--hairline);
-  background: var(--bg-surface);
-  color: var(--ink-secondary);
-  font-size: 12px;
-  font-weight: 500;
-  cursor: pointer;
-  white-space: nowrap;
-  box-shadow: var(--shadow-xs);
-  transition: border-color 0.15s ease, color 0.15s ease, background-color 0.15s ease;
-}
-
-.gateway-trigger:hover,
-.gateway-trigger.open {
-  border-color: var(--border-strong);
-  color: var(--ink);
-}
-
-.gateway-trigger .status-dot {
-  width: 6px;
-  height: 6px;
-}
-
-.gateway-trigger svg {
-  color: var(--ink-muted);
-  flex-shrink: 0;
-}
-
-.gateway-popover {
-  position: absolute;
-  top: calc(100% + 8px);
-  left: 0;
-  width: 348px;
-  max-width: calc(100vw - 28px);
-  z-index: 110;
-  background: var(--bg-surface);
-  border: 1px solid var(--border-strong);
-  border-radius: 12px;
-  box-shadow: var(--shadow-lg);
-  padding: 14px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  color: var(--ink);
-}
-
-.gateway-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  flex-wrap: wrap;
-  min-width: 0;
-  font-size: 12.5px;
-}
-
-.gateway-section {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding-top: 11px;
-  border-top: 1px solid var(--hairline);
-}
-
-.gateway-section:first-child {
-  padding-top: 0;
-  border-top: none;
-}
-
-.gateway-section-label,
-.gateway-label {
-  font-size: 11.5px;
-  font-weight: 600;
-  color: var(--ink-muted);
-}
-
-.gateway-meta {
-  font-size: 11.5px;
-  color: var(--ink-muted);
-  font-family: var(--font-mono);
-  font-variant-numeric: tabular-nums;
-}
-
-.gateway-divider {
-  height: 1px;
-  border: none;
-  background: var(--hairline);
-  margin: 0;
-}
-
-.gateway-popover .seg-rail {
-  width: 100%;
-  display: flex;
-}
-
-.gateway-popover .seg-btn {
-  flex: 1 1 0;
-  padding: 0 8px;
-  font-size: 12px;
-}
-
-/* 8. Raycast-Style CommandPalette (⌘K) */
+/* 7. CommandPalette (⌘K) */
 .cmd-backdrop {
   position: fixed;
   inset: 0;
@@ -1067,7 +983,7 @@
 }
 
 .cmd-list {
-  max-height: 340px;
+  max-height: 360px;
   overflow-y: auto;
   padding: 6px;
 }
@@ -1103,33 +1019,6 @@
   background: var(--bg-well);
 }
 
-.cmd-item-main,
-.cmd-item-left {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  min-width: 0;
-  flex: 1;
-  overflow: hidden;
-}
-
-.cmd-item-main > span:not(.mono-tag):not(.status-dot),
-.cmd-item-label {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.cmd-item-meta,
-.cmd-item-badge,
-.cmd-item-hint {
-  font-family: var(--font-mono);
-  font-variant-numeric: tabular-nums;
-  font-size: 11.5px;
-  color: var(--ink-muted);
-  flex-shrink: 0;
-}
-
 .cmd-empty {
   padding: 28px 16px;
   text-align: center;
@@ -1137,19 +1026,7 @@
   color: var(--ink-muted);
 }
 
-.cmd-footer {
-  padding: 8px 14px;
-  border-top: 1px solid var(--hairline);
-  background: var(--bg-subtle);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  font-size: 11.5px;
-  color: var(--ink-muted);
-}
-
-/* 9. Shared Badges, Forms, Modals, Drawers, Connectivity & Toasts */
+/* 8. Shared Badges, Forms, Modals, Drawers, Connectivity & Toasts */
 .badge {
   display: inline-flex;
   align-items: center;

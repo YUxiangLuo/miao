@@ -298,7 +298,7 @@ export function SelectPopover(props: SelectPopoverProps): JSX.Element {
                 ref={(el) => { searchInputEl = el }}
                 type="text"
                 aria-label={props.searchPlaceholder ?? '搜索选项或节点'}
-                placeholder={props.searchPlaceholder ?? '搜索专线、地区或节点…'}
+                placeholder={props.searchPlaceholder ?? '搜索节点或地区…'}
                 value={query()}
                 onInput={(event) => {
                   setQuery(event.currentTarget.value)

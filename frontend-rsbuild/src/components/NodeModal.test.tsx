@@ -28,7 +28,7 @@ describe('manual node submission', () => {
   it('shows optional SOCKS5 credentials and accepts short protocol-valid passwords', async () => {
     const user = userEvent.setup()
     renderModal({ nodeType: 'socks', form: { ...EMPTY_NODE_FORM, tag: 'SOCKS5', server: 'proxy.example.com', username: 'u', password: 'p' } })
-    await user.click(screen.getByRole('button', { name: '手动 / 静态住宅' }))
+    await user.click(screen.getByRole('button', { name: '手动配置' }))
     expect(screen.getByLabelText('用户名（可选）')).toHaveValue('u')
     expect(screen.getByLabelText('密码（可选）')).toHaveAttribute('type', 'password')
     expect(screen.queryByLabelText('SNI')).not.toBeInTheDocument()
@@ -39,7 +39,7 @@ describe('manual node submission', () => {
     const user = userEvent.setup()
     const onSubmit = rs.fn()
     renderModal({ onSubmit, form: { ...EMPTY_NODE_FORM, tag: '测试节点', server: 'example.com', password: 'test-password', server_port: port } })
-    await user.click(screen.getByRole('button', { name: '手动 / 静态住宅' }))
+    await user.click(screen.getByRole('button', { name: '手动配置' }))
     expect(screen.getByRole('alert')).toHaveTextContent(port > 65535 ? '端口号超出范围' : '端口号必须为正整数')
     const submit = screen.getByRole('button', { name: '添加 Hysteria2 节点' })
     expect(submit).toBeDisabled()
@@ -50,7 +50,7 @@ describe('manual node submission', () => {
   it.each([1, 65535])('accepts valid port boundary %s', async (port) => {
     const user = userEvent.setup()
     renderModal({ form: { ...EMPTY_NODE_FORM, tag: '测试节点', server: 'example.com', password: 'test-password', server_port: port } })
-    await user.click(screen.getByRole('button', { name: '手动 / 静态住宅' }))
+    await user.click(screen.getByRole('button', { name: '手动配置' }))
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: '添加 Hysteria2 节点' })).toBeEnabled()
   })
@@ -72,7 +72,7 @@ describe('manual node submission', () => {
         onDeployVps={rs.fn()}
       />
     ))
-    await user.click(screen.getByRole('button', { name: '手动 / 静态住宅' }))
+    await user.click(screen.getByRole('button', { name: '手动配置' }))
     expect(screen.getByRole('alert')).toHaveTextContent('密码太短（至少 8 个字符）')
     await user.type(screen.getByLabelText('密码'), '-long-enough')
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
@@ -102,7 +102,7 @@ describe('manual node submission', () => {
         />
       </>
     ))
-    await user.click(screen.getByRole('button', { name: '手动 / 静态住宅' }))
+    await user.click(screen.getByRole('button', { name: '手动配置' }))
     const submit = screen.getByRole('button', { name: '添加 Hysteria2 节点' })
     fireEvent.click(submit)
     fireEvent.click(submit)
@@ -123,7 +123,7 @@ describe('manual node submission', () => {
     flush()
     expect(screen.getByRole('dialog')).toBeInTheDocument()
     expect(screen.getByRole('textbox', { name: '节点分享链接' })).toHaveValue('新的草稿')
-    expect(screen.getByRole('button', { name: '手动 / 静态住宅' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: '手动配置' })).toBeEnabled()
   })
 
   it('preserves the failed draft for retry and closes after success', async () => {
@@ -131,7 +131,7 @@ describe('manual node submission', () => {
     const onSubmit = rs.fn().mockResolvedValueOnce(false).mockResolvedValueOnce(true)
     const onClose = rs.fn()
     renderModal({ onSubmit, onClose, form: { ...EMPTY_NODE_FORM, tag: '重试节点', server: 'example.net', password: 'test-password' } })
-    await user.click(screen.getByRole('button', { name: '手动 / 静态住宅' }))
+    await user.click(screen.getByRole('button', { name: '手动配置' }))
     await user.click(screen.getByRole('button', { name: '添加 Hysteria2 节点' }))
     expect(onClose).not.toHaveBeenCalled()
     expect(screen.getByLabelText('节点名称')).toHaveValue('重试节点')
@@ -143,7 +143,16 @@ describe('manual node submission', () => {
   })
 })
 
-describe('NodeModal link import', () => {
+describe('NodeModal link import & initialMode', () => {
+  it('opens directly in the requested initialMode tab (vps or manual)', () => {
+    const { unmount } = renderModal({ initialMode: 'vps' })
+    expect(screen.getByLabelText('VPS IP 地址')).toBeInTheDocument()
+    unmount()
+
+    renderModal({ initialMode: 'manual' })
+    expect(screen.getByLabelText('协议')).toBeInTheDocument()
+  })
+
   it('removes only successful request indices and retains invalid lines and backend failures for retry', async () => {
     const user = userEvent.setup()
     const onClose = rs.fn()
@@ -196,7 +205,7 @@ describe('NodeModal link import', () => {
     flush()
     expect(onImport).toHaveBeenCalledTimes(1)
     expect(screen.getByRole('textbox', { name: '节点分享链接' })).toBeDisabled()
-    expect(screen.getByRole('button', { name: '手动 / 静态住宅' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '手动配置' })).toBeDisabled()
     await user.click(screen.getByRole('button', { name: '关闭节点对话框' }))
     await user.click(screen.getByRole('button', { name: '重新打开' }))
     await user.type(screen.getByRole('textbox', { name: '节点分享链接' }), '新草稿')
@@ -288,7 +297,7 @@ describe('NodeModal link import', () => {
     const user = userEvent.setup()
     renderModal()
 
-    await user.click(screen.getByRole('button', { name: '手动 / 静态住宅' }))
+    await user.click(screen.getByRole('button', { name: '手动配置' }))
     expect(screen.getByLabelText('协议')).toBeInTheDocument()
     expect(screen.getByLabelText('节点名称')).toBeInTheDocument()
     const details = document.querySelector('.advanced-details')
