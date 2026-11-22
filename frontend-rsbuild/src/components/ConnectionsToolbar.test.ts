@@ -75,6 +75,8 @@ describe('processNameOf', () => {
   it('extracts the basename and strips the user suffix', () => {
     expect(processNameOf('/usr/lib/firefox/firefox (alice)')).toBe('firefox')
     expect(processNameOf('/opt/brave-origin-bin/brave (alice)')).toBe('brave')
+    expect(processNameOf('C:\\Program Files\\Mozilla Firefox\\firefox.exe')).toBe('firefox.exe')
+    expect(processNameOf('\\Device\\HarddiskVolume3\\Windows\\System32\\svchost.exe')).toBe('svchost.exe')
   })
 
 

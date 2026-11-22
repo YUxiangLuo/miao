@@ -326,16 +326,21 @@ pub async fn assign_terminal(state: Arc<AppState>, req: AssignTerminalRequest) -
 
 #[cfg(test)]
 mod tests {
+    use super::merge_terminals;
+    #[cfg(unix)]
     use super::{
-        assign_terminal, delete_terminal, extract_single_source_ipv4_rule, merge_terminals,
-        upsert_terminal,
+        assign_terminal, delete_terminal, extract_single_source_ipv4_rule, upsert_terminal,
     };
+    use crate::models::TerminalRecord;
+    #[cfg(unix)]
     use crate::models::{
-        AssignTerminalRequest, Config, DeleteTerminalRequest, TerminalAssignMode, TerminalRecord,
+        AssignTerminalRequest, Config, DeleteTerminalRequest, TerminalAssignMode,
         UpsertTerminalRequest,
     };
     use crate::services::dhcp::DhcpLease;
+    #[cfg(unix)]
     use crate::test_support::{install_fake_kernel, isolated_stopped_state};
+    #[cfg(unix)]
     use std::net::Ipv4Addr;
 
     #[test]
@@ -374,6 +379,7 @@ mod tests {
         assert_eq!(merged[2].dhcp_hostname.as_deref(), Some("CAIWU"));
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn upsert_delete_and_atomic_assign_terminal_preserve_priority_order() {
         let (_root, state) = isolated_stopped_state(Config {

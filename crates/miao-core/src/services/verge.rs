@@ -65,6 +65,17 @@ pub async fn scan() -> Option<Vec<VergeSubscription>> {
 }
 
 /// 解析 profiles.yaml 的位置；不存在返回 None。
+#[cfg(windows)]
+fn profiles_path() -> Option<PathBuf> {
+    let appdata = std::env::var_os("APPDATA")?;
+    let path = PathBuf::from(appdata)
+        .join(VERGE_DATA_DIR)
+        .join(PROFILES_FILE);
+    path.is_file().then_some(path)
+}
+
+/// 解析 profiles.yaml 的位置；不存在返回 None。
+#[cfg(unix)]
 fn profiles_path() -> Option<PathBuf> {
     unix_candidates()
         .into_iter()
@@ -81,6 +92,7 @@ fn profiles_path() -> Option<PathBuf> {
 ///
 /// miao 以 root 运行（sudo 或 systemd），而 clash-verge-rev 的数据在普通用户
 /// home 下；sudo 时 HOME 可能指向 /root，systemd 下则没有 SUDO_USER 可用。
+#[cfg(unix)]
 fn unix_candidates() -> Vec<PathBuf> {
     let mut homes: Vec<PathBuf> = Vec::new();
     if let Some(home) = sudo_user_home() {
@@ -96,12 +108,14 @@ fn unix_candidates() -> Vec<PathBuf> {
     homes
 }
 
+#[cfg(unix)]
 fn sudo_user_home() -> Option<PathBuf> {
     let name = std::env::var("SUDO_USER").ok()?;
     let user = nix::unistd::User::from_name(&name).ok()??;
     Some(user.dir)
 }
 
+#[cfg(unix)]
 fn home_dir_scan() -> Vec<PathBuf> {
     let Ok(entries) = std::fs::read_dir("/home") else {
         return vec![];

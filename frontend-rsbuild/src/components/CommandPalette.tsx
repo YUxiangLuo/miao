@@ -123,14 +123,23 @@ export function CommandPalette(props: CommandPaletteProps): JSX.Element {
         badge: 'SOCKS5',
         run: () => app.openNodeModal('socks-residential'),
       },
-      {
-        id: 'act:vps',
-        group: '快捷操作',
-        label: 'SSH 部署海外 VPS / 导入节点',
-        keywords: 'ssh vps 部署 海外 云服务器 导入 分享链接 hysteria2 node',
-        badge: 'VPS',
-        run: () => app.openNodeModal('vps'),
-      },
+      app.status().vps_supported !== false
+        ? {
+            id: 'act:vps',
+            group: '快捷操作',
+            label: 'SSH 部署海外 VPS / 导入节点',
+            keywords: 'ssh vps 部署 海外 云服务器 导入 分享链接 hysteria2 node',
+            badge: 'VPS',
+            run: () => app.openNodeModal('vps'),
+          }
+        : {
+            id: 'act:vps',
+            group: '快捷操作',
+            label: '导入独享专线 / 分享链接',
+            keywords: '导入 分享链接 独享 专线 hysteria2 vless trojan ss vmess tuic link node',
+            badge: '导入',
+            run: () => app.openNodeModal('link'),
+          },
       {
         id: 'act:theme',
         group: '快捷操作',

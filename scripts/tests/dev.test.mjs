@@ -6,6 +6,7 @@ import { join } from 'node:path'
 const roots = []
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }) })
 const head = 'a'.repeat(40)
+const shellTest = test.skipIf(process.platform === 'win32')
 
 function run(args, overrides = {}) {
   const root = mkdtempSync(join(tmpdir(), 'miao-dev-test-'))
@@ -52,16 +53,20 @@ esac
   }
 }
 
-test('build rejects ambiguous targets and core checks do not need Bun or resources', () => {
+shellTest('build rejects ambiguous or host-mismatched targets and Linux checks skip desktop workspace crate', () => {
   expect(run(['build', 'amd64', 'arm64']).status).toBe(1)
+  expect(run(['build', 'desktop']).status).toBe(1)
   expect(run(['version', 'v1.2.3;bad']).status).toBe(1)
   const result = run(['check', 'core'])
   expect(result.status).toBe(0)
   expect(result.calls.every(call => call.startsWith('cargo '))).toBe(true)
   expect(result.calls.filter(call => call.includes('--no-default-features'))).toHaveLength(2)
+  const all = run(['check', 'all'])
+  expect(all.status).toBe(0)
+  expect(all.calls.some(call => call.startsWith('cargo ') && call.includes('--workspace'))).toBe(false)
 })
 
-test('frontend and script checks run independently', () => {
+shellTest('frontend and script checks run independently', () => {
   const frontend = run(['check', 'frontend'])
   expect(frontend.status).toBe(0)
   expect(frontend.calls.every(call => call.startsWith('bun ') && call.includes('frontend-rsbuild'))).toBe(true)
@@ -72,7 +77,7 @@ test('frontend and script checks run independently', () => {
   expect(scripts.calls.some(call => call.includes('frontend-rsbuild') || call.startsWith('cargo '))).toBe(false)
 })
 
-test('kernel-only builds accept the default host target', () => {
+shellTest('kernel-only builds accept the default host target', () => {
   const defaultTarget = run(['kernel']).calls.find(call => call.startsWith('kernel '))
   const result = run(['kernel', '--kernel-only'])
   expect(result.status).toBe(0)
@@ -80,7 +85,7 @@ test('kernel-only builds accept the default host target', () => {
   expect(run(['kernel', 'arm64', '--kernel-only']).calls).toContain('kernel arm64 --kernel-only')
 })
 
-test('release preparation builds both musl targets with one kernel build and no remote writes', () => {
+shellTest('release preparation builds both musl targets with one kernel build and no remote writes', () => {
   const result = run(['release'], { CARGO_TARGET_DIR: '/unused-review-target' })
   expect(result.status).toBe(0)
   expect(result.calls.filter(call => call === 'kernel all')).toHaveLength(1)
@@ -90,7 +95,7 @@ test('release preparation builds both musl targets with one kernel build and no 
   expect(result.calls.some(call => /^(gh |git (push|tag) )/.test(call))).toBe(false)
 })
 
-test('publishing rejects dirty trees, unverified builds and mismatched remote tags before writes', () => {
+shellTest('publishing rejects dirty trees, unverified builds and mismatched remote tags before writes', () => {
   for (const env of [{ DIRTY: ' M changed' }, { GIT_STATUS: '1' }, { VERIFY_STATUS: '1' }, { GH_API_STATUS: '1' }, { REMOTE_TAG: `${'b'.repeat(40)}\trefs/tags/v1.2.3` }, { PUSH_URL: 'git@github.com:a/one.git\ngit@github.com:b/two.git' }]) {
     const result = run(['release', '--publish'], env)
     expect(result.status).toBe(1)
@@ -98,7 +103,7 @@ test('publishing rejects dirty trees, unverified builds and mismatched remote ta
   }
 })
 
-test('version updates restore both original files when Cargo fails', () => {
+shellTest('version updates restore both original files when Cargo fails', () => {
   const failed = run(['version', 'v1.2.4'], { CARGO_STATUS: '1' })
   expect(failed.status).toBe(1)
   expect(failed.manifest).toBe('original manifest\n')
@@ -109,7 +114,7 @@ test('version updates restore both original files when Cargo fails', () => {
   expect(success.lock).toBe('updated lock\n')
 })
 
-test('tag checks, push and GitHub uploads all use the origin push URL', () => {
+shellTest('tag checks, push and GitHub uploads all use the origin push URL', () => {
   const pushUrl = 'https://github.com/release-owner/miao.git'
   const result = run(['release', '--publish'], { PUSH_URL: pushUrl })
   expect(result.status).toBe(0)
@@ -118,7 +123,7 @@ test('tag checks, push and GitHub uploads all use the origin push URL', () => {
   expect(result.calls.find(call => call.startsWith('gh release create '))).toContain('--repo github.com/release-owner/miao')
 })
 
-test('draft releases are published only after uploads, while --draft cannot overwrite a public release', () => {
+shellTest('draft releases are published only after uploads, while --draft cannot overwrite a public release', () => {
   const env = { EXISTING_ASSETS: '', RELEASE_STATE: 'draft' }
   const publish = run(['release', '--publish'], env)
   expect(publish.status).toBe(0)
@@ -133,7 +138,7 @@ test('draft releases are published only after uploads, while --draft cannot over
   expect(rejected.calls.some(call => /^(git (push|tag) |gh release (create|upload|edit) )/.test(call))).toBe(false)
 })
 
-test('publishing uploads two binaries and their checksums and leaves source archives to GitHub', () => {
+shellTest('publishing uploads two binaries and their checksums and leaves source archives to GitHub', () => {
   const result = run(['release', '--publish', '--draft'])
   expect(result.status).toBe(0)
   const create = result.calls.find(call => call.startsWith('gh release create '))
@@ -148,7 +153,7 @@ test('publishing uploads two binaries and their checksums and leaves source arch
   expect(result.calls.some(call => call.startsWith('cargo '))).toBe(false)
 })
 
-test('republishing preserves checksums and removes obsolete assets only after all uploads succeed', () => {
+shellTest('republishing preserves checksums and removes obsolete assets only after all uploads succeed', () => {
   const env = { EXISTING_ASSETS: 'miao-rust-linux-amd64\nmiao-rust-linux-amd64.sha256\nmiao-rust-linux-arm64\nmiao-rust-linux-arm64.sha256\nchecksums.txt\nold metadata.json' }
   const result = run(['release', '--publish'], env)
   expect(result.status).toBe(0)

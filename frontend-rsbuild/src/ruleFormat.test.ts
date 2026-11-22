@@ -5,6 +5,7 @@ import {
   RULE_FIELD_OPTIONS,
   RULE_TARGET_OPTIONS,
   ruleFieldLabel,
+  ruleFieldOptions,
   ruleFieldTone,
   ruleTargetLabel,
 } from './ruleFormat'
@@ -79,5 +80,17 @@ describe('ruleFormat', () => {
   it('falls back to raw for hand-written rules', () => {
     const raw = '{"rule_set":["custom"],"action":"route","outbound":"direct"}'
     expect(describeRule({ index: 1, skipped: false, raw })).toEqual({ structured: false, raw })
+  })
+
+  it('uses Windows executable placeholders when platform is windows', () => {
+    const linux = ruleFieldOptions('linux')
+    expect(linux.find((o) => o.value === 'process_name')?.placeholder).toBe('curl')
+    expect(linux.find((o) => o.value === 'process_path')?.placeholder).toBe('/usr/bin/curl')
+
+    const windows = ruleFieldOptions('windows')
+    expect(windows.find((o) => o.value === 'process_name')?.placeholder).toBe('qbittorrent.exe')
+    expect(windows.find((o) => o.value === 'process_path')?.placeholder).toBe(
+      'C:\\Program Files\\qBittorrent\\qbittorrent.exe',
+    )
   })
 })

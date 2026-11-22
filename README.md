@@ -7,7 +7,7 @@
   </p>
 </div>
 
-HarborGate（底层兼容二进制与路径保持 `miao`）将定制 `sing-box` 内核、大陆/内网直连规则集与 SolidJS 2.0 企业云网关控制台打包为单个可执行文件，专为外贸公司办公网络设计，提供 Linux / OpenWrt 双平台与 `amd64`、`arm64` 双架构支持：
+HarborGate（底层兼容二进制与路径保持 `miao`）将定制 `sing-box` 内核、大陆/内网直连规则集与 SolidJS 2.0 企业云网关控制台打包为单个可执行文件，专为外贸公司办公网络设计，主力支持 Linux / OpenWrt（`amd64`、`arm64`），同时提供源码一键打包的 Windows 桌面端支持：
 
 - **双粒度防关联隔离**：既支持按员工电脑/手机局域网 IP 分配整机独享专线（读取 `/tmp/dhcp.leases` 自动发现办公终端，单事务无漏流切换），也支持按需开放局域网多店铺专属混合代理端口（如 `:20101` HTTP/SOCKS5 → 美区静态住宅 IP），供指纹浏览器、Chrome 多分身及独立社媒客户端同机多店隔离使用，上游静态住宅 IP 凭据 100% 封存在网关内。
 - **离线自动熔断保护**：任何锁定独享专线的工位或专属端口，一旦对应专线或其前置中转跳板不可用，网关自动在路由与 DNS 双层原位改写为 `reject` 阻断，严防回退公共池引发账号关联；国内企业微信、飞书、ERP 与对公网银直连不受影响。
@@ -40,7 +40,7 @@ sudo ./miao-rust-linux-amd64
 
 浏览器访问 `http://<设备IP>:6161`（本机为 `http://localhost:6161`），添加订阅或节点。**面板和 MCP 无鉴权，默认监听所有网卡，只应允许可信设备访问。**
 
-临时订阅与启动参数见[配置参考](docs/config.md#命令行启动)；systemd Linux 的服务安装、升级和卸载见[平台说明](docs/platforms.md#升级与卸载)。
+临时订阅与启动参数见[配置参考](docs/config.md#命令行启动)；systemd 服务安装、升级、卸载及 Windows 桌面版说明见[平台说明](docs/platforms.md)。
 
 ## 从源码构建
 
@@ -50,13 +50,24 @@ sudo ./miao-rust-linux-amd64
 ./dev.sh build
 ```
 
-产物为 `target/release/miao-rust`。使用当前源码安装或更新 systemd 服务：
+产物为 `target/release/miao-rust`。使用当前源码安装或更新 Linux systemd 服务：
 
 ```bash
 sudo bash install.sh ./target/release/miao-rust
 ```
 
 安装保留现有配置并重启服务，期间会短暂断网。交叉编译、测试和发布见[开发指南](docs/development.md)。
+
+### Windows 打包与使用
+
+Windows 端不随 GitHub Release 分发，提供本地一键打包。安装 Git for Windows、Rust（MSVC）与 VS C++ 生成工具、Bun、Go 后，在仓库根目录任选一种方式执行：
+
+```powershell
+.\desktop\package.cmd        # PowerShell / CMD（自动调用 Git Bash）
+./dev.sh build desktop       # Git Bash
+```
+
+打包完成后生成 `dist/miao-windows-amd64-setup.exe`（附同名 `.sha256`）。直接运行安装包即可安装到当前用户目录（无需管理员，缺 WebView2 自动引导下载）；启动时经 UAC 提权创建 TUN 并驻留系统托盘（仅监听本机 `127.0.0.1`，支持勾选开机免 UAC 自启与打开日志）。覆盖升级或卸载前，请先在托盘图标右键选择「退出」。
 
 ## 文档
 

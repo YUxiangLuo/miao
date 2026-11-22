@@ -8,12 +8,13 @@ usage() {
   cat <<'EOF'
 Usage: ./dev.sh <command> [arguments]
 
-  build [native|amd64|arm64|all] [--refresh-kernel]
-      Build the panel and release binary; default native. amd64/arm64 use musl.
-      Missing or stale kernel/rule assets are rebuilt automatically.
-  kernel [amd64|arm64|all] [--kernel-only]
-      Rebuild pinned kernels and rules; default host architecture.
-  check [all|core|frontend|scripts]
+  build [native|amd64|arm64|windows-amd64|desktop|all] [--refresh-kernel]
+      Build the panel and release binary; default native. amd64/arm64 use musl,
+      desktop packages dist/miao-windows-amd64-setup.exe on Windows. Missing or
+      stale kernel/rule assets are rebuilt automatically.
+  kernel [amd64|arm64|windows-amd64|all] [--kernel-only]
+      Rebuild pinned kernels and rules; default host platform/architecture.
+  check [all|core|frontend|scripts|windows|desktop]
       Lint, test and build checks; default all. Core needs no generated assets.
   test [--embedded] [cargo test arguments]
       Core tests, or core + CLI tests with prepared assets.
@@ -30,8 +31,9 @@ Usage: ./dev.sh <command> [arguments]
       --publish: verify that staged release, push its tag and upload via gh.
   help
 
-Build outputs: target/release/miao-rust (native),
-  target/{x86_64,aarch64}-unknown-linux-musl/release/miao-rust (musl).
+Build outputs: target/release/miao-rust[.exe] (native),
+  target/{x86_64,aarch64}-unknown-linux-musl/release/miao-rust (musl),
+  dist/miao-windows-amd64-setup.exe (desktop on Windows).
 Cross builds require zig, cargo-zigbuild and the Rust musl targets.
 EOF
 }
@@ -39,7 +41,20 @@ EOF
 die() { echo "dev: $*" >&2; exit 1; }
 require() { local tool; for tool in "$@"; do command -v "$tool" >/dev/null || die "missing tool: $tool"; done; }
 no_args() { (( $# == 0 )) || die "unexpected argument: $1 (see ./dev.sh help)"; }
+is_windows_host() {
+  case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
 host_target() {
+  if is_windows_host; then
+    case "$(uname -m)" in
+      x86_64|amd64) echo windows-amd64 ;;
+      *) die "unsupported Windows architecture: $(uname -m)" ;;
+    esac
+    return
+  fi
   case "$(uname -m)" in
     x86_64) echo amd64 ;;
     aarch64) echo arm64 ;;
@@ -50,6 +65,7 @@ rust_target() {
   case "$1" in
     amd64) echo x86_64-unknown-linux-musl ;;
     arm64) echo aarch64-unknown-linux-musl ;;
+    windows-amd64) echo x86_64-pc-windows-gnu ;;
     *) die "unsupported target: $1" ;;
   esac
 }
@@ -67,25 +83,33 @@ build() {
   for arg in "$@"; do
     case "$arg" in
       --refresh-kernel) refresh=1 ;;
-      native|amd64|arm64|all)
+      native|amd64|arm64|windows-amd64|desktop|all)
         (( specified == 0 )) || die "supply only one build target"
         target=$arg; specified=1 ;;
       *) die "unknown build argument: $arg" ;;
     esac
   done
   require cargo bun
+  if [[ "$target" == desktop ]]; then
+    is_windows_host || die "desktop NSIS installer must be built on Windows"
+  fi
   local targets=()
   case "$target" in
     native) targets=("$(host_target)") ;;
+    desktop) targets=(windows-amd64) ;;
     all) targets=(amd64 arm64) ;;
     *) targets=("$target") ;;
   esac
-  if [[ "$target" != native ]]; then
+  if [[ "$target" == amd64 || "$target" == arm64 || "$target" == all ]]; then
     require zig cargo-zigbuild rustup
     for arch in "${targets[@]}"; do
       triple=$(rust_target "$arch")
       rustup target list --installed | grep -qx "$triple" || die "install Rust target first: rustup target add $triple"
     done
+  elif [[ "$target" == windows-amd64 ]] && ! is_windows_host; then
+    require x86_64-w64-mingw32-gcc rustup
+    triple=$(rust_target windows-amd64)
+    rustup target list --installed | grep -qx "$triple" || die "install Rust target first: rustup target add $triple"
   fi
   for arch in "${targets[@]}"; do
     if ! bun scripts/lib/release-artifacts.mjs resources "$arch"; then refresh=1; fi
@@ -94,8 +118,26 @@ build() {
   if (( refresh )); then
     if [[ "$target" == all ]]; then kernel_build all; else kernel_build "${targets[0]}"; fi
   fi
-  if [[ "$target" == native ]]; then
+  if [[ "$target" == desktop ]]; then
+    local out_dir="$ROOT_DIR/dist" out_name="miao-windows-amd64-setup.exe" installers
+    rm -f "$ROOT_DIR"/target/release/bundle/nsis/*.exe
+    (cd "$ROOT_DIR/desktop/src-tauri" && bunx @tauri-apps/cli@2.11.4 build --bundles nsis --ci)
+    installers=("$ROOT_DIR"/target/release/bundle/nsis/*.exe)
+    [[ -f "${installers[0]}" ]] || die "NSIS installer not found under target/release/bundle/nsis"
+    mkdir -p "$out_dir"
+    cp "${installers[0]}" "$out_dir/$out_name"
+    if command -v sha256sum >/dev/null; then
+      (cd "$out_dir" && sha256sum "$out_name" > "$out_name.sha256")
+      echo "==> Packaged Windows installer: dist/$out_name"
+      cat "$out_dir/$out_name.sha256"
+    else
+      echo "==> Packaged Windows installer: dist/$out_name"
+    fi
+  elif [[ "$target" == native ]] || { [[ "$target" == windows-amd64 ]] && is_windows_host; }; then
     cargo build --locked --release -p miao-cli --target-dir "$ROOT_DIR/target"
+  elif [[ "$target" == windows-amd64 ]]; then
+    CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER="${CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER:-x86_64-w64-mingw32-gcc}" \
+      cargo build --locked --release -p miao-cli --target "$(rust_target windows-amd64)" --target-dir "$ROOT_DIR/target"
   else
     for arch in "${targets[@]}"; do
       cargo zigbuild --locked --release -p miao-cli --target "$(rust_target "$arch")" --target-dir "$ROOT_DIR/target"
@@ -131,8 +173,15 @@ frontend_check() {
   bun run --cwd frontend-rsbuild build
 }
 scripts_check() {
-  require bun shellcheck jq
-  shellcheck dev.sh install.sh remove.sh scripts/lib/*.sh scripts/tests/*.sh
+  if is_windows_host; then
+    require bun
+    if command -v shellcheck >/dev/null; then
+      shellcheck dev.sh install.sh remove.sh scripts/lib/*.sh scripts/tests/*.sh
+    fi
+  else
+    require bun shellcheck jq
+    shellcheck dev.sh install.sh remove.sh scripts/lib/*.sh scripts/tests/*.sh
+  fi
   bun test scripts/tests
 }
 
@@ -158,13 +207,43 @@ case "$command" in
       core) core_check ;;
       frontend) frontend_check ;;
       scripts) scripts_check ;;
+      windows)
+        require cargo
+        if is_windows_host; then
+          core_check
+          frontend_build
+          prepare_test_assets
+          cargo clippy --workspace --locked --all-targets --all-features -- -D warnings
+          cargo test --workspace --locked --all-targets
+        else
+          require x86_64-w64-mingw32-gcc rustup
+          triple=$(rust_target windows-amd64)
+          rustup target list --installed | grep -qx "$triple" || die "install Rust target first: rustup target add $triple"
+          CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER="${CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER:-x86_64-w64-mingw32-gcc}" \
+            cargo clippy -p miao-core --locked --no-default-features --target "$triple" --all-targets -- -D warnings
+          frontend_build
+          prepare_test_assets
+          CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER="${CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER:-x86_64-w64-mingw32-gcc}" \
+            cargo clippy -p miao-core -p miao-cli --locked --target "$triple" --all-targets --all-features -- -D warnings
+        fi ;;
+      desktop)
+        require cargo
+        frontend_build
+        prepare_test_assets
+        cargo clippy -p miao-desktop --locked --all-targets -- -D warnings
+        cargo test -p miao-desktop --locked --all-targets ;;
       all)
         scripts_check
         frontend_check
         core_check
         prepare_test_assets
-        cargo clippy --workspace --locked --all-targets --all-features -- -D warnings
-        cargo test --workspace --locked --all-targets ;;
+        if is_windows_host; then
+          cargo clippy --workspace --locked --all-targets --all-features -- -D warnings
+          cargo test --workspace --locked --all-targets
+        else
+          cargo clippy --locked --all-targets --all-features -- -D warnings
+          cargo test --locked --all-targets
+        fi ;;
       *) die "unknown check scope: $scope" ;;
     esac ;;
   test)
@@ -173,7 +252,11 @@ case "$command" in
       shift
       frontend_build
       prepare_test_assets
-      cargo test --workspace --locked --all-targets "$@"
+      if is_windows_host; then
+        cargo test --workspace --locked --all-targets "$@"
+      else
+        cargo test --locked --all-targets "$@"
+      fi
     else
       cargo test -p miao-core --locked --no-default-features --all-targets "$@"
     fi ;;

@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { customizationHash, readSource } from '../sing-box/source.mjs'
 
 const targets = { amd64: ['x86_64-unknown-linux-musl', 62], arm64: ['aarch64-unknown-linux-musl', 183] }
+const kernelArtifacts = { amd64: 'sing-box-amd64', arm64: 'sing-box-arm64', 'windows-amd64': 'sing-box-windows-amd64.exe' }
 const ruleFiles = ['geoip-cn.srs', 'geosite-geolocation-cn.srs']
 const assetNames = Object.keys(targets).map(target => `miao-rust-linux-${target}`)
 const sha256 = bytes => createHash('sha256').update(bytes).digest('hex')
@@ -19,7 +20,7 @@ export function version(root = '.') {
 }
 
 function validateKernelMetadata(metadata, target) {
-  ensure(Object.hasOwn(targets, target), `Unsupported target: ${target}`)
+  ensure(Object.hasOwn(kernelArtifacts, target), `Unsupported target: ${target}`)
   ensure(metadata.schema_version === 1 && metadata.name === 'miao-kernel' && !metadata.test_stub, 'Real kernel required')
   ensure(metadata.target === target, 'Kernel target mismatch')
   for (const [key, value] of Object.entries(readSource())) {
@@ -29,7 +30,8 @@ function validateKernelMetadata(metadata, target) {
 }
 
 export function validateKernel(directory, target) {
-  const base = join(directory, `sing-box-${target}`)
+  ensure(Object.hasOwn(kernelArtifacts, target), `Unsupported target: ${target}`)
+  const base = join(directory, kernelArtifacts[target])
   const metadata = json(`${base}.meta.json`)
   validateKernelMetadata(metadata, target)
   const bytes = readFileSync(`${base}.zst`)

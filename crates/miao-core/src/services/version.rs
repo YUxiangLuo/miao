@@ -1,29 +1,51 @@
+#[cfg(not(windows))]
 use std::fs;
+#[cfg(not(windows))]
 use std::path::{Path, PathBuf};
+#[cfg(not(windows))]
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Instant;
 
+#[cfg(not(windows))]
 use futures::StreamExt;
+#[cfg(not(windows))]
 use sha2::{Digest, Sha256};
+#[cfg(not(windows))]
 use tokio::io::AsyncWriteExt;
-use tokio::time::{sleep, Duration};
-use tracing::{error, info, warn};
+#[cfg(not(windows))]
+use tokio::time::sleep;
+use tokio::time::Duration;
+#[cfg(not(windows))]
+use tracing::info;
+use tracing::{error, warn};
 
 use crate::error::{AppError, AppResult};
-use crate::models::{GitHubAsset, GitHubRelease, VersionInfo};
-use crate::services::singbox::{is_sing_box_running, start_sing_internal, stop_sing_internal};
-use crate::state::{AppState, UpgradeQuiescence, VersionCache};
+#[cfg(any(not(windows), test))]
+use crate::models::GitHubAsset;
+use crate::models::{GitHubRelease, VersionInfo};
+use crate::services::singbox::is_sing_box_running;
+#[cfg(not(windows))]
+use crate::services::singbox::{start_sing_internal, stop_sing_internal};
+#[cfg(not(windows))]
+use crate::state::UpgradeQuiescence;
+use crate::state::{AppState, VersionCache};
 use crate::VERSION;
 
 const CACHE_TTL: Duration = Duration::from_secs(300);
+#[cfg(not(windows))]
 const DOWNLOAD_MAX_ATTEMPTS: u32 = 3;
+#[cfg(not(windows))]
 const DOWNLOAD_RETRY_BASE_MS: u64 = 500;
+#[cfg(not(windows))]
 const HANDOFF_RESPONSE_FLUSH_DELAY: Duration = Duration::from_millis(500);
 
+#[cfg(any(not(windows), test))]
 const MARKER_STATE_INSTALLED: &str = "installed";
+#[cfg(any(not(windows), test))]
 const MARKER_STATE_BOOTING: &str = "booting";
 
+#[cfg(any(not(windows), test))]
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 struct UpgradePending {
     expected_version: String,
@@ -32,6 +54,7 @@ struct UpgradePending {
     boot_pid: Option<u32>,
 }
 
+#[cfg(not(windows))]
 struct UpgradePaths {
     current_exe: PathBuf,
     staged: PathBuf,
@@ -40,6 +63,7 @@ struct UpgradePaths {
     failed: PathBuf,
 }
 
+#[cfg(not(windows))]
 impl UpgradePaths {
     fn for_exe(current_exe: &Path) -> Self {
         let display = current_exe.display();
@@ -53,6 +77,7 @@ impl UpgradePaths {
     }
 }
 
+#[cfg(any(not(windows), test))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum PendingUpgradeAction {
     /// No marker file: remove any legacy `.bak` left by pre-marker releases.
@@ -65,6 +90,7 @@ enum PendingUpgradeAction {
     RollbackToBackup,
 }
 
+#[cfg(any(not(windows), test))]
 fn decide_pending_upgrade(
     marker: Option<&UpgradePending>,
     current_ver: &str,
@@ -100,6 +126,7 @@ fn decide_pending_upgrade(
     }
 }
 
+#[cfg(not(windows))]
 fn marker_belongs_to_current_boot(
     marker: &UpgradePending,
     current_ver: &str,
@@ -110,6 +137,7 @@ fn marker_belongs_to_current_boot(
         && parse_semver_tag(&marker.expected_version) == parse_semver_tag(current_ver)
 }
 
+#[cfg(unix)]
 fn process_is_alive(pid: u32) -> bool {
     use nix::{errno::Errno, sys::signal, unistd::Pid};
 
@@ -122,11 +150,17 @@ fn process_is_alive(pid: u32) -> bool {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(not(windows), not(unix)))]
+fn process_is_alive(_pid: u32) -> bool {
+    false
+}
+
+#[cfg(all(test, not(windows)))]
 fn upgrade_pending_path(current_exe: &Path) -> PathBuf {
     UpgradePaths::for_exe(current_exe).pending
 }
 
+#[cfg(not(windows))]
 fn write_upgrade_pending(path: &Path, pending: &UpgradePending) -> AppResult<()> {
     let temp = PathBuf::from(format!("{}.tmp", path.display()));
     let bytes = serde_json::to_vec(pending)?;
@@ -143,6 +177,7 @@ fn write_upgrade_pending(path: &Path, pending: &UpgradePending) -> AppResult<()>
 /// the new binary moves `installed` to `booting`; a second boot before embedded
 /// extraction and the expected data plane become healthy rolls back to the
 /// retained executable.
+#[cfg(not(windows))]
 fn upgrade_requires_rollback(current_exe: &Path) -> AppResult<bool> {
     let paths = UpgradePaths::for_exe(current_exe);
     let pending = match fs::read(&paths.pending) {
@@ -176,6 +211,7 @@ fn upgrade_requires_rollback(current_exe: &Path) -> AppResult<bool> {
     }
 }
 
+#[cfg(not(windows))]
 pub fn reconcile_pending_upgrade() -> AppResult<()> {
     let current_exe = std::env::current_exe()?;
     if !upgrade_requires_rollback(&current_exe)? {
@@ -199,6 +235,12 @@ pub fn reconcile_pending_upgrade() -> AppResult<()> {
     )))
 }
 
+#[cfg(windows)]
+pub fn reconcile_pending_upgrade() -> AppResult<()> {
+    Ok(())
+}
+
+#[cfg(not(windows))]
 pub fn mark_upgrade_healthy() {
     let Ok(current_exe) = std::env::current_exe() else {
         return;
@@ -206,6 +248,10 @@ pub fn mark_upgrade_healthy() {
     mark_upgrade_healthy_at(&current_exe);
 }
 
+#[cfg(windows)]
+pub fn mark_upgrade_healthy() {}
+
+#[cfg(not(windows))]
 fn mark_upgrade_healthy_at(current_exe: &Path) {
     let paths = UpgradePaths::for_exe(current_exe);
     let Ok(bytes) = fs::read(&paths.pending) else {
@@ -224,6 +270,7 @@ fn mark_upgrade_healthy_at(current_exe: &Path) {
 }
 
 /// 流式下载到临时文件并增量 SHA256；成功时文件已关闭且校验通过。
+#[cfg(not(windows))]
 async fn download_binary_streaming_once(
     client: &reqwest::Client,
     url: &str,
@@ -316,6 +363,7 @@ async fn download_binary_streaming_once(
     Ok(())
 }
 
+#[cfg(not(windows))]
 async fn download_binary_streaming_retried(
     client: &reqwest::Client,
     url: &str,
@@ -382,6 +430,7 @@ async fn fetch_latest_release(
     Ok(release)
 }
 
+#[cfg(not(windows))]
 async fn invalidate_release_cache(state: &Arc<AppState>) {
     state.version_cache.store(Arc::new(VersionCache {
         release: None,
@@ -397,7 +446,9 @@ pub async fn get_version_info(state: &Arc<AppState>) -> VersionInfo {
     }
 
     match fetch_latest_release(&state.http_client, state).await {
-        Ok(release) => version_info_from_release(current, &release),
+        Ok(release) => {
+            version_info_from_release(current, &release, crate::platform::upgrade_supported())
+        }
         Err(e) => {
             warn!(error = %e, "Failed to fetch latest release from GitHub");
             version_info_without_release(current)
@@ -405,10 +456,14 @@ pub async fn get_version_info(state: &Arc<AppState>) -> VersionInfo {
     }
 }
 
-fn version_info_from_release(current: String, release: &GitHubRelease) -> VersionInfo {
+fn version_info_from_release(
+    current: String,
+    release: &GitHubRelease,
+    upgrade_supported: bool,
+) -> VersionInfo {
     let latest = release.tag_name.clone();
     let has_update = release_is_newer_than_current(&current, &latest);
-    let download_url = {
+    let download_url = if upgrade_supported {
         current_arch_asset_name().and_then(|asset_name| {
             release
                 .assets
@@ -416,6 +471,8 @@ fn version_info_from_release(current: String, release: &GitHubRelease) -> Versio
                 .find(|asset| asset.name == asset_name)
                 .map(|asset| asset.browser_download_url.clone())
         })
+    } else {
+        None
     };
 
     VersionInfo {
@@ -423,10 +480,11 @@ fn version_info_from_release(current: String, release: &GitHubRelease) -> Versio
         latest: Some(latest),
         has_update,
         download_url,
-        upgrade_supported: true,
+        upgrade_supported,
     }
 }
 
+#[cfg(not(windows))]
 fn get_temp_binary_path() -> String {
     let pid = std::process::id();
     let timestamp = std::time::SystemTime::now()
@@ -439,6 +497,7 @@ fn get_temp_binary_path() -> String {
         .into_owned()
 }
 
+#[cfg(any(not(windows), test))]
 fn binary_asset_and_digest<'a>(
     release: &'a GitHubRelease,
     asset_name: &str,
@@ -487,6 +546,7 @@ fn release_is_newer_than_current(current: &str, release_tag: &str) -> bool {
 }
 
 /// 对已通过 SHA256 校验的临时文件 chmod 并执行 `--version` 核对。
+#[cfg(not(windows))]
 async fn verify_temp_binary_executable(temp_path: &Path, tag_name: &str) -> AppResult<()> {
     set_executable(temp_path).map_err(|e| AppError::context("Failed to chmod temp binary", e))?;
 
@@ -516,6 +576,7 @@ async fn verify_temp_binary_executable(temp_path: &Path, tag_name: &str) -> AppR
     Ok(())
 }
 
+#[cfg(any(not(windows), test))]
 fn stdout_version_matches_release(stdout: &str, tag_name: &str) -> bool {
     let lower = stdout.to_ascii_lowercase();
     if !lower.contains("miao") {
@@ -526,14 +587,17 @@ fn stdout_version_matches_release(stdout: &str, tag_name: &str) -> bool {
     stdout.contains(tag_trim) || stdout.contains(no_v)
 }
 
+#[cfg(not(windows))]
 struct UpgradeGuard(Arc<AppState>);
 
+#[cfg(not(windows))]
 impl Drop for UpgradeGuard {
     fn drop(&mut self) {
         self.0.upgrading.store(false, Ordering::SeqCst);
     }
 }
 
+#[cfg(not(windows))]
 async fn stage_verified_binary(temp_path: &Path, staged_path: &Path) -> AppResult<()> {
     let _ = fs::remove_file(staged_path);
     fs::copy(temp_path, staged_path)
@@ -547,6 +611,7 @@ async fn stage_verified_binary(temp_path: &Path, staged_path: &Path) -> AppResul
     Ok(())
 }
 
+#[cfg(not(windows))]
 fn install_staged_upgrade(paths: &UpgradePaths, expected_version: &str) -> AppResult<()> {
     if paths.backup.exists() {
         return Err(AppError::message(
@@ -574,6 +639,7 @@ fn install_staged_upgrade(paths: &UpgradePaths, expected_version: &str) -> AppRe
     Ok(())
 }
 
+#[cfg(not(windows))]
 async fn recover_after_failed_install(
     state: &Arc<AppState>,
     staged_path: &Path,
@@ -591,6 +657,7 @@ async fn recover_after_failed_install(
     install_err
 }
 
+#[cfg(not(windows))]
 async fn run_delayed_upgrade_handoff(
     guard: UpgradeGuard,
     quiescence: UpgradeQuiescence,
@@ -653,6 +720,7 @@ async fn run_delayed_upgrade_handoff(
     std::process::exit(1);
 }
 
+#[cfg(not(windows))]
 pub async fn upgrade_binary(state: &Arc<AppState>) -> AppResult<String> {
     if state
         .upgrading
@@ -746,18 +814,46 @@ pub async fn upgrade_binary(state: &Arc<AppState>) -> AppResult<String> {
     Ok(new_version)
 }
 
+#[cfg(not(windows))]
 fn set_executable(path: &Path) -> std::io::Result<()> {
-    use std::os::unix::fs::PermissionsExt;
-    fs::set_permissions(path, fs::Permissions::from_mode(0o755))
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(path, fs::Permissions::from_mode(0o755))
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = path;
+        Ok(())
+    }
 }
 
+#[cfg(not(windows))]
 fn exec_replace(command: &mut std::process::Command) -> std::io::Error {
-    use std::os::unix::process::CommandExt;
-    command.exec()
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.exec()
+    }
+    #[cfg(not(unix))]
+    {
+        match command.spawn() {
+            Ok(_) => std::io::Error::other("spawned replacement process"),
+            Err(err) => err,
+        }
+    }
 }
 
+#[cfg(not(windows))]
 fn upgrade_failure_log_path() -> std::path::PathBuf {
-    std::path::PathBuf::from("/tmp/miao-upgrade-failure.log")
+    #[cfg(unix)]
+    {
+        std::path::PathBuf::from("/tmp/miao-upgrade-failure.log")
+    }
+    #[cfg(not(unix))]
+    {
+        std::env::temp_dir().join("miao-upgrade-failure.log")
+    }
 }
 
 fn current_version() -> String {
@@ -765,6 +861,10 @@ fn current_version() -> String {
 }
 
 fn current_arch_asset_name() -> Option<&'static str> {
+    if cfg!(windows) {
+        return None;
+    }
+
     if cfg!(target_arch = "x86_64") {
         Some("miao-rust-linux-amd64")
     } else if cfg!(target_arch = "aarch64") {
@@ -780,7 +880,7 @@ fn version_info_without_release(current: String) -> VersionInfo {
         latest: None,
         has_update: false,
         download_url: None,
-        upgrade_supported: true,
+        upgrade_supported: crate::platform::upgrade_supported(),
     }
 }
 

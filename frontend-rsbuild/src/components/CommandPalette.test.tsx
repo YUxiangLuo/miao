@@ -145,4 +145,35 @@ describe('CommandPalette', () => {
     await user.click(backdrop)
     expect(open()).toBe(false)
   })
+
+  it('switches the VPS quick action to link import when vps_supported is false', async () => {
+    const user = userEvent.setup()
+    const app = createMockApp({
+      status: () => ({
+        ready: true,
+        running: true,
+        initializing: false,
+        node_select: 'manual',
+        requested_node_select: 'manual',
+        vps_supported: false,
+        platform: 'windows',
+      }),
+    })
+    const onClose = rs.fn()
+
+    render(() => (
+      <CommandPalette
+        open
+        onClose={onClose}
+        app={app}
+        onToggleTheme={rs.fn()}
+        theme="light"
+      />
+    ))
+
+    expect(screen.queryByRole('option', { name: /SSH 部署海外 VPS/ })).toBeNull()
+    await user.click(screen.getByRole('option', { name: /导入独享专线 \/ 分享链接/ }))
+    expect(app.openNodeModal).toHaveBeenCalledWith('link')
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
 })

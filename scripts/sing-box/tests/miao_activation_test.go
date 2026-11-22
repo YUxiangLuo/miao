@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"syscall"
 	"testing"
 	"time"
 
@@ -83,10 +82,8 @@ func TestMiaoActivationRunHelper(t *testing.T) {
 	}
 }
 
-func TestMiaoActivationRunAcknowledgesOnlySuccessfulReloads(t *testing.T) {
-	directory := t.TempDir()
-	config := `{"log":{"disabled":true},"outbounds":[{"type":"direct","tag":"direct"}],"route":{"final":"direct"}}`
-	miaoWriteActivation(t, directory, "start", config)
+func miaoStartActivationChild(t *testing.T, directory string) (*exec.Cmd, func() string, func(string)) {
+	t.Helper()
 	command := exec.Command(os.Args[0], "-test.run=^TestMiaoActivationRunHelper$")
 	command.Env = append(os.Environ(), "MIAO_ACTIVATION_TEST_CHILD=1", "MIAO_ACTIVATION_DIR="+directory)
 	if err := command.Start(); err != nil {
@@ -118,21 +115,13 @@ func TestMiaoActivationRunAcknowledgesOnlySuccessfulReloads(t *testing.T) {
 		}
 		t.Fatalf("acknowledgement did not become %q, got %q", expected, readAck())
 	}
+	return command, readAck, waitAck
+}
+
+func TestMiaoActivationRunPublishesInitialAcknowledgement(t *testing.T) {
+	directory := t.TempDir()
+	config := `{"log":{"disabled":true},"outbounds":[{"type":"direct","tag":"direct"}],"route":{"final":"direct"}}`
+	miaoWriteActivation(t, directory, "start", config)
+	_, _, waitAck := miaoStartActivationChild(t, directory)
 	waitAck("start")
-	miaoWriteActivation(t, directory, "reload", config+"\n")
-	if err := command.Process.Signal(syscall.SIGHUP); err != nil {
-		t.Fatal(err)
-	}
-	waitAck("reload")
-	miaoWriteActivation(t, directory, "rejected", `{"outbounds":[{"type":"not-a-protocol"}]}`)
-	if err := command.Process.Signal(syscall.SIGHUP); err != nil {
-		t.Fatal(err)
-	}
-	time.Sleep(100 * time.Millisecond)
-	if readAck() != "reload" {
-		t.Fatal("failed reload published an acknowledgement")
-	}
-	if err := command.Process.Signal(syscall.Signal(0)); err != nil {
-		t.Fatal("failed precheck did not keep the old instance", err)
-	}
 }

@@ -346,9 +346,51 @@ async fn get_status_works_when_stopped_without_network() {
         2,
         "including the current cap in the response must not modify the node-derived options"
     );
-    assert_eq!(payload["upgrade_supported"], true);
-    assert_eq!(payload["vps_supported"], true);
+    assert_eq!(
+        payload["upgrade_supported"],
+        crate::platform::upgrade_supported()
+    );
+    assert_eq!(payload["vps_supported"], crate::platform::vps_supported());
     assert!(payload["current_node"].is_null());
+}
+
+#[cfg(windows)]
+#[tokio::test]
+async fn windows_rejects_vps_and_in_process_upgrade_via_mcp() {
+    let state = state(Config::default());
+    let vps = call(
+        &state,
+        json!({
+            "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+            "params": {
+                "name": "deploy_vps",
+                "arguments": { "ip": "203.0.113.10", "password": "secret", "confirm": true }
+            },
+        }),
+    )
+    .await;
+    assert_eq!(vps["result"]["isError"], true);
+    assert!(vps["result"]["content"][0]["text"]
+        .as_str()
+        .unwrap()
+        .contains("不支持"));
+
+    let upgrade = call(
+        &state,
+        json!({
+            "jsonrpc": "2.0", "id": 2, "method": "tools/call",
+            "params": {
+                "name": "upgrade_miao",
+                "arguments": { "confirm": true }
+            },
+        }),
+    )
+    .await;
+    assert_eq!(upgrade["result"]["isError"], true);
+    assert!(upgrade["result"]["content"][0]["text"]
+        .as_str()
+        .unwrap()
+        .contains("Windows"));
 }
 
 #[tokio::test]

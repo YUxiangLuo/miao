@@ -150,7 +150,7 @@ pub(crate) fn parse(args: impl IntoIterator<Item = OsString>) -> AppResult<Comma
 }
 
 /// Shells supporting --config can reuse the CLI parser after removing their
-/// own flags. SDK startup never implicitly reads argv.
+/// own flags (e.g. --minimized). SDK startup never implicitly reads argv.
 pub fn config_path_from_args(
     args: impl IntoIterator<Item = OsString>,
 ) -> AppResult<Option<PathBuf>> {
@@ -189,7 +189,7 @@ pub(crate) fn prepare(source: LaunchSource) -> AppResult<PreparedLaunch> {
             // .max_multiplier; node bindings follow the temporary config path.
             let mut builder = tempfile::Builder::new();
             builder.prefix("miao-cli-");
-
+            #[cfg(unix)]
             {
                 use std::os::unix::fs::PermissionsExt;
                 builder.permissions(std::fs::Permissions::from_mode(0o700));
@@ -205,6 +205,9 @@ pub(crate) fn prepare(source: LaunchSource) -> AppResult<PreparedLaunch> {
             options.config_path = Some(config_path);
             options.runtime_dir = Some(profile.path().join("runtime"));
             options.volatile_path = Some(profile.path().join("volatile.yaml"));
+            if cfg!(windows) {
+                options.log_path = Some(profile.path().join("miao.log"));
+            }
             Some(profile)
         }
     };

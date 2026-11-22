@@ -351,6 +351,7 @@ mod tests {
         assert_eq!(nodes[1].tag, "日本サーバー");
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn residential_socks5_detour_roundtrips_and_rejects_cycles() {
         use crate::services::commands::nodes::add_node;

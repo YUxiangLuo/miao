@@ -11,7 +11,7 @@ sudo ./miao --sub 'https://example.com/sub?token=xxx' JP
 ./miao --version
 ```
 
-示例假定二进制名为 `miao`。`--config=PATH`、`--sub=URL` 同样有效，两者互斥；参数在提权、写文件和启核前校验。
+示例假定二进制名为 `miao`（Windows 桌面端支持额外的 `--minimized` 静默托盘启动参数）。`--config=PATH`、`--sub=URL` 同样有效，两者互斥；参数在提权、写文件和启核前校验。
 
 `--sub` 接受 HTTP/HTTPS Clash YAML 订阅。地区可选 `HK/JP/TW/SG/US`，大小写不限；省略时手动选择，无地区候选时临时回退手动。临时运行默认规则分流、不限倍率，不继承已有配置或偏好，面板修改也仅影响本次运行；清理规则见 [Profile](profiles.md#sdk-与生命周期)。
 
@@ -27,7 +27,7 @@ nodes:  # sing-box outbound JSON
   - '{"type":"hysteria2","tag":"HY2","server":"example.com","server_port":443,"password":"xxx","tls":{"enabled":true}}'
 custom_rules:
   - '{"domain_suffix":"example.com","action":"route","outbound":"direct"}'
-  - '{"process_name":"qbittorrent","action":"route","outbound":"HY2"}'
+  - '{"process_name":"qbittorrent","action":"route","outbound":"HY2"}'  # Windows 进程名需带 .exe
 
 # 可省略；持久偏好优先于策略/倍率的启动默认值
 mcp: false
@@ -148,9 +148,9 @@ disabled_nodes:
 
 `success` 仅表示收到 HTTP 响应，须结合 `http_status`、`error_kind`（timeout/connect/request）和 `error` 判断。403/405/503 不代表访问正常，部分网站不支持 HEAD；后端不可达也不能当作目标不可达。关闭弹窗不取消检查，报告保留至下次检查或刷新页面；复制失败可手动选取。
 
-## VPS 一键部署
+## VPS 一键部署（仅非 Windows 平台）
 
-「添加节点 → VPS 部署」通过 SSH 安装 Hysteria2 或恢复已有 Miao 节点。Miao 主机须有 OpenSSH 客户端。
+Linux/OpenWrt 下「添加节点 → VPS 部署」通过 SSH 安装 Hysteria2 或恢复已有 Miao 节点。Miao 主机须有 OpenSSH 客户端；Windows 不编译该入口，面板自动隐藏 SSH 部署切页并引导通过分享链接或静态住宅 SOCKS5 导入。
 
 - 目标为 Linux x86_64/arm64、systemd/OpenRC、POSIX sh；自动安装依赖支持 apt、dnf/yum、apk、pacman、zypper，其他环境须预装工具。
 - 仅支持 **root 密码登录、SSH 22 端口**，不支持密钥或非 root sudo；密码只用于本次连接，不写入 Miao 配置。

@@ -1051,5 +1051,5 @@ pub(super) async fn retry_failed_startup(state: &Arc<AppState>) {
 
 #[cfg(test)]
 mod activity_tests;
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod recovery_tests;

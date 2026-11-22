@@ -16,13 +16,13 @@
 
 不注册代理服务端入站、endpoint、额外服务、证书签发或其他 DNS transport。手动 JSON 也只支持七种节点协议：读取/生成时跳过不支持的类型并告警，保留原始 JSON；内核 `check` 拒绝已移除类型。
 
-TUN 名为 `sing-tun`，启用 `auto_route`、`strict_route`，使用 `auto_redirect: true`，`multi_queue` 默认关闭。内置 direct 使用 30 秒 TCP keepalive、15 秒间隔，帮助发现闲置连接失效，不保证远端连接永久存活。
+TUN 名为 `sing-tun`，启用 `auto_route`、`strict_route`，Linux 下额外开启 `auto_redirect: true`，`multi_queue` 默认关闭。内置 direct 使用 30 秒 TCP keepalive、15 秒间隔，帮助发现闲置连接失效，不保证远端连接永久存活。
 
-`miao-kernel` 只包含 run/check/version 与 namespace 辅助入口，复用上游实现；运行时文件仍名为 `sing-box`。
+`miao-kernel` 只包含 run/check/version 与 namespace 辅助入口，复用上游实现；运行时文件名为 `sing-box`（Windows 为 `sing-box.exe`）。
 
 ## 补丁与回归
 
-- [miao_activation.go](../scripts/sing-box/miao_activation.go) 为父子进程增加激活回执。父进程在启动/SIGHUP 前写入唯一请求 ID 与配置 SHA-256；内核在读取配置前捕获请求，校验实际读取字节，并且仅在实例 `Start()` 成功后原子发布带 PID 的回执。控制面必须同时验证回执、进程存活及 TUN/Clash 健康，旧监听器不能提前完成新事务。[miao_activation_test.go](../scripts/sing-box/tests/miao_activation_test.go) 覆盖旧请求、哈希不匹配及真实子进程的成功/拒绝重载；命令钩子与固定上游不匹配时构建立即失败。
+- [miao_activation.go](../scripts/sing-box/miao_activation.go) 为父子进程增加激活回执。父进程在启动或 Unix SIGHUP 前写入唯一请求 ID 与配置 SHA-256；内核在读取配置前捕获请求，校验实际读取字节，并且仅在实例 `Start()` 成功后原子发布带 PID 的回执。控制面必须同时验证回执、进程存活及 TUN/Clash 健康，旧监听器不能提前完成新事务。[miao_activation_test.go](../scripts/sing-box/tests/miao_activation_test.go) 与 [miao_activation_unix_test.go](../scripts/sing-box/tests/miao_activation_unix_test.go) 覆盖旧请求、哈希不匹配、跨平台启动回执及 Unix 子进程 SIGHUP 成功/拒绝重载；命令钩子与固定上游不匹配时构建立即失败。
 - CLI context 隔离已由上游实现；[miao_context_test.go](../scripts/sing-box/tests/miao_context_test.go) 保留 create/check 两处注册表隔离回归。两者均须通过 `service.ExtendContext(globalCtx)` 复制可变注册表，同时保留取消语义；仅 `context.WithCancel` 会共享 manager，可能在 SIGHUP 重载时访问未启动的 AnyTLS client。测试使用 direct 和未选中的 AnyTLS，不使用 TUN/外网，也不并行修改 CLI 全局变量。
 - [shadowsocks2-halfclose.patch](../scripts/sing-box/shadowsocks2-halfclose.patch) 为经典 AEAD、AEAD-2022 客户端提供 `CloseWrite`：必要时先发送加密目的地址，再关闭底层写端并保留响应方向。不绕过加密层；不支持半关闭的底层传输退回完整关闭。
 - [miao_shadowsocks_test.go](../scripts/sing-box/tests/miao_shadowsocks_test.go) 使用 loopback TCP 和独立服务端，覆盖空请求、多帧、EOF 后响应、半关闭后写入失败、包装回退与错误传播；不承诺所有插件/复用都支持半关闭。
@@ -34,17 +34,18 @@ TUN 名为 `sing-tun`，启用 `auto_route`、`strict_route`，使用 `auto_redi
 在仓库根目录执行，需要 Git、Go、Bun、curl：
 
 ```bash
-./dev.sh kernel all                # 两架构内核与规则
-./dev.sh kernel amd64 --kernel-only # 仅 amd64 内核
+./dev.sh kernel all                        # 两架构 Linux 内核与规则
+./dev.sh kernel windows-amd64              # Windows amd64 内核与规则
+./dev.sh kernel amd64 --kernel-only        # 仅 amd64 内核
 ```
 
 默认同时更新规则，将上游分支解析为完整 SHA，并将来源和规则内容哈希写入 `rules.meta.json`。`--kernel-only` 跳过 host 规则编译器与规则更新；`SING_BOX_REF` 只能等于清单 SHA。
 
-流程为上游回归 → host 规则编译器 → 补丁与客户端命令 → 客户端回归 → 目标编译/压缩，全部成功才写入 `embedded/`。回归与规则编译器固定使用本机 Linux 架构，目标内核按命令参数构建，不受外部 `GOARCH`/`GOOS` 影响。上游与客户端 Go 回归各重复 20 次，验证注册能力、含 TUN 配置及已移除出站的拒绝行为。
+流程为上游回归 → host 规则编译器 → 补丁与客户端命令 → 客户端回归 → 目标编译/压缩，全部成功才写入 `embedded/`。回归与规则编译器使用本机宿主 OS/架构，目标内核按命令参数构建（`sing-box-amd64`、`sing-box-arm64`、`sing-box-windows-amd64.exe`），不受外部 `GOARCH`/`GOOS` 影响。上游与客户端 Go 回归各重复 20 次，验证注册能力、含 TUN 配置及已移除出站的拒绝行为。
 
 | 产物 | 用途 |
 | --- | --- |
-| `sing-box-<target>` | 原始内核，供验证 |
+| `sing-box-<target>` / `sing-box-windows-amd64.exe` | 原始内核，供验证 |
 | 同名 `.zst` | Rust 嵌入的 Zstandard level 19 数据 |
 | 同名 `.meta.json` | 源码、工具链、能力、定制文件哈希、压缩前后大小与 SHA-256 |
 | `sing-box-host` | 未裁剪的规则编译器，不嵌入成品 |

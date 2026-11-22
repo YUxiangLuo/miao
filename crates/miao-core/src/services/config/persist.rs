@@ -242,7 +242,7 @@ pub(crate) async fn write_file_atomic(path: &Path, content: &[u8]) -> AppResult<
 async fn write_file_atomic_inner(
     path: &Path,
     content: &[u8],
-    #[cfg_attr(not(test), allow(unused_variables))] fail_directory_sync: bool,
+    #[cfg_attr(not(all(test, unix)), allow(unused_variables))] fail_directory_sync: bool,
 ) -> AppResult<()> {
     let parent = path
         .parent()
@@ -281,6 +281,7 @@ async fn write_file_atomic_inner(
             .await
             .map_err(|e| AppError::context("Failed to atomically rename file", e))?;
 
+        #[cfg(unix)]
         {
             #[cfg(test)]
             if fail_directory_sync {
@@ -472,6 +473,7 @@ async fn remove_file_durable(path: &Path) -> AppResult<()> {
         Err(err) => return Err(AppError::context("Failed to remove stable config", err)),
     }
 
+    #[cfg(unix)]
     {
         let parent = path
             .parent()
@@ -821,10 +823,11 @@ mod tests {
         load_max_multiplier_preference, load_node_select_preference, load_volatile_config_at,
         persist_effective_node_select, read_sub_nodes_snapshot_at, restore_config_from_cache_at,
         restore_runtime_config_bytes_at, save_config_cache_at, save_config_layered,
-        save_config_layered_inner, save_max_multiplier_preference, save_node_select_preference,
-        save_sub_nodes_snapshot_at, save_volatile_to, snapshot_runtime_config_at,
-        write_file_atomic_inner, SubNodesSnapshot,
+        save_max_multiplier_preference, save_node_select_preference, save_sub_nodes_snapshot_at,
+        save_volatile_to, snapshot_runtime_config_at, SubNodesSnapshot,
     };
+    #[cfg(unix)]
+    use super::{save_config_layered_inner, write_file_atomic_inner};
     use crate::services::singbox::get_sing_box_home;
 
     #[test]
@@ -871,6 +874,7 @@ mod tests {
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn atomic_write_reports_that_rename_committed_before_directory_sync_failure() {
         let temp_dir = tempfile::tempdir().unwrap();
@@ -912,6 +916,7 @@ mod tests {
         assert!(config_path.is_dir());
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn save_config_layered_restores_both_files_and_memory_after_post_rename_failure() {
         use crate::models::{Config, NodeSelect, Region};
@@ -974,6 +979,7 @@ mod tests {
         let _ = tokio::fs::remove_dir_all(&base).await;
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn layered_post_rename_failure_removes_previously_absent_files() {
         for (fail_stable, fail_volatile) in [(true, false), (false, true)] {
@@ -1005,6 +1011,7 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn save_config_layered_reports_primary_and_rollback_failures() {
         use crate::models::Config;
@@ -1042,6 +1049,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn save_config_layered_skips_unchanged_stable_layer() {
         use crate::models::{Config, NodeSelect, Region};

@@ -13,5 +13,5 @@ pub mod static_assets;
 pub mod subs;
 pub mod terminals;
 pub mod version;
-
+#[cfg(not(windows))]
 pub mod vps;

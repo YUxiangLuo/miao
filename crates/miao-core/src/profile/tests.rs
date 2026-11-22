@@ -15,7 +15,9 @@ fn environment() -> (tempfile::TempDir, Environment) {
                 source: ConfigPathSource::EtcDefault,
             },
             runtime_root: base.join("runtime"),
+            data_dir: base.join("data"),
             cwd,
+            windows: false,
             preferences: PreferenceStore::Working,
         },
     )
@@ -36,7 +38,12 @@ fn named(path: PathBuf, env: &Environment) -> ResolvedProfile {
 #[test]
 fn default_paths_and_explicit_selection_of_default_are_compatible() {
     let (_root, mut env) = environment();
-    for store in [PreferenceStore::Working, PreferenceStore::Runtime] {
+    for (windows, store) in [
+        (false, PreferenceStore::Working),
+        (false, PreferenceStore::Runtime),
+        (true, PreferenceStore::Persistent),
+    ] {
+        env.windows = windows;
         env.preferences = store;
         let default = resolve(RuntimeOptions::default(), &env);
         let explicit = named(env.default_config.path.clone(), &env);
@@ -47,6 +54,7 @@ fn default_paths_and_explicit_selection_of_default_are_compatible() {
         let prefs = match store {
             PreferenceStore::Working => &env.cwd,
             PreferenceStore::Runtime => &env.runtime_root,
+            PreferenceStore::Persistent => &env.data_dir,
         };
         assert_eq!(default.runtime.last_proxy, prefs.join(".last_proxy"));
         assert_eq!(
@@ -57,7 +65,15 @@ fn default_paths_and_explicit_selection_of_default_are_compatible() {
             default.runtime.max_multiplier_preference,
             prefs.join(".max_multiplier")
         );
-        assert_eq!(default.volatile, env.runtime_root.join("volatile.yaml"));
+        assert_eq!(
+            default.volatile,
+            if windows {
+                &env.data_dir
+            } else {
+                &env.runtime_root
+            }
+            .join("volatile.yaml")
+        );
         assert!(
             !env.runtime_root.exists(),
             "resolution must not create files"
@@ -68,7 +84,12 @@ fn default_paths_and_explicit_selection_of_default_are_compatible() {
 #[test]
 fn named_profiles_isolate_all_state_even_with_matching_stems() {
     let (_root, mut env) = environment();
-    for store in [PreferenceStore::Working, PreferenceStore::Runtime] {
+    for (windows, store) in [
+        (false, PreferenceStore::Working),
+        (false, PreferenceStore::Runtime),
+        (true, PreferenceStore::Persistent),
+    ] {
+        env.windows = windows;
         env.preferences = store;
         let a = named(env.cwd.join("travel.yaml"), &env);
         let b = named(env.cwd.join("travel.yml"), &env);
@@ -92,7 +113,10 @@ fn named_profiles_isolate_all_state_even_with_matching_stems() {
                     .starts_with(&profile.runtime.runtime_dir),
                 store == PreferenceStore::Runtime
             );
-            assert!(profile.volatile.starts_with(&profile.runtime.runtime_dir));
+            assert_eq!(
+                profile.volatile.starts_with(&profile.runtime.runtime_dir),
+                !windows
+            );
         }
         assert_ne!(a.runtime.active_config, b.runtime.active_config);
         assert_ne!(a.runtime.config_cache, b.runtime.config_cache);
@@ -125,10 +149,15 @@ fn named_profile_identity_survives_first_save_and_does_not_depend_on_cwd() {
 }
 
 #[test]
-fn runtime_and_volatile_overrides_have_explicit_precedence() {
+fn runtime_and_volatile_overrides_have_explicit_precedence_on_all_platforms() {
     let (_root, mut env) = environment();
-    for store in [PreferenceStore::Working, PreferenceStore::Runtime] {
-        env.preferences = store;
+    for windows in [true, false] {
+        env.windows = windows;
+        env.preferences = if windows {
+            PreferenceStore::Persistent
+        } else {
+            PreferenceStore::Working
+        };
         let options = RuntimeOptions {
             config_path: Some("other.yaml".into()),
             runtime_dir: Some("isolated".into()),
@@ -141,6 +170,9 @@ fn runtime_and_volatile_overrides_have_explicit_precedence() {
             profile.runtime.node_select_preference,
             env.cwd.join("isolated/.node_select")
         );
+        if windows {
+            assert_eq!(profile.log, Some(env.cwd.join("isolated/miao.log")));
+        }
         let profile = resolve(
             RuntimeOptions {
                 volatile_path: Some("override.yaml".into()),
@@ -154,6 +186,7 @@ fn runtime_and_volatile_overrides_have_explicit_precedence() {
     }
 }
 
+#[cfg(unix)]
 #[test]
 fn symlink_and_relative_aliases_resolve_to_the_same_profile() {
     let (_root, env) = environment();
@@ -168,6 +201,7 @@ fn symlink_and_relative_aliases_resolve_to_the_same_profile() {
     }
 }
 
+#[cfg(unix)]
 #[tokio::test]
 async fn configuration_writes_preserve_the_symlink_and_update_its_resolved_target() {
     let (_root, env) = environment();
@@ -197,6 +231,7 @@ async fn configuration_writes_preserve_the_symlink_and_update_its_resolved_targe
     assert!(saved.mcp);
 }
 
+#[cfg(unix)]
 #[test]
 fn non_utf8_profile_names_have_distinct_identities() {
     use std::os::unix::ffi::OsStringExt;

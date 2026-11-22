@@ -8,8 +8,9 @@ const preflight = readFileSync(new URL('../../crates/miao-core/src/services/vps/
 const provision = readFileSync(new URL('../../crates/miao-core/src/services/vps/provision.sh', import.meta.url), 'utf8')
 const probe = readFileSync(new URL('../../crates/miao-core/src/services/vps/probe.sh', import.meta.url), 'utf8')
 const legacyConfig = 'listen: :543\nauth:\n  type: password\n  password: old-secret\nobfs:\n  type: salamander\n  salamander:\n    password: old-obfs\n'
+const shellTest = test.skipIf(process.platform === 'win32')
 
-test('legacy probe requests migration without overwriting config or restarting', () => {
+shellTest('legacy probe requests migration without overwriting config or restarting', () => {
   const root = mkdtempSync(join(tmpdir(), 'miao-vps-probe-'))
   const config = legacyConfig
   try {
@@ -52,7 +53,7 @@ function fixture({ manager, init = 'openrc', arch = 'x86_64', missing = false })
 }
 
 for (const [manager, args] of [['apt-get', 'install -y'], ['dnf', 'install -y'], ['yum', 'install -y'], ['apk', 'add --no-cache'], ['pacman', '-S --needed --noconfirm'], ['zypper', '--non-interactive install']]) {
-  test(`VPS preflight installs missing OpenSSL with ${manager}`, () => {
+  shellTest(`VPS preflight installs missing OpenSSL with ${manager}`, () => {
     const { result, calls } = fixture({ manager, missing: true })
     expect(result.status).toBe(0)
     expect(result.stdout).toBe('openrc:amd64')
@@ -62,21 +63,21 @@ for (const [manager, args] of [['apt-get', 'install -y'], ['dnf', 'install -y'],
   })
 }
 
-test('VPS preflight supports arm64 without installing existing tools', () => {
+shellTest('VPS preflight supports arm64 without installing existing tools', () => {
   const { result, calls } = fixture({ manager: 'apk', arch: 'aarch64' })
   expect(result.status).toBe(0)
   expect(result.stdout).toBe('openrc:arm64')
   expect(calls).toBe('')
 })
 
-test('VPS preflight rejects unsupported architecture before installation', () => {
+shellTest('VPS preflight rejects unsupported architecture before installation', () => {
   const { result, calls } = fixture({ manager: 'apk', missing: true, arch: 'riscv64' })
   expect(result.status).not.toBe(0)
   expect(result.stderr).toContain('不支持的 CPU 架构')
   expect(calls).toBe('')
 })
 
-test('VPS preflight rejects missing init before installation', () => {
+shellTest('VPS preflight rejects missing init before installation', () => {
   const { result, calls } = fixture({ manager: 'apk', missing: true, init: 'none' })
   expect(result.status).not.toBe(0)
   expect(result.stderr).toContain('systemd 或 OpenRC')
@@ -170,7 +171,7 @@ miao_reload_init() { [ "$MIAO_INIT" != systemd ] || systemctl daemon-reload; }
 function contents(path) { return readFileSync(path, 'utf8') }
 
 for (const init of ['systemd', 'openrc']) {
-  for (const fail of ['', 'activate']) test(`${init} legacy migration ${fail ? 'rolls back' : 'upgrades binary and config'}`, () => {
+  for (const fail of ['', 'activate']) shellTest(`${init} legacy migration ${fail ? 'rolls back' : 'upgrades binary and config'}`, () => {
     const f = provisionFixture({ init, fail, legacy: true })
     try {
       expect(f.result.signal, f.result.stderr).toBeNull()
@@ -195,7 +196,7 @@ for (const init of ['systemd', 'openrc']) {
   })
 }
 
-test('generation failure leaves the old deployment and service untouched', () => {
+shellTest('generation failure leaves the old deployment and service untouched', () => {
   const f = provisionFixture({ fail: 'generate' })
   try {
     expect(f.result.signal, f.result.stderr).toBeNull()
@@ -207,7 +208,7 @@ test('generation failure leaves the old deployment and service untouched', () =>
   } finally { f.cleanup() }
 })
 
-for (const init of ['systemd', 'openrc']) test(`${init} activation failure restores files and state`, () => {
+for (const init of ['systemd', 'openrc']) shellTest(`${init} activation failure restores files and state`, () => {
   const f = provisionFixture({ init, fail: 'activate', running: true, enabled: true })
   try {
     expect(f.result.status).not.toBe(0)
@@ -220,7 +221,7 @@ for (const init of ['systemd', 'openrc']) test(`${init} activation failure resto
   } finally { f.cleanup() }
 })
 
-test('rollback preserves an originally stopped/disabled partial deployment', () => {
+shellTest('rollback preserves an originally stopped/disabled partial deployment', () => {
   const f = provisionFixture({ fail: 'activate', running: false, enabled: false, withUnit: false })
   try {
     expect(f.result.status).not.toBe(0)
@@ -233,7 +234,7 @@ test('rollback preserves an originally stopped/disabled partial deployment', () 
   } finally { f.cleanup() }
 })
 
-test('failed first installation restores the absence of a deployment', () => {
+shellTest('failed first installation restores the absence of a deployment', () => {
   const f = provisionFixture({ fail: 'activate', running: false, enabled: false, existing: false })
   try {
     expect(f.result.status).not.toBe(0)
@@ -246,7 +247,7 @@ test('failed first installation restores the absence of a deployment', () => {
   } finally { f.cleanup() }
 })
 
-test('successful activation starts and enables the requested new deployment', () => {
+shellTest('successful activation starts and enables the requested new deployment', () => {
   const f = provisionFixture({ running: false, enabled: false, withUnit: false })
   try {
     expect(f.result.status).toBe(0)
@@ -258,7 +259,7 @@ test('successful activation starts and enables the requested new deployment', ()
   } finally { f.cleanup() }
 })
 
-test('rollback failure retains backup and reports its real path', () => {
+shellTest('rollback failure retains backup and reports its real path', () => {
   const f = provisionFixture({ fail: 'restore' })
   try {
     expect(f.result.status).not.toBe(0)
@@ -271,7 +272,7 @@ test('rollback failure retains backup and reports its real path', () => {
   } finally { f.cleanup() }
 })
 
-for (const init of ['systemd', 'openrc']) test(`${init} rollback still restarts the old service when restoring autostart fails`, () => {
+for (const init of ['systemd', 'openrc']) shellTest(`${init} rollback still restarts the old service when restoring autostart fails`, () => {
   const f = provisionFixture({ init, fail: 'enable' })
   try {
     expect(f.result.signal, f.result.stderr).toBeNull()

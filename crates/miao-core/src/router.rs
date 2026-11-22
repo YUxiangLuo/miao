@@ -10,8 +10,9 @@ use axum::{
     Router,
 };
 
+#[cfg(not(windows))]
 use crate::handlers::version::upgrade;
-
+#[cfg(not(windows))]
 use crate::handlers::vps::deploy_vps;
 use crate::handlers::{
     access_ports::{delete_access_port, get_access_ports, save_access_port},
@@ -95,6 +96,7 @@ pub fn build_router(app_state: Arc<AppState>) -> Router {
         .route("/api/proxy/switch", post(switch_proxy))
         .route("/mcp", get(handle_mcp_get).post(handle_mcp));
 
+    #[cfg(not(windows))]
     let router = router
         .route("/api/upgrade", post(upgrade))
         .route("/api/vps/deploy", post(deploy_vps));
@@ -176,5 +178,5 @@ fn shutting_down_response(state: &AppState) -> Response {
 #[cfg(test)]
 mod tests;
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod cancellation_tests;

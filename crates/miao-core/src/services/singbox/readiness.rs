@@ -12,13 +12,17 @@ const REQUIRED_CONSECUTIVE_READY: u8 = 2;
 #[derive(Clone, Copy)]
 pub(super) enum Operation {
     Start,
-    Reload { pid: u32 },
+    #[cfg(unix)]
+    Reload {
+        pid: u32,
+    },
 }
 
 impl Operation {
     fn settle_time(self) -> Duration {
         match self {
             Self::Start => Duration::from_millis(100),
+            #[cfg(unix)]
             Self::Reload { .. } => Duration::from_millis(500),
         }
     }
@@ -26,6 +30,7 @@ impl Operation {
     fn cancelled(self) -> &'static str {
         match self {
             Self::Start => "sing-box start was cancelled",
+            #[cfg(unix)]
             Self::Reload { .. } => "sing-box reload was cancelled",
         }
     }
@@ -33,6 +38,7 @@ impl Operation {
     fn missing_process_error(self) -> &'static str {
         match self {
             Self::Start => self.cancelled(),
+            #[cfg(unix)]
             Self::Reload { .. } => "sing-box exited during reload",
         }
     }
@@ -40,6 +46,7 @@ impl Operation {
     fn status_check_context(self) -> &'static str {
         match self {
             Self::Start => "Failed to check sing-box startup status",
+            #[cfg(unix)]
             Self::Reload { .. } => "Failed to check sing-box reload status",
         }
     }
@@ -47,6 +54,7 @@ impl Operation {
     fn phase_label(self) -> &'static str {
         match self {
             Self::Start => "startup",
+            #[cfg(unix)]
             Self::Reload { .. } => "reload",
         }
     }
@@ -56,6 +64,7 @@ impl Operation {
             Self::Start => {
                 "sing-box process started but its data plane did not become ready within 8 seconds"
             }
+            #[cfg(unix)]
             Self::Reload { .. } => {
                 "sing-box data plane did not become ready within 8 seconds after reload"
             }
@@ -123,6 +132,7 @@ async fn check_process(state: &AppState, generation: u64, operation: Operation) 
         .as_mut()
         .ok_or_else(|| AppError::message(operation.missing_process_error()))?;
 
+    #[cfg(unix)]
     if let Operation::Reload { pid } = operation {
         if process.child.id() != Some(pid) {
             return Err(AppError::message(
@@ -136,6 +146,8 @@ async fn check_process(state: &AppState, generation: u64, operation: Operation) 
         .map_err(|e| AppError::context(operation.status_check_context(), e))?
     {
         *slot = None;
+        #[cfg(windows)]
+        super::cleanup_stale_tun_adapter();
         return Err(AppError::message(format!(
             "sing-box exited during {} with code {}",
             operation.phase_label(),
@@ -147,7 +159,7 @@ async fn check_process(state: &AppState, generation: u64, operation: Operation) 
         .ok_or_else(|| AppError::message(operation.cancelled()))
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 async fn wait_with_probe(
     state: &Arc<AppState>,
     generation: u64,

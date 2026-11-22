@@ -29,28 +29,29 @@ echo 'No vulnerabilities found'
 }
 
 const unavailable = 'error: POST https://registry.npmjs.org/-/npm/v1/security/advisories/bulk - 503'
+const shellTest = test.skipIf(process.platform === 'win32')
 
-test('audit recovers from a temporary registry outage', () => {
+shellTest('audit recovers from a temporary registry outage', () => {
   const result = runAudit(2, unavailable)
   expect(result.status).toBe(0)
   expect(result.attempts).toBe(3)
 })
 
-test('audit fails after bounded retries if the registry stays unavailable', () => {
+shellTest('audit fails after bounded retries if the registry stays unavailable', () => {
   const result = runAudit(5, unavailable)
   expect(result.status).toBe(1)
   expect(result.attempts).toBe(3)
 })
 
 for (const message of ['1 high vulnerability found', 'error: unknown audit failure']) {
-  test(`audit fails immediately for ${message}`, () => {
+  shellTest(`audit fails immediately for ${message}`, () => {
     const result = runAudit(1, message)
     expect(result.status).toBe(1)
     expect(result.attempts).toBe(1)
   })
 }
 
-test('successful audit is not retried', () => {
+shellTest('successful audit is not retried', () => {
   const result = runAudit(0, '')
   expect(result.status).toBe(0)
   expect(result.attempts).toBe(1)

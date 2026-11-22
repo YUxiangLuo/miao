@@ -20,7 +20,7 @@ for (const name of [
 
 function replaceExactlyOnce(name, before, after) {
   const path = join(target, name)
-  const text = readFileSync(path, 'utf8')
+  const text = readFileSync(path, 'utf8').replaceAll('\r\n', '\n')
   if (text.split(before).length !== 2) {
     throw new Error(`Upstream ${name} changed; review Miao command hooks`)
   }
@@ -41,6 +41,6 @@ replaceExactlyOnce('cmd_run.go',
   '\t\toptions, err = readConfigAndMerge()',
   '\t\toptionsList, activation, err = readMiaoConfig()\n\t\tif err != nil {\n\t\t\treturn err\n\t\t}\n\t\toptions, err = mergeOptionsList(optionsList)')
 
-for (const name of ['miao_context_test.go', 'miao_registry_test.go', 'miao_config_test.go', 'miao_shadowsocks_test.go', 'miao_activation_test.go']) {
+for (const name of ['miao_context_test.go', 'miao_registry_test.go', 'miao_config_test.go', 'miao_shadowsocks_test.go', 'miao_activation_test.go', 'miao_activation_unix_test.go']) {
   copyFileSync(fileURLToPath(new URL(`./tests/${name}`, import.meta.url)), join(target, name))
 }

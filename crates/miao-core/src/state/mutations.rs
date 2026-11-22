@@ -27,6 +27,7 @@ impl MutationGuard {
     }
 }
 
+#[cfg_attr(windows, allow(dead_code))]
 pub(crate) struct UpgradeQuiescence {
     state: Arc<AppState>,
     _mutation: MutationGuard,
@@ -52,6 +53,7 @@ impl AppState {
     /// Reuse the enclosing HTTP/MCP write request's task-local lease when it
     /// belongs to this `AppState` so draining awaits all *other* mutations
     /// without deadlocking on itself; standalone callers acquire a fresh lease.
+    #[cfg_attr(windows, allow(dead_code))]
     fn acquire_upgrade_mutation_lease(self: &Arc<Self>) -> Option<MutationGuard> {
         CURRENT_MUTATION
             .try_with(|guard| Arc::ptr_eq(&guard.0.state, self).then(|| guard.clone()))
@@ -63,6 +65,7 @@ impl AppState {
     /// No config_update lock may be held here: admitted SSH/network work and
     /// queued writes still need it. Exempt precisely this request's lease, not
     /// an arbitrary count of tasks. Standalone callers acquire their own lease.
+    #[cfg_attr(windows, allow(dead_code))]
     pub(crate) async fn quiesce_for_upgrade(self: &Arc<Self>) -> AppResult<UpgradeQuiescence> {
         let mutation = self
             .acquire_upgrade_mutation_lease()
@@ -138,6 +141,7 @@ mod tests {
         assert!(state.begin_mutation().is_none());
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn isolated_exec_happens_only_after_an_accepted_write_commits() {
         let root = tempfile::tempdir().unwrap();
@@ -167,6 +171,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn upgrade_exec_child() {
         use crate::{models::Config, paths::RuntimePaths, state::AppState};

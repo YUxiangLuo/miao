@@ -257,6 +257,8 @@ pub struct ScheduledRefreshStatus {
     pub next_run_at: Option<String>,
 }
 
+#[cfg(any(not(windows), test))]
+#[cfg_attr(windows, allow(dead_code))]
 #[derive(Deserialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
 pub struct VpsDeployRequest {
@@ -264,6 +266,7 @@ pub struct VpsDeployRequest {
     pub password: String,
 }
 
+#[cfg(any(not(windows), test))]
 #[derive(Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
 pub struct VpsDeployResponse {

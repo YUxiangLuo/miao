@@ -1,5 +1,6 @@
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, IsTerminal, Write};
+#[cfg(unix)]
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -142,11 +143,11 @@ impl BoundedLogWriter {
 }
 
 fn open_private_append(path: &Path) -> io::Result<File> {
-    OpenOptions::new()
-        .create(true)
-        .append(true)
-        .mode(0o600)
-        .open(path)
+    let mut options = OpenOptions::new();
+    options.create(true).append(true);
+    #[cfg(unix)]
+    options.mode(0o600);
+    options.open(path)
 }
 
 fn rotate_in_place(state: &mut BoundedState) {
@@ -210,8 +211,6 @@ async fn drain_stream<R: tokio::io::AsyncRead + Unpin>(
 
 #[cfg(test)]
 mod tests {
-    use std::os::unix::fs::PermissionsExt;
-
     use super::*;
 
     #[test]
@@ -236,8 +235,12 @@ mod tests {
         assert!(active_len > 0);
         assert!(rotated_len > 0);
 
-        let mode = fs::metadata(&log_path).unwrap().permissions().mode() & 0o777;
-        assert_eq!(mode, 0o600);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = fs::metadata(&log_path).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o600);
+        }
     }
 
     #[tokio::test]
@@ -248,8 +251,22 @@ mod tests {
         let limit = 1024_u64;
 
         let writer = BoundedLogWriter::open_with_limit(log_path.clone(), limit, false).unwrap();
+        #[cfg(unix)]
         let mut child = tokio::process::Command::new("sh")
-            .args(["-c", "i=0; while [ $i -lt 80 ]; do echo '0123456789abcdef0123456789abcdef'; i=$((i+1)); done"])
+            .args([
+                "-c",
+                "i=0; while [ $i -lt 80 ]; do echo '0123456789abcdef0123456789abcdef'; i=$((i+1)); done",
+            ])
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        #[cfg(windows)]
+        let mut child = tokio::process::Command::new("cmd.exe")
+            .args([
+                "/C",
+                "for /L %i in (1,1,80) do @echo 0123456789abcdef0123456789abcdef",
+            ])
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
             .spawn()

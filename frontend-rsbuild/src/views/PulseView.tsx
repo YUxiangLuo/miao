@@ -21,7 +21,7 @@ import {
   type TradeCategoryId,
   type TradePlatform,
 } from '../domain/tradeCatalog'
-import { PROTOCOL_OPTIONS, RULE_FIELD_OPTIONS, ruleFieldLabel } from '../ruleFormat'
+import { PROTOCOL_OPTIONS, ruleFieldLabel, ruleFieldOptions } from '../ruleFormat'
 import { useDialog } from '../hooks/useDialog'
 import { classNames, formatDelay, formatSpeed } from '../utils'
 import type { RuleInfo } from '../types/api'
@@ -249,10 +249,14 @@ export function PulseView(props: PulseViewProps) {
     return base
   }
 
-  const customRuleFieldOptions: SelectOption[] = RULE_FIELD_OPTIONS.map((opt) => ({
-    value: opt.value,
-    label: opt.label,
-  }))
+  const fieldOptions = createMemo(() => ruleFieldOptions(app().status().platform))
+
+  const customRuleFieldOptions = createMemo<SelectOption[]>(() =>
+    fieldOptions().map((opt) => ({
+      value: opt.value,
+      label: opt.label,
+    })),
+  )
 
   const protocolSelectOptions: SelectOption[] = PROTOCOL_OPTIONS.map((opt) => ({
     value: opt.value,
@@ -267,7 +271,7 @@ export function PulseView(props: PulseViewProps) {
   ])
 
   const fieldPlaceholder = createMemo(
-    () => RULE_FIELD_OPTIONS.find((opt) => opt.value === field())?.placeholder || '请输入匹配值',
+    () => fieldOptions().find((opt) => opt.value === field())?.placeholder || '请输入匹配值',
   )
 
   const handleFieldChange = (nextField: string) => {
@@ -650,7 +654,7 @@ export function PulseView(props: PulseViewProps) {
                     ariaLabel="匹配类型"
                     fullWidth
                     value={field()}
-                    options={customRuleFieldOptions}
+                    options={customRuleFieldOptions()}
                     searchableThreshold={12}
                     onChange={handleFieldChange}
                   />

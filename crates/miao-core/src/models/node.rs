@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 
+#[cfg(any(not(windows), test))]
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Hysteria2 {
     #[serde(rename = "type")]
@@ -17,6 +18,7 @@ pub struct Hysteria2 {
     pub tls: Tls,
 }
 
+#[cfg(any(not(windows), test))]
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Hysteria2Obfs {
     #[serde(rename = "type")]
@@ -24,6 +26,7 @@ pub struct Hysteria2Obfs {
     pub password: String,
 }
 
+#[cfg(any(not(windows), test))]
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Tls {
     pub enabled: bool,

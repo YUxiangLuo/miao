@@ -14,6 +14,7 @@ use crate::{
     state::AppState,
 };
 
+#[cfg(unix)]
 pub const FAKE_KERNEL: &str = include_str!("test_support/fake-kernel.sh");
 
 /// Normalize test thread names to compact filesystem-safe components.
@@ -74,6 +75,7 @@ pub fn isolated_stopped_state(config: Config) -> (tempfile::TempDir, Arc<AppStat
     (root, state)
 }
 
+#[cfg(unix)]
 pub fn install_fake_kernel(state: &AppState) {
     use std::os::unix::fs::PermissionsExt;
     let kernel = state.runtime_paths.runtime_dir.join("sing-box");

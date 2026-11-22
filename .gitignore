@@ -13,11 +13,13 @@ local.*
 # Dependencies, generated assets and release output
 node_modules/
 /target/
+desktop/src-tauri/gen
 /public/
 /embedded/
 dist/
 out/
 *.tgz
+/miao-windows-amd64*
 /miao-rust-linux-*
 
 # Test, build and runtime caches

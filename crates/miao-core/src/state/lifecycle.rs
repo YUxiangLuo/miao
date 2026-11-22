@@ -40,6 +40,8 @@ impl RuntimeSnapshot {
 #[derive(Clone, Copy, Debug)]
 pub enum KernelOperation {
     Start,
+    // Windows uses a stop/start sequence instead of Unix SIGHUP.
+    #[cfg_attr(not(unix), allow(dead_code))]
     Reload,
     Stop,
 }
@@ -78,6 +80,7 @@ impl RuntimeActivity {
 enum MutationAdmission {
     #[default]
     Open,
+    #[cfg_attr(windows, allow(dead_code))]
     QuiescingForUpgrade,
     ShuttingDown,
 }
@@ -91,10 +94,12 @@ impl MutationAdmission {
         matches!(self, Self::ShuttingDown)
     }
 
+    #[cfg_attr(windows, allow(dead_code))]
     fn allows_upgrade_handoff(self) -> bool {
         matches!(self, Self::QuiescingForUpgrade)
     }
 
+    #[cfg_attr(windows, allow(dead_code))]
     fn enter_quiescence(&mut self) -> bool {
         if matches!(self, Self::Open) {
             *self = Self::QuiescingForUpgrade;
@@ -104,6 +109,7 @@ impl MutationAdmission {
         }
     }
 
+    #[cfg_attr(windows, allow(dead_code))]
     fn resume_from_quiescence(&mut self) {
         if matches!(self, Self::QuiescingForUpgrade) {
             *self = Self::Open;
@@ -207,10 +213,12 @@ impl RuntimeLifecycle {
         }
     }
 
+    #[cfg_attr(windows, allow(dead_code))]
     pub(super) fn quiesce_mutations(&self) -> bool {
         self.inner.lock().unwrap().admission.enter_quiescence()
     }
 
+    #[cfg_attr(windows, allow(dead_code))]
     pub(super) fn resume_mutations(&self) {
         self.inner
             .lock()
@@ -226,6 +234,7 @@ impl RuntimeLifecycle {
 
     /// No await in this critical section. Either shutdown wins and prevents
     /// exec, or successful exec replaces the process before shutdown begins.
+    #[cfg_attr(windows, allow(dead_code))]
     pub(crate) fn with_upgrade_handoff<T>(&self, action: impl FnOnce() -> T) -> Option<T> {
         let inner = self.inner.lock().unwrap();
         if !inner.admission.allows_upgrade_handoff() {

@@ -74,11 +74,12 @@ export function humanizeClashRule(text: string | null | undefined): string | nul
 /**
  * 从 sing-box processPath 提取进程名：
  * `/usr/lib/firefox/firefox (alice)` → `firefox`；
+ * `C:\Program Files\Firefox\firefox.exe` → `firefox.exe`；
  * 空值返回 null。
  */
 export function processNameOf(processPath: string | null | undefined): string | null {
   if (!processPath) return null
-  const base = processPath.split('/').filter(Boolean).pop() || ''
+  const base = processPath.split(/[\\/]/).filter(Boolean).pop() || ''
   const name = base.replace(/\s+\([^)]*\)$/, '').trim()
   return name || null
 }

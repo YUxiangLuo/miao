@@ -1,23 +1,24 @@
 # 开发指南
 
-Miao 仅支持 Linux/OpenWrt amd64、arm64。Rust `miao-core` 管理配置、REST/MCP 和内核，`miao-cli` 提供入口，React 面板通过本地 HTTP API 操作。源码结构与依赖版本以 workspace 清单和 lockfile 为准。
+HarborGate（兼容二进制名 `miao`）日常在 Linux 下开发、检查与发布（Linux / OpenWrt `amd64`、`arm64` 单二进制），同时保留 `desktop/src-tauri` 供 Windows 本地一键打包桌面端与 NSIS 安装程序。Rust `miao-core` 管理配置、REST/MCP 和内核，`miao-cli` 提供命令行入口，`miao-desktop` 仅负责窗口、托盘与提权（非 workspace 默认成员，日常 Linux 开发无需安装 WebKitGTK），SolidJS 2.0 面板通过本地 HTTP API 操作。源码结构与依赖版本以 workspace 清单和 lockfile 为准。
 
 ## 开发入口
 
-所有开发命令从仓库根目录的 `./dev.sh` 进入，`./dev.sh help` 查看参数。安装和卸载分别使用 `install.sh`、`remove.sh`。辅助文件按用途归档：`scripts/lib/` 为内部构建/发布实现，`scripts/tests/` 为脚本测试与隔离验收，`scripts/sing-box/` 为固定内核来源、补丁与 Go 回归。
+所有开发命令从仓库根目录的 `./dev.sh` 进入（Windows 可直接运行 `.\desktop\package.cmd` 打包或在 Git Bash 中执行 `./dev.sh`），`./dev.sh help` 查看参数。Linux 安装和卸载分别使用 `install.sh`、`remove.sh`。辅助文件按用途归档：`scripts/lib/` 为内部构建/发布实现，`scripts/tests/` 为脚本测试与隔离验收，`scripts/sing-box/` 为固定内核来源、补丁与 Go 回归。
 
 | 命令 | 用途 |
 | --- | --- |
 | `./dev.sh test [过滤参数]` | 无资源核心测试，只需 Rust |
-| `./dev.sh test --embedded [过滤参数]` | 构建前端，补齐缺失测试资源，运行 core + CLI 测试 |
+| `./dev.sh test --embedded [过滤参数]` | 构建前端，补齐缺失测试资源，运行带资源测试 |
 | `./dev.sh check` | ShellCheck、前端检查与构建、脚本测试、两种资源模式的 fmt/Clippy/Rust 测试 |
-| `./dev.sh check core` / `frontend` / `scripts` | 单独检查核心、前端或辅助脚本 |
+| `./dev.sh check core` / `frontend` / `scripts` / `windows` / `desktop` | 单独检查核心、前端、脚本、Windows 目标（Linux 下交叉 Clippy）或桌面壳 |
 | `./dev.sh audit` | 前端与 Rust 依赖审计，需要联网和 cargo-audit |
 | `./dev.sh types` | 从 Rust 生成前端 API 类型，无需生成资源 |
 | `./dev.sh build` | 构建前端及本机 release 程序，按需补齐或更新内核/规则 |
-| `./dev.sh build amd64` / `arm64` / `all` | 构建对应 Linux musl 程序 |
-| `./dev.sh kernel [amd64\|arm64\|all]` | 重建固定内核及规则；省略目标时使用本机架构 |
-| `./dev.sh netns [程序路径]` | 隔离真实内核验收，默认 `target/release/miao-rust` |
+| `./dev.sh build amd64` / `arm64` / `windows-amd64` / `all` | 构建对应平台 CLI 程序（`all` 为两架构 Linux musl） |
+| `./dev.sh build desktop`（或 `.\desktop\package.cmd`） | 在 Windows 上构建 Tauri 桌面端并打包 `dist/miao-windows-amd64-setup.exe` |
+| `./dev.sh kernel [amd64\|arm64\|windows-amd64\|all]` | 重建固定内核及规则；省略目标时使用本机平台架构 |
+| `./dev.sh netns [程序路径]` | Linux 命名空间隔离真实内核验收，默认 `target/release/miao-rust` |
 
 `check scripts` 需要 Bun、ShellCheck、jq；只检查辅助脚本，安装/卸载测试使用临时目录与假命令，不操作本机服务。`check frontend` 只检查面板。
 
@@ -62,11 +63,22 @@ sudo bash install.sh ./target/release/miao-rust
 
 只读排查用 `systemctl status miao`、`sudo pgrep -x miao` 或 `sudo ss -tlnp 'sport = :6161'`。`/api/status` 的 `data.pid` 是内核子进程。卸载会删除 `/etc/miao`，先备份配置。
 
+### Windows 打包与交叉检查
+
+日常在 Linux 修改 Rust 代码后，安装 `mingw-w64-gcc` 并执行 `rustup target add x86_64-pc-windows-gnu`，即可运行 `./dev.sh check windows` 在 Linux 本机完成 Windows 条件编译与 Clippy 检查，无需切换到 Windows 或安装 WebKitGTK。
+
+在 Windows 真机打包需安装 Git for Windows、Rust（MSVC）、VS C++ 生成工具、Bun 与 Go。PowerShell 执行 `.\desktop\package.cmd`（或 Git Bash 执行 `./dev.sh build desktop`，加 `--refresh-kernel` 强制重建内核与规则），产物固定输出到 `dist/miao-windows-amd64-setup.exe` 与同名 `.sha256`。重编或覆盖安装前先从托盘退出运行中的 `miao.exe`。维护桌面端时保留以下约束：
+
+- 参数先校验再提权；`Global\` 互斥量（无权限时回退 `Local\`）防多开，已有实例不再触发 UAC。
+- 内核使用独立进程组与 `KILL_ON_JOB_CLOSE` Job Object，停止先发 `CTRL_BREAK_EVENT`，超时强杀并清理 `sing-tun`；配置变更走停止/启动回滚。
+- 面板默认仅监听 loopback，端口冲突可回退随机端口；不增加 Tauri 远程 IPC，Windows 不编入 VPS 部署、自替换升级或 OpenWrt 安装器（路由保持 404）。
+- 自启通过最高权限 `Miao` 登录计划任务加 `--minimized` 实现，启动时自动修复失配路径；升级 `@tauri-apps/cli` 时须同步核对 [`installer.nsi`](../desktop/src-tauri/nsis/installer.nsi) 中的两处定制钩子。
+
 ## 测试隔离与维护约定
 
 修改 core 前读[状态与事务](runtime-state.md)、[Profile 路径](profiles.md)；前端类型、mock 和浏览器规则见[前端开发](../frontend-rsbuild/README.md)。路径只能取自已解析的 `AppState`。
 
-普通测试使用临时目录、假内核与 localhost 订阅。`spawn_server` 设置 `skip_extract: true`，注入隔离配置、运行目录与 `volatile_path`；不得读写生产路径或启动真实 TUN。整个 workspace 仅有 core + CLI，可以运行 `cargo test --workspace`。
+普通测试使用临时目录、假内核与 localhost 订阅。`spawn_server` 设置 `skip_extract: true`，注入隔离配置、运行目录与 `volatile_path`；不得读写生产路径或启动真实 TUN。workspace 默认成员为 `miao-core` 与 `miao-cli`，Linux 下直接运行不带 `--workspace` 的 `cargo test` / `cargo clippy`，避免额外编译桌面壳。
 
 `netns` 需要真实内核、Bun、curl、OpenSSL、iproute2、util-linux、sysctl 和 root/sudo；须先构建待测程序，并通过 `./dev.sh kernel` 准备本机架构的 `embedded/sing-box-host`。它在独立网络/挂载/PID 命名空间验证启动、重载、规则/DNS 配置、策略回退、停止与 TUN 清理。对端命名空间模拟 DNS 和订阅服务器，验证分流/全局模式冷启动时，失效手动节点不妨碍订阅失败后的自动恢复与手动刷新。
 

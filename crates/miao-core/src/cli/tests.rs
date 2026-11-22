@@ -35,6 +35,7 @@ fn existing_config_syntax_is_preserved() {
     assert!(prepared.options.runtime_dir.is_none());
 }
 
+#[cfg(unix)]
 #[test]
 fn separate_config_value_preserves_non_utf8_paths() {
     use std::os::unix::ffi::OsStringExt;
@@ -46,12 +47,18 @@ fn separate_config_value_preserves_non_utf8_paths() {
 }
 
 #[test]
-fn sdk_config_arguments_use_the_cli_parser_without_hidden_runtime_argv() {
+fn desktop_config_arguments_use_the_cli_parser_without_hidden_runtime_argv() {
     for arguments in [
-        vec!["--config", "travel.yaml"],
-        vec!["--config=travel.yaml"],
+        vec!["--minimized", "--config", "travel.yaml"],
+        vec!["--config=travel.yaml", "--minimized"],
     ] {
-        let path = config_path_from_args(args(&arguments)).unwrap().unwrap();
+        let path = config_path_from_args(
+            args(&arguments)
+                .into_iter()
+                .filter(|arg| arg != crate::MINIMIZED_ARG),
+        )
+        .unwrap()
+        .unwrap();
         assert!(path.is_absolute());
         assert!(path.ends_with("travel.yaml"));
     }
@@ -208,7 +215,7 @@ fn subscription_profiles_are_private_unique_and_cleaned_up() {
     assert_eq!(config.node_select, NodeSelect::Fastest(Region::Jp));
     assert!(config.max_multiplier.is_none());
     assert!(config.nodes.is_empty());
-
+    #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         assert_eq!(
@@ -221,6 +228,7 @@ fn subscription_profiles_are_private_unique_and_cleaned_up() {
     assert!(second.profile.as_ref().unwrap().path().exists());
 }
 
+#[cfg(unix)]
 async fn exercise_subscription_startup(body: &'static str, expected_mode: &str) {
     use axum::{routing::get, Router};
     use std::os::unix::fs::PermissionsExt;
@@ -327,11 +335,13 @@ async fn exercise_subscription_startup(body: &'static str, expected_mode: &str) 
     .expect("temporary profile should be released after shutdown");
 }
 
+#[cfg(unix)]
 #[tokio::test]
 async fn sub_jp_starts_with_only_japanese_urltest_candidates() {
     exercise_subscription_startup("proxies:\n  - name: 日本-test\n    type: hysteria2\n    server: 127.0.0.1\n    port: 443\n    password: test\n  - name: 美国-test\n    type: hysteria2\n    server: 127.0.0.2\n    port: 443\n    password: test\n", "fastest_jp").await;
 }
 
+#[cfg(unix)]
 #[tokio::test]
 async fn sub_jp_without_japanese_nodes_keeps_requested_preference_on_fallback() {
     exercise_subscription_startup("proxies:\n  - name: 美国-test\n    type: hysteria2\n    server: 127.0.0.2\n    port: 443\n    password: test\n", "manual").await;

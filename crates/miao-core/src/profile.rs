@@ -33,7 +33,9 @@ pub(crate) struct ResolvedProfile {
 struct Environment {
     default_config: ConfigPathResolution,
     runtime_root: PathBuf,
+    data_dir: PathBuf,
     cwd: PathBuf,
+    windows: bool,
     preferences: PreferenceStore,
 }
 
@@ -42,7 +44,9 @@ impl Environment {
         Ok(Self {
             default_config: paths::resolve_default_config_path(),
             runtime_root: crate::services::singbox::get_sing_box_home(),
+            data_dir: paths::platform_data_dir(),
             cwd: std::env::current_dir()?,
+            windows: cfg!(windows),
             preferences: platform::preference_store(),
         })
     }
@@ -137,8 +141,9 @@ fn select_runtime_dir(
 /// Preference files (`.last_proxy`, `.node_select`, `.max_multiplier`) live:
 /// - in `runtime_dir` when `runtime_dir` is explicitly overridden or on
 ///   OpenWrt/non-systemd hosts (`PreferenceStore::Runtime`, tmpfs flash safety);
-/// - in `.miao-profiles/<id>` alongside config for named profiles on systemd;
-/// - in startup `cwd` (`/etc/miao` under systemd unit) for the default profile.
+/// - in `.miao-profiles/<id>` alongside config for named profiles on systemd/Windows;
+/// - in `data_dir` on Windows, or startup `cwd` (`/etc/miao` under systemd unit)
+///   on Linux, for the default profile.
 fn select_preference_dir(
     has_runtime_override: bool,
     kind: ProfileKind,
@@ -148,9 +153,14 @@ fn select_preference_dir(
 ) -> PathBuf {
     match (has_runtime_override, env.preferences, kind) {
         (true, _, _) | (false, PreferenceStore::Runtime, _) => runtime_dir.to_path_buf(),
-        (false, PreferenceStore::Working, ProfileKind::Named) => persistent_dir.to_path_buf(),
+        (false, PreferenceStore::Working | PreferenceStore::Persistent, ProfileKind::Named) => {
+            persistent_dir.to_path_buf()
+        }
         (false, PreferenceStore::Working, ProfileKind::Default | ProfileKind::Temporary) => {
             env.cwd.clone()
+        }
+        (false, PreferenceStore::Persistent, ProfileKind::Default | ProfileKind::Temporary) => {
+            env.data_dir.clone()
         }
     }
 }
@@ -211,19 +221,20 @@ impl ResolvedProfile {
         let id = paths::profile_id(&config_path);
         let persistent = paths::profile_state_dir(&config_path);
         let runtime_dir = select_runtime_dir(options, kind, &id, env)?;
-        let preference_dir = select_preference_dir(
-            options.runtime_dir.is_some(),
-            kind,
-            &runtime_dir,
-            &persistent,
-            env,
-        );
+        let overridden = options.runtime_dir.is_some();
+        let preference_dir =
+            select_preference_dir(overridden, kind, &runtime_dir, &persistent, env);
         let volatile = match &options.volatile_path {
             Some(path) => resolve_path(path, &env.cwd)?,
-            None => runtime_dir.join("volatile.yaml"),
+            None if overridden || !env.windows => runtime_dir.join("volatile.yaml"),
+            None if kind == ProfileKind::Named => persistent.join("volatile.yaml"),
+            None => env.data_dir.join("volatile.yaml"),
         };
         let log = match &options.log_path {
             Some(path) => Some(resolve_path(path, &env.cwd)?),
+            None if env.windows && overridden => Some(runtime_dir.join("miao.log")),
+            // The installed Windows desktop's log is process-scoped (tray "open log").
+            None if env.windows => Some(env.data_dir.join("miao.log")),
             // 在 OpenWrt / 非 systemd 环境（无 journald 托管）下，CLI 常驻默认将日志写入
             // tmpfs 运行目录并启用体积封顶轮转，既保留排障现场又避免写穿闪存或无限膨胀。
             None if env.preferences == PreferenceStore::Runtime && options.install_tracing => {

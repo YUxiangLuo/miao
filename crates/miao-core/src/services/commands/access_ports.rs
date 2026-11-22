@@ -221,7 +221,7 @@ pub async fn delete_access_port(
     Ok(success_no_data("Access port deleted"))
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::{delete_access_port, get_access_ports, save_access_port};
     use crate::models::{Config, DeleteAccessPortRequest, SaveAccessPortRequest};

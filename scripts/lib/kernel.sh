@@ -7,17 +7,29 @@ KERNEL_DIR="$ROOT_DIR/scripts/sing-box"
 TMP_DIR=$(mktemp -d)
 trap 'rm -rf "$TMP_DIR"' EXIT
 
-[[ $(uname -s) == Linux ]] || { echo "Linux build host required" >&2; exit 1; }
-target="${1:?use ./dev.sh kernel [amd64|arm64|all]}"
+case "$(uname -s)" in
+  Linux) host_goos=linux ;;
+  MINGW*|MSYS*|CYGWIN*) host_goos=windows ;;
+  *) echo "Linux or Windows (Git Bash) build host required, got: $(uname -s)" >&2; exit 1 ;;
+esac
+target="${1:?use ./dev.sh kernel [amd64|arm64|windows-amd64|all]}"
 shift
 case "$target" in
-  amd64|arm64) targets=("$target") ;;
+  amd64|arm64|windows-amd64) targets=("$target") ;;
   all) targets=(amd64 arm64) ;;
   *) echo "Unsupported target: $target" >&2; exit 1 ;;
 esac
 build_rules=true
 if [[ "${1:-}" == --kernel-only ]]; then build_rules=false; shift; fi
 (( $# == 0 )) || { echo "Unexpected kernel argument: $1" >&2; exit 1; }
+
+native_path() {
+  if [[ "$host_goos" == windows ]] && command -v cygpath >/dev/null 2>&1; then
+    cygpath -m "$1"
+  else
+    printf '%s\n' "$1"
+  fi
+}
 
 host_goarch=$(go env GOHOSTARCH)
 case "$host_goarch" in
@@ -30,11 +42,12 @@ esac
 
 # Kernel upgrades are reviewed changes to source.json, independent of Miao
 # releases. Rule data still follows upstream; release builds snapshot both refs.
-sing_box_ref=$(bun "$KERNEL_DIR/source.mjs" revision)
-sing_box_repo=$(bun "$KERNEL_DIR/source.mjs" repository)
-go_version=$(bun "$KERNEL_DIR/source.mjs" go_version)
-core_version=$(bun "$KERNEL_DIR/source.mjs" version)
-build_tags=$(bun "$KERNEL_DIR/source.mjs" build_tags)
+source_mjs=$(native_path "$KERNEL_DIR/source.mjs")
+sing_box_ref=$(bun "$source_mjs" revision)
+sing_box_repo=$(bun "$source_mjs" repository)
+go_version=$(bun "$source_mjs" go_version)
+core_version=$(bun "$source_mjs" version)
+build_tags=$(bun "$source_mjs" build_tags)
 if [[ -n "${SING_BOX_REF:-}" && "$SING_BOX_REF" != "$sing_box_ref" ]]; then
   echo "SING_BOX_REF differs from the pinned kernel; update scripts/sing-box/source.json and review the client patch first" >&2
   exit 1
@@ -58,6 +71,7 @@ mkdir -p "$TMP_DIR/artifacts" "$EMBEDDED_DIR"
 artifacts="$TMP_DIR/artifacts"
 echo "==> Fetching pinned sing-box source ($sing_box_ref)..."
 git -C "$TMP_DIR" init -q sing-box
+git -C "$TMP_DIR/sing-box" config core.autocrlf false
 git -C "$TMP_DIR/sing-box" remote add origin "$sing_box_repo"
 for attempt in 1 2 3; do
   if git -C "$TMP_DIR/sing-box" fetch -q --depth=1 origin "$sing_box_ref"; then
@@ -71,7 +85,7 @@ git -C "$TMP_DIR/sing-box" checkout -q FETCH_HEAD
 
 cd "$TMP_DIR/sing-box"
 # Always select the reviewed toolchain, even when the host Go is newer.
-go_command=(env "GOTOOLCHAIN=go$go_version" GOOS=linux CGO_ENABLED=0 go)
+go_command=(env "GOTOOLCHAIN=go$go_version" CGO_ENABLED=0 go)
 actual_go=$("${go_command[@]}" env GOVERSION)
 if [[ "$actual_go" != "go$go_version" ]]; then
   echo "Expected go$go_version, got $actual_go" >&2
@@ -81,16 +95,18 @@ build_flags=(-mod=readonly -trimpath -ldflags "-s -w -buildid= -X github.com/sag
 
 # The upstream isolation fix is now part of the pin. Keep its behavioral
 # tests separately, and capture upstream support before applying our profile.
-registry_snapshot="$TMP_DIR/registries.json"
-profile_manifest="$KERNEL_DIR/source.json"
+registry_snapshot=$(native_path "$TMP_DIR/registries.json")
+profile_manifest=$(native_path "$KERNEL_DIR/source.json")
 cp "$KERNEL_DIR/tests/miao_context_test.go" "$KERNEL_DIR/tests/miao_registry_test.go" cmd/sing-box/
 echo "==> Testing upstream isolation and recording client capabilities..."
-GOARCH="$host_goarch" MIAO_REGISTRY_SNAPSHOT="$registry_snapshot" MIAO_CAPTURE_REGISTRIES=1 \
+GOOS="$host_goos" GOARCH="$host_goarch" MIAO_REGISTRY_SNAPSHOT="$registry_snapshot" MIAO_CAPTURE_REGISTRIES=1 \
   "${go_command[@]}" test -mod=readonly -tags "$build_tags" ./cmd/sing-box -run '^TestMiao' -count=20
 
+host_bin="$artifacts/sing-box-host"
+if [[ "$host_goos" == windows ]]; then host_bin="$artifacts/sing-box-host.exe"; fi
 if [[ "$build_rules" == true ]]; then
-  echo "==> Building host sing-box ($host_goarch) for rule compilation..."
-  GOARCH="$host_goarch" "${go_command[@]}" build "${build_flags[@]}" -o "$artifacts/sing-box-host" ./cmd/sing-box
+  echo "==> Building host sing-box ($host_goos/$host_goarch) for rule compilation..."
+  GOOS="$host_goos" GOARCH="$host_goarch" "${go_command[@]}" build "${build_flags[@]}" -o "$(native_path "$host_bin")" ./cmd/sing-box
 fi
 
 # Patch a private dependency copy, never the shared Go module cache. Keep the
@@ -112,16 +128,28 @@ git apply --directory=miao-shadowsocks2 "$KERNEL_DIR/shadowsocks2-halfclose.patc
 echo "==> Applying Miao client profile..."
 git apply --check "$KERNEL_DIR/client.patch"
 git apply "$KERNEL_DIR/client.patch"
-bun "$KERNEL_DIR/prepare-command.mjs" "$TMP_DIR/sing-box"
-GOARCH="$host_goarch" MIAO_REGISTRY_SNAPSHOT="$registry_snapshot" MIAO_CAPTURE_REGISTRIES=0 MIAO_PROFILE_MANIFEST="$profile_manifest" \
+bun "$(native_path "$KERNEL_DIR/prepare-command.mjs")" "$(native_path "$TMP_DIR/sing-box")"
+GOOS="$host_goos" GOARCH="$host_goarch" MIAO_REGISTRY_SNAPSHOT="$registry_snapshot" MIAO_CAPTURE_REGISTRIES=0 MIAO_PROFILE_MANIFEST="$profile_manifest" \
   "${go_command[@]}" test -mod=readonly -tags "$build_tags" ./cmd/miao-kernel -run '^TestMiao' -count=20
 
 for target in "${targets[@]}"; do
-  echo "==> Building kernel (linux/$target)..."
-  GOARCH="$target" GOOS=linux CGO_ENABLED=0 \
-    "${go_command[@]}" build "${build_flags[@]}" -o "$artifacts/sing-box-$target" ./cmd/miao-kernel
-  chmod 755 "$artifacts/sing-box-$target"
-  bun "$ROOT_DIR/scripts/lib/pack-kernel.mjs" "$artifacts/sing-box-$target" "$target"
+  case "$target" in
+    amd64|arm64)
+      target_goos=linux
+      target_goarch=$target
+      artifact_name="sing-box-$target"
+      ;;
+    windows-amd64)
+      target_goos=windows
+      target_goarch=amd64
+      artifact_name="sing-box-windows-amd64.exe"
+      ;;
+  esac
+  echo "==> Building kernel ($target_goos/$target_goarch)..."
+  GOARCH="$target_goarch" GOOS="$target_goos" CGO_ENABLED=0 \
+    "${go_command[@]}" build "${build_flags[@]}" -o "$(native_path "$artifacts/$artifact_name")" ./cmd/miao-kernel
+  chmod 755 "$artifacts/$artifact_name"
+  bun "$(native_path "$ROOT_DIR/scripts/lib/pack-kernel.mjs")" "$(native_path "$artifacts/$artifact_name")" "$target"
 done
 if [[ "$build_rules" == true ]]; then
   echo "==> Downloading and compiling geo rule files..."
@@ -135,12 +163,14 @@ if [[ "$build_rules" == true ]]; then
     -o "$direct_list" \
     "https://raw.githubusercontent.com/Loyalsoldier/v2ray-rules-dat/${direct_rules_ref}/direct-list.txt"
 
-  bun "$ROOT_DIR/scripts/lib/compile-direct-rules.mjs" "$direct_list" "$direct_json"
-  "$artifacts/sing-box-host" rule-set compile "$direct_json" \
-    -o "$artifacts/geosite-geolocation-cn.srs"
-  bun "$ROOT_DIR/scripts/lib/release-artifacts.mjs" rules "$artifacts" "$sing_geoip_ref" "$direct_rules_ref"
+  bun "$(native_path "$ROOT_DIR/scripts/lib/compile-direct-rules.mjs")" "$(native_path "$direct_list")" "$(native_path "$direct_json")"
+  "$host_bin" rule-set compile "$(native_path "$direct_json")" \
+    -o "$(native_path "$artifacts/geosite-geolocation-cn.srs")"
+  bun "$(native_path "$ROOT_DIR/scripts/lib/release-artifacts.mjs")" rules "$(native_path "$artifacts")" "$sing_geoip_ref" "$direct_rules_ref"
 fi
 
+# Do not leave the temporary host rule compiler in embedded/.
+rm -f "$host_bin"
 # Publish only after both the kernel and rules have built successfully.
 cp "$artifacts/"* "$EMBEDDED_DIR/"
 

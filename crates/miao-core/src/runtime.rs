@@ -148,6 +148,9 @@ pub(crate) async fn spawn_resolved(
         rotate_oversized_log(path);
     }
 
+    #[cfg(windows)]
+    crate::services::singbox::ensure_hidden_console();
+
     crate::services::version::reconcile_pending_upgrade()?;
 
     info!("Reading configuration...");
@@ -295,7 +298,7 @@ mod scheduler;
 mod startup;
 
 use startup::initialize_runtime;
-#[cfg(test)]
+#[cfg(all(test, unix))]
 use startup::{
     initialize_runtime_locked, refresh_subscriptions_in_background, retry_failed_startup,
 };
@@ -337,14 +340,24 @@ async fn request_shutdown(handle: &mut ServerHandle) {
 }
 
 async fn wait_os_shutdown() {
-    let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-        .expect("failed to install SIGTERM handler");
+    #[cfg(unix)]
+    {
+        let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+            .expect("failed to install SIGTERM handler");
 
-    tokio::select! {
-        result = tokio::signal::ctrl_c() => {
-            result.expect("failed to install Ctrl+C handler");
+        tokio::select! {
+            result = tokio::signal::ctrl_c() => {
+                result.expect("failed to install Ctrl+C handler");
+            }
+            _ = sigterm.recv() => {}
         }
-        _ = sigterm.recv() => {}
+    }
+
+    #[cfg(not(unix))]
+    {
+        tokio::signal::ctrl_c()
+            .await
+            .expect("failed to install Ctrl+C handler");
     }
 }
 
@@ -428,9 +441,17 @@ fn resolve_boot_preferences(
 }
 
 fn panel_bind_addr(port: u16) -> String {
-    format!("0.0.0.0:{port}")
+    #[cfg(windows)]
+    {
+        format!("127.0.0.1:{port}")
+    }
+    #[cfg(not(windows))]
+    {
+        format!("0.0.0.0:{port}")
+    }
 }
 
+#[cfg_attr(windows, allow(dead_code))]
 fn browser_launch_env() -> Vec<(String, String)> {
     let mut envs = Vec::new();
 
@@ -460,6 +481,7 @@ fn browser_launch_env() -> Vec<(String, String)> {
     envs
 }
 
+#[cfg_attr(windows, allow(dead_code))]
 fn build_browser_command(
     url: &str,
     sudo_user: Option<&str>,
@@ -481,31 +503,55 @@ fn build_browser_command(
 }
 
 async fn open_onboarding_browser(url: String) {
-    let has_graphical_session =
-        std::env::var_os("DISPLAY").is_some() || std::env::var_os("WAYLAND_DISPLAY").is_some();
-    if !has_graphical_session {
-        return;
+    #[cfg(windows)]
+    {
+        let mut command = tokio::process::Command::new("rundll32.exe");
+        command.arg("url.dll,FileProtocolHandler").arg(&url);
+        match command
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .await
+        {
+            Ok(status) if status.success() => {}
+            Ok(status) => warn!(
+                url = %url,
+                status = ?status.code(),
+                "Failed to auto-open onboarding URL in browser"
+            ),
+            Err(err) => warn!(url = %url, error = %err, "Failed to launch browser opener"),
+        }
     }
 
-    let sudo_user = std::env::var("SUDO_USER")
-        .ok()
-        .filter(|user| !user.is_empty());
-    let mut command = build_browser_command(&url, sudo_user.as_deref(), browser_launch_env());
-
-    match command
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .await
+    #[cfg(not(windows))]
     {
-        Ok(status) if status.success() => {}
-        Ok(status) => warn!(
-            url = %url,
-            status = ?status.code(),
-            "Failed to auto-open onboarding URL in browser"
-        ),
-        Err(err) => warn!(url = %url, error = %err, "Failed to launch browser opener"),
+        let has_graphical_session =
+            std::env::var_os("DISPLAY").is_some() || std::env::var_os("WAYLAND_DISPLAY").is_some();
+        if !has_graphical_session {
+            return;
+        }
+
+        let sudo_user = std::env::var("SUDO_USER")
+            .ok()
+            .filter(|user| !user.is_empty());
+        let mut command = build_browser_command(&url, sudo_user.as_deref(), browser_launch_env());
+
+        match command
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .await
+        {
+            Ok(status) if status.success() => {}
+            Ok(status) => warn!(
+                url = %url,
+                status = ?status.code(),
+                "Failed to auto-open onboarding URL in browser"
+            ),
+            Err(err) => warn!(url = %url, error = %err, "Failed to launch browser opener"),
+        }
     }
 }
 

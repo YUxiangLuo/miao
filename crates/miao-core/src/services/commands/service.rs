@@ -53,8 +53,8 @@ pub async fn get_status(state: Arc<AppState>) -> CommandReply<StatusData> {
             uptime_secs,
             warning,
             warnings,
-            vps_supported: true,
-            platform: "linux",
+            vps_supported: crate::platform::vps_supported(),
+            platform: if cfg!(windows) { "windows" } else { "linux" },
             mcp: config.mcp,
         },
     )

@@ -11,7 +11,7 @@ pub mod subs;
 pub mod terminals;
 #[cfg(test)]
 mod tests;
-
+#[cfg(not(windows))]
 pub mod vps;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -20,6 +20,8 @@ pub enum CommandErrorKind {
     Conflict,
     NotFound,
     Internal,
+    // Remote provisioning is not compiled on Windows.
+    #[cfg(not(windows))]
     Upstream,
 }
 

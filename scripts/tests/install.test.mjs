@@ -10,6 +10,7 @@ afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: 
 const name = 'miao-rust-linux-amd64'
 const binary = 'downloaded fixture binary'
 const digest = `sha256:${createHash('sha256').update(binary).digest('hex')}`
+const shellTest = test.skipIf(process.platform === 'win32')
 
 function download(assets) {
   const root = mkdtempSync(join(tmpdir(), 'miao-install-test-'))
@@ -35,7 +36,7 @@ download_release_binary miao-rust-linux-amd64 "$FIXTURE" "$FIXTURE/candidate"
   return { status: result.exitCode, calls: readFileSync(join(root, 'calls'), 'utf8').trim().split('\n'), root }
 }
 
-test('installer downloads a pinned release URL and verifies its GitHub digest without sidecar assets', () => {
+shellTest('installer downloads a pinned release URL and verifies its GitHub digest without sidecar assets', () => {
   const result = download([{ name, browser_download_url: 'https://example.com/v1.2.3/miao', digest }])
   expect(result.status).toBe(0)
   expect(result.calls).toHaveLength(2)
@@ -43,7 +44,7 @@ test('installer downloads a pinned release URL and verifies its GitHub digest wi
   expect(readFileSync(join(result.root, 'candidate'), 'utf8')).toBe(binary)
 })
 
-test('installer uses the binary digest when checksum sidecars are also present', () => {
+shellTest('installer uses the binary digest when checksum sidecars are also present', () => {
   const result = download([
     { name, browser_download_url: 'https://example.com/v1.2.3/miao', digest },
     { name: `${name}.sha256`, browser_download_url: 'https://example.com/v1.2.3/miao.sha256', digest: null },
@@ -53,7 +54,7 @@ test('installer uses the binary digest when checksum sidecars are also present',
   expect(result.calls[1]).toBe('https://example.com/v1.2.3/miao')
 })
 
-test('installer rejects missing, duplicate or invalid digests before downloading a binary', () => {
+shellTest('installer rejects missing, duplicate or invalid digests before downloading a binary', () => {
   const asset = { name, browser_download_url: 'https://example.com/v1.2.3/miao', digest }
   for (const assets of [[], [asset, asset], [{ ...asset, digest: null }], [{ ...asset, digest: 'sha256:bad' }], [{ ...asset, digest: digest.replace('sha256', 'sha512') }]]) {
     const result = download(assets)
@@ -62,13 +63,13 @@ test('installer rejects missing, duplicate or invalid digests before downloading
   }
 })
 
-test('installer refuses a binary whose SHA256 differs from release metadata', () => {
+shellTest('installer refuses a binary whose SHA256 differs from release metadata', () => {
   const result = download([{ name, browser_download_url: 'https://example.com/v1.2.3/miao', digest: `sha256:${'a'.repeat(64)}` }])
   expect(result.status).not.toBe(0)
   expect(result.calls).toHaveLength(2)
 })
 
-test('installation and removal help and argument errors are handled before privilege checks', () => {
+shellTest('installation and removal help and argument errors are handled before privilege checks', () => {
   const root = mkdtempSync(join(tmpdir(), 'miao-entry-test-'))
   roots.push(root)
   const log = join(root, 'privilege-checks')
@@ -90,7 +91,7 @@ test('installation and removal help and argument errors are handled before privi
   expect(readFileSync(log, 'utf8')).toBe('')
 })
 
-test('removal clears interrupted upgrade state so a fresh installation is not blocked', () => {
+shellTest('removal clears interrupted upgrade state so a fresh installation is not blocked', () => {
   const root = mkdtempSync(join(tmpdir(), 'miao-remove-test-'))
   roots.push(root)
   const commands = join(root, 'commands')

@@ -21,7 +21,9 @@ pub struct GitHubAsset {
     pub name: String,
     pub browser_download_url: String,
 
+    #[cfg_attr(windows, allow(dead_code))]
     pub size: u64,
     #[serde(default)]
+    #[cfg_attr(all(windows, not(test)), allow(dead_code))]
     pub digest: Option<String>,
 }

@@ -1,5 +1,6 @@
 use super::*;
 
+#[cfg_attr(not(unix), allow(dead_code))]
 pub(super) struct ReadyProbe;
 
 impl DataPlaneProbe for ReadyProbe {
@@ -55,6 +56,7 @@ async fn http_probe_requires_success_and_bounds_a_stalled_response() {
     );
 }
 
+#[cfg(unix)]
 mod controller {
     use super::*;
     use std::collections::VecDeque;

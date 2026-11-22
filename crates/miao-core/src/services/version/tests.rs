@@ -1,15 +1,19 @@
 use super::{
-    binary_asset_and_digest, current_arch_asset_name, get_version_info, parse_semver_tag,
-    release_is_newer_than_current, stdout_version_matches_release, version_info_from_release,
+    binary_asset_and_digest, current_arch_asset_name, decide_pending_upgrade, get_version_info,
+    parse_semver_tag, release_is_newer_than_current, stdout_version_matches_release,
+    version_info_from_release, PendingUpgradeAction, UpgradePending,
 };
 use crate::models::{Config, GitHubAsset, GitHubRelease};
+use crate::platform::upgrade_supported;
 use crate::test_support::app_state;
 
+#[cfg(not(windows))]
 use super::{
-    current_version, decide_pending_upgrade, mark_upgrade_healthy_at, upgrade_pending_path,
-    upgrade_requires_rollback, write_upgrade_pending, PendingUpgradeAction, UpgradePending,
+    current_version, mark_upgrade_healthy_at, upgrade_pending_path, upgrade_requires_rollback,
+    write_upgrade_pending,
 };
 
+#[cfg(not(windows))]
 #[test]
 fn pending_upgrade_rolls_back_only_after_an_unhealthy_second_boot() {
     let dir = std::env::temp_dir().join(format!(
@@ -73,6 +77,7 @@ fn pending_upgrade_rolls_back_only_after_an_unhealthy_second_boot() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
+#[cfg(not(windows))]
 #[test]
 fn health_confirmation_preserves_unowned_and_unbooted_upgrade_markers() {
     let root = tempfile::tempdir().unwrap();
@@ -169,7 +174,9 @@ fn stdout_version_matches_release_requires_miao_and_tag_or_version() {
 
 #[test]
 fn current_arch_asset_name_matches_supported_targets() {
-    if cfg!(target_arch = "x86_64") {
+    if cfg!(windows) {
+        assert_eq!(current_arch_asset_name(), None);
+    } else if cfg!(target_arch = "x86_64") {
         assert_eq!(current_arch_asset_name(), Some("miao-rust-linux-amd64"));
     } else if cfg!(target_arch = "aarch64") {
         assert_eq!(current_arch_asset_name(), Some("miao-rust-linux-arm64"));
@@ -181,14 +188,32 @@ fn current_arch_asset_name_matches_supported_targets() {
 #[tokio::test]
 async fn version_info_skips_github_when_kernel_is_down() {
     let info = get_version_info(&app_state(Config::default())).await;
-    assert!(info.upgrade_supported);
+    assert_eq!(info.upgrade_supported, upgrade_supported());
     assert!(!info.has_update);
     assert!(info.latest.is_none());
     assert!(info.download_url.is_none());
 }
 
 #[test]
-fn version_info_includes_linux_asset_url() {
+fn version_info_reports_update_without_download_when_upgrade_unsupported() {
+    let release = GitHubRelease {
+        tag_name: "v99.0.0".to_string(),
+        assets: vec![GitHubAsset {
+            name: "miao-windows-amd64-setup.exe".to_string(),
+            browser_download_url: "https://example.com/setup.exe".to_string(),
+            size: 1,
+            digest: None,
+        }],
+    };
+    let info = version_info_from_release("v0.31.0".to_string(), &release, false);
+    assert!(!info.upgrade_supported);
+    assert!(info.has_update);
+    assert_eq!(info.latest.as_deref(), Some("v99.0.0"));
+    assert!(info.download_url.is_none());
+}
+
+#[test]
+fn version_info_includes_linux_asset_url_when_upgrade_supported() {
     let release = GitHubRelease {
         tag_name: "v99.0.0".to_string(),
         assets: vec![GitHubAsset {
@@ -198,10 +223,10 @@ fn version_info_includes_linux_asset_url() {
             digest: None,
         }],
     };
-    let info = version_info_from_release("v0.31.0".to_string(), &release);
+    let info = version_info_from_release("v0.31.0".to_string(), &release, true);
     assert!(info.upgrade_supported);
     assert!(info.has_update);
-    if cfg!(target_arch = "x86_64") {
+    if cfg!(all(not(windows), target_arch = "x86_64")) {
         assert_eq!(
             info.download_url.as_deref(),
             Some("https://example.com/miao")

@@ -20,6 +20,7 @@ pub use api::{
     TerminalSummary, UpsertTerminalRequest, VergeImportItem, VergeImportResult,
 };
 
+#[cfg(any(not(windows), test))]
 pub use api::{VpsDeployRequest, VpsDeployResponse};
 pub use config::{
     AccessPortConfig, Config, DisabledNode, NodeSelect, Region, RouteMode, ScheduledRefresh,
@@ -31,9 +32,11 @@ pub use node::{
     NodeInfo, NodeRequest,
 };
 
+#[cfg(not(windows))]
 pub use node::{Hysteria2, Hysteria2Obfs, Tls};
 pub use proxy::{LastProxy, SwitchProxyResult};
 
+#[cfg(any(not(windows), test))]
 pub use version::GitHubAsset;
 pub use version::{GitHubRelease, VersionInfo};
 
@@ -147,7 +150,8 @@ mod typescript_contract {
     fn typescript_api_bindings_are_current() {
         let path = binding_path();
         let actual = std::fs::read_to_string(&path)
-            .unwrap_or_else(|err| panic!("failed to read {}: {err}", path.display()));
+            .unwrap_or_else(|err| panic!("failed to read {}: {err}", path.display()))
+            .replace("\r\n", "\n");
         assert_eq!(
             actual,
             generated_typescript(),
