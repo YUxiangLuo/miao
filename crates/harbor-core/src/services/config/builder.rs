@@ -484,7 +484,7 @@ fn apply_proxy_group(
             // 此 https 默认值，组配置若仍用 http 会造成两套测量口径。
             "url": "https://www.gstatic.com/generate_204",
             "interval": "2m",
-            "tolerance": 30,
+            "tolerance": 50,
             // 自动切换不打断已有连接：旧连接留在原节点自然结束，新连接走当前最快
             "interrupt_exist_connections": false
         })
