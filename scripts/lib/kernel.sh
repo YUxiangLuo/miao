@@ -40,7 +40,7 @@ case "$host_goarch" in
     ;;
 esac
 
-# Kernel upgrades are reviewed changes to source.json, independent of Miao
+# Kernel upgrades are reviewed changes to source.json, independent of Harbor
 # releases. Rule data still follows upstream; release builds snapshot both refs.
 source_mjs=$(native_path "$KERNEL_DIR/source.mjs")
 sing_box_ref=$(bun "$source_mjs" revision)
@@ -97,10 +97,10 @@ build_flags=(-mod=readonly -trimpath -ldflags "-s -w -buildid= -X github.com/sag
 # tests separately, and capture upstream support before applying our profile.
 registry_snapshot=$(native_path "$TMP_DIR/registries.json")
 profile_manifest=$(native_path "$KERNEL_DIR/source.json")
-cp "$KERNEL_DIR/tests/miao_context_test.go" "$KERNEL_DIR/tests/miao_registry_test.go" cmd/sing-box/
+cp "$KERNEL_DIR/tests/harbor_context_test.go" "$KERNEL_DIR/tests/harbor_registry_test.go" cmd/sing-box/
 echo "==> Testing upstream isolation and recording client capabilities..."
-GOOS="$host_goos" GOARCH="$host_goarch" MIAO_REGISTRY_SNAPSHOT="$registry_snapshot" MIAO_CAPTURE_REGISTRIES=1 \
-  "${go_command[@]}" test -mod=readonly -tags "$build_tags" ./cmd/sing-box -run '^TestMiao' -count=20
+GOOS="$host_goos" GOARCH="$host_goarch" HARBOR_REGISTRY_SNAPSHOT="$registry_snapshot" HARBOR_CAPTURE_REGISTRIES=1 \
+  "${go_command[@]}" test -mod=readonly -tags "$build_tags" ./cmd/sing-box -run '^TestHarbor' -count=20
 
 host_bin="$artifacts/sing-box-host"
 if [[ "$host_goos" == windows ]]; then host_bin="$artifacts/sing-box-host.exe"; fi
@@ -119,18 +119,18 @@ if [[ "$ss_version" != v0.2.2-0.20261110092058-52ade8ab7e95 ]]; then
   exit 1
 fi
 ss_dir=$("${go_command[@]}" list -mod=readonly -m -f '{{.Dir}}' "$ss_module")
-cp -R "$ss_dir" miao-shadowsocks2
-chmod -R u+w miao-shadowsocks2
-git apply --check --directory=miao-shadowsocks2 "$KERNEL_DIR/shadowsocks2-halfclose.patch"
-git apply --directory=miao-shadowsocks2 "$KERNEL_DIR/shadowsocks2-halfclose.patch"
-"${go_command[@]}" mod edit "-replace=$ss_module@$ss_version=./miao-shadowsocks2"
+cp -R "$ss_dir" harbor-shadowsocks2
+chmod -R u+w harbor-shadowsocks2
+git apply --check --directory=harbor-shadowsocks2 "$KERNEL_DIR/shadowsocks2-halfclose.patch"
+git apply --directory=harbor-shadowsocks2 "$KERNEL_DIR/shadowsocks2-halfclose.patch"
+"${go_command[@]}" mod edit "-replace=$ss_module@$ss_version=./harbor-shadowsocks2"
 
-echo "==> Applying Miao client profile..."
+echo "==> Applying Harbor client profile..."
 git apply --check "$KERNEL_DIR/client.patch"
 git apply "$KERNEL_DIR/client.patch"
 bun "$(native_path "$KERNEL_DIR/prepare-command.mjs")" "$(native_path "$TMP_DIR/sing-box")"
-GOOS="$host_goos" GOARCH="$host_goarch" MIAO_REGISTRY_SNAPSHOT="$registry_snapshot" MIAO_CAPTURE_REGISTRIES=0 MIAO_PROFILE_MANIFEST="$profile_manifest" \
-  "${go_command[@]}" test -mod=readonly -tags "$build_tags" ./cmd/miao-kernel -run '^TestMiao' -count=20
+GOOS="$host_goos" GOARCH="$host_goarch" HARBOR_REGISTRY_SNAPSHOT="$registry_snapshot" HARBOR_CAPTURE_REGISTRIES=0 HARBOR_PROFILE_MANIFEST="$profile_manifest" \
+  "${go_command[@]}" test -mod=readonly -tags "$build_tags" ./cmd/harbor-kernel -run '^TestHarbor' -count=20
 
 for target in "${targets[@]}"; do
   case "$target" in
@@ -147,7 +147,7 @@ for target in "${targets[@]}"; do
   esac
   echo "==> Building kernel ($target_goos/$target_goarch)..."
   GOARCH="$target_goarch" GOOS="$target_goos" CGO_ENABLED=0 \
-    "${go_command[@]}" build "${build_flags[@]}" -o "$(native_path "$artifacts/$artifact_name")" ./cmd/miao-kernel
+    "${go_command[@]}" build "${build_flags[@]}" -o "$(native_path "$artifacts/$artifact_name")" ./cmd/harbor-kernel
   chmod 755 "$artifacts/$artifact_name"
   bun "$(native_path "$ROOT_DIR/scripts/lib/pack-kernel.mjs")" "$(native_path "$artifacts/$artifact_name")" "$target"
 done

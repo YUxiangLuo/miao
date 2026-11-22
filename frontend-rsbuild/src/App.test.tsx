@@ -63,7 +63,7 @@ describe('Harbor Studio Console integration', () => {
     const user = userEvent.setup()
     render(() => <App />)
 
-    expect(await screen.findByRole('heading', { name: '初始化 Harbor 海港网关' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: '初始化 Harbor' })).toBeInTheDocument()
     await user.type(
       screen.getByPlaceholderText(/subscribe\?token=/),
       'https://pool.example.com/sub',

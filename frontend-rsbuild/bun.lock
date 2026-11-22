@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "miao-panel-rsbuild",
+      "name": "harbor-panel-rsbuild",
       "dependencies": {
         "@solidjs/web": "^2.0.3",
         "solid-js": "^2.0.3",

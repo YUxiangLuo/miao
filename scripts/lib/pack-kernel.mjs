@@ -35,10 +35,10 @@ if (import.meta.main) {
   }
   const source = readSource()
   const packed = packKernel(readFileSync(path), {
-    name: 'miao-kernel',
+    name: 'harbor-kernel',
     target,
     ...source,
-    command: './cmd/miao-kernel',
+    command: './cmd/harbor-kernel',
     cgo_enabled: false,
     trimpath: true,
     ldflags: `-s -w -buildid= -X github.com/sagernet/sing-box/constant.Version=${source.version}`,

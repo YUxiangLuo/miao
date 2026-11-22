@@ -10,20 +10,20 @@ const roots = []
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }) })
 const commit = 'a'.repeat(40)
 function fixture() {
-  const root = mkdtempSync(join(tmpdir(), 'miao-release-test-'))
+  const root = mkdtempSync(join(tmpdir(), 'harbor-release-test-'))
   roots.push(root)
   mkdirSync(join(root, 'embedded'))
   writeFileSync(join(root, 'Cargo.toml'), '[workspace.package]\nversion = "1.2.3"\n')
   for (const [target, triple, machine] of [['amd64', 'x86_64', 62], ['arm64', 'aarch64', 183]]) {
     writePackedKernel(join(root, 'embedded', `sing-box-${target}`), packKernel(Buffer.from('isolated-kernel-fixture'), {
-      name: 'miao-kernel', target, ...readSource(), customization_sha256: customizationHash(),
+      name: 'harbor-kernel', target, ...readSource(), customization_sha256: customizationHash(),
     }))
     const directory = join(root, 'target', `${triple}-unknown-linux-musl`, 'release')
     mkdirSync(directory, { recursive: true })
     const elf = Buffer.alloc(64)
     elf.set([0x7f, 0x45, 0x4c, 0x46, 2, 1])
     elf.writeUInt16LE(machine, 18)
-    writeFileSync(join(directory, 'miao-rust'), elf)
+    writeFileSync(join(directory, 'harbor-cli'), elf)
   }
   writeFileSync(join(root, 'embedded', 'geoip-cn.srs'), 'geoip-fixture')
   writeFileSync(join(root, 'embedded', 'geosite-geolocation-cn.srs'), 'geosite-fixture')
@@ -36,12 +36,12 @@ test('release binds both architectures, sources and checksums to one commit/vers
   stageRelease(root, stage, commit, 'v1.2.3')
   verifyRelease(stage, commit, 'v1.2.3')
   expect(readdirSync(stage).sort()).toEqual([
-    'miao-rust-linux-amd64', 'miao-rust-linux-amd64.sha256',
-    'miao-rust-linux-arm64', 'miao-rust-linux-arm64.sha256', 'release-manifest.json',
+    'harbor-linux-amd64', 'harbor-linux-amd64.sha256',
+    'harbor-linux-arm64', 'harbor-linux-arm64.sha256', 'release-manifest.json',
   ])
   if (Bun.which('sha256sum')) {
     for (const target of ['amd64', 'arm64']) {
-      const result = Bun.spawnSync(['sha256sum', '-c', `miao-rust-linux-${target}.sha256`], {
+      const result = Bun.spawnSync(['sha256sum', '-c', `harbor-linux-${target}.sha256`], {
         cwd: stage, stdout: 'pipe', stderr: 'pipe',
       })
       expect(result.exitCode).toBe(0)
@@ -52,9 +52,9 @@ test('release binds both architectures, sources and checksums to one commit/vers
   expect(manifest.rules.sources).toEqual({ 'sing-geoip': 'b'.repeat(40), 'v2ray-rules-dat': 'c'.repeat(40) })
   expect(() => verifyRelease(stage, 'd'.repeat(40), 'v1.2.3')).toThrow('HEAD/version')
   expect(() => verifyRelease(stage, commit, 'v1.2.4')).toThrow('HEAD/version')
-  const binary = readFileSync(join(stage, 'miao-rust-linux-arm64'))
+  const binary = readFileSync(join(stage, 'harbor-linux-arm64'))
   binary[63] ^= 1
-  writeFileSync(join(stage, 'miao-rust-linux-arm64'), binary)
+  writeFileSync(join(stage, 'harbor-linux-arm64'), binary)
   expect(() => verifyRelease(stage, commit, 'v1.2.3')).toThrow('Staged asset changed')
 })
 
@@ -62,7 +62,7 @@ test('publishing rejects missing, incorrect or malformed checksum files for eith
   const { root, stage } = fixture()
   stageRelease(root, stage, commit, 'v1.2.3')
   for (const target of ['amd64', 'arm64']) {
-    const name = `miao-rust-linux-${target}`
+    const name = `harbor-linux-${target}`
     const path = join(stage, `${name}.sha256`)
     const original = readFileSync(path, 'utf8')
     for (const content of [
@@ -83,8 +83,8 @@ test('publishing rejects missing, incorrect or malformed checksum files for eith
 
 test('staging rejects the wrong architecture instead of packaging a native binary twice', () => {
   const { root, stage } = fixture()
-  const amd64 = readFileSync(join(root, 'target/x86_64-unknown-linux-musl/release/miao-rust'))
-  writeFileSync(join(root, 'target/aarch64-unknown-linux-musl/release/miao-rust'), amd64)
+  const amd64 = readFileSync(join(root, 'target/x86_64-unknown-linux-musl/release/harbor-cli'))
+  writeFileSync(join(root, 'target/aarch64-unknown-linux-musl/release/harbor-cli'), amd64)
   expect(() => stageRelease(root, stage, commit, 'v1.2.3')).toThrow('Expected arm64 ELF')
 })
 
@@ -95,7 +95,7 @@ test('publishing requires a complete current manifest, including kernel and rule
   const original = JSON.parse(readFileSync(path, 'utf8'))
   for (const mutate of [
     manifest => { manifest.schema_version = 1 },
-    manifest => { delete manifest.files['miao-rust-linux-arm64'] },
+    manifest => { delete manifest.files['harbor-linux-arm64'] },
     manifest => { manifest.kernels.arm64.revision = 'stale' },
     manifest => { delete manifest.rules.files['geoip-cn.srs'] },
   ]) {
@@ -122,7 +122,7 @@ test('resource reuse rejects test stubs, changed customization and damaged bundl
 test('resource reuse rejects stale rule contents and unpinned source refs', () => {
   const { root } = fixture()
   writePackedKernel(join(root, 'embedded', 'sing-box-windows-amd64.exe'), packKernel(Buffer.from('isolated-win-kernel-fixture'), {
-    name: 'miao-kernel', target: 'windows-amd64', ...readSource(), customization_sha256: customizationHash(),
+    name: 'harbor-kernel', target: 'windows-amd64', ...readSource(), customization_sha256: customizationHash(),
   }))
   expect(() => validateResources(root, 'windows-amd64')).not.toThrow()
   expect(() => recordRules(join(root, 'embedded'), 'rule-set', 'release')).toThrow('pinned commits')

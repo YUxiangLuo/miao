@@ -7,7 +7,7 @@ import { closeSync, existsSync, openSync, readFileSync, readlinkSync, writeFileS
 
 assert.equal(process.getuid(), 0)
 assert.equal(readFileSync('/proc/1/comm', 'utf8').trim(), 'bash')
-assert(existsSync('/run/miao-rust') && existsSync('/tmp/miao-smoke.yaml'))
+assert(existsSync('/run/harbor-cli') && existsSync('/tmp/harbor-smoke.yaml'))
 
 function dnsAnswer(query, address) {
   let end = 12
@@ -193,7 +193,7 @@ if (role === '--upstream') {
     writeFileSync('/tmp/studio.yaml', Bun.YAML.stringify({ nodes: nodes.map(node => JSON.stringify(node)), route_mode: 'rule' }))
     async function startApp(name) {
       // Trust only a fixture certificate in this test process tree, not on the host.
-      app = spawn(['/run/miao-rust', '--config', '/tmp/studio.yaml'], name, { ...process.env, SSL_CERT_FILE: '/tmp/studio-cert.pem' })
+      app = spawn(['/run/harbor-cli', '--config', '/tmp/studio.yaml'], name, { ...process.env, SSL_CERT_FILE: '/tmp/studio-cert.pem' })
       await until(async () => { try { const status = await api('status'); return status.ready && !status.initializing } catch { return false } }, 'studio gateway did not become ready')
     }
     await startApp('gateway')

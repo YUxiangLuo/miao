@@ -7,8 +7,8 @@ REST 与 MCP 共用业务状态。内核生命周期、订阅拉取、配置提�
 | 状态 | 含义 |
 | --- | --- |
 | `running` / `pid` | 观察到的内核子进程 |
-| `phase` / `ready` / `should_run` / `generation` | [lifecycle](../crates/miao-core/src/state/lifecycle.rs) 管理的阶段、健康、运行意图、操作代次 |
-| `subscription_refresh` | [subscriptions](../crates/miao-core/src/state/subscriptions.rs) 管理的拉取活动、结果、等待 |
+| `phase` / `ready` / `should_run` / `generation` | [lifecycle](../crates/harbor-core/src/state/lifecycle.rs) 管理的阶段、健康、运行意图、操作代次 |
+| `subscription_refresh` | [subscriptions](../crates/harbor-core/src/state/subscriptions.rs) 管理的拉取活动、结果、等待 |
 | `sub_refresh_success_generation` / 节点快照 | 已接受响应且完成提交的代次 / 节点材料 |
 
 `/api/status` 与 MCP `get_status` 共用快照。`initializing` 仅表示首次资源初始化；旧阶段 `fetching_subscriptions` / `refreshing_subscriptions` 只兼容保留，不再发布。

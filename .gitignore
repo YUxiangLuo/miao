@@ -19,8 +19,9 @@ desktop/src-tauri/gen
 dist/
 out/
 *.tgz
-/miao-windows-amd64*
-/miao-rust-linux-*
+/harbor-windows-amd64*
+/harbor-linux-*
+/harbor-cli*
 
 # Test, build and runtime caches
 coverage/

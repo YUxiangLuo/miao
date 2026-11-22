@@ -77,12 +77,12 @@ export function ConnectivityCheck(props: { status: StatusData; backendUnreachabl
       conclusion = describeResult(response.data)
       details = `耗时：${response.data.latency_ms == null ? '无测量结果' : `${response.data.latency_ms} ms`}\n错误类型：${response.data.error_kind || '无'}\n错误详情：${response.data.error || '无'}`
     } catch (error) {
-      conclusion = '未取得检查结果，目标是否可达未知。请检查 Miao 后端连接。'
+      conclusion = '未取得检查结果，目标是否可达未知。请检查 Harbor 后端连接。'
       details = `错误详情：${error instanceof Error ? error.message : String(error)}`
     }
     if (activeRequest !== controller) return
     setSummary(conclusion)
-    setReport(`Miao 连接检查\n开始时间：${startedAt}\n完成时间：${new Date().toLocaleString()}\n检查开始时：${startService}\n目标：${target}\n方法：HEAD，超时 5 秒\n范围：Miao 所在主机；不使用代理环境变量，仍可能经过系统 TUN/路由。不是指定节点或浏览器测试。\n结论：${conclusion}\n${details}`)
+    setReport(`Harbor 连接检查\n开始时间：${startedAt}\n完成时间：${new Date().toLocaleString()}\n检查开始时：${startService}\n目标：${target}\n方法：HEAD，超时 5 秒\n范围：Harbor 所在主机；不使用代理环境变量，仍可能经过系统 TUN/路由。不是指定节点或浏览器测试。\n结论：${conclusion}\n${details}`)
     activeRequest = null
     setPending(false)
   }
@@ -125,7 +125,7 @@ export function ConnectivityCheck(props: { status: StatusData; backendUnreachabl
                 </button>
               </div>
               <p class="drawer-status-line" role="status">{service()}</p>
-              <p class="drawer-help">从 Miao 主机发送 HEAD 请求，不修改配置。不使用代理环境变量，可能经过系统 TUN/路由；不测试浏览器或指定节点。</p>
+              <p class="drawer-help">从 Harbor 主机发送 HEAD 请求，不修改配置。不使用代理环境变量，可能经过系统 TUN/路由；不测试浏览器或指定节点。</p>
               <label class="field">
                 <span>目标网址</span>
                 <input

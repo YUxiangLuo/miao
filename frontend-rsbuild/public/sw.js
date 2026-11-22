@@ -1,9 +1,9 @@
-// Miao PWA Service Worker。
+// Harbor PWA Service Worker。
 // 存在的唯一理由是满足 Chrome 的可安装门槛（install prompt 要求带 fetch
 // handler 的 SW）。面板离开后端就是死页面，所以不做激进的离线缓存：
 // 仅对导航请求 network-first，成功时刷新缓存、断网时回退缓存；
 // /api 与 WebSocket 一律直连网络（WS 升级请求本就不经过 fetch 事件）。
-const CACHE = 'miao-shell-v1'
+const CACHE = 'harbor-shell-v1'
 
 self.addEventListener('install', (event) => {
   event.waitUntil(

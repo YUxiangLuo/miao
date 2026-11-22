@@ -1,10 +1,10 @@
-# Miao 客户端内核
+# Harbor 客户端内核
 
-[source.json](../scripts/sing-box/source.json) 统一记录上游仓库、完整 SHA、Go/内核版本、构建标签和能力清单。构建固定源码与工具链，Miao 发版或上游 testing 变化不会自动升级内核。
+[source.json](../scripts/sing-box/source.json) 统一记录上游仓库、完整 SHA、Go/内核版本、构建标签和能力清单。构建固定源码与工具链，Harbor 发版或上游 testing 变化不会自动升级内核。
 
 ## 能力与裁剪
 
-[client.patch](../scripts/sing-box/client.patch) 调整组件注册，`miao-client-v4` 保留：
+[client.patch](../scripts/sing-box/client.patch) 调整组件注册，`harbor-client-v4` 保留：
 
 | 类别 | 能力 |
 | --- | --- |
@@ -18,14 +18,14 @@
 
 TUN 名为 `sing-tun`，启用 `auto_route`、`strict_route`，Linux 下额外开启 `auto_redirect: true`，`multi_queue` 默认关闭。内置 direct 使用 30 秒 TCP keepalive、15 秒间隔，帮助发现闲置连接失效，不保证远端连接永久存活。
 
-`miao-kernel` 只包含 run/check/version 与 namespace 辅助入口，复用上游实现；运行时文件名为 `sing-box`（Windows 为 `sing-box.exe`）。
+`harbor-kernel` 只包含 run/check/version 与 namespace 辅助入口，复用上游实现；运行时文件名为 `sing-box`（Windows 为 `sing-box.exe`）。
 
 ## 补丁与回归
 
-- [miao_activation.go](../scripts/sing-box/miao_activation.go) 为父子进程增加激活回执。父进程在启动或 Unix SIGHUP 前写入唯一请求 ID 与配置 SHA-256；内核在读取配置前捕获请求，校验实际读取字节，并且仅在实例 `Start()` 成功后原子发布带 PID 的回执。控制面必须同时验证回执、进程存活及 TUN/Clash 健康，旧监听器不能提前完成新事务。[miao_activation_test.go](../scripts/sing-box/tests/miao_activation_test.go) 与 [miao_activation_unix_test.go](../scripts/sing-box/tests/miao_activation_unix_test.go) 覆盖旧请求、哈希不匹配、跨平台启动回执及 Unix 子进程 SIGHUP 成功/拒绝重载；命令钩子与固定上游不匹配时构建立即失败。
-- CLI context 隔离已由上游实现；[miao_context_test.go](../scripts/sing-box/tests/miao_context_test.go) 保留 create/check 两处注册表隔离回归。两者均须通过 `service.ExtendContext(globalCtx)` 复制可变注册表，同时保留取消语义；仅 `context.WithCancel` 会共享 manager，可能在 SIGHUP 重载时访问未启动的 AnyTLS client。测试使用 direct 和未选中的 AnyTLS，不使用 TUN/外网，也不并行修改 CLI 全局变量。
+- [harbor_activation.go](../scripts/sing-box/harbor_activation.go) 为父子进程增加激活回执。父进程在启动或 Unix SIGHUP 前写入唯一请求 ID 与配置 SHA-256；内核在读取配置前捕获请求，校验实际读取字节，并且仅在实例 `Start()` 成功后原子发布带 PID 的回执。控制面必须同时验证回执、进程存活及 TUN/Clash 健康，旧监听器不能提前完成新事务。[harbor_activation_test.go](../scripts/sing-box/tests/harbor_activation_test.go) 与 [harbor_activation_unix_test.go](../scripts/sing-box/tests/harbor_activation_unix_test.go) 覆盖旧请求、哈希不匹配、跨平台启动回执及 Unix 子进程 SIGHUP 成功/拒绝重载；命令钩子与固定上游不匹配时构建立即失败。
+- CLI context 隔离已由上游实现；[harbor_context_test.go](../scripts/sing-box/tests/harbor_context_test.go) 保留 create/check 两处注册表隔离回归。两者均须通过 `service.ExtendContext(globalCtx)` 复制可变注册表，同时保留取消语义；仅 `context.WithCancel` 会共享 manager，可能在 SIGHUP 重载时访问未启动的 AnyTLS client。测试使用 direct 和未选中的 AnyTLS，不使用 TUN/外网，也不并行修改 CLI 全局变量。
 - [shadowsocks2-halfclose.patch](../scripts/sing-box/shadowsocks2-halfclose.patch) 为经典 AEAD、AEAD-2022 客户端提供 `CloseWrite`：必要时先发送加密目的地址，再关闭底层写端并保留响应方向。不绕过加密层；不支持半关闭的底层传输退回完整关闭。
-- [miao_shadowsocks_test.go](../scripts/sing-box/tests/miao_shadowsocks_test.go) 使用 loopback TCP 和独立服务端，覆盖空请求、多帧、EOF 后响应、半关闭后写入失败、包装回退与错误传播；不承诺所有插件/复用都支持半关闭。
+- [harbor_shadowsocks_test.go](../scripts/sing-box/tests/harbor_shadowsocks_test.go) 使用 loopback TCP 和独立服务端，覆盖空请求、多帧、EOF 后响应、半关闭后写入失败、包装回退与错误传播；不承诺所有插件/复用都支持半关闭。
 
 构建脚本将固定的 `sing-shadowsocks2` 客户端依赖复制到临时目录，用相对 `replace` 应用补丁，不修改共享 Go 缓存。精确依赖版本由 [内核构建实现](../scripts/lib/kernel.sh) 校验，漂移即停止；勿与上游服务端依赖 `sing-shadowsocks` 混淆。
 
@@ -50,7 +50,7 @@ TUN 名为 `sing-tun`，启用 `auto_route`、`strict_route`，Linux 下额外�
 | 同名 `.meta.json` | 源码、工具链、能力、定制文件哈希、压缩前后大小与 SHA-256 |
 | `sing-box-host` | 未裁剪的规则编译器，不嵌入成品 |
 
-资源变更后须[重编 Miao](development.md#构建发布与部署)。启动时以纯 Rust 解压到同目录临时文件，校验完整帧、大小和 SHA-256，再设置权限并原子替换；失败保留旧内核，不清理缓存/配置。压缩只减少分发体积，8 MiB 解码窗口与启动峰值 RSS 须在 OpenWrt 验收。
+资源变更后须[重编 Harbor](development.md#构建发布与部署)。启动时以纯 Rust 解压到同目录临时文件，校验完整帧、大小和 SHA-256，再设置权限并原子替换；失败保留旧内核，不清理缓存/配置。压缩只减少分发体积，8 MiB 解码窗口与启动峰值 RSS 须在 OpenWrt 验收。
 
 ## 升级与验收
 
@@ -64,7 +64,7 @@ testing 曾重写历史：固定 SHA 不保证对象永久可下载，须保留�
 
 ## 验证范围
 
-`./dev.sh netns` 验证 Miao 与内核的控制流程、TUN 创建及清理，并用两个客户端、一个真实 VLESS 服务端和一个带认证的 SOCKS5 服务端验证大陆/内网直连优先、按来源 IP 固定出口、TCP/UDP、每节点 DoH，以及删除节点后的 DNS 缓存隔离。服务端由 `embedded/sing-box-host` 提供，所有目标及证书均为隔离网络内的本地测试材料。它不验证公网线路、其他协议或 OpenWrt 真机；这些仍需要专用环境。
+`./dev.sh netns` 验证 Harbor 与内核的控制流程、TUN 创建及清理，并用两个客户端、一个真实 VLESS 服务端和一个带认证的 SOCKS5 服务端验证大陆/内网直连优先、按来源 IP 固定出口、TCP/UDP、每节点 DoH，以及删除节点后的 DNS 缓存隔离。服务端由 `embedded/sing-box-host` 提供，所有目标及证书均为隔离网络内的本地测试材料。它不验证公网线路、其他协议或 OpenWrt 真机；这些仍需要专用环境。
 
 ## 来源与许可
 

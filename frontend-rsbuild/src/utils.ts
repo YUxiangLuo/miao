@@ -8,7 +8,7 @@ export const POLL_INTERVAL = 3000
 export const CONFIG_POLL_INTERVAL = 30_000
 // 延迟测试目标：必须用 https——sing-box 自 9d32fc9b（Use HTTPS URLTest source）起
 // 在 Clash API 测速端点拒绝 http:// URL（静默回退到此 https 默认值）；
-// 与 miao-core 生成的 urltest 组配置保持一致，保证手动测速与组内周期测速同口径。
+// 与 harbor-core 生成的 urltest 组配置保持一致，保证手动测速与组内周期测速同口径。
 export const DELAY_TEST_URL = 'https://www.gstatic.com/generate_204'
 // 链式代理需要额外握手时间；外层 HTTP 读取仍以 10 秒兜底。
 export const DELAY_TEST_TIMEOUT_MS = 8_000

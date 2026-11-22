@@ -55,7 +55,7 @@ export function SetupWizard(props: SetupWizardProps) {
         <header class="wizard-header">
           <LogoIcon size={LOGO_SIZE.onboarding} />
           <div>
-            <h1>初始化 Harbor 海港网关</h1>
+            <h1>初始化 Harbor</h1>
             <p class="wizard-sub">
               接入公共出海池订阅，或直接配置独享静态 IP 开启局域网终端与店铺分流。
             </p>

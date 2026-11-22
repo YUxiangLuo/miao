@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
   <rect width="512" height="512" rx="116" fill="#18181B"/>
-  <rect x="18" y="18" width="476" height="476" rx="98" stroke="#FFFFFF" stroke-opacity="0.1" stroke-width="6"/>
+  <rect x="18" y="18" width="476" height="476" rx="98" stroke="#FFFFFF" stroke-opacity="0.12" stroke-width="6"/>
   <!-- Minimalist architectural H-portal & signal bridge -->
   <rect x="132" y="128" width="52" height="256" rx="14" fill="#F7F6F3"/>
   <rect x="328" y="128" width="52" height="256" rx="14" fill="#F7F6F3"/>

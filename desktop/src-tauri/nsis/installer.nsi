@@ -1,11 +1,11 @@
 Unicode true
 ManifestDPIAware true
 ; ═══════════════════════════════════════════════════════════════════════
-; Miao 定制模板：基于 tauri-cli v2.11.4 官方 installer.nsi，含两处修改：
+; Harbor 定制模板：基于 tauri-cli v2.11.4 官方 installer.nsi，含两处修改：
 ;   1. PageReinstall 默认选中「不卸载直接安装」（覆盖安装）
-;   2. reinst_uninstall 先 Call MiaoEnsureNotRunning（卸载前确保进程退出）
+;   2. reinst_uninstall 先 Call HarborEnsureNotRunning（卸载前确保进程退出）
 ; 升级 @tauri-apps/cli 时：取新版本官方模板（crates/tauri-bundler/.../nsis/installer.nsi）
-; 重新套用这两处修改。定位锚点：搜索 "Miao 定制"。
+; 重新套用这两处修改。定位锚点：搜索 "Harbor 定制"。
 ; ═══════════════════════════════════════════════════════════════════════
 ; Add in `dpiAwareness` `PerMonitorV2` to manifest for Windows 10 1607+ (note this should not affect lower versions since they should be able to ignore this and pick up `dpiAware` `true` set by `ManifestDPIAware true`)
 ; Currently undocumented on NSIS's website but is in the Docs folder of source tree, see
@@ -293,7 +293,7 @@ Function PageReinstall
     !endif
     ${NSD_OnClick} $R3 PageReinstallUpdateSelection
 
-    ; Miao 定制：默认选中「不卸载直接安装」（覆盖安装）。
+    ; Harbor 定制：默认选中「不卸载直接安装」（覆盖安装）。
     ; 原版默认选第一项（卸载再安装）：卸载后页面状态不变，用户再次下一步
     ; 会二次卸载并失败。覆盖安装对我们完全够用（配置/数据不在安装目录）。
     ${If} $ReinstallPageCheck = 1
@@ -352,9 +352,9 @@ Function PageLeaveReinstall
   ${EndIf}
 
   reinst_uninstall:
-    ; Miao 定制：卸载前先确保进程已退出（提权进程安装器杀不掉，
+    ; Harbor 定制：卸载前先确保进程已退出（提权进程安装器杀不掉，
     ; 不退出则旧 exe 删除失败 → 本页 Abort 回退 → 二次卸载死循环）
-    Call MiaoEnsureNotRunning
+    Call HarborEnsureNotRunning
     HideWindow
     ClearErrors
 

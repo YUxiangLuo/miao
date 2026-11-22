@@ -16,7 +16,7 @@ set_version() (
   trap 'result=$?; if (( result != 0 )); then cp "$backup/Cargo.toml" "$backup/Cargo.lock" .; fi; rm -rf -- "$backup"; exit "$result"' EXIT
   bun scripts/lib/release-artifacts.mjs version "$version"
   # Resolve only the workspace version change, retaining existing dependency pins.
-  cargo check -p miao-core --offline --no-default-features
+  cargo check -p harbor-core --offline --no-default-features
   echo "==> Version updated locally. Review and commit Cargo.toml/Cargo.lock, then run ./dev.sh release"
 )
 release() {
@@ -77,10 +77,10 @@ release() {
   git rev-parse --verify --quiet "refs/tags/$tag" >/dev/null || git tag "$tag" "$commit"
   git push "$push_url" "refs/tags/$tag"
   local assets=(
-    "$stage/miao-rust-linux-amd64"
-    "$stage/miao-rust-linux-amd64.sha256"
-    "$stage/miao-rust-linux-arm64"
-    "$stage/miao-rust-linux-arm64.sha256"
+    "$stage/harbor-linux-amd64"
+    "$stage/harbor-linux-amd64.sha256"
+    "$stage/harbor-linux-arm64"
+    "$stage/harbor-linux-arm64.sha256"
   )
   local asset
   if [[ -n "$release_state" ]]; then
@@ -89,8 +89,8 @@ release() {
     # only after both binaries and their checksums have been uploaded successfully.
     while IFS= read -r asset; do
       case "$asset" in
-        ''|miao-rust-linux-amd64|miao-rust-linux-arm64) ;;
-        miao-rust-linux-amd64.sha256|miao-rust-linux-arm64.sha256) ;;
+        ''|harbor-linux-amd64|harbor-linux-arm64) ;;
+        harbor-linux-amd64.sha256|harbor-linux-arm64.sha256) ;;
         *) gh release delete-asset "$tag" "$asset" --repo "$repository" --yes ;;
       esac
     done < <(printf '%s\n' "$release_state" | tail -n +2)

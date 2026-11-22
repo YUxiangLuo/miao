@@ -4,21 +4,21 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { spawnSync } from 'node:child_process'
 
-const preflight = readFileSync(new URL('../../crates/miao-core/src/services/vps/common.sh', import.meta.url), 'utf8')
-const provision = readFileSync(new URL('../../crates/miao-core/src/services/vps/provision.sh', import.meta.url), 'utf8')
-const probe = readFileSync(new URL('../../crates/miao-core/src/services/vps/probe.sh', import.meta.url), 'utf8')
+const preflight = readFileSync(new URL('../../crates/harbor-core/src/services/vps/common.sh', import.meta.url), 'utf8')
+const provision = readFileSync(new URL('../../crates/harbor-core/src/services/vps/provision.sh', import.meta.url), 'utf8')
+const probe = readFileSync(new URL('../../crates/harbor-core/src/services/vps/probe.sh', import.meta.url), 'utf8')
 const legacyConfig = 'listen: :543\nauth:\n  type: password\n  password: old-secret\nobfs:\n  type: salamander\n  salamander:\n    password: old-obfs\n'
 const shellTest = test.skipIf(process.platform === 'win32')
 
 shellTest('legacy probe requests migration without overwriting config or restarting', () => {
-  const root = mkdtempSync(join(tmpdir(), 'miao-vps-probe-'))
+  const root = mkdtempSync(join(tmpdir(), 'harbor-vps-probe-'))
   const config = legacyConfig
   try {
     writeFileSync(join(root, 'config.yaml'), config)
     writeFileSync(join(root, 'server.crt'), 'certificate')
     writeFileSync(join(root, 'server.key'), 'key')
     const result = spawnSync('/bin/sh', ['-s'], {
-      input: `set -eu\nFALLBACK_OBFS_PASSWORD=new-obfs\nopenssl() { echo 'subject=CN = miao-hysteria'; }\nmiao_start_checked() { touch '${root}/restarted'; exit 1; }\n` + probe.replaceAll('/etc/hysteria', root),
+      input: `set -eu\nFALLBACK_OBFS_PASSWORD=new-obfs\nopenssl() { echo 'subject=CN = harbor-hysteria'; }\nharbor_start_checked() { touch '${root}/restarted'; exit 1; }\n` + probe.replaceAll('/etc/hysteria', root),
       encoding: 'utf8', timeout: 5000,
     })
     expect(contents(join(root, 'config.yaml'))).toBe(config)
@@ -31,7 +31,7 @@ shellTest('legacy probe requests migration without overwriting config or restart
 // Only the shared preflight runs here; all package/service commands are fakes.
 // Never run provisioning paths or a real package manager on the test host.
 function fixture({ manager, init = 'openrc', arch = 'x86_64', missing = false }) {
-  const path = mkdtempSync(join(tmpdir(), 'miao-vps-preflight-'))
+  const path = mkdtempSync(join(tmpdir(), 'harbor-vps-preflight-'))
   writeFileSync(join(path, 'ca.pem'), 'test CA fixture')
   const log = join(path, 'calls')
   const script = (name, body) => writeFileSync(join(path, name), `#!/bin/sh\n${body}\n`, { mode: 0o700 })
@@ -46,7 +46,7 @@ function fixture({ manager, init = 'openrc', arch = 'x86_64', missing = false })
   if (manager) script(manager, `printf '%s\\n' "$*" >> '${log}'\n/bin/ln -sf /bin/true '${path}/openssl'`)
   try {
     return {
-      result: spawnSync('/bin/sh', ['-s'], { input: `${preflight.replaceAll('/etc/ssl/certs/ca-certificates.crt', join(path, 'ca.pem'))}\nprintf '%s:%s' "$MIAO_INIT" "$HYSTERIA_ARCH"`, env: { PATH: path }, encoding: 'utf8' }),
+      result: spawnSync('/bin/sh', ['-s'], { input: `${preflight.replaceAll('/etc/ssl/certs/ca-certificates.crt', join(path, 'ca.pem'))}\nprintf '%s:%s' "$HARBOR_INIT" "$HYSTERIA_ARCH"`, env: { PATH: path }, encoding: 'utf8' }),
       calls: (() => { try { return readFileSync(log, 'utf8') } catch { return '' } })(),
     }
   } finally { rmSync(path, { recursive: true, force: true }) }
@@ -87,7 +87,7 @@ shellTest('VPS preflight rejects missing init before installation', () => {
 // Execute a path-rewritten copy of provision.sh. Every external/network/service
 // boundary is fake; only ordinary file operations happen, under this fixture.
 function provisionFixture({ init = 'systemd', fail = '', running = true, enabled = true, withUnit = true, existing = true, legacy = false } = {}) {
-  const root = mkdtempSync(join(tmpdir(), 'miao-vps-provision-'))
+  const root = mkdtempSync(join(tmpdir(), 'harbor-vps-provision-'))
   const bin = join(root, 'mock-bin')
   const state = join(root, 'state')
   mkdirSync(bin)
@@ -142,19 +142,19 @@ case "$1" in show) [ -f '${state}/enabled' ] && echo ' hysteria-server ';; add) 
     .replaceAll('/usr/local/bin', join(root, 'usr/local/bin'))
     .replaceAll('/etc/systemd/system/hysteria-server.service', join(root, 'etc/systemd/system/hysteria-server.service'))
     .replaceAll('/etc/init.d/hysteria-server', join(root, 'etc/init.d/hysteria-server'))
-    .replaceAll('/tmp/miao-hysteria-backup.', `${root}/backup.`)
+    .replaceAll('/tmp/harbor-hysteria-backup.', `${root}/backup.`)
   let prefix = `set -eu
-MIAO_INIT='${init}'; HYSTERIA_ARCH=amd64; SERVICE=hysteria-server; PASSWORD=p; OBFS_PASSWORD=o
-miao_fail() { echo "MIAO_ERROR: $*" >&2; exit 1; }
-miao_stop() { if [ "$MIAO_INIT" = systemd ]; then systemctl stop "$SERVICE"; else rc-service "$SERVICE" stop; fi; }
-miao_disable() { if [ "$MIAO_INIT" = systemd ]; then systemctl disable "$SERVICE"; else rc-update del "$SERVICE" default; fi; }
-miao_is_running() { if [ "$MIAO_INIT" = systemd ]; then systemctl is-active --quiet "$SERVICE"; else rc-service "$SERVICE" status >/dev/null 2>&1; fi; }
-miao_is_enabled() { if [ "$MIAO_INIT" = systemd ]; then systemctl is-enabled --quiet "$SERVICE"; else rc-update show default | grep -q hysteria-server; fi; }
-miao_reload_init() { [ "$MIAO_INIT" != systemd ] || systemctl daemon-reload; }
+HARBOR_INIT='${init}'; HYSTERIA_ARCH=amd64; SERVICE=hysteria-server; PASSWORD=p; OBFS_PASSWORD=o
+harbor_fail() { echo "HARBOR_ERROR: $*" >&2; exit 1; }
+harbor_stop() { if [ "$HARBOR_INIT" = systemd ]; then systemctl stop "$SERVICE"; else rc-service "$SERVICE" stop; fi; }
+harbor_disable() { if [ "$HARBOR_INIT" = systemd ]; then systemctl disable "$SERVICE"; else rc-update del "$SERVICE" default; fi; }
+harbor_is_running() { if [ "$HARBOR_INIT" = systemd ]; then systemctl is-active --quiet "$SERVICE"; else rc-service "$SERVICE" status >/dev/null 2>&1; fi; }
+harbor_is_enabled() { if [ "$HARBOR_INIT" = systemd ]; then systemctl is-enabled --quiet "$SERVICE"; else rc-update show default | grep -q hysteria-server; fi; }
+harbor_reload_init() { [ "$HARBOR_INIT" != systemd ] || systemctl daemon-reload; }
 `
   if (legacy) {
     const result = spawnSync('/bin/sh', ['-s'], {
-      input: `set -eu\nFALLBACK_OBFS_PASSWORD=new-obfs\nopenssl() { echo 'subject=CN = miao-hysteria'; }\nmiao_start_checked() { exit 99; }\n` + probe.replaceAll('/etc/hysteria', join(root, 'etc/hysteria')),
+      input: `set -eu\nFALLBACK_OBFS_PASSWORD=new-obfs\nopenssl() { echo 'subject=CN = harbor-hysteria'; }\nharbor_start_checked() { exit 99; }\n` + probe.replaceAll('/etc/hysteria', join(root, 'etc/hysteria')),
       encoding: 'utf8', timeout: 5000,
     })
     if (result.status !== 20 || result.stdout !== 'old-secret\nnew-obfs\n') {

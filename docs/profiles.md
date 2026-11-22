@@ -1,6 +1,6 @@
 # Profile 与路径归属
 
-[`ResolvedProfile`](../crates/miao-core/src/profile.rs) 在启动时解析所有路径，服务只使用 `AppState` 中的结果。**Profile 隔离不支持多开**：TUN、Clash API 端口和部分进程级设施仍共享。
+[`ResolvedProfile`](../crates/harbor-core/src/profile.rs) 在启动时解析所有路径，服务只使用 `AppState` 中的结果。**Profile 隔离不支持多开**：TUN、Clash API 端口和部分进程级设施仍共享。
 
 ## 启动来源
 
@@ -14,19 +14,19 @@
 
 ## 文件位置
 
-Linux/OpenWrt 默认配置为 `/etc/miao/config.yaml`，Windows 默认配置为 `%LOCALAPPDATA%\io.github.yuxiangluo.miao\config.yaml`。可执行文件旁的配置优先（Windows 大小写不敏感）。
+Linux/OpenWrt 默认配置为 `/etc/harbor/config.yaml`，Windows 默认配置为 `%LOCALAPPDATA%\io.github.yuxiangluo.harbor\config.yaml`。可执行文件旁的配置优先（Windows 大小写不敏感）。
 
-`R` 为运行根目录（Linux/OpenWrt `/tmp/miao-sing-box`，Windows `%TEMP%\miao-sing-box`），`D` 为 Windows 数据目录 `%LOCALAPPDATA%\io.github.yuxiangluo.miao`，`P` 为配置同目录的 `.miao-profiles/<id>`。
+`R` 为运行根目录（Linux/OpenWrt `/tmp/harbor-sing-box`，Windows `%TEMP%\harbor-sing-box`），`D` 为 Windows 数据目录 `%LOCALAPPDATA%\io.github.yuxiangluo.harbor`，`P` 为配置同目录的 `.harbor-profiles/<id>`。
 
 | 文件与用途 | 默认 Profile | 命名 Profile |
 | --- | --- | --- |
 | `config.yaml`：订阅、手动节点、规则、端口、MCP、定时刷新与启动默认值 | 上述发现路径 | 指定路径 |
 | 内核、active `config.json`、运行缓存、订阅快照：派生运行材料 | `R` | `R/profiles/<id>` |
 | `volatile.yaml`：当前策略、倍率、路由模式、禁用节点 | Linux/OpenWrt `R`；Windows `D/volatile.yaml` | Linux/OpenWrt 该 Profile 运行目录；Windows `P/volatile.yaml` |
-| `.last_proxy` / `.node_select` / `.max_multiplier`：显式选择偏好 | Windows `D`；systemd Linux 启动 CWD（安装服务为 `/etc/miao`）；OpenWrt/非 systemd `R` | Windows / systemd Linux `P`；OpenWrt/非 systemd 该 Profile 运行目录 |
+| `.last_proxy` / `.node_select` / `.max_multiplier`：显式选择偏好 | Windows `D`；systemd Linux 启动 CWD（安装服务为 `/etc/harbor`）；OpenWrt/非 systemd `R` | Windows / systemd Linux `P`；OpenWrt/非 systemd 该 Profile 运行目录 |
 | `node-bindings.json`：稳定节点 tag | 配置同目录 | 配置名为 `config.yaml` 时沿用同目录文件，其他名称使用 `P` |
 
-Linux/OpenWrt 默认易变层及 OpenWrt/非 systemd 的偏好在 tmpfs，进程重启保留、系统重启清空；Windows 易变层与偏好持久保存在 `D` / `P`。稳定配置与节点绑定持久保存。默认 Profile 的 CWD 偏好规则为兼容保留，命名 Profile 不依赖 CWD。Windows 默认写滚动日志 `D/miao.log`（命名 Profile 为 `P/miao.log`），Linux systemd 默认输出终端，OpenWrt 默认写 `R/miao.log`，均可由 SDK 显式指定文件。
+Linux/OpenWrt 默认易变层及 OpenWrt/非 systemd 的偏好在 tmpfs，进程重启保留、系统重启清空；Windows 易变层与偏好持久保存在 `D` / `P`。稳定配置与节点绑定持久保存。默认 Profile 的 CWD 偏好规则为兼容保留，命名 Profile 不依赖 CWD。Windows 默认写滚动日志 `D/harbor.log`（命名 Profile 为 `P/harbor.log`），Linux systemd 默认输出终端，OpenWrt 默认写 `R/harbor.log`，均可由 SDK 显式指定文件。
 
 ## 迁移
 

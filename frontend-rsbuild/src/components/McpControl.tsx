@@ -21,12 +21,12 @@ const AGENTS: Agent[] = [
   {
     id: 'claude',
     label: 'Claude',
-    command: (url) => `claude mcp add --transport http miao ${url}`,
+    command: (url) => `claude mcp add --transport http harbor ${url}`,
   },
   {
     id: 'codex',
     label: 'Codex',
-    command: (url) => `codex mcp add miao --url ${url}`,
+    command: (url) => `codex mcp add harbor --url ${url}`,
   },
 ]
 
@@ -47,15 +47,15 @@ export function McpControl(props: McpControlProps) {
   const [manualCopy, setManualCopy] = createSignal<{ text: string; label: string } | null>(null)
   const dialogRef = useDialog(() => Boolean(manualCopy()), () => setManualCopy(null))
 
-  const agentInstructions = `## Miao MCP
+  const agentInstructions = `## Harbor MCP
 
-Miao 是基于 sing-box 的透明代理，MCP 提供状态查询、节点测速和配置管理。
+Harbor 是基于 sing-box 的透明代理，MCP 提供状态查询、节点测速和配置管理。
 
-- 接入：在面板启用 MCP，将 Streamable HTTP 端点 ${url} 添加为服务 miao；agent 必须能访问此地址。本文不会自动配置 MCP。
+- 接入：在面板启用 MCP，将 Streamable HTTP 端点 ${url} 添加为服务 harbor；agent 必须能访问此地址。本文不会自动配置 MCP。
 - 操作前先用 get_status 查看状态，用 tools/list 获取当前工具及参数；节点名从 list_nodes 获取，不要猜测。
-- 排查网络时优先查询状态、连接和规则；test_delay 测的是节点延迟，不是下载速度；test_connectivity 从运行 Miao 的主机发起请求，不代表用户浏览器必然可用。
+- 排查网络时优先查询状态、连接和规则；test_delay 测的是节点延迟，不是下载速度；test_connectivity 从运行 Harbor 的主机发起请求，不代表用户浏览器必然可用。
 - 修改仅限用户要求的范围。对要求 confirm: true 的工具，须先获得用户明确确认；启停、删除、VPS 部署、关闭 MCP、升级等可能影响网络，不要自行尝试。
-- 操作后读取状态核对结果；超时不等于失败，先确认实际结果再决定是否重试。不要启动第二个 Miao 实例来排错。
+- 操作后读取状态核对结果；超时不等于失败，先确认实际结果再决定是否重试。不要启动第二个 Harbor 实例来排错。
 `
 
   const copyText = async (text: string, label: string) => {

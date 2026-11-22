@@ -5,13 +5,13 @@
 ## 命令行启动
 
 ```bash
-sudo ./miao --config /path/to/config.yaml
-sudo ./miao --sub 'https://example.com/sub?token=xxx' JP
-./miao --help
-./miao --version
+sudo ./harbor --config /path/to/config.yaml
+sudo ./harbor --sub 'https://example.com/sub?token=xxx' JP
+./harbor --help
+./harbor --version
 ```
 
-示例假定二进制名为 `miao`（Windows 桌面端支持额外的 `--minimized` 静默托盘启动参数）。`--config=PATH`、`--sub=URL` 同样有效，两者互斥；参数在提权、写文件和启核前校验。
+示例假定二进制名为 `harbor`（Windows 桌面端支持额外的 `--minimized` 静默托盘启动参数）。`--config=PATH`、`--sub=URL` 同样有效，两者互斥；参数在提权、写文件和启核前校验。
 
 `--sub` 接受 HTTP/HTTPS Clash YAML 订阅。地区可选 `HK/JP/TW/SG/US`，大小写不限；省略时手动选择，无地区候选时临时回退手动。临时运行默认规则分流、不限倍率，不继承已有配置或偏好，面板修改也仅影响本次运行；清理规则见 [Profile](profiles.md#sdk-与生命周期)。
 
@@ -47,7 +47,7 @@ scheduled_refresh:
 
 ### 工作室：按内网 IP 固定出口
 
-在 Linux/OpenWrt 网关运行 Miao，通过 DHCP 静态租约给电脑分配固定 IPv4 地址，并让流量经过该网关。到达 Miao 前不能先将多台电脑 NAT 成同一个来源 IP。Miao 不管理 DHCP、IP 转发或路由器防火墙，这些由网关环境配置。
+在 Linux/OpenWrt 网关运行 Harbor，通过 DHCP 静态租约给电脑分配固定 IPv4 地址，并让流量经过该网关。到达 Harbor 前不能先将多台电脑 NAT 成同一个来源 IP。Harbor 不管理 DHCP、IP 转发或路由器防火墙，这些由网关环境配置。
 
 导入节点后，在面板「自定义规则 → 添加 → 更多方式 → 来源 IP 地址段」填写单台电脑的 `/32` 地址，并选择指定节点。也可以在配置文件中保存相同规则，无需手写排除大陆的组合条件：
 
@@ -60,7 +60,7 @@ custom_rules:
 
 节点 tag 必须与实际节点一致；`proxy` 表示跟随默认出口，不能用于固定到某个具体节点。指定节点绑定不受默认节点切换或地区最快策略影响。各节点的 DNS 服务标识绑定节点 tag，避免增删节点或调整规则顺序时串用其他出口的缓存。同一来源匹配多个自定义规则时，先添加的规则生效；未绑定设备仍使用默认分流。不同节点名称不保证不同公网 IP，独立公网 IP 由出口服务提供。
 
-当前按 IPv4 接入，需在网络侧避免另一条 IPv6 出口绕过网关。局域网 DNS 应让客户端查询经过 Miao；若先交给路由器 DNS 转发器，Miao 只能看到转发器的来源 IP，无法按员工分别选择 DNS 出口。管理面板/MCP 无鉴权，应通过防火墙限制为管理员可访问。
+当前按 IPv4 接入，需在网络侧避免另一条 IPv6 出口绕过网关。局域网 DNS 应让客户端查询经过 Harbor；若先交给路由器 DNS 转发器，Harbor 只能看到转发器的来源 IP，无法按员工分别选择 DNS 出口。管理面板/MCP 无鉴权，应通过防火墙限制为管理员可访问。
 
 从旧版升级后，旧优先级的运行配置缓存会被拒绝复用，并从手动节点/订阅快照重建，以应用新的路由顺序。已有持久或易变的 `global` 选择不会被自动改回 `rule`，部署时须确认当前模式。
 
@@ -70,7 +70,7 @@ custom_rules:
 
 「分享链接」也支持 `socks5://user:password@proxy.example.com:1080#节点名称`、`socks://` 和 `proxy.example.com:1080:user:password`（每行一条）。链接中的特殊字符须进行 URL 编码；IPv6 地址用方括号包围。无名称的 SOCKS5 条目按本批次行号命名。Clash YAML 订阅支持 `type: socks5`，不支持 SOCKS5 over TLS；显式 `udp: false` 只启用 TCP。
 
-底层手动配置使用 sing-box 的 `type: socks`、`version: '5'`、`username` 和 `password` 字段。标准 SOCKS5 的 UDP 转发仍取决于服务端与网络是否支持；添加节点并不代表已验证 UDP。支持 SOCKS5 的内核版本从 `miao.15` 开始，旧版本需先升级。
+底层手动配置使用 sing-box 的 `type: socks`、`version: '5'`、`username` 和 `password` 字段。标准 SOCKS5 的 UDP 转发仍取决于服务端与网络是否支持；添加节点并不代表已验证 UDP。支持 SOCKS5 的内核版本从 `harbor.15` 开始，旧版本需先升级。
 
 ### 前置跳板中转（`detour`）与局域网多店铺专属端口（`access_ports`）
 
@@ -127,8 +127,8 @@ access_ports:
 
 - 使用**运行主机的系统时区**，时刻为 `HH:MM`，最多 24 个；面板显示该时区与下次执行时间，不随浏览器时区换算。
 - 到点复用手动刷新的拉取、生成、校验和应用路径。全部来源失败、事务失败、初始化未完成或前台刷新占用时，按 1/5/15 分钟重试，最多 3 次且不越过下个计划时刻。
-- 部分来源失败不重试：成功来源提交，失败来源沿用缓存。成功、无需执行或到达下个计划时刻时清零预算；用尽后等下个时刻。退避原因只写日志，可用 `journalctl -u miao` 查看；订阅行与告警同手动刷新。
-- 调度仅在 Miao 进程存活时运行。内核停止时仍更新配置，但不会自动启核；调度退避不重置启动恢复预算。
+- 部分来源失败不重试：成功来源提交，失败来源沿用缓存。成功、无需执行或到达下个计划时刻时清零预算；用尽后等下个时刻。退避原因只写日志，可用 `journalctl -u harbor` 查看；订阅行与告警同手动刷新。
+- 调度仅在 Harbor 进程存活时运行。内核停止时仍更新配置，但不会自动启核；调度退避不重置启动恢复预算。
 
 ### 禁用订阅节点
 
@@ -144,19 +144,19 @@ disabled_nodes:
 
 ## 连接检查
 
-面板「连接检查」、REST `/api/connectivity` 和 MCP `test_connectivity` 共用一次 HTTP/HTTPS HEAD 请求，超时 5 秒，不修改配置。请求从 **Miao 主机**发起，忽略 HTTP_PROXY/HTTPS_PROXY，但仍可能经过系统 TUN；不代表浏览器或指定节点的连通性。
+面板「连接检查」、REST `/api/connectivity` 和 MCP `test_connectivity` 共用一次 HTTP/HTTPS HEAD 请求，超时 5 秒，不修改配置。请求从 **Harbor 主机**发起，忽略 HTTP_PROXY/HTTPS_PROXY，但仍可能经过系统 TUN；不代表浏览器或指定节点的连通性。
 
 `success` 仅表示收到 HTTP 响应，须结合 `http_status`、`error_kind`（timeout/connect/request）和 `error` 判断。403/405/503 不代表访问正常，部分网站不支持 HEAD；后端不可达也不能当作目标不可达。关闭弹窗不取消检查，报告保留至下次检查或刷新页面；复制失败可手动选取。
 
 ## VPS 一键部署（仅非 Windows 平台）
 
-Linux/OpenWrt 下「添加节点 → VPS 部署」通过 SSH 安装 Hysteria2 或恢复已有 Miao 节点。Miao 主机须有 OpenSSH 客户端；Windows 不编译该入口，面板自动隐藏 SSH 部署切页并引导通过分享链接或静态住宅 SOCKS5 导入。
+Linux/OpenWrt 下「添加节点 → VPS 部署」通过 SSH 安装 Hysteria2 或恢复已有 Harbor 节点。Harbor 主机须有 OpenSSH 客户端；Windows 不编译该入口，面板自动隐藏 SSH 部署切页并引导通过分享链接或静态住宅 SOCKS5 导入。
 
 - 目标为 Linux x86_64/arm64、systemd/OpenRC、POSIX sh；自动安装依赖支持 apt、dnf/yum、apk、pacman、zypper，其他环境须预装工具。
-- 仅支持 **root 密码登录、SSH 22 端口**，不支持密钥或非 root sudo；密码只用于本次连接，不写入 Miao 配置。
+- 仅支持 **root 密码登录、SSH 22 端口**，不支持密钥或非 root sudo；密码只用于本次连接，不写入 Harbor 配置。
 - 固定版本经官方校验清单验证后才替换服务。Hysteria2 使用 **543/UDP**，须在安全组与 VPS 防火墙放行。
 
-错误详情保留至关闭或重试。`Permission denied` 不能区分密码错误与服务端禁用登录；面板「查看解决办法与错误详情」提供[条件化排障步骤](../crates/miao-core/src/services/vps/ssh-auth-help.txt)，Miao 不自动执行修复。主机密钥变化时先核对服务商指纹，再更新运行 Miao 账户的 `known_hosts`。
+错误详情保留至关闭或重试。`Permission denied` 不能区分密码错误与服务端禁用登录；面板「查看解决办法与错误详情」提供[条件化排障步骤](../crates/harbor-core/src/services/vps/ssh-auth-help.txt)，Harbor 不自动执行修复。主机密钥变化时先核对服务商指纹，再更新运行 Harbor 账户的 `known_hosts`。
 
 ## MCP：让 AI agent 操作代理
 

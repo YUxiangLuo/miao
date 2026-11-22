@@ -262,7 +262,7 @@ export function StudioView(props: { app: AppController }): JSX.Element {
                   )}
                   aria-hidden="true"
                 />
-                <span>海港分流核心</span>
+                <span>Harbor 分流核心</span>
               </span>
               <span class="mono-tag">
                 {app().status().route_mode === 'rule' ? '大陆直连优先' : '全量出海'}

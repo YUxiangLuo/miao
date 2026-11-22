@@ -13,7 +13,7 @@ export class HttpStatusError extends Error {
 
 /**
  * Whether a failed write request left backend execution state uncertain.
- * Miao registers HTTP write tasks once the body arrives and finishes commit/rollback
+ * Harbor registers HTTP write tasks once the body arrives and finishes commit/rollback
  * even if the client times out or loses its network connection.
  */
 export function isUncertainRequestError(error: unknown): error is RequestInterruptedError | TypeError {

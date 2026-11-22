@@ -1,0 +1,38 @@
+#[cfg(not(any(target_os = "linux", target_os = "windows")))]
+compile_error!("Harbor supports Linux/OpenWrt and Windows only");
+
+mod autostart;
+mod cli;
+mod error;
+mod handlers;
+mod instance;
+mod logging;
+mod models;
+mod paths;
+mod platform;
+mod privilege;
+mod profile;
+mod responses;
+mod router;
+mod runtime;
+mod services;
+mod state;
+#[cfg(test)]
+mod test_support;
+mod validation;
+
+pub use autostart::{
+    is_enabled as autostart_is_enabled, repair_if_stale as autostart_repair_if_stale,
+    set_enabled as autostart_set_enabled, MINIMIZED_ARG,
+};
+pub use cli::config_path_from_args;
+pub use error::{AppError, AppResult};
+pub use instance::{
+    acquire_single_instance, double_click_interval, focus_existing_window, peek_single_instance,
+    InstanceAcquire, InstanceGuard, InstancePeek, WINDOW_TITLE,
+};
+pub use paths::default_log_path;
+pub use privilege::{is_elevated, require_privileges, show_user_error};
+pub use runtime::{run, spawn_server, RuntimeOptions, ServerHandle};
+
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");

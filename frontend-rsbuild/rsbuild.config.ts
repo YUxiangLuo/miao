@@ -1,11 +1,11 @@
 import { defineConfig } from '@rsbuild/core';
 import { pluginSolid } from '@rsbuild/plugin-solid';
 
-// 本地开发时将控制面 API 代理到正在运行的 miao 后端。
+// 本地开发时将控制面 API 代理到正在运行的 harbor 后端。
 // 固定默认 loopback 为 IPv4：部分环境会把 localhost 优先解析到 ::1，
-// 而本机 miao 后端只监听 IPv4。后端端口有调整时：
-// MIAO_API=http://127.0.0.1:7000 bun run dev
-const miaoApiTarget = process.env.MIAO_API ?? 'http://127.0.0.1:6161';
+// 而本机 harbor 后端只监听 IPv4。后端端口有调整时：
+// HARBOR_API=http://127.0.0.1:7000 bun run dev
+const harborApiTarget = process.env.HARBOR_API ?? 'http://127.0.0.1:6161';
 
 // Docs: https://rsbuild.rs/config/
 export default defineConfig(({ command }) => ({
@@ -37,7 +37,7 @@ export default defineConfig(({ command }) => ({
     host: '127.0.0.1',
     proxy: {
       '/api': {
-        target: miaoApiTarget,
+        target: harborApiTarget,
         changeOrigin: true,
         ws: true,
       },

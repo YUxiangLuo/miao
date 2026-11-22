@@ -1,4 +1,4 @@
-# HarborGate · 海港网关 Web 控制台
+# Harbor Web 控制台
 
 SolidJS 2.0、TypeScript strict、Rsbuild，使用 Rslint/Rstest；版本见 [package.json](package.json) 与 lockfile。构建到根目录 `public/`，由 Rust 嵌入，修改后须重建前端和网关二进制。
 
@@ -11,7 +11,7 @@ bun install --frozen-lockfile
 bun run dev
 ```
 
-开发服务监听 `127.0.0.1`，将 `/api`（含 WebSocket）代理到 `http://127.0.0.1:6161`；更换后端用 `MIAO_API=http://127.0.0.1:7000 bun run dev`。写操作使用隔离后端或 mock，遵守[生产实例限制](../docs/development.md#arch-生产实例)。
+开发服务监听 `127.0.0.1`，将 `/api`（含 WebSocket）代理到 `http://127.0.0.1:6161`；更换后端用 `HARBOR_API=http://127.0.0.1:7000 bun run dev`。写操作使用隔离后端或 mock，遵守[生产实例限制](../docs/development.md#arch-生产实例)。
 
 ## 检查与测试
 
@@ -29,7 +29,7 @@ bun run build
 
 ## API 类型与请求
 
-[api.ts](src/types/api.ts) 由 Rust serde models 生成，禁止手改。修改 `crates/miao-core/src/models/*.rs` 后在根目录运行 `./dev.sh types`，常规 Rust 测试会检查一致性。[clash.ts](src/types/clash.ts) 按实际消费的 Clash API 手工维护。
+[api.ts](src/types/api.ts) 由 Rust serde models 生成，禁止手改。修改 `crates/harbor-core/src/models/*.rs` 后在根目录运行 `./dev.sh types`，常规 Rust 测试会检查一致性。[clash.ts](src/types/clash.ts) 按实际消费的 Clash API 手工维护。
 
 状态、代理与连接每 3 秒轮询；订阅、手动节点、规则按 `data_revision` 刷新，30 秒兜底。首次读取共用轮询器，请求必须有超时、取消和代次校验，旧响应不得覆盖新状态；清空/卸载取消测速批次，自动历史与手动测量按时间合并。
 
@@ -39,6 +39,6 @@ bun run build
 
 全局企业云网关主题变量位于 [theme.css](src/styles/theme.css)，导航与抽屉骨架位于 [shell.css](src/styles/shell.css)，通用表格/徽标/表单组件位于 [components.css](src/styles/components.css)，各业务视图排版位于 [views.css](src/styles/views.css)，少量供 JS 布局/动效计算的数值常量位于 [tokens.ts](src/tokens.ts)。组件与样式表可根据迭代需要自由调整色板、圆角、间距或局部覆写。
 
-主题支持显式 `light` / `dark` 切换（键名 `miao-theme`）；如需改动默认主题或首屏背景色，顺手同步 [index.html](index.html) 的防闪烁脚本即可。
+主题支持显式 `light` / `dark` 切换（键名 `harbor-theme`）；如需改动默认主题或首屏背景色，顺手同步 [index.html](index.html) 的防闪烁脚本即可。
 
-PWA 资源在本目录 `public/`；新增资源须在 Rust [静态资源处理器](../crates/miao-core/src/handlers/static_assets.rs) 嵌入并在 [router.rs](../crates/miao-core/src/router.rs) 注册。service worker 仅导航 network-first 兜底，**不缓存 `/api`**。
+PWA 资源在本目录 `public/`；新增资源须在 Rust [静态资源处理器](../crates/harbor-core/src/handlers/static_assets.rs) 嵌入并在 [router.rs](../crates/harbor-core/src/router.rs) 注册。service worker 仅导航 network-first 兜底，**不缓存 `/api`**。

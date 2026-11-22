@@ -6,7 +6,7 @@ import { closeSync, existsSync, openSync, readFileSync, readlinkSync, writeFileS
 
 assert.equal(process.getuid(), 0)
 assert.equal(readFileSync('/proc/1/comm', 'utf8').trim(), 'bash')
-assert(existsSync('/run/miao-rust') && existsSync('/tmp/miao-smoke.yaml'))
+assert(existsSync('/run/harbor-cli') && existsSync('/tmp/harbor-smoke.yaml'))
 
 if (process.argv[2] === '--upstream') {
   // A simulated Internet host and DNS resolver in a second network namespace.
@@ -80,12 +80,12 @@ if (process.argv[2] === '--upstream') {
   }
 
   command('ip', 'link', 'del', 'test-uplink')
-  command('ip', 'netns', 'add', 'miao-upstream')
+  command('ip', 'netns', 'add', 'harbor-upstream')
   let upstream
   let app
   try {
     command('ip', 'link', 'add', 'boot-uplink', 'type', 'veth', 'peer', 'name', 'boot-peer')
-    command('ip', 'link', 'set', 'boot-peer', 'netns', 'miao-upstream')
+    command('ip', 'link', 'set', 'boot-peer', 'netns', 'harbor-upstream')
     command('ip', 'address', 'add', '192.0.2.2/24', 'dev', 'boot-uplink')
     command('ip', 'link', 'set', 'boot-uplink', 'up')
     command('ip', 'route', 'add', 'default', 'via', '192.0.2.1')
@@ -94,10 +94,10 @@ if (process.argv[2] === '--upstream') {
       ['address', 'add', '198.51.100.10/32', 'dev', 'lo'],
       ['address', 'add', '223.5.5.5/32', 'dev', 'lo'],
       ['link', 'set', 'boot-peer', 'up'], ['link', 'set', 'lo', 'up'],
-    ]) command('ip', '-n', 'miao-upstream', ...args)
+    ]) command('ip', '-n', 'harbor-upstream', ...args)
     writeFileSync('/tmp/bootstrap-resolv.conf', 'nameserver 223.5.5.5\noptions timeout:1 attempts:1\n')
     command('mount', '--bind', '/tmp/bootstrap-resolv.conf', '/etc/resolv.conf')
-    upstream = Bun.spawn(['ip', 'netns', 'exec', 'miao-upstream', '/run/bun', '/run/netns-subscription.mjs', '--upstream'], { stdout: 'inherit', stderr: 'inherit' })
+    upstream = Bun.spawn(['ip', 'netns', 'exec', 'harbor-upstream', '/run/bun', '/run/netns-subscription.mjs', '--upstream'], { stdout: 'inherit', stderr: 'inherit' })
     await until(() => existsSync('/tmp/subscription-upstream-ready'), 'fixture did not start')
 
     for (const mode of ['rule', 'global']) {
@@ -114,7 +114,7 @@ if (process.argv[2] === '--upstream') {
       }))
       const logFd = openSync(`/tmp/bootstrap-${mode}.log`, 'w')
       try {
-        app = Bun.spawn(['/run/miao-rust', '--config', configPath], { stdout: logFd, stderr: logFd })
+        app = Bun.spawn(['/run/harbor-cli', '--config', configPath], { stdout: logFd, stderr: logFd })
       } finally {
         closeSync(logFd)
       }
@@ -123,7 +123,7 @@ if (process.argv[2] === '--upstream') {
       }, 'manual-only startup did not become ready', 15000)
       assert.equal((await api('status')).route_mode, mode)
       const profileId = createHash('sha256').update(configPath).digest('hex')
-      const runtime = JSON.parse(readFileSync(`/tmp/miao-sing-box/profiles/${profileId}/config.json`, 'utf8'))
+      const runtime = JSON.parse(readFileSync(`/tmp/harbor-sing-box/profiles/${profileId}/config.json`, 'utf8'))
       assert(!runtime.outbounds.some(node => ['detour-leaf', 'detour-parent'].includes(node.tag)))
       for (const section of ['route', 'dns']) {
         assert(runtime[section].rules.some(rule => rule.source_ip_cidr === '192.168.8.194/32' && rule.action === 'reject'))
@@ -152,7 +152,7 @@ if (process.argv[2] === '--upstream') {
     writeFileSync(configPath, Bun.YAML.stringify({ port: 6161, subs: ['http://bootstrap.test:8080/empty'] }))
     const logFd = openSync('/tmp/bootstrap-empty.log', 'w')
     try {
-      app = Bun.spawn(['/run/miao-rust', '--config', configPath], { stdout: logFd, stderr: logFd })
+      app = Bun.spawn(['/run/harbor-cli', '--config', configPath], { stdout: logFd, stderr: logFd })
     } finally { closeSync(logFd) }
     await until(async () => {
       try {
@@ -182,7 +182,7 @@ if (process.argv[2] === '--upstream') {
     assert.equal((await api('status')).ready, false)
     assert.deepEqual(Bun.YAML.parse(readFileSync(configPath, 'utf8')).subs, ['http://bootstrap.test:8080/empty'])
     const profileId = createHash('sha256').update(configPath).digest('hex')
-    assert(!existsSync(`/tmp/miao-sing-box/profiles/${profileId}/config.json`), 'deletion must retire the old active config')
+    assert(!existsSync(`/tmp/harbor-sing-box/profiles/${profileId}/config.json`), 'deletion must retire the old active config')
     const started = await fetch('http://127.0.0.1:6161/api/service/start', {
       method: 'POST', signal: AbortSignal.timeout(35000),
     })
@@ -214,6 +214,6 @@ if (process.argv[2] === '--upstream') {
   } finally {
     await stop(app)
     await stop(upstream)
-    command('ip', 'netns', 'del', 'miao-upstream')
+    command('ip', 'netns', 'del', 'harbor-upstream')
   }
 }

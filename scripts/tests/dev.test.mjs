@@ -9,7 +9,7 @@ const head = 'a'.repeat(40)
 const shellTest = test.skipIf(process.platform === 'win32')
 
 function run(args, overrides = {}) {
-  const root = mkdtempSync(join(tmpdir(), 'miao-dev-test-'))
+  const root = mkdtempSync(join(tmpdir(), 'harbor-dev-test-'))
   roots.push(root)
   mkdirSync(join(root, 'scripts/lib'), { recursive: true })
   mkdirSync(join(root, 'bin'))
@@ -147,26 +147,26 @@ shellTest('publishing uploads two binaries and their checksums and leaves source
   expect(create).toContain('--draft')
   const files = create.split(' ').filter(arg => arg.includes('/dist/')).map(path => path.split('/').at(-1))
   expect(files).toEqual([
-    'miao-rust-linux-amd64', 'miao-rust-linux-amd64.sha256',
-    'miao-rust-linux-arm64', 'miao-rust-linux-arm64.sha256',
+    'harbor-linux-amd64', 'harbor-linux-amd64.sha256',
+    'harbor-linux-arm64', 'harbor-linux-arm64.sha256',
   ])
   expect(result.calls.some(call => call.startsWith('cargo '))).toBe(false)
 })
 
 shellTest('republishing preserves checksums and removes obsolete assets only after all uploads succeed', () => {
-  const env = { EXISTING_ASSETS: 'miao-rust-linux-amd64\nmiao-rust-linux-amd64.sha256\nmiao-rust-linux-arm64\nmiao-rust-linux-arm64.sha256\nchecksums.txt\nold metadata.json' }
+  const env = { EXISTING_ASSETS: 'harbor-linux-amd64\nharbor-linux-amd64.sha256\nharbor-linux-arm64\nharbor-linux-arm64.sha256\nchecksums.txt\nold metadata.json' }
   const result = run(['release', '--publish'], env)
   expect(result.status).toBe(0)
   const upload = result.calls.findIndex(call => call.startsWith('gh release upload '))
   const files = result.calls[upload].split(' ').filter(arg => arg.includes('/dist/')).map(path => path.split('/').at(-1))
   expect(files).toEqual([
-    'miao-rust-linux-amd64', 'miao-rust-linux-amd64.sha256',
-    'miao-rust-linux-arm64', 'miao-rust-linux-arm64.sha256',
+    'harbor-linux-amd64', 'harbor-linux-amd64.sha256',
+    'harbor-linux-arm64', 'harbor-linux-arm64.sha256',
   ])
   const deletions = result.calls.filter(call => call.startsWith('gh release delete-asset '))
   expect(deletions).toHaveLength(2)
   expect(deletions.every(call => result.calls.indexOf(call) > upload)).toBe(true)
-  expect(deletions.some(call => call.includes('miao-rust-linux-'))).toBe(false)
+  expect(deletions.some(call => call.includes('harbor-linux-'))).toBe(false)
   const failed = run(['release', '--publish'], { ...env, UPLOAD_STATUS: '1' })
   expect(failed.status).toBe(1)
   expect(failed.calls.some(call => call.startsWith('gh release delete-asset '))).toBe(false)

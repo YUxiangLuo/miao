@@ -1455,6 +1455,56 @@ dependencies = [
 ]
 
 [[package]]
+name = "harbor-cli"
+version = "0.50.0"
+dependencies = [
+ "harbor-core",
+ "tokio",
+]
+
+[[package]]
+name = "harbor-core"
+version = "0.50.0"
+dependencies = [
+ "arc-swap",
+ "axum",
+ "bytes",
+ "futures",
+ "hex",
+ "iana-time-zone",
+ "jiff 1.0.1",
+ "jsonschema",
+ "nix",
+ "regex",
+ "reqwest 0.12.28",
+ "ruzstd",
+ "semver",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "tokio",
+ "tokio-tungstenite",
+ "tower",
+ "tracing",
+ "tracing-subscriber",
+ "ts-rs",
+ "url",
+ "urlencoding",
+ "windows-sys 0.61.2",
+ "yaml_serde",
+]
+
+[[package]]
+name = "harbor-desktop"
+version = "0.50.0"
+dependencies = [
+ "harbor-core",
+ "tauri",
+ "tauri-build",
+]
+
+[[package]]
 name = "hashbrown"
 version = "0.12.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2250,56 +2300,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "488016bfae457b036d996092f6cb448677611ce4449e970ceaf42695203f218a"
 dependencies = [
  "autocfg",
-]
-
-[[package]]
-name = "miao-cli"
-version = "0.50.0"
-dependencies = [
- "miao-core",
- "tokio",
-]
-
-[[package]]
-name = "miao-core"
-version = "0.50.0"
-dependencies = [
- "arc-swap",
- "axum",
- "bytes",
- "futures",
- "hex",
- "iana-time-zone",
- "jiff 1.0.1",
- "jsonschema",
- "nix",
- "regex",
- "reqwest 0.12.28",
- "ruzstd",
- "semver",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "tempfile",
- "tokio",
- "tokio-tungstenite",
- "tower",
- "tracing",
- "tracing-subscriber",
- "ts-rs",
- "url",
- "urlencoding",
- "windows-sys 0.61.2",
- "yaml_serde",
-]
-
-[[package]]
-name = "miao-desktop"
-version = "0.50.0"
-dependencies = [
- "miao-core",
- "tauri",
- "tauri-build",
 ]
 
 [[package]]

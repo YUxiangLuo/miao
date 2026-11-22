@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-use miao_core::{
+use harbor_core::{
     acquire_single_instance, autostart_is_enabled, autostart_repair_if_stale,
     autostart_set_enabled, config_path_from_args, default_log_path, double_click_interval,
     focus_existing_window, is_elevated, peek_single_instance, require_privileges, show_user_error,
@@ -27,7 +27,7 @@ fn focus_existing_window_or_error() {
         }
         std::thread::sleep(std::time::Duration::from_millis(500));
     }
-    show_user_error("Miao", "Miao 已在运行");
+    show_user_error("Harbor", "Harbor 已在运行");
 }
 
 fn main() {
@@ -38,7 +38,7 @@ fn main() {
     ) {
         Ok(path) => path,
         Err(error) => {
-            show_user_error("Miao", &error.to_string());
+            show_user_error("Harbor", &error.to_string());
             return;
         }
     };
@@ -48,7 +48,7 @@ fn main() {
             return;
         }
         InstancePeek::Failed => {
-            show_user_error("Miao", "无法检查是否已在运行");
+            show_user_error("Harbor", "无法检查是否已在运行");
             return;
         }
         InstancePeek::None => {}
@@ -66,7 +66,7 @@ fn main() {
             return;
         }
         InstanceAcquire::Failed => {
-            show_user_error("Miao", "无法创建单实例锁");
+            show_user_error("Harbor", "无法创建单实例锁");
             return;
         }
         InstanceAcquire::Unique(guard) => guard,
@@ -77,9 +77,9 @@ fn main() {
 
     if let Err(err) = run_app(config_path) {
         show_user_error(
-            "Miao",
+            "Harbor",
             &format!(
-                "Miao 启动失败：{err}\n日志：{}",
+                "Harbor 启动失败：{err}\n日志：{}",
                 default_log_path().display()
             ),
         );
@@ -224,7 +224,7 @@ fn finish_desktop_shell(
 fn toggle_autostart(item: &CheckMenuItem<tauri::Wry>) {
     let target = !autostart_is_enabled();
     if let Err(err) = autostart_set_enabled(target) {
-        show_user_error("Miao", &format!("设置开机自启失败：{err}"));
+        show_user_error("Harbor", &format!("设置开机自启失败：{err}"));
     }
     let _ = item.set_checked(autostart_is_enabled());
 }
@@ -295,10 +295,11 @@ mod tests {
 
     #[test]
     fn explorer_select_quotes_paths_with_spaces() {
-        let path = Path::new(r"C:\Users\Jane Doe\AppData\Local\io.github.yuxiangluo.miao\miao.log");
+        let path =
+            Path::new(r"C:\Users\Jane Doe\AppData\Local\io.github.yuxiangluo.harbor\harbor.log");
         assert_eq!(
             explorer_select_arg(path),
-            r#"/select,"C:\Users\Jane Doe\AppData\Local\io.github.yuxiangluo.miao\miao.log""#
+            r#"/select,"C:\Users\Jane Doe\AppData\Local\io.github.yuxiangluo.harbor\harbor.log""#
         );
     }
 }

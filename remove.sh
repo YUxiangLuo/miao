@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
-# Miao 独立卸载入口，可直接下载执行。
+# Harbor 独立卸载入口，可直接下载执行。
 set -euo pipefail
 
-BIN_PATH=/usr/local/bin/miao
-CONFIG_DIR=/etc/miao
-RUNTIME_DIR=/tmp/miao-sing-box
-UNIT_PATH=/etc/systemd/system/miao.service
+BIN_PATH=/usr/local/bin/harbor
+CONFIG_DIR=/etc/harbor
+RUNTIME_DIR=/tmp/harbor-sing-box
+UNIT_PATH=/etc/systemd/system/harbor.service
 
 log() { echo "==> $*"; }
 
 usage() {
   cat <<'EOF'
 用法: sudo bash remove.sh [-y|--yes]
-  删除服务、二进制、/etc/miao、/tmp/miao-sing-box，清理残留内核和 TUN。
+  删除服务、二进制、/etc/harbor、/tmp/harbor-sing-box，清理残留内核和 TUN。
   先备份配置；非交互执行必须传 -y，其他情况在终端确认。
   -h, --help  显示帮助，无需 root。
 EOF
@@ -32,7 +32,7 @@ if [[ "$(id -u)" -ne 0 ]]; then
   exit 1
 fi
 if [[ "$skip_confirm" != "yes" ]]; then
-  echo "将删除 miao 服务、二进制、配置($CONFIG_DIR)与运行时文件。"
+  echo "将删除 harbor 服务、二进制、配置($CONFIG_DIR)与运行时文件。"
   # 先静默探测控制终端是否可用(仅探测时屏蔽 stderr,避免吞掉下面的提示语)
   if : 2>/dev/null < /dev/tty; then
     read -r -p "确认卸载?[y/N] " answer < /dev/tty
@@ -48,13 +48,13 @@ if [[ "$skip_confirm" != "yes" ]]; then
 fi
 
 if command -v systemctl >/dev/null 2>&1; then
-  if systemctl is-active --quiet miao 2>/dev/null; then
-    log "停止 miao 服务"
-    systemctl stop miao
+  if systemctl is-active --quiet harbor 2>/dev/null; then
+    log "停止 harbor 服务"
+    systemctl stop harbor
   fi
-  if systemctl is-enabled --quiet miao 2>/dev/null; then
+  if systemctl is-enabled --quiet harbor 2>/dev/null; then
     log "禁用开机自启"
-    systemctl disable miao
+    systemctl disable harbor
   fi
 fi
 if [[ -f "$UNIT_PATH" ]]; then

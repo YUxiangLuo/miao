@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Miao 一键安装：下载最新 release 并注册为 systemd 服务（仅 Linux + systemd）
+# Harbor 一键安装：下载最新 release 并注册为 systemd 服务（仅 Linux + systemd）
 # 重复运行即事务式升级：先下载并校验，最后才短暂停服替换；启动失败自动回滚。
 set -euo pipefail
 
-BIN_PATH=/usr/local/bin/miao
-CONFIG_DIR=/etc/miao
-UNIT_PATH=/etc/systemd/system/miao.service
+BIN_PATH=/usr/local/bin/harbor
+CONFIG_DIR=/etc/harbor
+UNIT_PATH=/etc/systemd/system/harbor.service
 SELF_UPGRADE_BACKUP="${BIN_PATH}.bak"
 SELF_UPGRADE_PENDING="${BIN_PATH}.upgrade-pending.json"
 REPO=YUxiangLuo/miao
@@ -124,7 +124,7 @@ case "$(uname -m)" in
     exit 1
     ;;
 esac
-asset="miao-rust-linux-$asset_arch"
+asset="harbor-linux-$asset_arch"
 
 if command -v curl >/dev/null 2>&1; then
   download() { curl --fail --location --retry 3 --progress-bar "$1" -o "$2"; }
@@ -163,21 +163,21 @@ if ! candidate_version=$("$candidate" --version 2>&1); then
   echo "二进制无法在当前系统运行: $candidate_version" >&2
   exit 1
 fi
-if [[ ! "$candidate_version" =~ ^miao[[:space:]]v[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+if [[ ! "$candidate_version" =~ ^harbor[[:space:]]v[0-9]+\.[0-9]+\.[0-9]+ ]]; then
   echo "二进制版本输出异常: $candidate_version" >&2
   exit 1
 fi
 log "候选版本校验通过: $candidate_version"
 
 if self_upgrade_pending; then
-  echo "检测到尚未完成的面板自升级，请等待其完成或重启 miao 让其回滚后再运行安装脚本" >&2
+  echo "检测到尚未完成的面板自升级，请等待其完成或重启 harbor 让其回滚后再运行安装脚本" >&2
   exit 1
 fi
 
-candidate_unit="$work_dir/miao.service"
+candidate_unit="$work_dir/harbor.service"
 cat > "$candidate_unit" <<'EOF'
 [Unit]
-Description=Miao transparent proxy (embedded sing-box)
+Description=Harbor transparent proxy (embedded sing-box)
 # 冷启动时优先等待网络管理器完成链路/DHCP，减少第一次订阅刷新与默认路由竞速。
 # Wants 而非 Requires：wait-online 超时/失败后仍启动，运行时后台重试继续兜底。
 Wants=network-online.target
@@ -186,9 +186,9 @@ After=network-online.target
 [Service]
 Type=simple
 # systemctl restart 时 network-online.target 已是 active，不能代表当前网络可用；
-# 因此这里只优化冷启动，断网恢复仍由 miao 的后台订阅重试负责。
-ExecStart=/usr/local/bin/miao
-WorkingDirectory=/etc/miao
+# 因此这里只优化冷启动，断网恢复仍由 harbor 的后台订阅重试负责。
+ExecStart=/usr/local/bin/harbor
+WorkingDirectory=/etc/harbor
 Restart=on-failure
 RestartSec=3
 
@@ -201,38 +201,38 @@ had_old_bin=no
 had_old_unit=no
 if [[ -f "$BIN_PATH" ]]; then
   had_old_bin=yes
-  cp -a "$BIN_PATH" "$work_dir/old-miao"
+  cp -a "$BIN_PATH" "$work_dir/old-harbor"
 fi
 if [[ -f "$UNIT_PATH" ]]; then
   had_old_unit=yes
-  cp -a "$UNIT_PATH" "$work_dir/old-miao.service"
+  cp -a "$UNIT_PATH" "$work_dir/old-harbor.service"
 fi
 
 service_was_active=no
 service_was_enabled=no
-if systemctl is-enabled --quiet miao 2>/dev/null; then
+if systemctl is-enabled --quiet harbor 2>/dev/null; then
   service_was_enabled=yes
 fi
-if systemctl is-active --quiet miao 2>/dev/null; then
+if systemctl is-active --quiet harbor 2>/dev/null; then
   service_was_active=yes
-  log "停止当前 miao 服务以执行原子升级"
-  systemctl stop miao
+  log "停止当前 harbor 服务以执行原子升级"
+  systemctl stop harbor
 fi
 
 # 捕获第一次检查后并发发生的面板自升级。此时进程已停，不会再产生新状态；
 # 保留其文件并重新启动，让内置恢复逻辑自行完成或回滚。
 if self_upgrade_pending; then
   if [[ "$service_was_active" == yes ]]; then
-    systemctl start miao || true
+    systemctl start harbor || true
   fi
-  echo "停服期间检测到面板自升级，系统安装已中止；请待 miao 状态稳定后重试" >&2
+  echo "停服期间检测到面板自升级，系统安装已中止；请待 harbor 状态稳定后重试" >&2
   exit 1
 fi
 
 # 旧 systemd 实例停止后再检查端口；此时命中的才是其他实例/程序。
 if command -v ss >/dev/null 2>&1 && ss -tlnH "( sport = :$PANEL_PORT )" | grep -q .; then
   if [[ "$service_was_active" == yes ]]; then
-    systemctl start miao || true
+    systemctl start harbor || true
   fi
   echo "端口 $PANEL_PORT 被其他进程占用，请先停止占用进程" >&2
   exit 1
@@ -240,27 +240,27 @@ fi
 
 rollback_install() {
   echo "服务启动失败，正在回滚旧版本..." >&2
-  systemctl stop miao 2>/dev/null || true
+  systemctl stop harbor 2>/dev/null || true
   if [[ "$had_old_bin" == yes ]]; then
-    install -m 755 "$work_dir/old-miao" "$staged_bin"
+    install -m 755 "$work_dir/old-harbor" "$staged_bin"
     mv -f "$staged_bin" "$BIN_PATH"
   else
     rm -f "$BIN_PATH"
   fi
   if [[ "$had_old_unit" == yes ]]; then
-    install -m 644 "$work_dir/old-miao.service" "$staged_unit"
+    install -m 644 "$work_dir/old-harbor.service" "$staged_unit"
     mv -f "$staged_unit" "$UNIT_PATH"
   else
     rm -f "$UNIT_PATH"
   fi
   systemctl daemon-reload || true
   if [[ "$service_was_enabled" == yes && "$had_old_unit" == yes ]]; then
-    systemctl enable miao >/dev/null 2>&1 || true
+    systemctl enable harbor >/dev/null 2>&1 || true
   else
-    systemctl disable miao >/dev/null 2>&1 || true
+    systemctl disable harbor >/dev/null 2>&1 || true
   fi
   if [[ "$service_was_active" == yes ]]; then
-    systemctl start miao || echo "旧版本恢复后仍无法启动，请检查 journalctl -u miao -e" >&2
+    systemctl start harbor || echo "旧版本恢复后仍无法启动，请检查 journalctl -u harbor -e" >&2
   fi
 }
 
@@ -275,15 +275,15 @@ if ! install -m 755 "$candidate" "$staged_bin" \
   exit 1
 fi
 
-log "启用并启动 miao 服务"
+log "启用并启动 harbor 服务"
 if ! systemctl daemon-reload \
-  || ! systemctl enable miao >/dev/null \
-  || ! systemctl start miao; then
+  || ! systemctl enable harbor >/dev/null \
+  || ! systemctl start harbor; then
   rollback_install
   exit 1
 fi
 sleep 1
-if ! systemctl is-active --quiet miao; then
+if ! systemctl is-active --quiet harbor; then
   rollback_install
   exit 1
 fi
@@ -291,6 +291,6 @@ fi
 log "完成！面板地址: http://localhost:$PANEL_PORT"
 echo
 echo "常用命令:"
-echo "  systemctl status miao    # 查看状态"
-echo "  journalctl -u miao -f    # 查看日志"
+echo "  systemctl status harbor    # 查看状态"
+echo "  journalctl -u harbor -f    # 查看日志"
 echo "  卸载: curl -fsSL $REMOVE_SH_URL | sudo bash"

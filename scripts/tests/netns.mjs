@@ -8,7 +8,7 @@ import { once } from 'node:events'
 assert.equal(process.getuid(), 0, 'run through ./dev.sh netns')
 assert.equal(readlinkSync('/proc/self/ns/net'), readlinkSync('/proc/1/ns/net'))
 assert.equal(readFileSync('/proc/1/comm', 'utf8').trim(), 'bash', 'expected the isolated worker as PID 1')
-assert(existsSync('/run/miao-rust') && existsSync('/tmp/miao-smoke.yaml'), 'missing isolated fixtures')
+assert(existsSync('/run/harbor-cli') && existsSync('/tmp/harbor-smoke.yaml'), 'missing isolated fixtures')
 const servicePid = Number(process.argv[2])
 assert(Number.isInteger(servicePid) && servicePid > 1, 'missing isolated service PID')
 
@@ -31,7 +31,7 @@ async function waitReady() {
     try {
       process.kill(servicePid, 0)
     } catch {
-      throw new Error('Miao exited before the kernel became ready')
+      throw new Error('Harbor exited before the kernel became ready')
     }
     try {
       last = await request('status')
@@ -45,9 +45,9 @@ async function waitReady() {
 }
 
 async function checkRules(mode) {
-  const files = [...new Bun.Glob('**/config.json').scanSync('/tmp/miao-sing-box')]
+  const files = [...new Bun.Glob('**/config.json').scanSync('/tmp/harbor-sing-box')]
   assert.equal(files.length, 1, 'exactly one isolated runtime config')
-  const config = await Bun.file(`/tmp/miao-sing-box/${files[0]}`).json()
+  const config = await Bun.file(`/tmp/harbor-sing-box/${files[0]}`).json()
   const routeRules = config.route.rules
   const customStart = mode === 'global' ? 2 : 5
   assert.deepEqual(routeRules.slice(customStart, customStart + 4), [
@@ -168,7 +168,7 @@ async function shutdownWithDisconnectedVps() {
     assert.equal((await response.json()).message, 'Service is shutting down')
     await Bun.sleep(100)
     assert(serviceAlive(), 'shutdown must wait for the disconnected VPS request')
-    const before = Bun.YAML.parse(readFileSync('/tmp/miao-smoke.yaml', 'utf8'))
+    const before = Bun.YAML.parse(readFileSync('/tmp/harbor-smoke.yaml', 'utf8'))
     assert.equal(before.nodes.length, 1, 'VPS local commit is still pending')
   } finally {
     socket.destroy()
@@ -177,7 +177,7 @@ async function shutdownWithDisconnectedVps() {
   const deadline = Date.now() + 5000
   while (serviceAlive() && Date.now() < deadline) await Bun.sleep(20)
   assert(!serviceAlive(), 'service exits after the accepted write finishes')
-  const saved = Bun.YAML.parse(readFileSync('/tmp/miao-smoke.yaml', 'utf8'))
+  const saved = Bun.YAML.parse(readFileSync('/tmp/harbor-smoke.yaml', 'utf8'))
   assert(saved.nodes.some(node => JSON.parse(node).server === '203.0.113.10'), 'VPS node committed before process exit')
   assert.equal(existsSync('/sys/class/net/sing-tun'), false, 'shutdown removes TUN')
   console.log('PASS SIGTERM drains disconnected VPS write, rejects later writes and removes TUN')

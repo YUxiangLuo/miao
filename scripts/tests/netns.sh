@@ -15,7 +15,7 @@ if [[ "${1:-}" == --inside ]]; then
   # Stage inputs before hiding /tmp, so repositories/binaries under /tmp work too.
   # /run is private tmpfs: staging and logs never write into the host's runtime.
   mount -t tmpfs -o size=768m tmpfs /run
-  cp -- "$1" /run/miao-rust
+  cp -- "$1" /run/harbor-cli
   cp -- "$2" /run/bun
   cp -- "$3" /run/netns-smoke.mjs
   cp -- "$(dirname "$3")/netns-subscription.mjs" /run/netns-subscription.mjs
@@ -32,7 +32,7 @@ if [[ "${1:-}" == --inside ]]; then
   ip link set test-uplink up
   ip route add default via 192.0.2.1
 
-  cat > /tmp/miao-smoke.yaml <<'YAML'
+  cat > /tmp/harbor-smoke.yaml <<'YAML'
 port: 6161
 nodes:
   - '{"type":"trojan","tag":"smoke-node","server":"192.0.2.1","server_port":443,"password":"isolated-test-password","tls":{"enabled":true,"server_name":"example.com"}}'
@@ -70,14 +70,14 @@ SH
       wait "$smoke_pid" || true
     fi
     if (( result != 0 )); then
-      tail -n 80 /tmp/miao-smoke.log >&2
+      tail -n 80 /tmp/harbor-smoke.log >&2
     fi
     exit "$result"
   }
   trap 'cleanup "$?"' EXIT
   trap 'exit 130' INT
   trap 'exit 143' TERM
-  PATH="/tmp/mock-bin:$PATH" /run/miao-rust --config /tmp/miao-smoke.yaml > /tmp/miao-smoke.log 2>&1 &
+  PATH="/tmp/mock-bin:$PATH" /run/harbor-cli --config /tmp/harbor-smoke.yaml > /tmp/harbor-smoke.log 2>&1 &
   smoke_pid=$!
   /run/bun /run/netns-smoke.mjs "$smoke_pid"
   wait "$smoke_pid"
@@ -88,10 +88,10 @@ SH
 fi
 
 if [[ "${1:-}" == --help || "${1:-}" == -h ]]; then
-  echo "Usage: ./dev.sh netns [path-to-miao-rust]"
+  echo "Usage: ./dev.sh netns [path-to-harbor-cli]"
   echo "Requires Linux, embedded/sing-box-host, a real embedded kernel, Bun, curl, OpenSSL, iproute2, util-linux and root/sudo."
   echo "Build first: ./dev.sh build"
-  echo "Default binary: target/release/miao-rust. Overall timeout: 120 seconds."
+  echo "Default binary: target/release/harbor-cli. Overall timeout: 120 seconds."
   exit 0
 fi
 [[ $# -le 1 ]] || die "expected at most one binary path; see --help"
@@ -101,7 +101,7 @@ for tool in unshare mount ip bun curl openssl sysctl timeout readlink realpath; 
 done
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-binary=$(realpath -e -- "${1:-$SCRIPT_DIR/../../target/release/miao-rust}")
+binary=$(realpath -e -- "${1:-$SCRIPT_DIR/../../target/release/harbor-cli}")
 [[ -f "$binary" && -x "$binary" ]] || die "not an executable file: $binary"
 bun_binary=$(realpath -e -- "$(command -v bun)")
 kernel_server="$SCRIPT_DIR/../../embedded/sing-box-host"

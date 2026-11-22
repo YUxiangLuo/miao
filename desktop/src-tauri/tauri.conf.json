@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Miao",
-  "identifier": "io.github.yuxiangluo.miao",
+  "productName": "Harbor",
+  "identifier": "io.github.yuxiangluo.harbor",
   "build": {
     "frontendDist": "panel-placeholder"
   },
@@ -17,11 +17,11 @@
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
-      "icons/henry@2x.png",
+      "icons/128x128@2x.png",
       "icons/icon.png",
       "icons/icon.ico"
     ],
-    "shortDescription": "开箱即用的透明代理",
+    "shortDescription": "现代轻量跨境分流与多店铺独立出口网关",
     "category": "Utility",
     "windows": {
       "nsis": {

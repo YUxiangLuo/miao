@@ -7,7 +7,7 @@ import { spawnSync } from 'node:child_process'
 const audit = new URL('../lib/audit-frontend.sh', import.meta.url).pathname
 
 function runAudit(failures, message) {
-  const dir = mkdtempSync(join(tmpdir(), 'miao-audit-'))
+  const dir = mkdtempSync(join(tmpdir(), 'harbor-audit-'))
   try {
     writeFileSync(join(dir, 'bun'), `#!/bin/sh
 count=$(cat "$AUDIT_TEST_DIR/count" 2>/dev/null || echo 0)

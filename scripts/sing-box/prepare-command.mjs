@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url'
 const source = process.argv[2]
 if (!source) throw new Error('Usage: bun prepare-command.mjs <upstream checkout>')
 
-const target = join(source, 'cmd/miao-kernel')
+const target = join(source, 'cmd/harbor-kernel')
 mkdirSync(target)
 
 // Copy the pinned upstream implementations, including signal handling and
@@ -22,25 +22,25 @@ function replaceExactlyOnce(name, before, after) {
   const path = join(target, name)
   const text = readFileSync(path, 'utf8').replaceAll('\r\n', '\n')
   if (text.split(before).length !== 2) {
-    throw new Error(`Upstream ${name} changed; review Miao command hooks`)
+    throw new Error(`Upstream ${name} changed; review Harbor command hooks`)
   }
   writeFileSync(path, text.replace(before, after))
 }
 
-replaceExactlyOnce('cmd.go', 'Use:              "sing-box",', 'Use:              "miao-kernel",')
-replaceExactlyOnce('cmd_version.go', '"sing-box version "', '"miao-kernel version "')
+replaceExactlyOnce('cmd.go', 'Use:              "sing-box",', 'Use:              "harbor-kernel",')
+replaceExactlyOnce('cmd_version.go', '"sing-box version "', '"harbor-kernel version "')
 
-copyFileSync(fileURLToPath(new URL('./miao_activation.go', import.meta.url)), join(target, 'miao_activation.go'))
+copyFileSync(fileURLToPath(new URL('./harbor_activation.go', import.meta.url)), join(target, 'harbor_activation.go'))
 replaceExactlyOnce('cmd_run.go',
   'func run() error {\n\toptionsList, err := readConfig()',
-  'func run() error {\n\toptionsList, activation, err := readMiaoConfig()')
+  'func run() error {\n\toptionsList, activation, err := readHarborConfig()')
 replaceExactlyOnce('cmd_run.go',
   '\t\truntimeDebug.FreeOSMemory()',
   '\t\tif err = activation.publish(); err != nil {\n\t\t\tcancel()\n\t\t\tinstance.Close()\n\t\t\treturn err\n\t\t}\n\t\truntimeDebug.FreeOSMemory()')
 replaceExactlyOnce('cmd_run.go',
   '\t\toptions, err = readConfigAndMerge()',
-  '\t\toptionsList, activation, err = readMiaoConfig()\n\t\tif err != nil {\n\t\t\treturn err\n\t\t}\n\t\toptions, err = mergeOptionsList(optionsList)')
+  '\t\toptionsList, activation, err = readHarborConfig()\n\t\tif err != nil {\n\t\t\treturn err\n\t\t}\n\t\toptions, err = mergeOptionsList(optionsList)')
 
-for (const name of ['miao_context_test.go', 'miao_registry_test.go', 'miao_config_test.go', 'miao_shadowsocks_test.go', 'miao_activation_test.go', 'miao_activation_unix_test.go']) {
+for (const name of ['harbor_context_test.go', 'harbor_registry_test.go', 'harbor_config_test.go', 'harbor_shadowsocks_test.go', 'harbor_activation_test.go', 'harbor_activation_unix_test.go']) {
   copyFileSync(fileURLToPath(new URL(`./tests/${name}`, import.meta.url)), join(target, name))
 }

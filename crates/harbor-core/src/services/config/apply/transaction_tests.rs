@@ -1,0 +1,555 @@
+use std::{os::unix::fs::PermissionsExt, sync::atomic::Ordering, sync::Arc};
+
+use crate::{
+    models::{Config, NodeSelect, Region, RuntimePhase, StableConfig},
+    paths::RuntimePaths,
+    services::singbox::{is_sing_box_running, start_sing_internal, stop_sing_internal},
+    state::AppState,
+};
+
+use super::{
+    apply_config_change, regenerate_preserving_service_state, regenerate_without_restart_runtime,
+    RuntimeUpdate, SubSource,
+};
+
+fn manual_node(tag: &str) -> String {
+    serde_json::json!({
+        "type": "hysteria2",
+        "tag": tag,
+        "server": "127.0.0.1",
+        "server_port": 443,
+        "password": "secret"
+    })
+    .to_string()
+}
+
+async fn refresh_commit_failure_fixture(
+    label: &str,
+) -> (std::path::PathBuf, Arc<AppState>, Config) {
+    let unique = format!(
+        "harbor-refresh-commit-{label}-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    );
+    let root = std::env::temp_dir().join(unique);
+    let runtime_dir = root.join("runtime");
+    let config_path = root.join("config.yaml");
+    let volatile_path = root.join("volatile.yaml");
+    tokio::fs::create_dir_all(&runtime_dir).await.unwrap();
+    // A directory at the volatile target makes the effective node-select
+    // commit fail after generation/activation has succeeded.
+    tokio::fs::create_dir_all(&volatile_path).await.unwrap();
+
+    let fake_kernel = runtime_dir.join("sing-box");
+    tokio::fs::write(&fake_kernel, crate::test_support::FAKE_KERNEL)
+        .await
+        .unwrap();
+    std::fs::set_permissions(&fake_kernel, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+    let config = Config {
+        nodes: vec![manual_node("only-node")],
+        node_select: NodeSelect::Fastest(Region::Us),
+        ..Config::default()
+    };
+    let runtime_paths = RuntimePaths::new(runtime_dir, &config_path);
+    let state = Arc::new(
+        AppState::with_config_layers(
+            StableConfig::from(&config),
+            config.clone(),
+            config_path,
+            volatile_path,
+            runtime_paths,
+        )
+        .unwrap(),
+    );
+    tokio::fs::write(
+        &state.runtime_paths.active_config,
+        br#"{"marker":"old-runtime"}"#,
+    )
+    .await
+    .unwrap();
+    tokio::fs::write(
+        &state.runtime_paths.node_bindings,
+        br#"{"marker":"old-bindings"}"#,
+    )
+    .await
+    .unwrap();
+
+    (root, state, config)
+}
+
+#[tokio::test]
+async fn running_refresh_commit_failure_reactivates_previous_runtime() {
+    let (root, state, config) = refresh_commit_failure_fixture("running").await;
+    start_sing_internal(&state).await.unwrap();
+
+    let result = regenerate_preserving_service_state(&config, &state).await;
+
+    assert!(result.is_err(), "effective preference commit must fail");
+    assert_eq!(
+        tokio::fs::read(&state.runtime_paths.active_config)
+            .await
+            .unwrap(),
+        br#"{"marker":"old-runtime"}"#
+    );
+    assert_eq!(
+        tokio::fs::read(&state.runtime_paths.node_bindings)
+            .await
+            .unwrap(),
+        br#"{"marker":"old-bindings"}"#
+    );
+    assert_eq!(state.config.read().await.node_select, config.node_select);
+    assert_eq!(state.lifecycle.snapshot().phase, RuntimePhase::Ready);
+    assert!(state.lifecycle.snapshot().ready);
+    assert!(is_sing_box_running(&state).await);
+
+    stop_sing_internal(&state).await;
+    let _ = tokio::fs::remove_dir_all(root).await;
+}
+
+#[tokio::test]
+async fn stopped_refresh_commit_failure_restores_runtime_files_and_phase() {
+    let (root, state, config) = refresh_commit_failure_fixture("stopped").await;
+    state.lifecycle.request_running(false);
+    state
+        .lifecycle
+        .finish(state.lifecycle.snapshot().generation, RuntimePhase::Stopped);
+
+    let result = regenerate_preserving_service_state(&config, &state).await;
+
+    assert!(result.is_err(), "effective preference commit must fail");
+    assert_eq!(
+        tokio::fs::read(&state.runtime_paths.active_config)
+            .await
+            .unwrap(),
+        br#"{"marker":"old-runtime"}"#
+    );
+    assert_eq!(
+        tokio::fs::read(&state.runtime_paths.node_bindings)
+            .await
+            .unwrap(),
+        br#"{"marker":"old-bindings"}"#
+    );
+    assert_eq!(state.config.read().await.node_select, config.node_select);
+    assert_eq!(state.lifecycle.snapshot().phase, RuntimePhase::Stopped);
+    assert!(!is_sing_box_running(&state).await);
+
+    let _ = tokio::fs::remove_dir_all(root).await;
+}
+
+#[tokio::test]
+async fn stopped_refresh_surfaces_rollback_failure_and_still_restores_bindings() {
+    let (root, state, config) = refresh_commit_failure_fixture("rollback-failure").await;
+    state.lifecycle.request_running(false);
+    // Sabotage only this temporary profile, after its checkpoint is captured.
+    // A validation error plus an unwritable restore target must report both.
+    tokio::fs::write(state.runtime_paths.runtime_dir.join("sing-box"),
+        b"#!/bin/sh\nbase=$(dirname \"$0\")\nrm -f \"$base/config.json\"\nmkdir \"$base/config.json\"\nexit 1\n",
+    ).await.unwrap();
+    let error = regenerate_preserving_service_state(&config, &state)
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(
+        error.contains("Config validation or installation failed"),
+        "{error}"
+    );
+    assert!(error.contains("Runtime rollback failed"), "{error}");
+    assert_eq!(
+        tokio::fs::read(&state.runtime_paths.node_bindings)
+            .await
+            .unwrap(),
+        br#"{"marker":"old-bindings"}"#
+    );
+    assert_eq!(*state.config.read().await, config);
+    assert!(state.sing_process.lock().await.is_none());
+    assert!(!state.lifecycle.snapshot().ready);
+    tokio::fs::remove_dir_all(root).await.unwrap();
+}
+
+#[tokio::test]
+async fn persistent_save_failure_reactivates_previous_runtime_and_restores_bindings() {
+    let unique = format!(
+        "harbor-transaction-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    );
+    let root = std::env::temp_dir().join(unique);
+    let runtime_dir = root.join("runtime");
+    let config_path = root.join("config.yaml");
+    let volatile_path = root.join("volatile.yaml");
+    tokio::fs::create_dir_all(&runtime_dir).await.unwrap();
+    // A directory at the target path deterministically makes the stable
+    // config commit fail after runtime activation, even when tests run as root.
+    tokio::fs::create_dir_all(&config_path).await.unwrap();
+
+    let fake_kernel = runtime_dir.join("sing-box");
+    tokio::fs::write(&fake_kernel, crate::test_support::FAKE_KERNEL)
+        .await
+        .unwrap();
+    std::fs::set_permissions(&fake_kernel, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+    let old_config = Config {
+        nodes: vec![manual_node("old-node")],
+        ..Config::default()
+    };
+    let runtime_paths = RuntimePaths::new(runtime_dir, &config_path);
+    let state = Arc::new(
+        AppState::with_config_layers(
+            StableConfig::from(&old_config),
+            old_config.clone(),
+            config_path,
+            volatile_path,
+            runtime_paths,
+        )
+        .unwrap(),
+    );
+    let old_runtime = br#"{"marker":"old-runtime"}"#;
+    let old_bindings = br#"{"marker":"old-bindings"}"#;
+    tokio::fs::write(&state.runtime_paths.active_config, old_runtime)
+        .await
+        .unwrap();
+    tokio::fs::write(&state.runtime_paths.node_bindings, old_bindings)
+        .await
+        .unwrap();
+    start_sing_internal(&state).await.unwrap();
+    assert_eq!(state.lifecycle.snapshot().generation, 1);
+    let original_pid = state
+        .sing_process
+        .lock()
+        .await
+        .as_ref()
+        .and_then(|process| process.child.id())
+        .unwrap();
+
+    let mut new_config = old_config.clone();
+    new_config.nodes.push(manual_node("new-node"));
+    let result = apply_config_change(&state, &old_config, &new_config).await;
+
+    assert!(result.is_err(), "the persistent config commit must fail");
+    assert_eq!(
+        tokio::fs::read(&state.runtime_paths.active_config)
+            .await
+            .unwrap(),
+        old_runtime
+    );
+    assert_eq!(
+        tokio::fs::read(&state.runtime_paths.node_bindings)
+            .await
+            .unwrap(),
+        old_bindings
+    );
+    assert!(is_sing_box_running(&state).await);
+    assert_eq!(
+        state
+            .sing_process
+            .lock()
+            .await
+            .as_ref()
+            .and_then(|process| process.child.id()),
+        Some(original_pid),
+        "Unix rollback should reactivate the previous config without replacing the process"
+    );
+    assert!(
+        state.lifecycle.snapshot().generation >= 3,
+        "both activation and rollback must retire their previous watchers"
+    );
+    assert_eq!(*state.config.read().await, old_config);
+
+    stop_sing_internal(&state).await;
+    let _ = tokio::fs::remove_dir_all(root).await;
+}
+
+#[tokio::test]
+async fn unchanged_runtime_bytes_still_start_a_missing_desired_process() {
+    let unique = format!(
+        "harbor-unchanged-start-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    );
+    let root = std::env::temp_dir().join(unique);
+    let runtime_dir = root.join("runtime");
+    let config_path = root.join("config.yaml");
+    let volatile_path = root.join("volatile.yaml");
+    tokio::fs::create_dir_all(&runtime_dir).await.unwrap();
+    let fake_kernel = runtime_dir.join("sing-box");
+    tokio::fs::write(&fake_kernel, crate::test_support::FAKE_KERNEL)
+        .await
+        .unwrap();
+    std::fs::set_permissions(&fake_kernel, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+    let config = Config {
+        nodes: vec![manual_node("only-node")],
+        ..Config::default()
+    };
+    let runtime_paths = RuntimePaths::new(runtime_dir, &config_path);
+    let state = Arc::new(
+        AppState::with_config_layers(
+            StableConfig::from(&config),
+            config.clone(),
+            config_path,
+            volatile_path,
+            runtime_paths,
+        )
+        .unwrap(),
+    );
+
+    regenerate_without_restart_runtime(&config, &state, SubSource::SnapshotOrLocal)
+        .await
+        .unwrap();
+    assert!(!is_sing_box_running(&state).await);
+
+    let runtime_update = regenerate_preserving_service_state(&config, &state)
+        .await
+        .unwrap();
+
+    assert_eq!(runtime_update, RuntimeUpdate::Started);
+    assert!(is_sing_box_running(&state).await);
+    assert!(state.lifecycle.snapshot().ready);
+
+    stop_sing_internal(&state).await;
+    let _ = tokio::fs::remove_dir_all(root).await;
+}
+
+#[tokio::test]
+async fn config_update_lock_serializes_overlapping_node_adds() {
+    let unique = format!(
+        "harbor-serialize-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    );
+    let root = std::env::temp_dir().join(unique);
+    let runtime_dir = root.join("runtime");
+    let config_path = root.join("config.yaml");
+    let volatile_path = root.join("volatile.yaml");
+    tokio::fs::create_dir_all(&runtime_dir).await.unwrap();
+    let fake_kernel = runtime_dir.join("sing-box");
+    tokio::fs::write(&fake_kernel, crate::test_support::FAKE_KERNEL)
+        .await
+        .unwrap();
+    std::fs::set_permissions(&fake_kernel, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+    let old_config = Config {
+        nodes: vec![manual_node("base-node")],
+        ..Config::default()
+    };
+    let runtime_paths = RuntimePaths::new(runtime_dir, &config_path);
+    let state = Arc::new(
+        AppState::with_config_layers(
+            StableConfig::from(&old_config),
+            old_config.clone(),
+            config_path,
+            volatile_path,
+            runtime_paths,
+        )
+        .unwrap(),
+    );
+    regenerate_without_restart_runtime(&old_config, &state, SubSource::SnapshotOrLocal)
+        .await
+        .unwrap();
+    start_sing_internal(&state).await.unwrap();
+
+    let add = |state: Arc<AppState>, tag: &'static str| async move {
+        let _guard = state.config_update.lock().await;
+        let old = state.config.read().await.clone();
+        let mut new = old.clone();
+        new.nodes.push(manual_node(tag));
+        apply_config_change(&state, &old, &new).await
+    };
+
+    let (first, second) = tokio::join!(add(state.clone(), "node-a"), add(state.clone(), "node-b"),);
+    first.expect("first add should apply");
+    second.expect("second add should apply");
+
+    let tags: Vec<String> = state
+        .config
+        .read()
+        .await
+        .nodes
+        .iter()
+        .filter_map(|raw| {
+            serde_json::from_str::<serde_json::Value>(raw)
+                .ok()?
+                .get("tag")?
+                .as_str()
+                .map(str::to_string)
+        })
+        .collect();
+    assert!(tags.contains(&"base-node".to_string()));
+    assert!(tags.contains(&"node-a".to_string()));
+    assert!(tags.contains(&"node-b".to_string()));
+    assert_eq!(tags.len(), 3);
+
+    stop_sing_internal(&state).await;
+    let _ = tokio::fs::remove_dir_all(root).await;
+}
+
+#[tokio::test]
+async fn stopping_service_cancels_a_refresh_without_waiting_for_subscription_http() {
+    use axum::{extract::State, routing::get, Router};
+    let entered = Arc::new(tokio::sync::Notify::new());
+    let notify = entered.clone();
+    let app = Router::new().route(
+        "/sub",
+        get(move || {
+            let notify = notify.clone();
+            async move {
+                notify.notify_one();
+                std::future::pending::<String>().await
+            }
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}/sub", listener.local_addr().unwrap());
+    let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let state = crate::test_support::app_state(Config {
+        subs: vec![url],
+        ..Config::default()
+    });
+    state.initializing.store(false, Ordering::Relaxed);
+    let cloned = state.clone();
+    let refresh =
+        tokio::spawn(async move { super::refresh_subscriptions_foreground(&cloned).await });
+    entered.notified().await;
+    assert!(tokio::time::timeout(
+        std::time::Duration::from_secs(1),
+        crate::handlers::service::stop_service(State(state.clone()))
+    )
+    .await
+    .expect("stop must acquire the lock while the subscription is pending")
+    .is_ok());
+    assert!(matches!(
+        refresh.await.unwrap(),
+        Err(super::ConfigMutationError::Superseded)
+    ));
+    assert!(!state.lifecycle.snapshot().should_run);
+    assert!(!state.runtime_paths.active_config.exists());
+    server.abort();
+}
+
+#[tokio::test]
+async fn failed_refresh_commit_preserves_local_edit_committed_during_fetch() {
+    use crate::models::RouteMode;
+    use axum::{routing::get, Router};
+    use tokio::{
+        sync::Notify,
+        time::{timeout, Duration},
+    };
+
+    let entered = Arc::new(Notify::new());
+    let release = Arc::new(Notify::new());
+    let (accepted, resume) = (entered.clone(), release.clone());
+    let app = Router::new().route("/sub", get(move || {
+        let (accepted, resume) = (accepted.clone(), resume.clone());
+        async move {
+            accepted.notify_one();
+            resume.notified().await;
+            "proxies:\n- {name: US-new, type: ss, server: example.com, port: 8388, cipher: aes-128-gcm, password: test}"
+        }
+    }));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}/sub", listener.local_addr().unwrap());
+    let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let (root, state, mut config) = refresh_commit_failure_fixture("concurrent-edit").await;
+    tokio::fs::remove_dir(&state.volatile_path).await.unwrap();
+    config.subs.push(url);
+    *state.config.write().await = config.clone();
+    *state.stable_config.write().await = StableConfig::from(&config);
+    state.lifecycle.request_running(false);
+    state
+        .lifecycle
+        .finish(state.lifecycle.snapshot().generation, RuntimePhase::Stopped);
+    let cloned = state.clone();
+    let refresh =
+        tokio::spawn(async move { super::refresh_subscriptions_foreground(&cloned).await });
+    timeout(Duration::from_secs(3), entered.notified())
+        .await
+        .unwrap();
+
+    // The fetch must not hold config_update. Commit a different route mode
+    // while it is paused, using only existing local node material.
+    timeout(
+        Duration::from_secs(3),
+        super::apply_route_mode(&state, RouteMode::Global),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    let committed = state.config.read().await.clone();
+    assert_eq!(committed.route_mode, RouteMode::Global);
+    assert_eq!(committed.node_select, NodeSelect::Manual);
+    let runtime = tokio::fs::read(&state.runtime_paths.active_config)
+        .await
+        .unwrap();
+    let bindings = tokio::fs::read(&state.runtime_paths.node_bindings)
+        .await
+        .unwrap();
+    let stable = tokio::fs::read(&state.config_path).await.unwrap();
+    let cache = tokio::fs::read(&state.runtime_paths.config_cache)
+        .await
+        .unwrap();
+    let multipliers = state.available_multipliers.read().await.clone();
+    let warning = state.config_warning.lock().await.clone();
+
+    // The incoming US node restores the requested region, requiring an
+    // effective-selection write. Make that write fail after runtime install.
+    tokio::fs::remove_file(&state.volatile_path).await.unwrap();
+    tokio::fs::create_dir(&state.volatile_path).await.unwrap();
+    release.notify_one();
+    let error = timeout(Duration::from_secs(3), refresh)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap_err()
+        .to_string();
+    server.abort();
+    assert!(
+        error.contains("Failed to commit refreshed configuration"),
+        "{error}"
+    );
+    assert_eq!(*state.config.read().await, committed);
+    assert_eq!(
+        tokio::fs::read(&state.runtime_paths.active_config)
+            .await
+            .unwrap(),
+        runtime
+    );
+    assert_eq!(
+        tokio::fs::read(&state.runtime_paths.node_bindings)
+            .await
+            .unwrap(),
+        bindings
+    );
+    assert_eq!(tokio::fs::read(&state.config_path).await.unwrap(), stable);
+    assert_eq!(
+        tokio::fs::read(&state.runtime_paths.config_cache)
+            .await
+            .unwrap(),
+        cache
+    );
+    // Fetch status may advance data_revision; accepted runtime diagnostics
+    // must still describe the committed local edit, not the rejected candidate.
+    assert_eq!(*state.available_multipliers.read().await, multipliers);
+    assert_eq!(*state.config_warning.lock().await, warning);
+    assert_eq!(
+        state.sub_refresh_success_generation.load(Ordering::Relaxed),
+        0
+    );
+    assert!(state.sub_nodes_cache.read().await.is_none());
+    assert_eq!(state.lifecycle.snapshot().phase, RuntimePhase::Stopped);
+    assert!(!state.lifecycle.snapshot().should_run);
+    assert!(state.sing_process.lock().await.is_none());
+    tokio::fs::remove_dir_all(root).await.unwrap();
+}
