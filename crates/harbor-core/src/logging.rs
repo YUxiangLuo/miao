@@ -101,32 +101,37 @@ impl BoundedLogWriter {
             let _ = io::stdout().write_all(buf);
         }
         let max_bytes = state.max_bytes as usize;
-        let slice = if buf.len() > max_bytes {
-            &buf[buf.len() - max_bytes..]
+        // Retain at most two rotation windows (active + `.old`) so a single
+        // burst read > max_bytes still rotates cleanly without unbounded I/O.
+        let keep_bytes = max_bytes.saturating_mul(2);
+        let tail = if buf.len() > keep_bytes {
+            &buf[buf.len() - keep_bytes..]
         } else {
             buf
         };
-        if state.current_len > 0
-            && state.current_len.saturating_add(slice.len() as u64) > state.max_bytes
-        {
-            rotate_in_place(&mut state);
-        }
-        if state.file.is_none() {
-            if let Some(parent) = state.path.parent() {
-                let _ = fs::create_dir_all(parent);
+        for slice in tail.chunks(max_bytes) {
+            if state.current_len > 0
+                && state.current_len.saturating_add(slice.len() as u64) > state.max_bytes
+            {
+                rotate_in_place(&mut state);
             }
-            if let Ok(file) = open_private_append(&state.path) {
-                state.current_len = file.metadata().map(|m| m.len()).unwrap_or(0);
-                state.file = Some(file);
-            }
-        }
-        if let Some(ref mut file) = state.file {
-            match file.write_all(slice) {
-                Ok(()) => {
-                    state.current_len = state.current_len.saturating_add(slice.len() as u64);
+            if state.file.is_none() {
+                if let Some(parent) = state.path.parent() {
+                    let _ = fs::create_dir_all(parent);
                 }
-                Err(_) => {
-                    state.file = None;
+                if let Ok(file) = open_private_append(&state.path) {
+                    state.current_len = file.metadata().map(|m| m.len()).unwrap_or(0);
+                    state.file = Some(file);
+                }
+            }
+            if let Some(ref mut file) = state.file {
+                match file.write_all(slice) {
+                    Ok(()) => {
+                        state.current_len = state.current_len.saturating_add(slice.len() as u64);
+                    }
+                    Err(_) => {
+                        state.file = None;
+                    }
                 }
             }
         }
@@ -274,9 +279,29 @@ mod tests {
         spawn_child_log_drains(&mut child, writer.clone());
         let status = child.wait().await.unwrap();
         assert!(status.success());
-        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+        let deadline = tokio::time::Instant::now() + tokio::time::Duration::from_secs(2);
+        while !rotated_path.exists() && tokio::time::Instant::now() < deadline {
+            tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+        }
+        writer.flush_file();
 
         assert!(fs::metadata(&log_path).unwrap().len() <= limit);
         assert!(fs::metadata(&rotated_path).unwrap().len() <= limit);
+    }
+
+    #[test]
+    fn single_burst_write_larger_than_limit_rotates_into_bounded_windows() {
+        let dir = tempfile::tempdir().unwrap();
+        let log_path = dir.path().join("burst.log");
+        let rotated_path = rotated_log_path(&log_path);
+        let limit = 1024_u64;
+
+        let writer = BoundedLogWriter::open_with_limit(log_path.clone(), limit, false).unwrap();
+        let burst = vec![b'x'; 2640];
+        writer.write_bytes(&burst);
+        writer.flush_file();
+
+        assert_eq!(fs::metadata(&log_path).unwrap().len(), limit);
+        assert_eq!(fs::metadata(&rotated_path).unwrap().len(), limit);
     }
 }
