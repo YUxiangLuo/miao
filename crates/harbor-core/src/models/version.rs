@@ -13,6 +13,8 @@ pub struct VersionInfo {
 #[derive(Clone, Deserialize)]
 pub struct GitHubRelease {
     pub tag_name: String,
+    #[serde(default)]
+    pub html_url: Option<String>,
     pub assets: Vec<GitHubAsset>,
 }
 

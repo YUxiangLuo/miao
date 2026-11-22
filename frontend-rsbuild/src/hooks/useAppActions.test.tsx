@@ -129,3 +129,47 @@ it('preserves successful batch indices even if the refreshed list is unavailable
   expect(await result.handleImportNodes([{ tag: 'fixture', node_type: 'hysteria2', server: 'example.com', server_port: 443, password: 'fixture-password' }])).toEqual({ added, failed: [] })
   expect(result.toasts().at(-1)?.message).toContain('勿重复导入')
 })
+
+it('forces cache refresh on manual version check and opens release page on Windows when update is available', async () => {
+  let checked = false
+  const openSpy = rs.fn()
+  rs.stubGlobal('open', openSpy)
+  const { result, fetch } = setup((url) => {
+    if (url === '/api/version') {
+      return response({
+        success: true,
+        data: { current: 'v0.51.0', latest: null, has_update: false, download_url: null, upgrade_supported: false },
+      })
+    }
+    if (url === '/api/version?refresh=1') {
+      checked = true
+      return response({
+        success: true,
+        data: {
+          current: 'v0.51.0',
+          latest: 'v0.52.0',
+          has_update: true,
+          download_url: 'https://github.com/YUxiangLuo/miao/releases/tag/v0.52.0',
+          upgrade_supported: false,
+        },
+      })
+    }
+  })
+  await waitFor(() => expect(result.firstLoadDone()).toBe(true))
+
+  // First click refreshes version bypassing backend cache even on Windows.
+  await result.handleUpgradeClick()
+  expect(checked).toBe(true)
+  expect(fetch.mock.calls.some(([u]) => u === '/api/version?refresh=1')).toBe(true)
+  expect(result.toasts().at(-1)?.message).toContain('发现新版本 v0.52.0')
+  expect(openSpy).not.toHaveBeenCalled()
+
+  // Second click opens the GitHub Release page in a new window (intercepted by Tauri on desktop).
+  await result.handleUpgradeClick()
+  expect(openSpy).toHaveBeenCalledWith(
+    'https://github.com/YUxiangLuo/miao/releases/tag/v0.52.0',
+    '_blank',
+    'noopener,noreferrer',
+  )
+  expect(result.toasts().at(-1)?.message).toContain('已在浏览器打开下载页')
+})

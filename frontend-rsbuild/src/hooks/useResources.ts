@@ -58,11 +58,11 @@ function useResource<T>(path: string, initial: T, revision: Accessor<number> = (
   const [error, setError] = createSignal('')
   const { begin } = useLatestRequest()
 
-  const refresh = async (): Promise<ResourceReadResult<T>> => {
+  const refresh = async (overridePath?: string): Promise<ResourceReadResult<T>> => {
     const requestRevision = untrack(revision)
     const request = begin()
     try {
-      const payload = await fetchJson<ApiResponse<T>>(path, { signal: request.signal })
+      const payload = await fetchJson<ApiResponse<T>>(overridePath ?? path, { signal: request.signal })
       if (!request.isCurrent()) return { status: 'superseded' }
       if (!payload.success || payload.data == null) throw new Error(payload.message || '请求失败')
       const next = payload.data
@@ -145,7 +145,10 @@ const INITIAL_VERSION: VersionInfo = {
 
 export function useVersion() {
   const resource = useResource('/api/version', INITIAL_VERSION)
-  return { versionInfo: resource.data, fetchVersion: resource.refresh }
+  const fetchVersion = (forceRefresh = false) => resource.refresh(
+    forceRefresh ? '/api/version?refresh=1' : '/api/version',
+  )
+  return { versionInfo: resource.data, fetchVersion }
 }
 
 /**

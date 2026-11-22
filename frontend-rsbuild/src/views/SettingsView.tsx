@@ -219,7 +219,7 @@ export function SettingsView(props: SettingsViewProps): JSX.Element {
                 {app().upgrading() && app().upgradeMessage()
                   ? app().upgradeMessage()
                   : app().versionInfo().upgrade_supported === false
-                    ? 'Windows 桌面版请前往 GitHub Release 下载最新安装包覆盖安装'
+                    ? '点击前往 GitHub Release 下载最新安装包（覆盖安装前请先从托盘退出）'
                     : '检查 GitHub Release 最新版本并在线更新'}
               </div>
             </div>
@@ -227,10 +227,12 @@ export function SettingsView(props: SettingsViewProps): JSX.Element {
               <Button
                 tone={app().versionInfo().has_update ? 'primary' : 'secondary'}
                 size="sm"
-                loading={app().upgrading()}
+                loading={app().upgrading() || app().checkingVersion()}
                 onClick={() => { void app().handleUpgradeClick() }}
               >
-                {app().versionInfo().has_update ? '立即更新' : '检查更新'}
+                {app().versionInfo().has_update
+                  ? (app().versionInfo().upgrade_supported === false ? '前往下载' : '立即更新')
+                  : '检查更新'}
               </Button>
             </div>
           </div>

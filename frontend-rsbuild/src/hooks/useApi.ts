@@ -76,7 +76,11 @@ export function useApi(onUncertain?: () => void) {
   ): Promise<ApiResponse<T>> => {
     setActionPending(action, true)
     try {
-      const timeout = endpoint === 'vps/deploy' ? 600_000 : WRITE_TIMEOUT_MS
+      const timeout = endpoint === 'vps/deploy'
+        ? 600_000
+        : endpoint === 'upgrade'
+          ? 400_000
+          : WRITE_TIMEOUT_MS
       const payload = await fetchJson<ApiResponse<T>>(
         `/api/${endpoint}`,
         { headers: API_HEADERS, ...options },

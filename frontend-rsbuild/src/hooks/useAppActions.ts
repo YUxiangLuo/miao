@@ -59,9 +59,12 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
+const GITHUB_RELEASES_FALLBACK_URL = 'https://github.com/YUxiangLuo/miao/releases/latest'
+
 export function useAppActions(data: AppData) {
   const { vpsTasks, vpsDeploying, handleDeployVps } = useVpsDeployment(data)
   const [upgradeMessage, setUpgradeMessage] = createSignal('')
+  const [checkingVersion, setCheckingVersion] = createSignal(false)
   const deleting = new Set<string>()
   const [pendingDeletes, setPendingDeletes] = createSignal<ReadonlySet<string>>(new Set())
 
@@ -516,15 +519,24 @@ export function useAppActions(data: AppData) {
 
   const handleUpgradeClick = async () => {
     const info = data.versionInfo()
-    if (info.upgrade_supported === false) {
-      data.showToast('当前平台请下载安装包，退出后覆盖安装', 'info')
+
+    if (!info.has_update) {
+      if (checkingVersion()) return
+      setCheckingVersion(true)
+      try {
+        const read = await data.fetchVersion(true)
+        const fresh = read.status === 'success' ? read.data : undefined
+        presentFeedback(describeVersionCheckResult(fresh))
+      } finally {
+        setCheckingVersion(false)
+      }
       return
     }
 
-    if (!info.has_update) {
-      const read = await data.fetchVersion()
-      const fresh = read.status === 'success' ? read.data : undefined
-      presentFeedback(describeVersionCheckResult(fresh))
+    if (info.upgrade_supported === false) {
+      const releaseUrl = info.download_url || GITHUB_RELEASES_FALLBACK_URL
+      window.open(releaseUrl, '_blank', 'noopener,noreferrer')
+      data.showToast('已在浏览器打开下载页；覆盖安装前请先从托盘退出 Harbor', 'info')
       return
     }
 
@@ -628,6 +640,7 @@ export function useAppActions(data: AppData) {
     handleSaveAccessPort,
     handleOpenDeleteAccessPortConfirm,
     handleUpgradeClick,
+    checkingVersion,
     upgradeMessage,
     handleOpenDeleteNodeConfirm,
     handleOpenDeleteSubConfirm,

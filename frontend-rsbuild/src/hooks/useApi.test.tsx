@@ -62,6 +62,18 @@ describe('useApi pending actions', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
+  it('gives upgrade requests a 400s timeout to accommodate multi-attempt binary downloads', async () => {
+    rs.useFakeTimers()
+    const fetchMock = rs.fn(async () => ({ ok: true, json: () => new Promise(() => {}) }))
+    rs.stubGlobal('fetch', fetchMock)
+    const { result } = renderHook(() => useApi())
+    const outcome = result.apiCall('upgrade', { method: 'POST' }, 'upgrade').catch((error) => error)
+    await rs.advanceTimersByTimeAsync(WRITE_TIMEOUT_MS + 60_000)
+    expect(result.pendingActions().has('upgrade')).toBe(true)
+    await rs.advanceTimersByTimeAsync(400_000 - WRITE_TIMEOUT_MS - 60_000)
+    expect((await outcome as Error).message).toContain('操作结果未知')
+  })
+
   it('reconciles a lost POST response without retrying the write', async () => {
     const reconcile = rs.fn()
     const fetchMock = rs.fn().mockRejectedValue(new TypeError('Failed to fetch'))

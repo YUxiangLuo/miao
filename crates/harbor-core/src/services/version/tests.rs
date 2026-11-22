@@ -198,9 +198,10 @@ async fn version_info_skips_github_when_kernel_is_down() {
 }
 
 #[test]
-fn version_info_reports_update_without_download_when_upgrade_unsupported() {
+fn version_info_reports_release_page_url_when_upgrade_unsupported() {
     let release = GitHubRelease {
         tag_name: "v99.0.0".to_string(),
+        html_url: Some("https://github.com/YUxiangLuo/miao/releases/tag/v99.0.0".to_string()),
         assets: vec![GitHubAsset {
             name: "harbor-windows-amd64-setup.exe".to_string(),
             browser_download_url: "https://example.com/setup.exe".to_string(),
@@ -212,13 +213,29 @@ fn version_info_reports_update_without_download_when_upgrade_unsupported() {
     assert!(!info.upgrade_supported);
     assert!(info.has_update);
     assert_eq!(info.latest.as_deref(), Some("v99.0.0"));
-    assert!(info.download_url.is_none());
+    assert_eq!(
+        info.download_url.as_deref(),
+        Some("https://github.com/YUxiangLuo/miao/releases/tag/v99.0.0")
+    );
+
+    // Untrusted html_url falls back to canonical repository release tag page.
+    let untrusted = GitHubRelease {
+        tag_name: "v99.0.1".to_string(),
+        html_url: Some("https://evil.example.com/releases/tag/v99.0.1".to_string()),
+        assets: vec![],
+    };
+    let safe_info = version_info_from_release("v0.31.0".to_string(), &untrusted, false);
+    assert_eq!(
+        safe_info.download_url.as_deref(),
+        Some("https://github.com/YUxiangLuo/miao/releases/tag/v99.0.1")
+    );
 }
 
 #[test]
 fn version_info_includes_linux_asset_url_when_upgrade_supported() {
     let release = GitHubRelease {
         tag_name: "v99.0.0".to_string(),
+        html_url: Some("https://github.com/YUxiangLuo/miao/releases/tag/v99.0.0".to_string()),
         assets: vec![GitHubAsset {
             name: "harbor-linux-amd64".to_string(),
             browser_download_url: "https://example.com/harbor".to_string(),

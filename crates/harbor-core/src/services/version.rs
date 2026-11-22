@@ -33,6 +33,7 @@ use crate::state::{AppState, VersionCache};
 use crate::VERSION;
 
 const CACHE_TTL: Duration = Duration::from_secs(300);
+const GITHUB_RELEASES_PREFIX: &str = "https://github.com/YUxiangLuo/miao/releases/";
 #[cfg(not(windows))]
 const DOWNLOAD_MAX_ATTEMPTS: u32 = 3;
 #[cfg(not(windows))]
@@ -410,17 +411,19 @@ async fn fetch_latest_release_uncached(client: &reqwest::Client) -> AppResult<Gi
     Ok(release)
 }
 
-async fn fetch_latest_release(
+async fn fetch_latest_release_with_refresh(
     client: &reqwest::Client,
     state: &Arc<AppState>,
+    force_refresh: bool,
 ) -> AppResult<GitHubRelease> {
-    let cache = state.version_cache.load();
-    if let (Some(release), Some(fetched_at)) = (&cache.release, cache.fetched_at) {
-        if fetched_at.elapsed() < CACHE_TTL {
-            return Ok(release.clone());
+    if !force_refresh {
+        let cache = state.version_cache.load();
+        if let (Some(release), Some(fetched_at)) = (&cache.release, cache.fetched_at) {
+            if fetched_at.elapsed() < CACHE_TTL {
+                return Ok(release.clone());
+            }
         }
     }
-    drop(cache);
 
     let release = fetch_latest_release_uncached(client).await?;
     state.version_cache.store(Arc::new(VersionCache {
@@ -439,13 +442,21 @@ async fn invalidate_release_cache(state: &Arc<AppState>) {
 }
 
 pub async fn get_version_info(state: &Arc<AppState>) -> VersionInfo {
+    get_version_info_with_refresh(state, false).await
+}
+
+pub async fn get_version_info_with_refresh(
+    state: &Arc<AppState>,
+    force_refresh: bool,
+) -> VersionInfo {
     let current = current_version();
-    // Skip GitHub while the kernel is down (no TUN / likely no route).
-    if !is_sing_box_running(state).await {
+    // Skip passive GitHub probes while the kernel is down (no TUN / likely no route).
+    // Explicit manual checks (`force_refresh`) still attempt the lookup.
+    if !force_refresh && !is_sing_box_running(state).await {
         return version_info_without_release(current);
     }
 
-    match fetch_latest_release(&state.http_client, state).await {
+    match fetch_latest_release_with_refresh(&state.http_client, state, force_refresh).await {
         Ok(release) => {
             version_info_from_release(current, &release, crate::platform::upgrade_supported())
         }
@@ -454,6 +465,15 @@ pub async fn get_version_info(state: &Arc<AppState>) -> VersionInfo {
             version_info_without_release(current)
         }
     }
+}
+
+fn release_page_url(release: &GitHubRelease) -> String {
+    if let Some(url) = release.html_url.as_deref() {
+        if url.starts_with(GITHUB_RELEASES_PREFIX) {
+            return url.to_string();
+        }
+    }
+    format!("{GITHUB_RELEASES_PREFIX}tag/{}", release.tag_name.trim())
 }
 
 fn version_info_from_release(
@@ -472,7 +492,7 @@ fn version_info_from_release(
                 .map(|asset| asset.browser_download_url.clone())
         })
     } else {
-        None
+        Some(release_page_url(release))
     };
 
     VersionInfo {
@@ -732,7 +752,7 @@ pub async fn upgrade_binary(state: &Arc<AppState>) -> AppResult<String> {
     let guard = UpgradeGuard(state.clone());
 
     invalidate_release_cache(state).await;
-    let release = fetch_latest_release(&state.http_client, state).await?;
+    let release = fetch_latest_release_with_refresh(&state.http_client, state, true).await?;
     let current = current_version();
     if !release_is_newer_than_current(&current, &release.tag_name) {
         return Ok("Already up to date".to_string());

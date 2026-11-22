@@ -13,6 +13,7 @@ use harbor_core::{
 };
 use tauri::menu::{CheckMenuItem, CheckMenuItemBuilder, Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+use tauri::webview::NewWindowResponse;
 use tauri::{AppHandle, Manager, RunEvent, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 
 struct Panel(Mutex<Option<ServerHandle>>);
@@ -215,10 +216,32 @@ fn finish_desktop_shell(
         .resizable(false)
         .maximized(true)
         .visible(!start_minimized)
+        .on_new_window(|target, _features| {
+            if is_allowed_external_release_url(&target) {
+                open_external_url(target.as_str());
+            }
+            NewWindowResponse::Deny
+        })
         .build()?;
     install_tray(app.handle())?;
     Ok(())
 }
+
+fn is_allowed_external_release_url(url: &tauri::Url) -> bool {
+    url.scheme() == "https"
+        && url.host_str() == Some("github.com")
+        && url.path().starts_with("/YUxiangLuo/miao/releases")
+}
+
+#[cfg(windows)]
+fn open_external_url(url: &str) {
+    // Delegate via explorer.exe so the elevated desktop process hands the URL
+    // to the interactive medium-IL shell and opens the system default browser.
+    let _ = std::process::Command::new("explorer.exe").arg(url).spawn();
+}
+
+#[cfg(not(windows))]
+fn open_external_url(_url: &str) {}
 
 /// 托盘勾选开机自启：尝试切换后把勾选状态对齐到真实状态（任务存在性）。
 fn toggle_autostart(item: &CheckMenuItem<tauri::Wry>) {
@@ -290,7 +313,7 @@ fn shutdown_panel(app: &AppHandle) {
 
 #[cfg(test)]
 mod tests {
-    use super::explorer_select_arg;
+    use super::{explorer_select_arg, is_allowed_external_release_url};
     use std::path::Path;
 
     #[test]
@@ -301,5 +324,33 @@ mod tests {
             explorer_select_arg(path),
             r#"/select,"C:\Users\Jane Doe\AppData\Local\io.github.yuxiangluo.harbor\harbor.log""#
         );
+    }
+
+    #[test]
+    fn external_release_url_allowlist_accepts_only_repo_release_https_urls() {
+        for allowed in [
+            "https://github.com/YUxiangLuo/miao/releases",
+            "https://github.com/YUxiangLuo/miao/releases/latest",
+            "https://github.com/YUxiangLuo/miao/releases/tag/v0.51.0",
+        ] {
+            let parsed = tauri::Url::parse(allowed).unwrap();
+            assert!(
+                is_allowed_external_release_url(&parsed),
+                "should allow {allowed}"
+            );
+        }
+        for denied in [
+            "http://github.com/YUxiangLuo/miao/releases/latest",
+            "https://evil.com/YUxiangLuo/miao/releases/latest",
+            "https://github.com/other/repo/releases/latest",
+            "file:///C:/Windows/System32/cmd.exe",
+            "javascript:alert(1)",
+        ] {
+            let parsed = tauri::Url::parse(denied).unwrap();
+            assert!(
+                !is_allowed_external_release_url(&parsed),
+                "should deny {denied}"
+            );
+        }
     }
 }
