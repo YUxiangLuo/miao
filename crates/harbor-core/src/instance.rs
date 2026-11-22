@@ -242,10 +242,37 @@ unsafe extern "system" fn enum_find_window_proc(
     1
 }
 
+#[cfg_attr(not(windows), allow(dead_code))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FocusShowAction {
+    None,
+    Restore,
+    Show,
+    ShowMaximized,
+}
+
+/// 唤出已有窗口时不应对可见或已最大化的窗口无脑发 `SW_RESTORE`（会把最大化窗口缩回小窗）。
+/// 仅在最小化到任务栏时恢复，隐藏在托盘时按原最大化状态显示，已可见则只置前。
+#[cfg_attr(not(windows), allow(dead_code))]
+fn focus_show_action(visible: bool, minimized: bool, maximized: bool) -> FocusShowAction {
+    if minimized {
+        FocusShowAction::Restore
+    } else if !visible {
+        if maximized {
+            FocusShowAction::ShowMaximized
+        } else {
+            FocusShowAction::Show
+        }
+    } else {
+        FocusShowAction::None
+    }
+}
+
 #[cfg(windows)]
 fn windows_focus_existing() -> bool {
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        EnumWindows, SetForegroundWindow, ShowWindow, SW_RESTORE,
+        EnumWindows, IsIconic, IsWindowVisible, IsZoomed, SetForegroundWindow, ShowWindow,
+        SW_RESTORE, SW_SHOW, SW_SHOWMAXIMIZED,
     };
 
     let mut context = FindContext {
@@ -268,7 +295,21 @@ fn windows_focus_existing() -> bool {
         return false;
     }
     unsafe {
-        ShowWindow(hwnd, SW_RESTORE);
+        let visible = IsWindowVisible(hwnd) != 0;
+        let minimized = IsIconic(hwnd) != 0;
+        let maximized = IsZoomed(hwnd) != 0;
+        match focus_show_action(visible, minimized, maximized) {
+            FocusShowAction::None => {}
+            FocusShowAction::Restore => {
+                ShowWindow(hwnd, SW_RESTORE);
+            }
+            FocusShowAction::Show => {
+                ShowWindow(hwnd, SW_SHOW);
+            }
+            FocusShowAction::ShowMaximized => {
+                ShowWindow(hwnd, SW_SHOWMAXIMIZED);
+            }
+        }
         SetForegroundWindow(hwnd);
     }
     true
@@ -300,6 +341,30 @@ mod tests {
         assert!(!is_harbor_process_image(r"C:\tools\harborw.exe"));
         assert!(!is_harbor_process_image(r"C:\tools\harbor.exe.bak"));
         assert!(!is_harbor_process_image(r"C:\Windows\notepad.exe"));
+    }
+
+    #[test]
+    fn focus_show_action_preserves_maximized_and_restores_minimized() {
+        use super::{focus_show_action, FocusShowAction};
+
+        assert_eq!(focus_show_action(true, false, true), FocusShowAction::None);
+        assert_eq!(focus_show_action(true, false, false), FocusShowAction::None);
+        assert_eq!(
+            focus_show_action(true, true, false),
+            FocusShowAction::Restore
+        );
+        assert_eq!(
+            focus_show_action(false, true, false),
+            FocusShowAction::Restore
+        );
+        assert_eq!(
+            focus_show_action(false, false, true),
+            FocusShowAction::ShowMaximized
+        );
+        assert_eq!(
+            focus_show_action(false, false, false),
+            FocusShowAction::Show
+        );
     }
 
     #[cfg(not(windows))]

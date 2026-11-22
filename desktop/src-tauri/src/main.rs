@@ -1,6 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
@@ -16,7 +16,39 @@ use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent}
 use tauri::webview::NewWindowResponse;
 use tauri::{AppHandle, Manager, RunEvent, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 
+const DEFAULT_WINDOW_WIDTH: f64 = 1280.0;
+const DEFAULT_WINDOW_HEIGHT: f64 = 840.0;
+const MIN_WINDOW_WIDTH: f64 = 960.0;
+const MIN_WINDOW_HEIGHT: f64 = 640.0;
+
 struct Panel(Mutex<Option<ServerHandle>>);
+
+/// `--minimized` 启动时窗口必须以非最大化状态隐藏创建，避免 tao/Win32 在隐藏窗口上
+/// 直接写入 `WS_MAXIMIZE` 污染 `ptMaxPosition`；等首次显式唤出可见后再执行一次最大化。
+struct WindowLaunchState {
+    pending_initial_maximize: AtomicBool,
+}
+
+impl WindowLaunchState {
+    fn new(start_minimized: bool) -> Self {
+        Self {
+            pending_initial_maximize: AtomicBool::new(start_minimized),
+        }
+    }
+
+    fn take_pending_initial_maximize(&self) -> bool {
+        self.pending_initial_maximize.swap(false, Ordering::AcqRel)
+    }
+}
+
+fn initial_window_maximized(start_minimized: bool) -> bool {
+    !start_minimized
+}
+
+fn consume_pending_initial_maximize(app: &AppHandle) -> bool {
+    app.try_state::<WindowLaunchState>()
+        .is_some_and(|state| state.take_pending_initial_maximize())
+}
 
 /// 后到实例聚焦先到者的窗口。先到者的窗口在提权后的 setup 阶段才创建，
 /// 快速双击时后到者拿到「已在运行」信号可能早于窗口创建——有限轮询等它
@@ -102,6 +134,7 @@ fn run_app(config_path: Option<std::path::PathBuf>) -> Result<(), Box<dyn std::e
             }))?;
 
             let url = handle.url().to_string();
+            app.manage(WindowLaunchState::new(start_minimized));
             if let Err(err) = finish_desktop_shell(app, &url, start_minimized) {
                 tauri::async_runtime::block_on(handle.shutdown());
                 return Err(err);
@@ -110,11 +143,25 @@ fn run_app(config_path: Option<std::path::PathBuf>) -> Result<(), Box<dyn std::e
             app.manage(Panel(Mutex::new(Some(handle))));
             Ok(())
         })
-        .on_window_event(|window, event| {
-            if let WindowEvent::CloseRequested { api, .. } = event {
+        .on_window_event(|window, event| match event {
+            WindowEvent::CloseRequested { api, .. } => {
                 let _ = window.hide();
                 api.prevent_close();
             }
+            WindowEvent::Focused(true) => {
+                // 后到实例通过 Win32 ShowWindow 唤出托盘隐藏窗口时，tao 内部缓存的
+                // WindowFlags::VISIBLE 仍可能停留在 false；同步调用 show() 在已可见时
+                // 是纯空操作，同时可为 `--minimized` 首次唤出补做可见态最大化。
+                if window.is_visible().unwrap_or(false) {
+                    let _ = window.show();
+                    if consume_pending_initial_maximize(window.app_handle())
+                        && !window.is_maximized().unwrap_or(false)
+                    {
+                        let _ = window.maximize();
+                    }
+                }
+            }
+            _ => {}
         })
         .build(tauri::generate_context!())?;
 
@@ -211,10 +258,18 @@ fn finish_desktop_shell(
     url: &str,
     start_minimized: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    // 必须保留可缩放边框（WS_SIZEBOX）且禁止在隐藏状态同时设置 maximized(true)：
+    // tao 在窗口隐藏时调用 set_maximized(true) 会跳过 ShowWindow(SW_MAXIMIZE)，
+    // 直接 SetWindowLongW 写入 WS_MAXIMIZE，把 Win32 内部 ptMaxPosition 污染为
+    // 窗口初始坐标；缺少 WS_SIZEBOX 时 Windows 永远不会重置该锚点，导致后续每次
+    // 最大化都从非 (0, 0) 开始并超出屏幕/压过任务栏。
     WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url.parse()?))
         .title(WINDOW_TITLE)
-        .resizable(false)
-        .maximized(true)
+        .inner_size(DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT)
+        .min_inner_size(MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT)
+        .center()
+        .resizable(true)
+        .maximized(initial_window_maximized(start_minimized))
         .visible(!start_minimized)
         .on_new_window(|target, _features| {
             if is_allowed_external_release_url(&target) {
@@ -254,9 +309,12 @@ fn toggle_autostart(item: &CheckMenuItem<tauri::Wry>) {
 
 fn show_main_window(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
-        let _ = window.unminimize();
-        let _ = window.maximize();
+        // 先确保窗口可见、取消最小化，再按需执行首次最大化，绝不在隐藏态调用 maximize()。
         let _ = window.show();
+        let _ = window.unminimize();
+        if consume_pending_initial_maximize(app) && !window.is_maximized().unwrap_or(false) {
+            let _ = window.maximize();
+        }
         let _ = window.set_focus();
     }
 }
@@ -313,8 +371,24 @@ fn shutdown_panel(app: &AppHandle) {
 
 #[cfg(test)]
 mod tests {
-    use super::{explorer_select_arg, is_allowed_external_release_url};
+    use super::{
+        explorer_select_arg, initial_window_maximized, is_allowed_external_release_url,
+        WindowLaunchState,
+    };
     use std::path::Path;
+
+    #[test]
+    fn initial_maximize_is_deferred_when_starting_minimized() {
+        assert!(initial_window_maximized(false));
+        assert!(!initial_window_maximized(true));
+
+        let normal = WindowLaunchState::new(false);
+        assert!(!normal.take_pending_initial_maximize());
+
+        let minimized = WindowLaunchState::new(true);
+        assert!(minimized.take_pending_initial_maximize());
+        assert!(!minimized.take_pending_initial_maximize());
+    }
 
     #[test]
     fn explorer_select_quotes_paths_with_spaces() {
