@@ -1,0 +1,237 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v[0-9]*.[0-9]*.[0-9]*'
+  workflow_dispatch:
+    inputs:
+      draft:
+        description: '创建或保持为草稿 Release（勾选后不对外公开）'
+        type: boolean
+        default: false
+      expected_version:
+        description: '可选：校验目标版本号（如 v0.51.0），留空则使用当前分支 Cargo.toml 版本'
+        type: string
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    name: Preflight & Pin Resolution
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+      version: ${{ steps.meta.outputs.version }}
+      commit: ${{ steps.meta.outputs.commit }}
+      draft: ${{ steps.meta.outputs.draft }}
+      go_version: ${{ steps.meta.outputs.go_version }}
+      sing_geoip_ref: ${{ steps.meta.outputs.sing_geoip_ref }}
+      direct_rules_ref: ${{ steps.meta.outputs.direct_rules_ref }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - uses: oven-sh/setup-bun@v2
+      - id: meta
+        name: Validate version, tag, release state and pin rule commits
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+          GITHUB_REF_TYPE: ${{ github.ref_type }}
+          COMMIT: ${{ github.sha }}
+          INPUT_EXPECTED_VERSION: ${{ inputs.expected_version || '' }}
+          INPUT_DRAFT: ${{ inputs.draft && 'true' || 'false' }}
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/lib/ci-release.sh preflight
+
+  verify-scripts:
+    name: Verify Scripts
+    needs: preflight
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.preflight.outputs.commit }}
+      - uses: oven-sh/setup-bun@v2
+      - name: Run script lint & tests
+        run: ./dev.sh check scripts
+
+  build-frontend:
+    name: Build & Verify Frontend
+    needs: preflight
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.preflight.outputs.commit }}
+      - uses: oven-sh/setup-bun@v2
+      - uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('frontend-rsbuild/bun.lock') }}
+          restore-keys: |
+            bun-${{ runner.os }}-
+      - name: Check and build frontend
+        run: ./dev.sh check frontend
+      - uses: actions/upload-artifact@v4
+        with:
+          name: public-panel
+          path: public
+          if-no-files-found: error
+          retention-days: 1
+
+  verify-rust:
+    name: Verify Rust (Linux)
+    needs: [preflight, build-frontend]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.preflight.outputs.commit }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: public-panel
+          path: public
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - uses: oven-sh/setup-bun@v2
+      - name: Run Rust fmt, clippy & tests
+        run: ./dev.sh check rust --skip-frontend
+
+  build-linux:
+    name: Build Linux (amd64 & arm64 musl)
+    needs: [preflight, build-frontend]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.preflight.outputs.commit }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: public-panel
+          path: public
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-musl, aarch64-unknown-linux-musl
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: linux-musl-release
+      - uses: oven-sh/setup-bun@v2
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ needs.preflight.outputs.go_version }}
+          cache: false
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.14.1
+      - uses: taiki-e/install-action@cargo-zigbuild
+      - name: Build kernels, rules and Linux musl binaries
+        env:
+          SING_GEOIP_REF: ${{ needs.preflight.outputs.sing_geoip_ref }}
+          DIRECT_RULES_REF: ${{ needs.preflight.outputs.direct_rules_ref }}
+        run: ./dev.sh build all --refresh-kernel --skip-frontend
+      - name: Stage and smoke-test Linux binaries
+        run: |
+          bun scripts/lib/release-artifacts.mjs stage-linux dist/linux "${{ needs.preflight.outputs.commit }}" "${{ needs.preflight.outputs.tag }}"
+          chmod +x dist/linux/harbor-linux-amd64
+          version_out=$(./dist/linux/harbor-linux-amd64 --version)
+          echo "Smoke test: $version_out"
+          [[ "$version_out" == *"harbor ${{ needs.preflight.outputs.tag }}"* ]]
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-linux
+          path: dist/linux
+          if-no-files-found: error
+          retention-days: 1
+
+  build-windows:
+    name: Build Windows Desktop Installer (x64 NSIS)
+    needs: [preflight, build-frontend]
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.preflight.outputs.commit }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: public-panel
+          path: public
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: windows-desktop-release
+      - uses: oven-sh/setup-bun@v2
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ needs.preflight.outputs.go_version }}
+          cache: false
+      - name: Build Windows kernel & geo rules
+        shell: bash
+        env:
+          SING_GEOIP_REF: ${{ needs.preflight.outputs.sing_geoip_ref }}
+          DIRECT_RULES_REF: ${{ needs.preflight.outputs.direct_rules_ref }}
+        run: ./dev.sh kernel windows-amd64
+      - name: Verify Windows workspace & desktop shell
+        shell: bash
+        run: |
+          cargo clippy --workspace --locked --all-targets --all-features -- -D warnings
+          cargo test --workspace --locked --all-targets
+      - name: Package NSIS installer and stage Windows artifacts
+        shell: bash
+        run: |
+          ./dev.sh build desktop --skip-frontend
+          bun scripts/lib/release-artifacts.mjs stage-windows dist/windows "${{ needs.preflight.outputs.commit }}" "${{ needs.preflight.outputs.tag }}" dist/harbor-windows-amd64-setup.exe
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-windows
+          path: dist/windows
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    name: Verify & Publish GitHub Release
+    needs: [preflight, verify-scripts, verify-rust, build-linux, build-windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.preflight.outputs.commit }}
+          fetch-depth: 1
+      - uses: oven-sh/setup-bun@v2
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-linux
+          path: dist/${{ needs.preflight.outputs.tag }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-windows
+          path: dist/${{ needs.preflight.outputs.tag }}
+      - name: Assemble, verify and publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          bash scripts/lib/ci-release.sh publish \
+            "dist/${{ needs.preflight.outputs.tag }}" \
+            "${{ needs.preflight.outputs.commit }}" \
+            "${{ needs.preflight.outputs.tag }}" \
+            "${{ needs.preflight.outputs.draft }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-manifest-${{ needs.preflight.outputs.tag }}
+          path: dist/${{ needs.preflight.outputs.tag }}/release-manifest.json
+          if-no-files-found: error
+          retention-days: 90

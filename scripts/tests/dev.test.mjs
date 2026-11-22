@@ -8,11 +8,15 @@ afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: 
 const head = 'a'.repeat(40)
 const shellTest = test.skipIf(process.platform === 'win32')
 
-function run(args, overrides = {}) {
+function run(args, overrides = {}, { withPublicIndex = false } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'harbor-dev-test-'))
   roots.push(root)
   mkdirSync(join(root, 'scripts/lib'), { recursive: true })
   mkdirSync(join(root, 'bin'))
+  if (withPublicIndex) {
+    mkdirSync(join(root, 'public'), { recursive: true })
+    writeFileSync(join(root, 'public/index.html'), '<html></html>\n')
+  }
   writeFileSync(join(root, 'Cargo.toml'), 'original manifest\n')
   writeFileSync(join(root, 'Cargo.lock'), 'original lock\n')
   copyFileSync(new URL('../../dev.sh', import.meta.url), join(root, 'dev.sh'))
@@ -26,21 +30,17 @@ printf '%s %s\\n' "$tool" "$*" >> "$LOG"
 case "$tool:$*" in
   'git:status '*) printf '%s' "\${DIRTY:-}"; exit "\${GIT_STATUS:-0}" ;;
   'git:rev-parse HEAD') printf '%s\\n' "$HEAD" ;;
-  'git:rev-parse --verify '*) exit 1 ;;
+  'git:rev-parse --verify '*) exit "\${LOCAL_TAG_EXISTS:-1}" ;;
+  'git:rev-parse refs/tags/'*) printf '%s\\n' "\${LOCAL_TAG_COMMIT:-$HEAD}" ;;
   'git:remote get-url --push --all origin') printf '%s\\n' "\${PUSH_URL:-git@github.com:example/miao.git}" ;;
   'git:ls-remote '*) printf '%s' "\${REMOTE_TAG:-}" ;;
   'bun:scripts/lib/release-artifacts.mjs version') echo 1.2.3 ;;
   'bun:scripts/lib/release-artifacts.mjs version '*) echo 'updated manifest' > Cargo.toml ;;
   'cargo:check '*--offline*) echo 'updated lock' > Cargo.lock; exit "\${CARGO_STATUS:-0}" ;;
-  'bun:scripts/lib/release-artifacts.mjs verify '*) exit "\${VERIFY_STATUS:-0}" ;;
-  'rustup:target list --installed') printf '%s\\n' x86_64-unknown-linux-musl aarch64-unknown-linux-musl ;;
-  'gh:api '*)
-    [[ \${GH_API_STATUS:-0} == 0 ]] || exit "$GH_API_STATUS"
-    if [[ \${EXISTING_ASSETS+x} ]]; then printf '%s\\n%s\\n' "\${RELEASE_STATE:-published}" "$EXISTING_ASSETS"; fi ;;
-  'gh:release upload '*) exit "\${UPLOAD_STATUS:-0}" ;;
+  'rustup:target list --installed') printf '%s\\n' x86_64-unknown-linux-musl aarch64-unknown-linux-musl x86_64-pc-windows-gnu ;;
 esac
 `
-  for (const name of ['git', 'bun', 'cargo', 'gh', 'rustup', 'zig', 'cargo-zigbuild', 'go', 'curl', 'shellcheck', 'jq']) {
+  for (const name of ['git', 'bun', 'cargo', 'rustup', 'zig', 'cargo-zigbuild', 'go', 'curl', 'shellcheck', 'jq', 'x86_64-w64-mingw32-gcc']) {
     writeFileSync(join(root, 'bin', name), stub, { mode: 0o755 })
   }
   const result = Bun.spawnSync(['bash', join(root, 'dev.sh'), ...args], {
@@ -48,8 +48,13 @@ esac
     stdout: 'pipe', stderr: 'pipe',
   })
   return {
-    status: result.exitCode, calls: readFileSync(log, 'utf8').trim().split('\n'), error: result.stderr.toString(),
-    manifest: readFileSync(join(root, 'Cargo.toml'), 'utf8'), lock: readFileSync(join(root, 'Cargo.lock'), 'utf8'), root,
+    status: result.exitCode,
+    calls: readFileSync(log, 'utf8').trim().split('\n').filter(Boolean),
+    stdout: result.stdout.toString(),
+    error: result.stderr.toString(),
+    manifest: readFileSync(join(root, 'Cargo.toml'), 'utf8'),
+    lock: readFileSync(join(root, 'Cargo.lock'), 'utf8'),
+    root,
   }
 }
 
@@ -66,15 +71,32 @@ shellTest('build rejects ambiguous or host-mismatched targets and Linux checks s
   expect(all.calls.some(call => call.startsWith('cargo ') && call.includes('--workspace'))).toBe(false)
 })
 
-shellTest('frontend and script checks run independently', () => {
+shellTest('frontend, scripts, rust, and --skip-frontend checks run independently', () => {
   const frontend = run(['check', 'frontend'])
   expect(frontend.status).toBe(0)
   expect(frontend.calls.every(call => call.startsWith('bun ') && call.includes('frontend-rsbuild'))).toBe(true)
+
   const scripts = run(['check', 'scripts'])
   expect(scripts.status).toBe(0)
   expect(scripts.calls.some(call => call.startsWith('shellcheck '))).toBe(true)
   expect(scripts.calls).toContain('bun test scripts/tests')
   expect(scripts.calls.some(call => call.includes('frontend-rsbuild') || call.startsWith('cargo '))).toBe(false)
+
+  expect(run(['check', 'rust', '--skip-frontend']).status).toBe(1)
+  const rustSkipped = run(['check', 'rust', '--skip-frontend'], {}, { withPublicIndex: true })
+  expect(rustSkipped.status).toBe(0)
+  expect(rustSkipped.calls.some(call => call.includes('frontend-rsbuild'))).toBe(false)
+  expect(rustSkipped.calls.some(call => call.startsWith('cargo clippy --locked'))).toBe(true)
+})
+
+shellTest('build all --skip-frontend builds both musl targets with one kernel build and reuses public/', () => {
+  expect(run(['build', 'all', '--skip-frontend']).status).toBe(1)
+  const result = run(['build', 'all', '--refresh-kernel', '--skip-frontend'], { CARGO_TARGET_DIR: '/unused-review-target' }, { withPublicIndex: true })
+  expect(result.status).toBe(0)
+  expect(result.calls.filter(call => call === 'kernel all')).toHaveLength(1)
+  expect(result.calls.filter(call => call.startsWith('cargo zigbuild'))).toHaveLength(2)
+  expect(result.calls.filter(call => call.startsWith('cargo zigbuild')).every(call => call.includes(`--target-dir ${result.root}/target`))).toBe(true)
+  expect(result.calls.some(call => call.includes('frontend-rsbuild'))).toBe(false)
 })
 
 shellTest('kernel-only builds accept the default host target', () => {
@@ -83,24 +105,6 @@ shellTest('kernel-only builds accept the default host target', () => {
   expect(result.status).toBe(0)
   expect(result.calls).toContain(`${defaultTarget} --kernel-only`)
   expect(run(['kernel', 'arm64', '--kernel-only']).calls).toContain('kernel arm64 --kernel-only')
-})
-
-shellTest('release preparation builds both musl targets with one kernel build and no remote writes', () => {
-  const result = run(['release'], { CARGO_TARGET_DIR: '/unused-review-target' })
-  expect(result.status).toBe(0)
-  expect(result.calls.filter(call => call === 'kernel all')).toHaveLength(1)
-  expect(result.calls.filter(call => call.startsWith('cargo zigbuild'))).toHaveLength(2)
-  expect(result.calls.filter(call => call.startsWith('cargo zigbuild')).every(call => call.includes(`--target-dir ${result.root}/target`))).toBe(true)
-  expect(result.calls.some(call => call.includes('mjs stage '))).toBe(true)
-  expect(result.calls.some(call => /^(gh |git (push|tag) )/.test(call))).toBe(false)
-})
-
-shellTest('publishing rejects dirty trees, unverified builds and mismatched remote tags before writes', () => {
-  for (const env of [{ DIRTY: ' M changed' }, { GIT_STATUS: '1' }, { VERIFY_STATUS: '1' }, { GH_API_STATUS: '1' }, { REMOTE_TAG: `${'b'.repeat(40)}\trefs/tags/v1.2.3` }, { PUSH_URL: 'git@github.com:a/one.git\ngit@github.com:b/two.git' }]) {
-    const result = run(['release', '--publish'], env)
-    expect(result.status).toBe(1)
-    expect(result.calls.some(call => /^(git (push|tag) |gh release (create|upload|delete-asset) )/.test(call))).toBe(false)
-  }
 })
 
 shellTest('version updates restore both original files when Cargo fails', () => {
@@ -114,60 +118,33 @@ shellTest('version updates restore both original files when Cargo fails', () => 
   expect(success.lock).toBe('updated lock\n')
 })
 
-shellTest('tag checks, push and GitHub uploads all use the origin push URL', () => {
+shellTest('release without --push checks tree readiness without remote writes or local cross-builds', () => {
+  const result = run(['release'])
+  expect(result.status).toBe(0)
+  expect(result.stdout).toContain('Ready to release v1.2.3')
+  expect(result.calls.some(call => /^(git (push|tag) |cargo )/.test(call))).toBe(false)
+})
+
+shellTest('release --push rejects dirty trees, mismatched local/remote tags, and invalid origins before writes', () => {
+  for (const env of [
+    { DIRTY: ' M changed' },
+    { GIT_STATUS: '1' },
+    { LOCAL_TAG_EXISTS: '0', LOCAL_TAG_COMMIT: 'b'.repeat(40) },
+    { REMOTE_TAG: `${'b'.repeat(40)}\trefs/tags/v1.2.3` },
+    { PUSH_URL: 'git@github.com:a/one.git\ngit@github.com:b/two.git' },
+    { PUSH_URL: 'https://gitlab.com/example/miao.git' },
+  ]) {
+    const result = run(['release', '--push'], env)
+    expect(result.status).toBe(1)
+    expect(result.calls.some(call => /^git (push|tag) /.test(call))).toBe(false)
+  }
+})
+
+shellTest('release --push tags HEAD and pushes branch + tag to origin push URL to trigger GitHub Actions', () => {
   const pushUrl = 'https://github.com/release-owner/miao.git'
-  const result = run(['release', '--publish'], { PUSH_URL: pushUrl })
+  const result = run(['release', '--push'], { PUSH_URL: pushUrl })
   expect(result.status).toBe(0)
   expect(result.calls.some(call => call.startsWith(`git ls-remote --tags ${pushUrl} `))).toBe(true)
-  expect(result.calls).toContain(`git push ${pushUrl} refs/tags/v1.2.3`)
-  expect(result.calls.find(call => call.startsWith('gh release create '))).toContain('--repo github.com/release-owner/miao')
-})
-
-shellTest('draft releases are published only after uploads, while --draft cannot overwrite a public release', () => {
-  const env = { EXISTING_ASSETS: '', RELEASE_STATE: 'draft' }
-  const publish = run(['release', '--publish'], env)
-  expect(publish.status).toBe(0)
-  const upload = publish.calls.findIndex(call => call.startsWith('gh release upload '))
-  const edit = publish.calls.findIndex(call => call.startsWith('gh release edit ') && call.includes('--draft=false'))
-  expect(edit).toBeGreaterThan(upload)
-  for (const result of [run(['release', '--publish', '--draft'], env), run(['release', '--publish'], { ...env, UPLOAD_STATUS: '1' })]) {
-    expect(result.calls.some(call => call.startsWith('gh release edit '))).toBe(false)
-  }
-  const rejected = run(['release', '--publish', '--draft'], { EXISTING_ASSETS: '', RELEASE_STATE: 'published' })
-  expect(rejected.status).toBe(1)
-  expect(rejected.calls.some(call => /^(git (push|tag) |gh release (create|upload|edit) )/.test(call))).toBe(false)
-})
-
-shellTest('publishing uploads two binaries and their checksums and leaves source archives to GitHub', () => {
-  const result = run(['release', '--publish', '--draft'])
-  expect(result.status).toBe(0)
-  const create = result.calls.find(call => call.startsWith('gh release create '))
-  expect(create).toContain('--repo github.com/example/miao')
-  expect(create).toContain('--verify-tag')
-  expect(create).toContain('--draft')
-  const files = create.split(' ').filter(arg => arg.includes('/dist/')).map(path => path.split('/').at(-1))
-  expect(files).toEqual([
-    'harbor-linux-amd64', 'harbor-linux-amd64.sha256',
-    'harbor-linux-arm64', 'harbor-linux-arm64.sha256',
-  ])
-  expect(result.calls.some(call => call.startsWith('cargo '))).toBe(false)
-})
-
-shellTest('republishing preserves checksums and removes obsolete assets only after all uploads succeed', () => {
-  const env = { EXISTING_ASSETS: 'harbor-linux-amd64\nharbor-linux-amd64.sha256\nharbor-linux-arm64\nharbor-linux-arm64.sha256\nchecksums.txt\nold metadata.json' }
-  const result = run(['release', '--publish'], env)
-  expect(result.status).toBe(0)
-  const upload = result.calls.findIndex(call => call.startsWith('gh release upload '))
-  const files = result.calls[upload].split(' ').filter(arg => arg.includes('/dist/')).map(path => path.split('/').at(-1))
-  expect(files).toEqual([
-    'harbor-linux-amd64', 'harbor-linux-amd64.sha256',
-    'harbor-linux-arm64', 'harbor-linux-arm64.sha256',
-  ])
-  const deletions = result.calls.filter(call => call.startsWith('gh release delete-asset '))
-  expect(deletions).toHaveLength(2)
-  expect(deletions.every(call => result.calls.indexOf(call) > upload)).toBe(true)
-  expect(deletions.some(call => call.includes('harbor-linux-'))).toBe(false)
-  const failed = run(['release', '--publish'], { ...env, UPLOAD_STATUS: '1' })
-  expect(failed.status).toBe(1)
-  expect(failed.calls.some(call => call.startsWith('gh release delete-asset '))).toBe(false)
+  expect(result.calls).toContain(`git tag v1.2.3 ${head}`)
+  expect(result.calls).toContain(`git push ${pushUrl} HEAD refs/tags/v1.2.3`)
 })

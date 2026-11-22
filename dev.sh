@@ -8,13 +8,13 @@ usage() {
   cat <<'EOF'
 Usage: ./dev.sh <command> [arguments]
 
-  build [native|amd64|arm64|windows-amd64|desktop|all] [--refresh-kernel]
+  build [native|amd64|arm64|windows-amd64|desktop|all] [--refresh-kernel] [--skip-frontend]
       Build the panel and release binary; default native. amd64/arm64 use musl,
       desktop packages dist/harbor-windows-amd64-setup.exe on Windows. Missing or
       stale kernel/rule assets are rebuilt automatically.
   kernel [amd64|arm64|windows-amd64|all] [--kernel-only]
       Rebuild pinned kernels and rules; default host platform/architecture.
-  check [all|core|frontend|scripts|windows|desktop]
+  check [all|core|rust|frontend|scripts|windows|desktop] [--skip-frontend]
       Lint, test and build checks; default all. Core needs no generated assets.
   test [--embedded] [cargo test arguments]
       Core tests, or core + CLI tests with prepared assets.
@@ -26,9 +26,9 @@ Usage: ./dev.sh <command> [arguments]
       Test a built binary with a real kernel in isolated Linux namespaces.
   version <vX.Y.Z>
       Update Cargo.toml/Cargo.lock locally; review and commit before release.
-  release [--publish [--draft]]
-      Default: build both musl targets and stage dist/vX.Y.Z at a clean HEAD.
-      --publish: verify that staged release, push its tag and upload via gh.
+  release [--push]
+      Verify release readiness for vX.Y.Z; with --push, tag HEAD and push to
+      origin to trigger the GitHub Actions Release workflow (Linux + Windows).
   help
 
 Build outputs: target/release/harbor-cli[.exe] (native),
@@ -74,15 +74,24 @@ frontend_build() {
   bun install --cwd frontend-rsbuild --frozen-lockfile
   bun run --cwd frontend-rsbuild build
 }
+ensure_frontend_assets() {
+  local mode=${1:-build}
+  case "$mode" in
+    built) ;;
+    skip) [[ -f "$ROOT_DIR/public/index.html" ]] || die "public/index.html missing with --skip-frontend" ;;
+    *) frontend_build ;;
+  esac
+}
 kernel_build() {
   require bun go git curl
   bash scripts/lib/kernel.sh "$@"
 }
 build() {
-  local target=native refresh=0 specified=0 arg arch triple
+  local target=native refresh=0 skip_frontend=0 specified=0 arg arch triple
   for arg in "$@"; do
     case "$arg" in
       --refresh-kernel) refresh=1 ;;
+      --skip-frontend) skip_frontend=1 ;;
       native|amd64|arm64|windows-amd64|desktop|all)
         (( specified == 0 )) || die "supply only one build target"
         target=$arg; specified=1 ;;
@@ -114,7 +123,9 @@ build() {
   for arch in "${targets[@]}"; do
     if ! bun scripts/lib/release-artifacts.mjs resources "$arch"; then refresh=1; fi
   done
-  frontend_build
+  local frontend_mode=build
+  if (( skip_frontend )); then frontend_mode=skip; fi
+  ensure_frontend_assets "$frontend_mode"
   if (( refresh )); then
     if [[ "$target" == all ]]; then kernel_build all; else kernel_build "${targets[0]}"; fi
   fi
@@ -164,6 +175,19 @@ core_check() {
   cargo clippy -p harbor-core --locked --no-default-features --all-targets -- -D warnings
   cargo test -p harbor-core --locked --no-default-features --all-targets
 }
+rust_check() {
+  local frontend_mode=${1:-build}
+  core_check
+  ensure_frontend_assets "$frontend_mode"
+  prepare_test_assets
+  if is_windows_host; then
+    cargo clippy --workspace --locked --all-targets --all-features -- -D warnings
+    cargo test --workspace --locked --all-targets
+  else
+    cargo clippy --locked --all-targets --all-features -- -D warnings
+    cargo test --locked --all-targets
+  fi
+}
 frontend_check() {
   require bun
   bun install --cwd frontend-rsbuild --frozen-lockfile
@@ -200,50 +224,50 @@ case "$command" in
     fi
     kernel_build "$target" "$@" ;;
   check)
-    scope=${1:-all}
-    if (( $# )); then shift; fi
-    no_args "$@"
+    scope=all
+    skip_frontend=0
+    scope_set=0
+    for arg in "$@"; do
+      case "$arg" in
+        --skip-frontend) skip_frontend=1 ;;
+        all|core|rust|frontend|scripts|windows|desktop)
+          (( scope_set == 0 )) || die "supply only one check scope"
+          scope=$arg; scope_set=1 ;;
+        *) die "unknown check argument: $arg" ;;
+      esac
+    done
+    frontend_mode=build
+    if (( skip_frontend )); then frontend_mode=skip; fi
     case "$scope" in
       core) core_check ;;
+      rust) rust_check "$frontend_mode" ;;
       frontend) frontend_check ;;
       scripts) scripts_check ;;
       windows)
         require cargo
         if is_windows_host; then
-          core_check
-          frontend_build
-          prepare_test_assets
-          cargo clippy --workspace --locked --all-targets --all-features -- -D warnings
-          cargo test --workspace --locked --all-targets
+          rust_check "$frontend_mode"
         else
           require x86_64-w64-mingw32-gcc rustup
           triple=$(rust_target windows-amd64)
           rustup target list --installed | grep -qx "$triple" || die "install Rust target first: rustup target add $triple"
           CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER="${CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER:-x86_64-w64-mingw32-gcc}" \
             cargo clippy -p harbor-core --locked --no-default-features --target "$triple" --all-targets -- -D warnings
-          frontend_build
+          ensure_frontend_assets "$frontend_mode"
           prepare_test_assets
           CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER="${CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER:-x86_64-w64-mingw32-gcc}" \
             cargo clippy -p harbor-core -p harbor-cli --locked --target "$triple" --all-targets --all-features -- -D warnings
         fi ;;
       desktop)
         require cargo
-        frontend_build
+        ensure_frontend_assets "$frontend_mode"
         prepare_test_assets
         cargo clippy -p harbor-desktop --locked --all-targets -- -D warnings
         cargo test -p harbor-desktop --locked --all-targets ;;
       all)
         scripts_check
         frontend_check
-        core_check
-        prepare_test_assets
-        if is_windows_host; then
-          cargo clippy --workspace --locked --all-targets --all-features -- -D warnings
-          cargo test --workspace --locked --all-targets
-        else
-          cargo clippy --locked --all-targets --all-features -- -D warnings
-          cargo test --locked --all-targets
-        fi ;;
+        rust_check built ;;
       *) die "unknown check scope: $scope" ;;
     esac ;;
   test)

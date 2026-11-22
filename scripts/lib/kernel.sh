@@ -63,8 +63,18 @@ resolve_ref() {
   return 1
 }
 if [[ "$build_rules" == true ]]; then
-  sing_geoip_ref=$(resolve_ref https://github.com/SagerNet/sing-geoip.git refs/heads/rule-set)
-  direct_rules_ref=$(resolve_ref https://github.com/Loyalsoldier/v2ray-rules-dat.git refs/heads/release)
+  if [[ -n "${SING_GEOIP_REF:-}" ]]; then
+    [[ "$SING_GEOIP_REF" =~ ^[0-9a-f]{40}$ ]] || { echo "Invalid SING_GEOIP_REF: $SING_GEOIP_REF" >&2; exit 1; }
+    sing_geoip_ref=$SING_GEOIP_REF
+  else
+    sing_geoip_ref=$(resolve_ref https://github.com/SagerNet/sing-geoip.git refs/heads/rule-set)
+  fi
+  if [[ -n "${DIRECT_RULES_REF:-}" ]]; then
+    [[ "$DIRECT_RULES_REF" =~ ^[0-9a-f]{40}$ ]] || { echo "Invalid DIRECT_RULES_REF: $DIRECT_RULES_REF" >&2; exit 1; }
+    direct_rules_ref=$DIRECT_RULES_REF
+  else
+    direct_rules_ref=$(resolve_ref https://github.com/Loyalsoldier/v2ray-rules-dat.git refs/heads/release)
+  fi
 fi
 
 mkdir -p "$TMP_DIR/artifacts" "$EMBEDDED_DIR"

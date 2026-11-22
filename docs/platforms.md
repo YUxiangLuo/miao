@@ -1,10 +1,10 @@
 # 平台与运行细节
 
-项目主力面向 Linux / OpenWrt（`x86_64`、`aarch64` 单个 musl 二进制），同时提供 Windows `x86_64` 桌面版与 CLI 的源码一键打包支持。TUN 需要 root / 管理员权限。
+项目面向 Linux / OpenWrt（`x86_64`、`aarch64` 单个 musl 二进制）与 Windows `x86_64` 桌面版（NSIS 安装包），均随 GitHub Release 统一发布，同时也支持从源码一键本地打包。TUN 需要 root / 管理员权限。
 
 | 项目 | Linux / OpenWrt | Windows 桌面版 |
 | --- | --- | --- |
-| 分发形态 | Release 单文件 `harbor-linux-{amd64,arm64}` | 本地打包 `dist/harbor-windows-amd64-setup.exe` |
+| 分发形态 | Release 单文件 `harbor-linux-{amd64,arm64}` | Release 安装包 `harbor-windows-amd64-setup.exe`（也支持本地打包） |
 | 面板监听 | 默认 `0.0.0.0:6161`（局域网可访问） | 默认 `127.0.0.1:6161`（端口冲突自动回退） |
 | 权限与单实例 | root / `sudo`；端口与 TUN 互斥 | 启动经 UAC `runas`；命名互斥量防多开并唤出已有窗口 |
 | 开机自启 | systemd 服务（OpenWrt 按系统方式配置） | 托盘勾选 `Harbor` 登录任务，登录后免 UAC 进托盘 |
@@ -44,9 +44,9 @@ systemd Linux 在源码目录用 `sudo bash install.sh /path/to/harbor-linux-amd
 
 在源码目录执行 `sudo bash remove.sh` 卸载，`-y` 跳过确认。它会删除服务、程序及升级残留、`/etc/harbor`、运行目录及残留内核/TUN，**先备份配置**。Windows 升级或卸载前先从托盘退出，再运行新安装包覆盖安装或从系统设置卸载。
 
-## Windows 桌面版打包与使用
+## Windows 桌面版安装与本地打包
 
-仓库 Release 仅上传 Linux 二进制；Windows 下通过源码直接生成 NSIS 安装包：
+GitHub Release 会同步构建并上传 `harbor-windows-amd64-setup.exe` 及同名 `.sha256` 校验文件，可直接下载安装。如需在 Windows 本地从源码打包，执行：
 
 ```powershell
 .\desktop\package.cmd        # PowerShell / CMD

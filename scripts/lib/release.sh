@@ -1,9 +1,10 @@
 # shellcheck shell=bash
-# Sourced by dev.sh. All remote writes live in the explicit --publish branch.
+# Sourced by dev.sh. Release builds and GitHub Release uploads run in GitHub Actions
+# (.github/workflows/release.yml); local helpers only bump versions and safely tag/push.
 clean_tree() {
   local changes
   changes=$(git status --porcelain --untracked-files=normal) || die "failed to inspect working tree"
-  [[ -z "$changes" ]] || die "commit or stash changes before preparing/publishing a release"
+  [[ -z "$changes" ]] || die "commit or stash changes before tagging or pushing a release"
 }
 set_version() (
   (( $# == 1 )) || die "usage: ./dev.sh version vX.Y.Z"
@@ -17,90 +18,47 @@ set_version() (
   bun scripts/lib/release-artifacts.mjs version "$version"
   # Resolve only the workspace version change, retaining existing dependency pins.
   cargo check -p harbor-core --offline --no-default-features
-  echo "==> Version updated locally. Review and commit Cargo.toml/Cargo.lock, then run ./dev.sh release"
+  echo "==> Version updated locally to v$version."
+  echo "    Review and commit Cargo.toml/Cargo.lock, then run:"
+  echo "      ./dev.sh release --push"
+  echo "    or trigger the Release workflow manually in GitHub Actions."
 )
 release() {
-  local publish=0 draft=0 arg version tag stage commit remote_tag repository push_url release_state
+  local push=0 arg version tag commit push_url remote_tag
   for arg in "$@"; do
     case "$arg" in
-      --publish) publish=1 ;;
-      --draft) draft=1 ;;
-      *) die "unknown release argument: $arg" ;;
+      --push) push=1 ;;
+      *) die "unknown release argument: $arg (use ./dev.sh release [--push])" ;;
     esac
   done
-  (( publish || ! draft )) || die "--draft requires --publish"
   require bun git
   clean_tree
   version=$(bun scripts/lib/release-artifacts.mjs version)
   tag="v$version"
-  stage="$ROOT_DIR/dist/$tag"
   commit=$(git rev-parse HEAD)
   if git rev-parse --verify --quiet "refs/tags/$tag" >/dev/null; then
     [[ $(git rev-parse "refs/tags/$tag^{commit}") == "$commit" ]] || die "$tag already points at another commit"
   fi
-  if (( ! publish )); then
-    build all --refresh-kernel
-    clean_tree
-    [[ $(git rev-parse HEAD) == "$commit" ]] || die "HEAD changed during release build"
-    bun scripts/lib/release-artifacts.mjs stage "$stage" "$commit" "$tag"
-    echo "==> Prepared $stage. Publish with: ./dev.sh release --publish"
+  if (( ! push )); then
+    echo "==> Ready to release $tag at $commit via GitHub Actions."
+    echo "    Trigger automatically by tagging and pushing:"
+    echo "      ./dev.sh release --push"
+    echo "    Or push your branch and run Actions -> Release -> Run workflow (supports draft mode)."
     return
   fi
-  require gh
-  bun scripts/lib/release-artifacts.mjs verify "$stage" "$commit" "$tag"
   push_url=$(git remote get-url --push --all origin)
   [[ "$push_url" != *$'\n'* ]] || die "origin must have exactly one push URL"
-  repository=$push_url
-  case "$repository" in
-    https://github.com/*) repository=${repository#https://github.com/} ;;
-    git@github.com:*) repository=${repository#git@github.com:} ;;
-    ssh://git@github.com/*) repository=${repository#ssh://git@github.com/} ;;
+  case "$push_url" in
+    https://github.com/*|git@github.com:*|ssh://git@github.com/*) ;;
     *) die "origin must be a GitHub repository" ;;
   esac
-  repository=${repository%.git}
-  [[ "$repository" =~ ^[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+$ ]] || die "invalid origin repository"
-  gh auth status --hostname github.com >/dev/null
-  # Verify an existing remote tag before any push. Peel annotated tags too.
+  # Verify an existing remote tag before creating or pushing. Peel annotated tags too.
   remote_tag=$(git ls-remote --tags "$push_url" "refs/tags/$tag" "refs/tags/$tag^{}")
   if [[ -n "$remote_tag" ]]; then
     remote_tag=$(awk 'END {print $1}' <<< "$remote_tag")
     [[ "$remote_tag" == "$commit" ]] || die "remote $tag points at another commit"
   fi
-  # A successful, paginated listing distinguishes absence from API/auth errors.
-  # Resolve this before creating or pushing a tag, including the draft state.
-  release_state=$(gh api --hostname github.com --paginate "repos/$repository/releases?per_page=100" \
-    --jq ".[] | select(.tag_name == \"$tag\") | (if .draft then \"draft\" else \"published\" end), .assets[].name")
-  if (( draft )) && [[ "${release_state%%$'\n'*}" == published ]]; then
-    die "$tag is already published; --draft cannot replace a public release"
-  fi
-  repository="github.com/$repository"
   git rev-parse --verify --quiet "refs/tags/$tag" >/dev/null || git tag "$tag" "$commit"
-  git push "$push_url" "refs/tags/$tag"
-  local assets=(
-    "$stage/harbor-linux-amd64"
-    "$stage/harbor-linux-amd64.sha256"
-    "$stage/harbor-linux-arm64"
-    "$stage/harbor-linux-arm64.sha256"
-  )
-  local asset
-  if [[ -n "$release_state" ]]; then
-    gh release upload "$tag" --repo "$repository" "${assets[@]}" --clobber
-    # Source archives are generated by GitHub. Retire old auxiliary uploads
-    # only after both binaries and their checksums have been uploaded successfully.
-    while IFS= read -r asset; do
-      case "$asset" in
-        ''|harbor-linux-amd64|harbor-linux-arm64) ;;
-        harbor-linux-amd64.sha256|harbor-linux-arm64.sha256) ;;
-        *) gh release delete-asset "$tag" "$asset" --repo "$repository" --yes ;;
-      esac
-    done < <(printf '%s\n' "$release_state" | tail -n +2)
-    if (( ! draft )) && [[ "${release_state%%$'\n'*}" == draft ]]; then
-      gh release edit "$tag" --repo "$repository" --draft=false
-    fi
-  else
-    local draft_args=()
-    if (( draft )); then draft_args=(--draft); fi
-    gh release create "$tag" --repo "$repository" --verify-tag --title "$tag" --generate-notes "${draft_args[@]}" "${assets[@]}"
-  fi
-  gh release view "$tag" --repo "$repository" --json url -q .url
+  git push "$push_url" HEAD "refs/tags/$tag"
+  echo "==> Pushed $tag ($commit). GitHub Actions Release workflow will build and publish Linux + Windows assets."
 }

@@ -3,6 +3,7 @@
   <h1>Harbor</h1>
   <p><strong>外贸企业跨境网络与多店铺静态 IP 防关联网关</strong></p>
   <p>
+    <a href="https://github.com/YUxiangLuo/miao/actions/workflows/ci.yml"><img src="https://github.com/YUxiangLuo/miao/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
     <a href="https://github.com/YUxiangLuo/miao/releases/latest"><img src="https://img.shields.io/github/v/release/YUxiangLuo/miao?style=flat-square" alt="Release" /></a>
   </p>
 </div>
@@ -22,14 +23,15 @@ Harbor 将定制 `sing-box` 内核、大陆/内网直连规则集与 SolidJS 2.0
 
 ## 安装与启动
 
-从 [Release](https://github.com/YUxiangLuo/miao/releases/latest) 下载对应架构的程序和同名 `.sha256` 校验文件；源码 ZIP/TAR.GZ 由 GitHub 自动生成。
+从 [Release](https://github.com/YUxiangLuo/miao/releases/latest) 下载对应平台的程序/安装包和同名 `.sha256` 校验文件；源码 ZIP/TAR.GZ 由 GitHub 自动生成。
 
-| 主机架构（`uname -m`） | 下载文件 |
+| 平台与架构 | 下载文件 |
 | --- | --- |
-| `x86_64` | `harbor-linux-amd64` |
-| `aarch64` | `harbor-linux-arm64` |
+| Linux / OpenWrt (`x86_64`) | `harbor-linux-amd64` |
+| Linux / OpenWrt (`aarch64`) | `harbor-linux-arm64` |
+| Windows 桌面版 (`x64`) | `harbor-windows-amd64-setup.exe` |
 
-先按[下载与校验](docs/platforms.md#下载与校验)核对 SHA-256，私有仓库需使用有访问权限的账号。启动需要 root 权限，TUN 和 Clash API 不支持多开，请先退出已有实例。
+Linux / OpenWrt 请先按[下载与校验](docs/platforms.md#下载与校验)核对 SHA-256，私有仓库需使用有访问权限的账号。启动需要 root 权限，TUN 和 Clash API 不支持多开，请先退出已有实例。
 
 以下以 amd64 为例，arm64 替换文件名；OpenWrt 以 root 直接运行，省略 `sudo`：
 
@@ -58,16 +60,16 @@ sudo bash install.sh ./target/release/harbor-cli
 
 安装保留现有配置并重启服务，期间会短暂断网。交叉编译、测试和发布见[开发指南](docs/development.md)。
 
-### Windows 打包与使用
+### Windows 桌面版安装与本地打包
 
-Windows 端不随 GitHub Release 分发，提供本地一键打包。安装 Git for Windows、Rust（MSVC）与 VS C++ 生成工具、Bun、Go 后，在仓库根目录任选一种方式执行：
+可直接从 [Release](https://github.com/YUxiangLuo/miao/releases/latest) 下载由 GitHub Actions 自动构建的 `harbor-windows-amd64-setup.exe`（附同名 `.sha256`）。如需本地从源码打包，安装 Git for Windows、Rust（MSVC）与 VS C++ 生成工具、Bun、Go 后，在仓库根目录任选一种方式执行：
 
 ```powershell
 .\desktop\package.cmd        # PowerShell / CMD（自动调用 Git Bash）
 ./dev.sh build desktop       # Git Bash
 ```
 
-打包完成后生成 `dist/harbor-windows-amd64-setup.exe`（附同名 `.sha256`）。直接运行安装包即可安装到当前用户目录（无需管理员，缺 WebView2 自动引导下载）；启动时经 UAC 提权创建 TUN 并驻留系统托盘（仅监听本机 `127.0.0.1`，支持勾选开机免 UAC 自启与打开日志）。覆盖升级或卸载前，请先在托盘图标右键选择「退出」。
+本地打包完成后生成 `dist/harbor-windows-amd64-setup.exe`（附同名 `.sha256`）。直接运行安装包即可安装到当前用户目录（无需管理员，缺 WebView2 自动引导下载）；启动时经 UAC 提权创建 TUN 并驻留系统托盘（仅监听本机 `127.0.0.1`，支持勾选开机免 UAC 自启与打开日志）。覆盖升级或卸载前，请先在托盘图标右键选择「退出」。
 
 ## 文档
 
