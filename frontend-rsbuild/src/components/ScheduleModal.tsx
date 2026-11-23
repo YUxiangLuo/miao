@@ -3,7 +3,6 @@ import { ICON } from '../tokens'
 import { useDialog } from '../hooks/useDialog'
 import { fetchJson } from '../hooks/request'
 import { Button } from './ui'
-import { classNames } from '../utils'
 import { formatNextRun, formatTimezoneLabel } from '../scheduleFormat'
 import type { ApiResponse, ScheduledRefreshRequest, ScheduledRefreshStatus } from '../types/api'
 import { ClockIcon, PlusIcon, Trash2Icon, XIcon } from './icons'
@@ -153,7 +152,7 @@ export function ScheduleModal(props: ScheduleModalProps) {
                     role="switch"
                     aria-checked={enabled() ? 'true' : 'false'}
                     aria-label="启用定时刷新"
-                    class={classNames('toggle-switch', enabled() && 'on')}
+                    class={['toggle-switch', { on: enabled() }]}
                     disabled={busy()}
                     data-autofocus
                     onClick={() => setEnabled((value) => !value)}

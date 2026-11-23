@@ -1,6 +1,6 @@
-import { For, Show, createEffect, createMemo, createSignal, flush, onCleanup } from 'solid-js'
+import { For, Show, createEffect, createMemo, createSignal, onSettled } from 'solid-js'
 import type { JSX } from '@solidjs/web'
-import { classNames, formatDelay } from '../utils'
+import { formatDelay } from '../utils'
 import type { useAppController } from '../hooks/useAppController'
 import { cleanNodeDisplay } from './SelectPopover'
 import { SearchIcon } from './icons'
@@ -35,16 +35,17 @@ interface CommandRenderRow {
 }
 
 export function useCommandShortcut(onToggle: () => void): void {
-  const handleKeyDown = (event: KeyboardEvent) => {
-    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
-      event.preventDefault()
-      onToggle()
-      flush()
+  onSettled(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault()
+        onToggle()
+      }
     }
-  }
-  window.addEventListener('keydown', handleKeyDown)
-  onCleanup(() => {
-    window.removeEventListener('keydown', handleKeyDown)
+    window.addEventListener('keydown', handleKeyDown)
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown)
+    }
   })
 }
 
@@ -257,13 +258,11 @@ export function CommandPalette(props: CommandPaletteProps): JSX.Element {
           event.preventDefault()
           event.stopPropagation()
           props.onClose()
-          flush()
           return
         }
         if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k' && !event.defaultPrevented) {
           event.preventDefault()
           props.onClose()
-          flush()
         }
       }
 
@@ -342,30 +341,30 @@ export function CommandPalette(props: CommandPaletteProps): JSX.Element {
               when={filteredRows().length > 0}
               fallback={<div class="cmd-empty">未找到匹配的命令或节点</div>}
             >
-              <For each={filteredRows()}>
+              <For each={filteredRows()} keyed={(row) => row.entry.id}>
                 {(row, index) => (
                   <>
-                    <Show when={row.showGroupTitle}>
-                      <div class="cmd-group-title" role="presentation">{row.entry.group}</div>
+                    <Show when={row().showGroupTitle}>
+                      <div class="cmd-group-title" role="presentation">{row().entry.group}</div>
                     </Show>
                     <button
                       type="button"
                       role="option"
                       aria-selected={activeIndex() === index() ? 'true' : 'false'}
-                      class={classNames('cmd-item', activeIndex() === index() && 'active')}
+                      class={['cmd-item', { active: activeIndex() === index() }]}
                       onMouseEnter={() => setActiveIndex(index())}
-                      onClick={() => executeEntry(row.entry)}
+                      onClick={() => executeEntry(row().entry)}
                     >
                       <span class="picker-option-main">
-                        <Show when={row.entry.activeDot}>
+                        <Show when={row().entry.activeDot}>
                           <span class="status-dot emerald" aria-hidden="true" />
                         </Show>
-                        <Show when={row.entry.code}>
+                        <Show when={row().entry.code}>
                           {(code) => <span class="mono-tag">{code()}</span>}
                         </Show>
-                        <span class="picker-trigger-label">{row.entry.label}</span>
+                        <span class="picker-trigger-label">{row().entry.label}</span>
                       </span>
-                      <Show when={row.entry.badge}>
+                      <Show when={row().entry.badge}>
                         {(badge) => <span class="mono-tag">{badge()}</span>}
                       </Show>
                     </button>

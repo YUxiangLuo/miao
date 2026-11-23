@@ -3,7 +3,7 @@ import { ICON } from '../tokens'
 import { useDialog } from '../hooks/useDialog'
 import { fetchJson } from '../hooks/request'
 import { Button } from './ui'
-import { classNames, maskSubscription, protocolTone } from '../utils'
+import { maskSubscription, protocolTone } from '../utils'
 import type { ApiResponse, SubNodeInfo, SubNodesInfo, SubStatus } from '../types/api'
 import { RssIcon, XIcon } from './icons'
 
@@ -162,19 +162,19 @@ export function SubDetailModal(props: SubDetailModalProps) {
                     >
                       <For each={list()} keyed={(node) => `${node.name}:${node.server}:${node.server_port}`}>
                         {(node) => (
-                          <div class={classNames('list-row', 'sub-node-row', node().disabled && 'disabled')}>
+                          <div class={['list-row', 'sub-node-row', { disabled: node().disabled }]}>
                             <div class="list-row-content">
                               <div class="list-row-title" title={node().name}>{node().name}</div>
                               <div class="list-row-meta num">{node().server}:{node().server_port}</div>
                             </div>
-                            <span class={classNames('badge', protocolTone(node().node_type))}>{node().node_type}</span>
+                            <span class={['badge', protocolTone(node().node_type)]}>{node().node_type}</span>
                             <button
                               type="button"
                               role="switch"
                               aria-checked={!node().disabled ? 'true' : 'false'}
                               aria-label={`${node().disabled ? '启用' : '禁用'}节点 ${node().name}`}
                               title={node().disabled ? '启用该节点' : '禁用该节点（从生成的配置中移除）'}
-                              class={classNames('toggle-switch', !node().disabled && 'on')}
+                              class={['toggle-switch', { on: !node().disabled }]}
                               disabled={isPending(sub().url, node().name)}
                               aria-busy={isPending(sub().url, node().name) ? 'true' : undefined}
                               onClick={() => { void toggle(sub().url, node().name, !node().disabled) }}

@@ -1,10 +1,9 @@
-import { For, Show, createMemo, createSignal } from 'solid-js'
+import { For, Show, createMemo, createProjection, createSignal } from 'solid-js'
 import { ICON } from '../tokens'
 import { Button } from '../components/ui'
 import { SelectPopover, cleanNodeDisplay, type SelectOption } from '../components/SelectPopover'
 import { buildProxyRegionBuckets, classifyProxyRegion, type ProxyRegionId } from '../proxyRegions'
 import {
-  classNames,
   formatDelay,
   getDelayTone,
   maskSubscription,
@@ -90,6 +89,13 @@ export function NodesView(props: NodesViewProps) {
   )
   const candidateNodes = createMemo(() => app().primaryGroup()?.all || [])
   const currentSelectedNode = createMemo(() => app().primaryGroup()?.now || '')
+  let prevSelectedNode = ''
+  const selectedNodeMap = createProjection<Record<string, boolean>>((draft) => {
+    const next = currentSelectedNode()
+    if (prevSelectedNode && prevSelectedNode !== next) delete draft[prevSelectedNode]
+    if (next) draft[next] = true
+    prevSelectedNode = next
+  }, {})
   const regionBuckets = createMemo(() => buildProxyRegionBuckets(candidateNodes()))
 
   const multiplierOptions = createMemo<SelectOption[]>(() => [
@@ -313,10 +319,10 @@ export function NodesView(props: NodesViewProps) {
                   <div class="hairline-row" role="listitem">
                     <div class="row-main">
                       <div class="row-title">
-                        <span class={classNames('status-dot', dotTone())} aria-hidden="true" />
+                        <span class={['status-dot', dotTone()]} aria-hidden="true" />
                         <span class="mono">{maskSubscription(sub().url)}</span>
                       </div>
-                      <div class={classNames('row-sub', sub().state === 'failed' && 'text-danger')}>
+                      <div class={['row-sub', { 'text-danger': sub().state === 'failed' }]}>
                         {formatSubStateText(sub())}
                       </div>
                     </div>
@@ -404,18 +410,18 @@ export function NodesView(props: NodesViewProps) {
                 }
 
                 return (
-                  <div class={classNames('hairline-row', !row().relayExists && 'danger-tint')}>
+                  <div class={['hairline-row', { 'danger-tint': !row().relayExists }]}>
                     <div class="row-main">
                       <div class="row-title">
                         <span
-                          class={classNames(
+                          class={[
                             'status-dot',
                             !row().relayExists
                               ? 'crimson'
                               : tone() === 'timeout'
                                 ? 'amber'
                                 : 'emerald',
-                          )}
+                          ]}
                         />
                         <Show when={cleaned().code}>
                           {(code) => <span class="mono-tag">{code()}</span>}
@@ -435,15 +441,15 @@ export function NodesView(props: NodesViewProps) {
 
                     <div class="row-end">
                       <span
-                        class={classNames(
+                        class={[
                           'latency-text',
                           'num',
-                          tone() === 'fast'
-                            ? 'fast'
-                            : tone() === 'medium'
-                              ? 'medium'
-                              : (tone() === 'slow' || tone() === 'timeout') && 'slow',
-                        )}
+                          {
+                            fast: tone() === 'fast',
+                            medium: tone() === 'medium',
+                            slow: tone() === 'slow' || tone() === 'timeout',
+                          },
+                        ]}
                       >
                         {row().testing
                           ? '测速中'
@@ -535,15 +541,15 @@ export function NodesView(props: NodesViewProps) {
           <div class="surface-body" style={{ display: 'flex', 'flex-direction': 'column', gap: '14px' }}>
             <div class="studio-toolbar">
               <div class="seg-rail" role="group" aria-label="地区筛选">
-                <For each={regionBuckets()}>
+                <For each={regionBuckets()} keyed={(bucket) => bucket.id}>
                   {(bucket) => (
                     <button
                       type="button"
-                      class={classNames('seg-btn', poolRegion() === bucket.id && 'active')}
-                      aria-pressed={poolRegion() === bucket.id ? 'true' : 'false'}
-                      onClick={() => setPoolRegion(bucket.id)}
+                      class={['seg-btn', { active: poolRegion() === bucket().id }]}
+                      aria-pressed={poolRegion() === bucket().id ? 'true' : 'false'}
+                      onClick={() => setPoolRegion(bucket().id)}
                     >
-                      {REGION_CODE_LABELS[bucket.id]} <span class="num">{bucket.count}</span>
+                      {REGION_CODE_LABELS[bucket().id]} <span class="num">{bucket().count}</span>
                     </button>
                   )}
                 </For>
@@ -572,14 +578,14 @@ export function NodesView(props: NodesViewProps) {
               <div class="node-matrix" role="group" aria-label="候选节点">
                 <For each={visiblePoolNodes()}>
                   {(nodeName) => {
-                    const selected = () => currentSelectedNode() === nodeName
-                    const cleaned = () => cleanNodeDisplay(nodeName)
+                    const selected = () => Boolean(selectedNodeMap[nodeName])
+                    const cleaned = createMemo(() => cleanNodeDisplay(nodeName))
                     const delay = () => app().delays()[nodeName]
                     const tone = () => getDelayTone(delay())
                     return (
                       <button
                         type="button"
-                        class={classNames('node-cell', selected() && 'selected')}
+                        class={['node-cell', { selected: selected() }]}
                         aria-pressed={selected() ? 'true' : 'false'}
                         disabled={requestedSelect() !== 'manual' || Boolean(app().switchingNode())}
                         title={
@@ -593,14 +599,14 @@ export function NodesView(props: NodesViewProps) {
                       >
                         <span class="node-cell-main">
                           <span
-                            class={classNames(
+                            class={[
                               'status-dot',
                               selected()
                                 ? 'emerald'
                                 : tone() === 'timeout'
                                   ? 'crimson'
                                   : 'muted',
-                            )}
+                            ]}
                           />
                           <Show when={cleaned().code}>
                             {(code) => <span class="mono-tag">{code()}</span>}
@@ -608,15 +614,15 @@ export function NodesView(props: NodesViewProps) {
                           <span class="node-cell-name">{cleaned().name}</span>
                         </span>
                         <span
-                          class={classNames(
+                          class={[
                             'latency-text',
                             'num',
-                            tone() === 'fast'
-                              ? 'fast'
-                              : tone() === 'medium'
-                                ? 'medium'
-                                : (tone() === 'slow' || tone() === 'timeout') && 'slow',
-                          )}
+                            {
+                              fast: tone() === 'fast',
+                              medium: tone() === 'medium',
+                              slow: tone() === 'slow' || tone() === 'timeout',
+                            },
+                          ]}
                         >
                           {app().testingNodes()[nodeName]
                             ? '…'

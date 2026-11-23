@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from '@solidjs/testing-library'
-import { createSignal } from 'solid-js'
+import { createSignal, flush } from 'solid-js'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, rs } from '@rstest/core'
 import { SelectPopover, cleanNodeDisplay, type SelectOption } from './SelectPopover'
@@ -198,6 +198,38 @@ describe('SelectPopover', () => {
     await user.click(trigger)
     expect(screen.getByRole('listbox')).toBeInTheDocument()
     fireEvent.pointerDown(screen.getByRole('button', { name: '外部区域' }))
+    flush()
     expect(screen.queryByRole('listbox')).not.toBeInTheDocument()
+  })
+
+  it('computes focused option against the updated search filter immediately on Enter', async () => {
+    const user = userEvent.setup()
+    const manyOptions: SelectOption[] = [
+      { value: 'n1', label: '禁用节点', disabled: true },
+      { value: 'n2', label: `${FLAG_HK} 香港专线 01` },
+      { value: 'n3', label: `${FLAG_JP} 东京高速 01`, disabled: true },
+      { value: 'n4', label: `${FLAG_JP} 大阪高速 02` },
+      { value: 'n5', label: `${FLAG_SG} 新加坡 BGP 01` },
+      { value: 'n6', label: `${FLAG_US} 洛杉矶原生 01` },
+      { value: 'n7', label: `${FLAG_DE} 法兰克福 01` },
+    ]
+    const onChange = rs.fn()
+
+    render(() => (
+      <SelectPopover
+        value="n2"
+        options={manyOptions}
+        onChange={onChange}
+        ariaLabel="搜索回车测试"
+      />
+    ))
+
+    await user.click(screen.getByRole('button', { name: '搜索回车测试' }))
+    const searchInput = screen.getByRole('textbox')
+    // 直接单次输入触发 onInput（不依赖多键逐次 flush），验证新过滤结果跳过禁用项并聚焦 n4
+    fireEvent.input(searchInput, { target: { value: 'JP' } })
+    flush()
+    await user.keyboard('{Enter}')
+    expect(onChange).toHaveBeenCalledWith('n4')
   })
 })

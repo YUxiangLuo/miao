@@ -1,6 +1,6 @@
 import { Show, createMemo } from 'solid-js'
 import { ICON } from '../tokens'
-import { classNames, formatBytes, formatSpeed } from '../utils'
+import { formatBytes, formatSpeed } from '../utils'
 import type { EnrichedConnection } from '../types/clash'
 import {
   connectionOutbound,
@@ -85,7 +85,7 @@ export function ConnectionRow(props: ConnectionRowProps) {
 
   return (
     <article
-      class={classNames('conn-row', active() ? 'active' : 'idle')}
+      class={['conn-row', active() ? 'active' : 'idle']}
       aria-label={`${domain()} 链接`}
       data-flip-key={props.connection.id}
       role="listitem"
@@ -99,7 +99,7 @@ export function ConnectionRow(props: ConnectionRowProps) {
           <span class="conn-row-sub" title={subtitle()}>{subtitle()}</span>
         </div>
         <span
-          class={classNames('badge', 'connection-outbound-chip', direct() && 'direct')}
+          class={['badge', 'connection-outbound-chip', { direct: direct() }]}
           title={direct() ? outbound() : outboundDisplay().name}
         >
           <Show when={!direct() && outboundDisplay().code}>

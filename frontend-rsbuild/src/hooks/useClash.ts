@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createSignal, onCleanup, untrack, type Accessor } from 'solid-js'
+import { createEffect, createMemo, createSignal, createStore, onCleanup, untrack, type Accessor } from 'solid-js'
 import { CLASH_API_BASE, DELAY_TEST_TIMEOUT_MS, DELAY_TEST_URL } from '../utils'
 import { useWebSocket } from './useWebSocket'
 import { fetchJson } from './request'
@@ -262,14 +262,24 @@ export function useConnections(ready: Accessor<boolean>, clashApiBase: string) {
   }
 }
 
+function clearRecord<T>(draft: Record<string, T>) {
+  for (const key of Object.keys(draft)) {
+    delete draft[key]
+  }
+}
+
 export function useDelays() {
-  const [delays, setDelays] = createSignal<Record<string, number>>({})
-  const [delayMeasuredAt, setDelayMeasuredAt] = createSignal<Record<string, number>>({})
-  const [testingNodes, setTestingNodes] = createSignal<Record<string, boolean>>({})
+  const [delaysStore, setDelaysStore] = createStore<Record<string, number>>({})
+  const [delayMeasuredAtStore, setDelayMeasuredAtStore] = createStore<Record<string, number>>({})
+  const [testingNodesStore, setTestingNodesStore] = createStore<Record<string, boolean>>({})
   const [testingGroup, setTestingGroup] = createSignal('')
   const requests = new Map<string, AbortController>()
   let generation = 0
   let groupRunning = false
+
+  const delays: Accessor<Record<string, number>> = () => delaysStore
+  const delayMeasuredAt: Accessor<Record<string, number>> = () => delayMeasuredAtStore
+  const testingNodes: Accessor<Record<string, boolean>> = () => testingNodesStore
 
   const cancel = () => {
     generation++
@@ -284,7 +294,9 @@ export function useDelays() {
     const controller = new AbortController()
     requests.set(nodeName, controller)
     const isCurrentProbe = () => requests.get(nodeName) === controller
-    setTestingNodes((prev) => ({ ...prev, [nodeName]: true }))
+    setTestingNodesStore((draft) => {
+      draft[nodeName] = true
+    })
     let delay = -1
     try {
       const payload = await fetchJson<ClashDelay>(
@@ -296,13 +308,15 @@ export function useDelays() {
       // A current failed measurement is displayed as unavailable.
     } finally {
       if (isCurrentProbe()) {
-        setDelays((prev) => ({ ...prev, [nodeName]: delay }))
-        setDelayMeasuredAt((prev) => ({ ...prev, [nodeName]: Date.now() }))
+        setDelaysStore((draft) => {
+          draft[nodeName] = delay
+        })
+        setDelayMeasuredAtStore((draft) => {
+          draft[nodeName] = Date.now()
+        })
         requests.delete(nodeName)
-        setTestingNodes((prev) => {
-          const next = { ...prev }
-          delete next[nodeName]
-          return next
+        setTestingNodesStore((draft) => {
+          delete draft[nodeName]
         })
       }
     }
@@ -329,9 +343,9 @@ export function useDelays() {
 
   const clearDelays = () => {
     cancel()
-    setDelays({})
-    setDelayMeasuredAt({})
-    setTestingNodes({})
+    setDelaysStore(clearRecord)
+    setDelayMeasuredAtStore(clearRecord)
+    setTestingNodesStore(clearRecord)
     setTestingGroup('')
   }
 

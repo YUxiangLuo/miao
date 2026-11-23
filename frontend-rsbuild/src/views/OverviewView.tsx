@@ -1,4 +1,4 @@
-import { For, Show, createMemo, createSignal } from 'solid-js'
+import { For, Show, createMemo, createProjection, createSignal } from 'solid-js'
 import type { JSX } from '@solidjs/web'
 import { ICON } from '../tokens'
 import { Button } from '../components/ui'
@@ -7,7 +7,6 @@ import { SelectPopover, cleanNodeDisplay, type SelectOption } from '../component
 import { splitConnectionStats } from '../components/connectionFilters'
 import { buildProxyRegionBuckets, classifyProxyRegion, type ProxyRegionId } from '../proxyRegions'
 import {
-  classNames,
   formatDelay,
   formatSpeed,
   formatUptime,
@@ -73,6 +72,13 @@ export function OverviewView(props: { app: AppController }): JSX.Element {
 
   const candidateNodes = createMemo(() => app().primaryGroup()?.all ?? [])
   const currentNode = createMemo(() => app().primaryGroup()?.now ?? '')
+  let prevCurrentNode = ''
+  const selectedNodeMap = createProjection<Record<string, boolean>>((draft) => {
+    const next = currentNode()
+    if (prevCurrentNode && prevCurrentNode !== next) delete draft[prevCurrentNode]
+    if (next) draft[next] = true
+    prevCurrentNode = next
+  }, {})
   const currentDisplay = createMemo(() => cleanNodeDisplay(currentNode()))
   const requestedSelect = createMemo<NodeSelect>(
     () => app().status().requested_node_select || app().status().node_select || 'manual',
@@ -186,10 +192,10 @@ export function OverviewView(props: { app: AppController }): JSX.Element {
           <div class="overview-card-body">
             <div class="overview-stat-line">
               <span
-                class={classNames(
+                class={[
                   'status-dot',
                   app().status().ready ? 'emerald pulse' : app().status().initializing ? 'amber' : 'muted',
-                )}
+                ]}
                 aria-hidden="true"
               />
               <strong class="overview-stat-value">
@@ -237,7 +243,7 @@ export function OverviewView(props: { app: AppController }): JSX.Element {
             <div class="seg-rail full" role="group" aria-label="分流模式">
               <button
                 type="button"
-                class={classNames('seg-btn', app().status().route_mode === 'rule' && 'active')}
+                class={['seg-btn', { active: app().status().route_mode === 'rule' }]}
                 aria-pressed={app().status().route_mode === 'rule' ? 'true' : 'false'}
                 disabled={app().pendingActions().has('routeMode')}
                 onClick={() => switchRouteMode('rule')}
@@ -246,7 +252,7 @@ export function OverviewView(props: { app: AppController }): JSX.Element {
               </button>
               <button
                 type="button"
-                class={classNames('seg-btn', app().status().route_mode === 'global' && 'active')}
+                class={['seg-btn', { active: app().status().route_mode === 'global' }]}
                 aria-pressed={app().status().route_mode === 'global' ? 'true' : 'false'}
                 disabled={app().pendingActions().has('routeMode')}
                 onClick={() => switchRouteMode('global')}
@@ -395,15 +401,15 @@ export function OverviewView(props: { app: AppController }): JSX.Element {
               <Show when={candidateNodes().length > 6}>
                 <div class="studio-toolbar" style={{ 'margin-bottom': '14px' }}>
                   <div class="seg-rail" role="group" aria-label="地区筛选">
-                    <For each={regionBuckets()}>
+                    <For each={regionBuckets()} keyed={(bucket) => bucket.id}>
                       {(bucket) => (
                         <button
                           type="button"
-                          class={classNames('seg-btn', region() === bucket.id && 'active')}
-                          aria-pressed={region() === bucket.id ? 'true' : 'false'}
-                          onClick={() => setRegion(bucket.id)}
+                          class={['seg-btn', { active: region() === bucket().id }]}
+                          aria-pressed={region() === bucket().id ? 'true' : 'false'}
+                          onClick={() => setRegion(bucket().id)}
                         >
-                          {REGION_LABELS[bucket.id]} <span class="num">{bucket.count}</span>
+                          {REGION_LABELS[bucket().id]} <span class="num">{bucket().count}</span>
                         </button>
                       )}
                     </For>
@@ -431,14 +437,14 @@ export function OverviewView(props: { app: AppController }): JSX.Element {
                 <div class="node-matrix" role="group" aria-label="候选节点列表">
                   <For each={visibleNodes()}>
                     {(nodeName) => {
-                      const selected = () => currentNode() === nodeName
-                      const cleaned = () => cleanNodeDisplay(nodeName)
+                      const selected = () => Boolean(selectedNodeMap[nodeName])
+                      const cleaned = createMemo(() => cleanNodeDisplay(nodeName))
                       const delay = () => app().delays()[nodeName]
                       const tone = () => getDelayTone(delay())
                       return (
                         <button
                           type="button"
-                          class={classNames('node-cell', selected() && 'selected')}
+                          class={['node-cell', { selected: selected() }]}
                           aria-pressed={selected() ? 'true' : 'false'}
                           disabled={!isManual() || Boolean(app().switchingNode())}
                           title={
@@ -452,14 +458,14 @@ export function OverviewView(props: { app: AppController }): JSX.Element {
                         >
                           <span class="node-cell-main">
                             <span
-                              class={classNames(
+                              class={[
                                 'status-dot',
                                 selected()
                                   ? 'emerald'
                                   : tone() === 'timeout'
                                     ? 'crimson'
                                     : 'muted',
-                              )}
+                              ]}
                             />
                             <Show when={cleaned().code}>
                               {(code) => <span class="mono-tag">{code()}</span>}
@@ -467,15 +473,15 @@ export function OverviewView(props: { app: AppController }): JSX.Element {
                             <span class="node-cell-name">{cleaned().name}</span>
                           </span>
                           <span
-                            class={classNames(
+                            class={[
                               'latency-text',
                               'num',
-                              tone() === 'fast'
-                                ? 'fast'
-                                : tone() === 'medium'
-                                  ? 'medium'
-                                  : (tone() === 'slow' || tone() === 'timeout') && 'slow',
-                            )}
+                              {
+                                fast: tone() === 'fast',
+                                medium: tone() === 'medium',
+                                slow: tone() === 'slow' || tone() === 'timeout',
+                              },
+                            ]}
                           >
                             {app().testingNodes()[nodeName]
                               ? '…'

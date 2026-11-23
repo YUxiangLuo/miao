@@ -198,10 +198,6 @@ export function nodeTypeDefaults(type: string): Partial<NodeForm> {
   }
 }
 
-export function classNames(...items: Array<string | false | null | undefined>): string {
-  return items.filter(Boolean).join(' ')
-}
-
 export function formatUptime(seconds: number | null | undefined): string {
   if (!seconds) return '--'
   const hrs = Math.floor(seconds / 3600)

@@ -1,5 +1,4 @@
 import { For, Show } from 'solid-js'
-import { classNames } from '../utils'
 import { PATH_FILTERS, type PathCounts, type PathFilterOption } from './connectionFilters'
 
 export interface PillGroupProps {
@@ -19,7 +18,7 @@ function PillGroup(props: PillGroupProps) {
           return (
             <button
               type="button"
-              class={classNames('connections-pill', props.value === option.value && 'active')}
+              class={['connections-pill', { active: props.value === option.value }]}
               aria-pressed={props.value === option.value ? 'true' : 'false'}
               onClick={() => props.onChange(option.value)}
             >

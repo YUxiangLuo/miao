@@ -1,6 +1,5 @@
-import { For, Show, createEffect, createMemo, createSignal, createUniqueId, flush } from 'solid-js'
+import { For, Show, createEffect, createMemo, createSignal, createUniqueId } from 'solid-js'
 import type { JSX } from '@solidjs/web'
-import { classNames } from '../utils'
 import { CheckIcon, ChevronDownIcon, SearchIcon } from './icons'
 
 export interface SelectOption {
@@ -64,6 +63,35 @@ interface FilteredItem {
   showGroupHeader: boolean
 }
 
+function filterSelectOptions(options: SelectOption[], query: string): FilteredItem[] {
+  const needle = query.trim().toLowerCase()
+  const items: FilteredItem[] = []
+  let lastGroup: string | undefined
+
+  for (const option of options) {
+    const display = cleanNodeDisplay(option.label)
+    if (needle) {
+      const haystack = [
+        option.label,
+        display.name,
+        display.code ?? '',
+        option.value,
+        option.group ?? '',
+        option.badge ?? '',
+      ]
+        .join(' ')
+        .toLowerCase()
+      if (!haystack.includes(needle)) continue
+    }
+
+    const showGroupHeader = Boolean(option.group && option.group !== lastGroup)
+    if (option.group) lastGroup = option.group
+    items.push({ option, display, showGroupHeader })
+  }
+
+  return items
+}
+
 export function SelectPopover(props: SelectPopoverProps): JSX.Element {
   const listboxId = createUniqueId()
   const [open, setOpen] = createSignal(false)
@@ -76,6 +104,7 @@ export function SelectPopover(props: SelectPopoverProps): JSX.Element {
   let searchInputEl: HTMLInputElement | undefined
   let popoverEl: HTMLDivElement | undefined
 
+  const isDisabled = createMemo(() => Boolean(props.disabled))
   const searchable = createMemo(() => props.options.length > (props.searchableThreshold ?? 6))
 
   const selectedOption = createMemo(() => props.options.find((opt) => opt.value === props.value))
@@ -87,34 +116,7 @@ export function SelectPopover(props: SelectPopoverProps): JSX.Element {
     return { code: null, name: props.placeholder ?? '请选择' }
   })
 
-  const filteredItems = createMemo<FilteredItem[]>(() => {
-    const needle = query().trim().toLowerCase()
-    const items: FilteredItem[] = []
-    let lastGroup: string | undefined
-
-    for (const option of props.options) {
-      const display = cleanNodeDisplay(option.label)
-      if (needle) {
-        const haystack = [
-          option.label,
-          display.name,
-          display.code ?? '',
-          option.value,
-          option.group ?? '',
-          option.badge ?? '',
-        ]
-          .join(' ')
-          .toLowerCase()
-        if (!haystack.includes(needle)) continue
-      }
-
-      const showGroupHeader = Boolean(option.group && option.group !== lastGroup)
-      if (option.group) lastGroup = option.group
-      items.push({ option, display, showGroupHeader })
-    }
-
-    return items
-  })
+  const filteredItems = createMemo<FilteredItem[]>(() => filterSelectOptions(props.options, query()))
 
   const findInitialFocusIndex = (items: FilteredItem[]): number => {
     const selectedIdx = items.findIndex((item) => item.option.value === props.value && !item.option.disabled)
@@ -131,7 +133,8 @@ export function SelectPopover(props: SelectPopoverProps): JSX.Element {
     }
     setQuery('')
     setOpen(true)
-    setFocusedIndex(findInitialFocusIndex(filteredItems()))
+    // Solid 2.0 写入在 microtask flush 后才对读取可见，用本次空查询直接计算初始焦点。
+    setFocusedIndex(findInitialFocusIndex(filterSelectOptions(props.options, '')))
   }
 
   const closePopover = (restoreFocus = false) => {
@@ -171,9 +174,9 @@ export function SelectPopover(props: SelectPopoverProps): JSX.Element {
   }
 
   createEffect(
-    () => Boolean(props.disabled && open()),
-    (shouldClose) => {
-      if (shouldClose) setOpen(false)
+    () => isDisabled(),
+    (disabled) => {
+      if (disabled) setOpen(false)
     },
   )
 
@@ -196,7 +199,6 @@ export function SelectPopover(props: SelectPopoverProps): JSX.Element {
         const target = event.target
         if (rootEl && target instanceof Node && !rootEl.contains(target)) {
           closePopover(false)
-          flush()
         }
       }
 
@@ -249,13 +251,13 @@ export function SelectPopover(props: SelectPopoverProps): JSX.Element {
   return (
     <div
       ref={(el) => { rootEl = el }}
-      class={classNames('picker-root', props.fullWidth && 'full-width', props.class)}
+      class={['picker-root', { 'full-width': Boolean(props.fullWidth) }, props.class]}
       onKeyDown={handleRootKeyDown}
     >
       <button
         ref={(el) => { triggerEl = el }}
         type="button"
-        class={classNames('picker-trigger', props.size ?? 'md', open() && 'open')}
+        class={['picker-trigger', props.size ?? 'md', { open: open() }]}
         aria-label={props.ariaLabel}
         aria-haspopup="listbox"
         aria-expanded={open() ? 'true' : 'false'}
@@ -265,7 +267,7 @@ export function SelectPopover(props: SelectPopoverProps): JSX.Element {
       >
         <span class="picker-trigger-main">
           <Show when={selectedOption()?.tone && selectedOption()!.tone !== 'default'}>
-            <span class={classNames('status-dot', selectedOption()!.tone)} aria-hidden="true" />
+            <span class={['status-dot', selectedOption()!.tone]} aria-hidden="true" />
           </Show>
           <Show when={selectedDisplay().code}>
             {(code) => <span class="mono-tag">{code()}</span>}
@@ -285,11 +287,11 @@ export function SelectPopover(props: SelectPopoverProps): JSX.Element {
           role="listbox"
           aria-label={props.ariaLabel}
           tabindex={-1}
-          class={classNames(
+          class={[
             'picker-popover',
             props.align === 'right' ? 'align-right' : 'align-left',
-            flipUp() && 'flip-up',
-          )}
+            { 'flip-up': flipUp() },
+          ]}
         >
           <Show when={searchable()}>
             <div class="picker-search">
@@ -301,8 +303,9 @@ export function SelectPopover(props: SelectPopoverProps): JSX.Element {
                 placeholder={props.searchPlaceholder ?? '搜索节点或地区…'}
                 value={query()}
                 onInput={(event) => {
-                  setQuery(event.currentTarget.value)
-                  const nextItems = filteredItems()
+                  const nextQuery = event.currentTarget.value
+                  setQuery(nextQuery)
+                  const nextItems = filterSelectOptions(props.options, nextQuery)
                   const firstEnabled = nextItems.findIndex((item) => !item.option.disabled)
                   setFocusedIndex(firstEnabled)
                 }}
@@ -315,13 +318,13 @@ export function SelectPopover(props: SelectPopoverProps): JSX.Element {
               when={filteredItems().length > 0}
               fallback={<div class="picker-empty">无匹配选项</div>}
             >
-              <For each={filteredItems()}>
+              <For each={filteredItems()} keyed={(item) => item.option.value}>
                 {(item, index) => {
-                  const isSelected = () => item.option.value === props.value
+                  const isSelected = () => item().option.value === props.value
                   const isFocused = () => focusedIndex() === index()
                   return (
                     <>
-                      <Show when={item.showGroupHeader && item.option.group}>
+                      <Show when={item().showGroupHeader && item().option.group}>
                         {(group) => (
                           <div class="picker-group-label" role="presentation">
                             {group()}
@@ -332,29 +335,28 @@ export function SelectPopover(props: SelectPopoverProps): JSX.Element {
                         type="button"
                         role="option"
                         aria-selected={isSelected() ? 'true' : 'false'}
-                        disabled={item.option.disabled}
-                        class={classNames(
+                        disabled={item().option.disabled}
+                        class={[
                           'picker-option',
-                          isSelected() && 'selected',
-                          isFocused() && 'focused',
-                        )}
+                          { selected: isSelected(), focused: isFocused() },
+                        ]}
                         onMouseEnter={() => {
-                          if (!item.option.disabled) setFocusedIndex(index())
+                          if (!item().option.disabled) setFocusedIndex(index())
                         }}
-                        onClick={() => commitOption(item.option)}
+                        onClick={() => commitOption(item().option)}
                       >
                         <span class="picker-option-main">
-                          <Show when={item.option.tone && item.option.tone !== 'default'}>
-                            <span class={classNames('status-dot', item.option.tone)} aria-hidden="true" />
+                          <Show when={item().option.tone && item().option.tone !== 'default'}>
+                            <span class={['status-dot', item().option.tone]} aria-hidden="true" />
                           </Show>
-                          <Show when={item.display.code}>
+                          <Show when={item().display.code}>
                             {(code) => <span class="mono-tag">{code()}</span>}
                           </Show>
-                          <span class="picker-trigger-label">{item.display.name}</span>
+                          <span class="picker-trigger-label">{item().display.name}</span>
                         </span>
-                        <Show when={item.option.badge || isSelected()}>
+                        <Show when={item().option.badge || isSelected()}>
                           <span class="picker-option-badge">
-                            {item.option.badge ?? ''}
+                            {item().option.badge ?? ''}
                             <Show when={isSelected()}>
                               <CheckIcon size={12} />
                             </Show>

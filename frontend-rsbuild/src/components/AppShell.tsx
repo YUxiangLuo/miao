@@ -1,4 +1,4 @@
-import { For, Match, Show, Switch, createEffect, createMemo, createSignal } from 'solid-js'
+import { For, Match, Show, Switch, createMemo, createSignal, onSettled } from 'solid-js'
 import { ICON } from '../tokens'
 import { useTheme } from '../hooks/useTheme'
 import { Button, LogoIcon, ToastStack } from './ui'
@@ -16,7 +16,7 @@ import { RulesView } from '../views/RulesView'
 import { LanView } from '../views/LanView'
 import { ConnectionsView } from '../views/ConnectionsView'
 import { SettingsView } from '../views/SettingsView'
-import { classNames, formatSpeed } from '../utils'
+import { formatSpeed } from '../utils'
 import type { ConsoleNavKey } from '../hooks/useAppData'
 import type { RouteMode, SubStatus } from '../types/api'
 import type { useAppController } from '../hooks/useAppController'
@@ -53,20 +53,17 @@ export function AppShell(props: { app: AppController }) {
 
   useCommandShortcut(() => setCmdOpen((prev) => !prev))
 
-  createEffect(
-    () => true,
-    () => {
-      if (typeof window === 'undefined') return
-      const syncViewport = () => setIsMobile(detectMobileViewport())
-      window.addEventListener('resize', syncViewport)
-      const mql = window.matchMedia?.('(max-width: 820px)')
-      mql?.addEventListener?.('change', syncViewport)
-      return () => {
-        window.removeEventListener('resize', syncViewport)
-        mql?.removeEventListener?.('change', syncViewport)
-      }
-    },
-  )
+  onSettled(() => {
+    if (typeof window === 'undefined') return
+    const syncViewport = () => setIsMobile(detectMobileViewport())
+    window.addEventListener('resize', syncViewport)
+    const mql = window.matchMedia?.('(max-width: 820px)')
+    mql?.addEventListener?.('change', syncViewport)
+    return () => {
+      window.removeEventListener('resize', syncViewport)
+      mql?.removeEventListener?.('change', syncViewport)
+    }
+  })
 
   const terminalRows = createMemo(() => buildTerminalRows({
     terminals: app().terminals(),
@@ -211,7 +208,7 @@ export function AppShell(props: { app: AppController }) {
                   return (
                     <button
                       type="button"
-                      class={classNames('sidebar-nav-item', app().activeNav() === item.key && 'active')}
+                      class={['sidebar-nav-item', { active: app().activeNav() === item.key }]}
                       aria-current={app().activeNav() === item.key ? 'page' : undefined}
                       onClick={() => app().setActiveNav(item.key)}
                     >
@@ -223,7 +220,7 @@ export function AppShell(props: { app: AppController }) {
                         <Show when={item.alertTone?.()}>
                           {(tone) => (
                             <span
-                              class={classNames('status-dot', tone())}
+                              class={['status-dot', tone()]}
                               aria-hidden="true"
                             />
                           )}
@@ -243,7 +240,7 @@ export function AppShell(props: { app: AppController }) {
           <div class="sidebar-dock" aria-label="运行控制栏">
             <div class="sidebar-dock-row">
               <span class="sidebar-status">
-                <span class={classNames('status-dot', statusTone())} aria-hidden="true" />
+                <span class={['status-dot', statusTone()]} aria-hidden="true" />
                 <strong>{statusText()}</strong>
               </span>
 
@@ -276,7 +273,7 @@ export function AppShell(props: { app: AppController }) {
             <div class="seg-rail full" role="group" aria-label="分流模式切换">
               <button
                 type="button"
-                class={classNames('seg-btn', app().status().route_mode === 'rule' && 'active')}
+                class={['seg-btn', { active: app().status().route_mode === 'rule' }]}
                 aria-pressed={app().status().route_mode === 'rule' ? 'true' : 'false'}
                 disabled={app().pendingActions().has('routeMode')}
                 onClick={() => switchRouteMode('rule')}
@@ -285,7 +282,7 @@ export function AppShell(props: { app: AppController }) {
               </button>
               <button
                 type="button"
-                class={classNames('seg-btn', app().status().route_mode === 'global' && 'active')}
+                class={['seg-btn', { active: app().status().route_mode === 'global' }]}
                 aria-pressed={app().status().route_mode === 'global' ? 'true' : 'false'}
                 disabled={app().pendingActions().has('routeMode')}
                 onClick={() => switchRouteMode('global')}
@@ -320,7 +317,7 @@ export function AppShell(props: { app: AppController }) {
             <LogoIcon size={24} />
             <span class="sidebar-brand-name">Harbor</span>
             <span class="status-inline">
-              <span class={classNames('status-dot', statusTone())} aria-hidden="true" />
+              <span class={['status-dot', statusTone()]} aria-hidden="true" />
               <span>{statusText()}</span>
             </span>
           </div>
@@ -389,7 +386,7 @@ export function AppShell(props: { app: AppController }) {
               return (
                 <button
                   type="button"
-                  class={classNames('mobile-dock-item', app().activeNav() === item.key && 'active')}
+                  class={['mobile-dock-item', { active: app().activeNav() === item.key }]}
                   aria-current={app().activeNav() === item.key ? 'page' : undefined}
                   onClick={() => app().setActiveNav(item.key)}
                 >

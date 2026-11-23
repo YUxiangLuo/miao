@@ -1,4 +1,4 @@
-import { createEffect, type Accessor } from 'solid-js'
+import { createEffect, createMemo, type Accessor } from 'solid-js'
 
 const BASE_DELAY = 1000
 const MAX_DELAY = 15000
@@ -87,8 +87,11 @@ export function useWebSocket<T = unknown>(
     }
   }
 
+  const targetUrlMemo = createMemo(() => getUrl())
+  const activeMemo = createMemo(() => getEnabled())
+
   createEffect(
-    () => ({ targetUrl: getUrl(), active: getEnabled() }),
+    () => ({ targetUrl: targetUrlMemo(), active: activeMemo() }),
     ({ targetUrl, active }) => {
       currentUrl = targetUrl
       isEnabled = active

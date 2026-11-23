@@ -26,38 +26,39 @@ function previewChips(parsed: ParsedShareLink): string[] {
 }
 
 function ShareLinkItem(props: { item: LinkItem }) {
+  const okItem = createMemo(() => (props.item.ok ? props.item : null))
   return (
     <Show
-      when={props.item.ok}
+      when={okItem()}
       fallback={
         <div class="share-link-item error">
           <span class="share-link-item-line" title={props.item.line}>{props.item.line}</span>
-          <span class="share-link-item-error">{(props.item as Extract<LinkItem, { ok: false }>).error}</span>
+          <span class="share-link-item-error">{!props.item.ok ? props.item.error : ''}</span>
         </div>
       }
     >
-      {(() => {
-        const okItem = props.item as Extract<LinkItem, { ok: true }>
-        const { parsed } = okItem
-        const typeLabel = NODE_TYPE_OPTIONS.find((option) => option.value === parsed.nodeType)?.label || parsed.nodeType
-        const chips = previewChips(parsed)
+      {(valid) => {
+        const typeLabel = createMemo(() => (
+          NODE_TYPE_OPTIONS.find((option) => option.value === valid().parsed.nodeType)?.label || valid().parsed.nodeType
+        ))
+        const chips = createMemo(() => previewChips(valid().parsed))
         return (
           <div class="share-link-item">
             <div class="share-link-item-top">
-              <span class="share-link-type">{typeLabel}</span>
-              <strong class="share-link-tag" title={parsed.tag}>{parsed.tag}</strong>
-              <span class="share-link-server num">{parsed.formPatch.server}:{parsed.formPatch.server_port}</span>
+              <span class="share-link-type">{typeLabel()}</span>
+              <strong class="share-link-tag" title={valid().parsed.tag}>{valid().parsed.tag}</strong>
+              <span class="share-link-server num">{valid().parsed.formPatch.server}:{valid().parsed.formPatch.server_port}</span>
             </div>
-            <Show when={chips.length > 0}>
+            <Show when={chips().length > 0}>
               <div class="share-link-chips">
-                <For each={chips}>
+                <For each={chips()}>
                   {(chip) => <span class="share-link-chip">{chip}</span>}
                 </For>
               </div>
             </Show>
           </div>
         )
-      })()}
+      }}
     </Show>
   )
 }
@@ -141,8 +142,8 @@ export function LinkImportPane(props: LinkImportPaneProps) {
           when={items().length > 0}
           fallback={<div class="share-link-empty">粘贴后自动识别节点信息,支持一次粘贴多条</div>}
         >
-          <For each={items()}>
-            {(item) => <ShareLinkItem item={item} />}
+          <For each={items()} keyed={false}>
+            {(item) => <ShareLinkItem item={item()} />}
           </For>
         </Show>
       </div>

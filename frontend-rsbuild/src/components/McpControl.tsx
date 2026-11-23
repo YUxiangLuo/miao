@@ -1,7 +1,6 @@
 import { For, Show, createSignal } from 'solid-js'
 import { useDialog } from '../hooks/useDialog'
 import { Button } from './ui'
-import { classNames } from '../utils'
 import type { ToastTone } from '../hooks/useApi'
 
 export interface McpControlProps {
@@ -93,7 +92,7 @@ Harbor 是基于 sing-box 的透明代理，MCP 提供状态查询、节点测�
           aria-checked={props.enabled ? 'true' : 'false'}
           aria-label="MCP 端点开关"
           title={props.enabled ? `MCP 端点已开启：${url}` : '开启 MCP 端点（AI agent 可通过它操作面板）'}
-          class={classNames('toggle-switch', props.enabled && 'on')}
+          class={['toggle-switch', { on: props.enabled }]}
           disabled={props.pending}
           aria-busy={props.pending ? 'true' : undefined}
           onClick={() => props.onToggle(!props.enabled)}
@@ -110,7 +109,7 @@ Harbor 是基于 sing-box 的透明代理，MCP 提供状态查询、节点测�
               return (
                 <button
                   type="button"
-                  class={classNames('mcp-agent-button', agent.id)}
+                  class={['mcp-agent-button', agent.id]}
                   onClick={() => { void copyText(command, `${agent.label} MCP 添加命令`) }}
                   title={`复制 ${agent.label} MCP 添加命令：${command}`}
                   aria-label={`复制 ${agent.label} MCP 添加命令`}

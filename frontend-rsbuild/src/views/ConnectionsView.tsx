@@ -13,7 +13,7 @@ import {
 import { connectionDomain } from '../components/siteIcons'
 import { buildTerminalRows } from '../domain/terminals'
 import { buildAccessPortRows, connectionAccessPortId } from '../domain/accessPorts'
-import { classNames, formatSpeed } from '../utils'
+import { formatSpeed } from '../utils'
 import type { useAppController } from '../hooks/useAppController'
 import { SearchIcon } from '../components/icons'
 
@@ -145,7 +145,7 @@ export function ConnectionsView(props: { app: AppController }) {
           <div class="seg-rail" role="group" aria-label="出口通道筛选">
             <button
               type="button"
-              class={classNames('seg-btn', pathFilter() === 'all' && 'active')}
+              class={['seg-btn', { active: pathFilter() === 'all' }]}
               aria-pressed={pathFilter() === 'all' ? 'true' : 'false'}
               onClick={() => setPathFilter('all')}
             >
@@ -153,7 +153,7 @@ export function ConnectionsView(props: { app: AppController }) {
             </button>
             <button
               type="button"
-              class={classNames('seg-btn', pathFilter() === 'proxy' && 'active')}
+              class={['seg-btn', { active: pathFilter() === 'proxy' }]}
               aria-pressed={pathFilter() === 'proxy' ? 'true' : 'false'}
               onClick={() => setPathFilter('proxy')}
             >
@@ -161,7 +161,7 @@ export function ConnectionsView(props: { app: AppController }) {
             </button>
             <button
               type="button"
-              class={classNames('seg-btn', pathFilter() === 'direct' && 'active')}
+              class={['seg-btn', { active: pathFilter() === 'direct' }]}
               aria-pressed={pathFilter() === 'direct' ? 'true' : 'false'}
               onClick={() => setPathFilter('direct')}
             >

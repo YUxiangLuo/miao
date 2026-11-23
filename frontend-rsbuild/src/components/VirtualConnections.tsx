@@ -44,8 +44,10 @@ export function VirtualConnections(props: {
     },
   )
 
+  const connectionCount = createMemo(() => props.connections.length)
+
   createEffect(
-    () => ({ element: viewport(), len: props.connections.length, h: height(), key: props.filterKey }),
+    () => ({ element: viewport(), len: connectionCount(), h: height(), key: props.filterKey }),
     ({ element, len, h }) => {
       if (!element) return
       const maximum = Math.max(0, len * STEP - CONNECTION_ROW_GAP - h)

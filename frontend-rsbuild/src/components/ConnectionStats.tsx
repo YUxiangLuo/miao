@@ -26,7 +26,7 @@ function PathCard(props: {
   return (
     <div class="path-card">
       <div class="path-id">
-        <span class={`badge ${props.tone}`}>{props.label}</span>
+        <span class={['badge', props.tone]}>{props.label}</span>
         <span class="path-count num">{props.stats.count} 条链接</span>
       </div>
       <div class="path-col speed">

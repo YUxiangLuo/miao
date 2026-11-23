@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createSignal, onCleanup, onSettled } from 'solid-js'
+import { createEffect, createMemo, createProjection, createSignal, onSettled } from 'solid-js'
 import { useToast, useApi } from './useApi'
 import { useStatus, useSubs, useNodes, useRules, useVersion, useTerminals, useAccessPorts } from './useResources'
 import {
@@ -114,6 +114,8 @@ export function useAppData() {
   const { status, statusLoaded, statusFailures, statusSettled, fetchStatus } = useStatus()
   const revision = createMemo(() => status().data_revision ?? 0)
   const isReady = createMemo(() => Boolean(status().ready))
+  const isInitializing = createMemo(() => Boolean(status().initializing))
+  const statusWarning = createMemo(() => status().warning)
   const { subs, subsLoaded, subsAvailable, subsCurrent, subsError, fetchSubs } = useSubs(revision)
   const { nodes, nodesLoaded, nodesAvailable, nodesCurrent, nodesError, fetchNodes } = useNodes(revision)
   const { rules, rulesLoaded, rulesCurrent, rulesError, fetchRules } = useRules(revision)
@@ -146,7 +148,7 @@ export function useAppData() {
 
   const nodeProtocols = createMemo(() => collectNodeProtocols(proxies()))
   const ruleNodeNames = createMemo(() => collectRuleTargetNodes(nodes(), proxies()))
-  const { traffic, closeSockets } = useTraffic(isReady)
+  const { traffic } = useTraffic(isReady)
   const {
     connectionsInfo,
     connectionsLoading,
@@ -162,8 +164,8 @@ export function useAppData() {
 
   createEffect(
     () => ({
-      ready: status().ready,
-      initializing: status().initializing,
+      ready: isReady(),
+      initializing: isInitializing(),
       node: currentNodeName(),
       urlTest: isUrlTestGroup(),
     }),
@@ -181,14 +183,17 @@ export function useAppData() {
     },
   )
 
-  const displayMeasurements = createMemo(() => mergeDisplayMeasurements({
-    proxies: proxies(),
-    isUrlTestGroup: isUrlTestGroup(),
-    delays: delays(),
-    delayMeasuredAt: delayMeasuredAt(),
-  }))
-  const mergedDelays = createMemo(() => displayMeasurements().delays)
-  const mergedMeasuredAt = createMemo(() => displayMeasurements().measuredAt)
+  const displayMeasurements = createProjection(
+    () => mergeDisplayMeasurements({
+      proxies: proxies(),
+      isUrlTestGroup: isUrlTestGroup(),
+      delays: delays(),
+      delayMeasuredAt: delayMeasuredAt(),
+    }),
+    { delays: {} as Record<string, number>, measuredAt: {} as Record<string, number> },
+  )
+  const mergedDelays = () => displayMeasurements.delays
+  const mergedMeasuredAt = () => displayMeasurements.measuredAt
 
   const resetNodeForm = () => {
     setNodeType('hysteria2')
@@ -261,10 +266,8 @@ export function useAppData() {
     void fetchVersion()
   })
 
-  onCleanup(() => closeSockets())
-
   createEffect(
-    () => status().warning,
+    () => statusWarning(),
     (warning) => {
       if (warning) showToast(warning, 'error')
     },

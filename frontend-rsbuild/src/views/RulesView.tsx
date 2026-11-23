@@ -7,7 +7,7 @@ import { isSingleSeatRule } from '../domain/terminals'
 import { RULE_PRESETS, type RulePreset } from '../domain/rulePresets'
 import { PROTOCOL_OPTIONS, ruleFieldLabel, ruleFieldOptions } from '../ruleFormat'
 import { useDialog } from '../hooks/useDialog'
-import { classNames, formatDelay } from '../utils'
+import { formatDelay } from '../utils'
 import type { RuleInfo } from '../types/api'
 import type { useAppController } from '../hooks/useAppController'
 import { PlusIcon, RouteIcon, SearchIcon, Trash2Icon, XIcon } from '../components/icons'
@@ -207,7 +207,7 @@ export function RulesView(props: { app: AppController }) {
           <div class="seg-rail" role="group" aria-label="规则范围筛选">
             <button
               type="button"
-              class={classNames('seg-btn', scopeFilter() === 'general' && 'active')}
+              class={['seg-btn', { active: scopeFilter() === 'general' }]}
               aria-pressed={scopeFilter() === 'general' ? 'true' : 'false'}
               onClick={() => setScopeFilter('general')}
             >
@@ -215,7 +215,7 @@ export function RulesView(props: { app: AppController }) {
             </button>
             <button
               type="button"
-              class={classNames('seg-btn', scopeFilter() === 'all' && 'active')}
+              class={['seg-btn', { active: scopeFilter() === 'all' }]}
               aria-pressed={scopeFilter() === 'all' ? 'true' : 'false'}
               onClick={() => setScopeFilter('all')}
             >
@@ -224,7 +224,7 @@ export function RulesView(props: { app: AppController }) {
             <Show when={deviceRuleCount() > 0}>
               <button
                 type="button"
-                class={classNames('seg-btn', scopeFilter() === 'device' && 'active')}
+                class={['seg-btn', { active: scopeFilter() === 'device' }]}
                 aria-pressed={scopeFilter() === 'device' ? 'true' : 'false'}
                 onClick={() => setScopeFilter('device')}
               >
@@ -262,7 +262,7 @@ export function RulesView(props: { app: AppController }) {
               {(rule) => {
                 const targetState = () => describeRuleTarget(rule())
                 return (
-                  <div class={classNames('hairline-row', rule().skipped && 'danger-tint')}>
+                  <div class={['hairline-row', { 'danger-tint': Boolean(rule().skipped) }]}>
                     <div class="row-main">
                       <div class="row-title">
                         <span class="mono-tag num">#{rule().index + 1}</span>
@@ -276,8 +276,8 @@ export function RulesView(props: { app: AppController }) {
                     </div>
 
                     <div class="row-end">
-                      <span class={classNames('status-inline', rule().skipped && 'danger')}>
-                        <span class={classNames('status-dot', targetState().tone)} />
+                      <span class={['status-inline', { danger: Boolean(rule().skipped) }]}>
+                        <span class={['status-dot', targetState().tone]} />
                         <span>{targetState().text}</span>
                       </span>
                       <button
@@ -333,10 +333,10 @@ export function RulesView(props: { app: AppController }) {
                     {(preset) => (
                       <button
                         type="button"
-                        class={classNames(
+                        class={[
                           'preset-chip',
-                          field() === preset.field && value() === preset.value && 'active',
-                        )}
+                          { active: field() === preset.field && value() === preset.value },
+                        ]}
                         title={preset.hint}
                         onClick={() => applyPreset(preset)}
                       >

@@ -4,7 +4,7 @@ import { ICON } from '../tokens'
 import { Button } from '../components/ui'
 import { McpControl } from '../components/McpControl'
 import { ConnectivityCheck } from '../components/ConnectivityCheck'
-import { classNames, formatUptime } from '../utils'
+import { formatUptime } from '../utils'
 import type { RouteMode } from '../types/api'
 import type { useAppController } from '../hooks/useAppController'
 import { ClockIcon, MoonIcon, PlayIcon, SquareIcon, SunIcon } from '../components/icons'
@@ -45,10 +45,10 @@ export function SettingsView(props: SettingsViewProps): JSX.Element {
             <div class="row-main">
               <div class="row-title">
                 <span
-                  class={classNames(
+                  class={[
                     'status-dot',
                     app().status().ready ? 'emerald pulse' : app().status().initializing ? 'amber' : 'muted',
-                  )}
+                  ]}
                   aria-hidden="true"
                 />
                 <span>sing-box 数据面引擎</span>
@@ -105,7 +105,7 @@ export function SettingsView(props: SettingsViewProps): JSX.Element {
               <div class="seg-rail" role="group" aria-label="分流模式设置">
                 <button
                   type="button"
-                  class={classNames('seg-btn', app().status().route_mode === 'rule' && 'active')}
+                  class={['seg-btn', { active: app().status().route_mode === 'rule' }]}
                   aria-pressed={app().status().route_mode === 'rule' ? 'true' : 'false'}
                   disabled={app().pendingActions().has('routeMode')}
                   onClick={() => switchRouteMode('rule')}
@@ -114,7 +114,7 @@ export function SettingsView(props: SettingsViewProps): JSX.Element {
                 </button>
                 <button
                   type="button"
-                  class={classNames('seg-btn', app().status().route_mode === 'global' && 'active')}
+                  class={['seg-btn', { active: app().status().route_mode === 'global' }]}
                   aria-pressed={app().status().route_mode === 'global' ? 'true' : 'false'}
                   disabled={app().pendingActions().has('routeMode')}
                   onClick={() => switchRouteMode('global')}
@@ -186,7 +186,7 @@ export function SettingsView(props: SettingsViewProps): JSX.Element {
               <div class="seg-rail" role="group" aria-label="界面外观">
                 <button
                   type="button"
-                  class={classNames('seg-btn', props.theme === 'light' && 'active')}
+                  class={['seg-btn', { active: props.theme === 'light' }]}
                   aria-pressed={props.theme === 'light' ? 'true' : 'false'}
                   onClick={() => { if (props.theme !== 'light') props.onToggleTheme() }}
                 >
@@ -195,7 +195,7 @@ export function SettingsView(props: SettingsViewProps): JSX.Element {
                 </button>
                 <button
                   type="button"
-                  class={classNames('seg-btn', props.theme === 'dark' && 'active')}
+                  class={['seg-btn', { active: props.theme === 'dark' }]}
                   aria-pressed={props.theme === 'dark' ? 'true' : 'false'}
                   onClick={() => { if (props.theme !== 'dark') props.onToggleTheme() }}
                 >

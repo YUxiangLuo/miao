@@ -75,4 +75,19 @@ describe('usePolling', () => {
     await Promise.resolve()
     expect(task).toHaveBeenCalledTimes(3)
   })
+
+  it('does not restart the timer when enabled dependencies change without flipping the boolean', async () => {
+    const task = rs.fn(() => Promise.resolve())
+    const [ruleCount, setRuleCount] = createSignal(1)
+
+    renderHook(() => usePolling([task], () => ruleCount() > 0))
+    flush()
+    await Promise.resolve()
+    expect(task).toHaveBeenCalledTimes(1)
+
+    setRuleCount(2)
+    flush()
+    await Promise.resolve()
+    expect(task).toHaveBeenCalledTimes(1)
+  })
 })

@@ -1,6 +1,5 @@
 import { For, Show, omit } from 'solid-js'
 import type { JSX } from '@solidjs/web'
-import { classNames } from '../utils'
 import { ICON } from '../tokens'
 import type { Toast } from '../hooks/useApi'
 import { CheckIcon, CircleAlertIcon, CircleXIcon, LoaderCircleIcon, XIcon } from './icons'
@@ -18,7 +17,7 @@ export function LogoIcon(props: { size?: number; class?: string }) {
       viewBox="0 0 512 512"
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
-      class={classNames('brand-icon', props.class)}
+      class={['brand-icon', props.class]}
       aria-hidden="true"
     >
       <rect class="logo-frame" width="512" height="512" rx="116" fill="#18181B" />
@@ -51,7 +50,7 @@ export function Button(props: ButtonProps) {
   return (
     <button
       type={props.type ?? 'button'}
-      class={classNames('btn', `btn-${props.tone}`, `btn-${size()}`, props.class)}
+      class={['btn', `btn-${props.tone}`, `btn-${size()}`, props.class]}
       {...rest}
       disabled={isDisabled()}
       aria-busy={props.loading ? 'true' : undefined}
@@ -74,9 +73,9 @@ export function SectionCard(props: {
   bodyClass?: string
 }) {
   return (
-    <section class={classNames('panel-card', props.class)}>
+    <section class={['panel-card', props.class]}>
       {props.header}
-      <div class={classNames('panel-card-body', props.bodyClass)}>{props.children}</div>
+      <div class={['panel-card-body', props.bodyClass]}>{props.children}</div>
     </section>
   )
 }
@@ -90,7 +89,7 @@ export function ToastStack(props: {
       <div class="toast-stack" aria-live="polite" aria-relevant="additions">
         <For each={props.toasts} keyed={(toast) => toast.id}>
           {(toast) => (
-            <div class={classNames('toast', toast().tone)}>
+            <div class={['toast', toast().tone]}>
               <span class="toast-icon" aria-hidden="true">
                 {toast().tone === 'success'
                   ? <CheckIcon size={14} />

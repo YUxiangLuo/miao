@@ -1,10 +1,10 @@
-import { For, Show, createEffect, createMemo, createSignal, createUniqueId, untrack } from 'solid-js'
+import { For, Show, createMemo, createSignal, createUniqueId, untrack } from 'solid-js'
 import type { JSX } from '@solidjs/web'
 import { ICON } from '../tokens'
 import { Button } from '../components/ui'
 import { SelectPopover, cleanNodeDisplay, type SelectOption } from '../components/SelectPopover'
 import { useDialog } from '../hooks/useDialog'
-import { classNames, formatDelay, formatSpeed } from '../utils'
+import { formatDelay, formatSpeed } from '../utils'
 import { buildTerminalRows, type TerminalRow } from '../domain/terminals'
 import { buildAccessPortRows, suggestNextAccessPort, type AccessPortRow } from '../domain/accessPorts'
 import type { TerminalAssignMode } from '../types/api'
@@ -64,16 +64,10 @@ export function LanView(props: {
     return 'devices'
   })
 
-  const [section, setSection] = createSignal<LanSection>(pickInitialSection())
+  const defaultSection = pickInitialSection()
+  const [section, setSection] = createSignal<LanSection>(() => props.initialSection ?? defaultSection)
   const [deviceFilter, setDeviceFilter] = createSignal<DeviceFilter>('all')
   const [query, setQuery] = createSignal('')
-
-  createEffect(
-    () => props.initialSection,
-    (next) => {
-      if (next) setSection(next)
-    },
-  )
 
   // Device profile & optional assignment dialog state
   const [deviceDialogOpen, setDeviceDialogOpen] = createSignal(false)
@@ -416,7 +410,7 @@ export function LanView(props: {
         <div class="seg-rail" role="group" aria-label="局域网与端口切换">
           <button
             type="button"
-            class={classNames('seg-btn', section() === 'devices' && 'active')}
+            class={['seg-btn', { active: section() === 'devices' }]}
             aria-pressed={section() === 'devices' ? 'true' : 'false'}
             onClick={() => setSection('devices')}
           >
@@ -428,7 +422,7 @@ export function LanView(props: {
 
           <button
             type="button"
-            class={classNames('seg-btn', section() === 'ports' && 'active')}
+            class={['seg-btn', { active: section() === 'ports' }]}
             aria-pressed={section() === 'ports' ? 'true' : 'false'}
             onClick={() => setSection('ports')}
           >
@@ -505,10 +499,10 @@ export function LanView(props: {
                   const assigning = () => app().pendingActions().has(`assignTerminal:${row().ip}`)
 
                   return (
-                    <div class={classNames('hairline-row', row().failClosed && 'danger-tint')}>
+                    <div class={['hairline-row', { 'danger-tint': row().failClosed }]}>
                       <div class="row-main">
                         <div class="row-title">
-                          <span class={classNames('status-dot', deviceDotTone(row()))} aria-hidden="true" />
+                          <span class={['status-dot', deviceDotTone(row())]} aria-hidden="true" />
                           <span>{row().displayName}</span>
                           <Show when={row().department}>
                             {(dept) => <span class="mono-tag">{dept()}</span>}
@@ -618,7 +612,7 @@ export function LanView(props: {
                   const cleanedOutbound = () => cleanNodeDisplay(row().outbound)
 
                   return (
-                    <div class={classNames('hairline-row', row().blocked && 'danger-tint')}>
+                    <div class={['hairline-row', { 'danger-tint': row().blocked }]}>
                       <div class="row-main">
                         <div class="row-title">
                           <span>{row().name}</span>

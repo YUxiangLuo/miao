@@ -1,7 +1,7 @@
-import { Match, Show, Switch, createEffect, createSignal, createUniqueId, type Setter } from 'solid-js'
+import { Match, Show, Switch, createEffect, createMemo, createSignal, createUniqueId, type Setter } from 'solid-js'
 import { ICON } from '../../tokens'
 import { useDialog } from '../../hooks/useDialog'
-import { classNames, type NodeForm } from '../../utils'
+import type { NodeForm } from '../../utils'
 import { LinkImportPane } from './LinkImportPane'
 import { ManualPane } from './ManualPane'
 import { VpsPane } from './VpsPane'
@@ -36,6 +36,8 @@ export function NodeModal(props: NodeModalProps) {
   const busy = () => props.loading || submitting()
   const vpsSupported = () => props.vpsSupported !== false
 
+  const activeMode = createMemo<NodeModalMode>(() => (!vpsSupported() && mode() === 'vps' ? 'link' : mode()))
+
   createEffect(
     () => ({ open: props.open, initialMode: props.initialMode }),
     ({ open, initialMode }) => {
@@ -45,13 +47,6 @@ export function NodeModal(props: NodeModalProps) {
       } else if (initialMode) {
         setMode(initialMode === 'vps' && !vpsSupported() ? 'link' : initialMode)
       }
-    },
-  )
-
-  createEffect(
-    () => ({ supported: vpsSupported(), currentMode: mode() }),
-    ({ supported, currentMode }) => {
-      if (!supported && currentMode === 'vps') setMode('link')
     },
   )
 
@@ -114,16 +109,16 @@ export function NodeModal(props: NodeModalProps) {
             <button
               type="button"
               disabled={submitting()}
-              class={classNames('connections-pill', mode() === 'link' && 'active')}
-              aria-pressed={mode() === 'link' ? 'true' : 'false'}
+              class={['connections-pill', { active: activeMode() === 'link' }]}
+              aria-pressed={activeMode() === 'link' ? 'true' : 'false'}
               onClick={() => setMode('link')}
             >
               粘贴链接
             </button>
             <button
               type="button"
-              class={classNames('connections-pill', mode() === 'manual' && 'active')}
-              aria-pressed={mode() === 'manual' ? 'true' : 'false'}
+              class={['connections-pill', { active: activeMode() === 'manual' }]}
+              aria-pressed={activeMode() === 'manual' ? 'true' : 'false'}
               disabled={submitting()}
               onClick={() => setMode('manual')}
             >
@@ -132,8 +127,8 @@ export function NodeModal(props: NodeModalProps) {
             <Show when={vpsSupported()}>
               <button
                 type="button"
-                class={classNames('connections-pill', mode() === 'vps' && 'active')}
-                aria-pressed={mode() === 'vps' ? 'true' : 'false'}
+                class={['connections-pill', { active: activeMode() === 'vps' }]}
+                aria-pressed={activeMode() === 'vps' ? 'true' : 'false'}
                 disabled={submitting()}
                 onClick={() => setMode('vps')}
               >
@@ -143,13 +138,13 @@ export function NodeModal(props: NodeModalProps) {
           </div>
 
           <Switch>
-            <Match when={mode() === 'link'}>
+            <Match when={activeMode() === 'link'}>
               <LinkImportPane onImport={importLinks} loading={busy()} />
             </Match>
-            <Match when={mode() === 'vps'}>
+            <Match when={activeMode() === 'vps'}>
               <VpsPane onDeploy={props.onDeployVps} loading={busy()} />
             </Match>
-            <Match when={mode() === 'manual'}>
+            <Match when={activeMode() === 'manual'}>
               <ManualPane
                 nodeType={props.nodeType}
                 setNodeType={props.setNodeType}

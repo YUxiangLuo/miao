@@ -1,9 +1,8 @@
 import { Show, createMemo } from 'solid-js'
-import { classNames } from '../utils'
 import { iconForDomain } from './siteIcons'
 
 export function AnimatedValue(props: { value: string | number; class?: string }) {
-  return <span class={classNames('value-anim', 'num', props.class)}>{props.value}</span>
+  return <span class={['value-anim', 'num', props.class]}>{props.value}</span>
 }
 
 export function SiteMark(props: { domain: string }) {
@@ -12,7 +11,7 @@ export function SiteMark(props: { domain: string }) {
 
   return (
     <div
-      class={classNames('site-icon', isLetter() && 'letter')}
+      class={['site-icon', { letter: isLetter() }]}
       style={!isLetter()
         ? {
           background: (icon() as { background: string }).background,

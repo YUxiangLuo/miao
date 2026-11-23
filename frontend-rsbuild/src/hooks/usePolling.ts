@@ -1,4 +1,4 @@
-import { createEffect, untrack, type Accessor } from 'solid-js'
+import { createEffect, createMemo, untrack, type Accessor } from 'solid-js'
 import { POLL_INTERVAL } from '../utils'
 
 // 返回值被轮询器忽略，允许任意签名（Promise 或非 Promise）
@@ -48,8 +48,11 @@ export function usePolling(
     return Promise.allSettled(startedTasks)
   }
 
+  const activeMemo = createMemo(() => getEnabled())
+  const intervalMemo = createMemo(() => getInterval())
+
   createEffect(
-    () => ({ active: getEnabled(), ms: getInterval() }),
+    () => ({ active: activeMemo(), ms: intervalMemo() }),
     ({ active, ms }) => {
       const stopTimer = () => {
         if (timer !== null) {
