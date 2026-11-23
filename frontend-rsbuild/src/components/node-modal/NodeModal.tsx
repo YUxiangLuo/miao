@@ -37,9 +37,11 @@ export function NodeModal(props: NodeModalProps) {
   const vpsSupported = () => props.vpsSupported !== false
 
   const activeMode = createMemo<NodeModalMode>(() => (!vpsSupported() && mode() === 'vps' ? 'link' : mode()))
+  const isOpen = createMemo(() => Boolean(props.open))
+  const initialModeMemo = createMemo(() => props.initialMode)
 
   createEffect(
-    () => ({ open: props.open, initialMode: props.initialMode }),
+    () => ({ open: isOpen(), initialMode: initialModeMemo() }),
     ({ open, initialMode }) => {
       if (!open) {
         setMode('link')

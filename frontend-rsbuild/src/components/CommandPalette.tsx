@@ -241,10 +241,12 @@ export function CommandPalette(props: CommandPaletteProps): JSX.Element {
     props.onClose()
   }
 
+  const isOpen = createMemo(() => Boolean(props.open))
+
   createEffect(
-    () => props.open,
-    (isOpen) => {
-      if (!isOpen) return
+    () => isOpen(),
+    (open) => {
+      if (!open) return
       setQuery('')
       setActiveIndex(0)
 

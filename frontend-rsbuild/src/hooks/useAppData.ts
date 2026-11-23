@@ -20,7 +20,30 @@ import {
   STATUS_FAILURE_THRESHOLD,
   type NodeForm,
 } from '../utils'
-import type { NodeType } from '../types/api'
+import type { NodeType, StatusData } from '../types/api'
+
+/**
+ * 提取当前状态中的独立告警文案：优先使用结构化 `warnings[]`，避免单条告警变化导致
+ * 兼容拼接串 `warning` 整体变化并重复弹出已关闭的旧告警；旧后端无 `warnings` 时回退 `warning`。
+ */
+export function extractStatusWarnings(status: Pick<StatusData, 'warning' | 'warnings'>): string[] {
+  if (status.warnings && status.warnings.length > 0) {
+    const seen = new Set<string>()
+    const messages: string[] = []
+    for (const item of status.warnings) {
+      if (item.message && !seen.has(item.message)) {
+        seen.add(item.message)
+        messages.push(item.message)
+      }
+    }
+    if (messages.length > 0) return messages
+  }
+  return status.warning ? [status.warning] : []
+}
+
+function isSameStringList(prev: readonly string[], next: readonly string[]): boolean {
+  return prev.length === next.length && prev.every((item, index) => item === next[index])
+}
 
 /** 确认对话框状态（ConfirmModal 的受控数据源） */
 export interface ConfirmState {
@@ -115,7 +138,10 @@ export function useAppData() {
   const revision = createMemo(() => status().data_revision ?? 0)
   const isReady = createMemo(() => Boolean(status().ready))
   const isInitializing = createMemo(() => Boolean(status().initializing))
-  const statusWarning = createMemo(() => status().warning)
+  const statusWarnings = createMemo(
+    () => extractStatusWarnings(status()),
+    { equals: isSameStringList },
+  )
   const { subs, subsLoaded, subsAvailable, subsCurrent, subsError, fetchSubs } = useSubs(revision)
   const { nodes, nodesLoaded, nodesAvailable, nodesCurrent, nodesError, fetchNodes } = useNodes(revision)
   const { rules, rulesLoaded, rulesCurrent, rulesError, fetchRules } = useRules(revision)
@@ -237,8 +263,12 @@ export function useAppData() {
   createEffect(
     () => isReady(),
     (ready) => {
-      if (ready) void fetchProxies()
-      else clearDelays()
+      if (ready) {
+        void fetchProxies()
+      } else {
+        lastAutoTestedNode = ''
+        clearDelays()
+      }
     },
   )
 
@@ -266,10 +296,25 @@ export function useAppData() {
     void fetchVersion()
   })
 
+  let previousStatusWarnings = new Set<string>()
+  const statusWarningToastIds = new Map<string, number>()
+
   createEffect(
-    () => statusWarning(),
-    (warning) => {
-      if (warning) showToast(warning, 'error')
+    () => statusWarnings(),
+    (warnings) => {
+      const active = new Set(warnings)
+      for (const [message, id] of [...statusWarningToastIds.entries()]) {
+        if (!active.has(message)) {
+          dismissToast(id)
+          statusWarningToastIds.delete(message)
+        }
+      }
+      for (const message of warnings) {
+        if (!previousStatusWarnings.has(message)) {
+          statusWarningToastIds.set(message, showToast(message, 'error'))
+        }
+      }
+      previousStatusWarnings = active
     },
   )
 

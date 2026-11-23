@@ -645,6 +645,19 @@ async fn check_background_commit_preconditions(
     Ok(current)
 }
 
+fn settle_background_refresh_warning(
+    step: BackgroundRefreshStep,
+    warning: Option<String>,
+    quiet: bool,
+    runtime_ready: bool,
+) -> Option<String> {
+    if quiet && step == BackgroundRefreshStep::Retry && runtime_ready {
+        Some(SUBS_RETRYING_SLOWLY.to_string())
+    } else {
+        warning
+    }
+}
+
 async fn settle_background_refresh_attempt(
     current: &Config,
     state: &Arc<AppState>,
@@ -654,34 +667,39 @@ async fn settle_background_refresh_attempt(
     quiet: bool,
 ) -> BackgroundRefreshStep {
     let result = refresh_subscriptions(current, state, RefreshPolicy::Startup, source).await;
-    let step = match result {
+    let (step, warning) = match result {
         Ok(outcome) => match outcome.effect {
             RefreshEffect::Activated | RefreshEffect::SkippedUnchanged => {
                 // Kernel activation and subscription acceptance are independent.
                 // A manual/cache rebuild can succeed with every source offline.
                 let pending = !current.subs.is_empty() && !fetch_report.accepted_response();
                 save_config_cache(state).await;
-                *state.config_warning.lock().await =
+                let warning =
                     activated_startup_refresh_warning(current, outcome.node_select, pending);
                 if outcome.effect == RefreshEffect::Activated {
                     spawn_restore_last_proxy(state);
                 }
-                if pending {
+                let step = if pending {
                     BackgroundRefreshStep::Retry
                 } else {
                     state.subscription_recovery.complete(refresh_generation);
                     BackgroundRefreshStep::Finished
-                }
+                };
+                (step, warning)
             }
             RefreshEffect::KeptRunningOnTotalFailure => {
                 warn!("{ALL_SUBS_FAILED_KEEP_CACHE}");
-                *state.config_warning.lock().await = Some(ALL_SUBS_FAILED_KEEP_CACHE.to_string());
-                retry_if_subs_configured(current)
+                (
+                    retry_if_subs_configured(current),
+                    Some(ALL_SUBS_FAILED_KEEP_CACHE.to_string()),
+                )
             }
             RefreshEffect::KeptRunningOnValidationFailure => {
                 error!("Refreshed config failed validation; keeping current config");
-                *state.config_warning.lock().await = Some(REFRESH_VALIDATION_FAILED.to_string());
-                retry_if_subs_configured(current)
+                (
+                    retry_if_subs_configured(current),
+                    Some(REFRESH_VALIDATION_FAILED.to_string()),
+                )
             }
         },
         Err(err) if err.is_no_usable_nodes() && fetch_report.accepted_response() => {
@@ -689,25 +707,29 @@ async fn settle_background_refresh_attempt(
                 // The response was authoritative; fetching it again is not a
                 // network-recovery operation. Preserve availability, but do not
                 // publish an unactivated empty snapshot or retry it as a failure.
-                *state.config_warning.lock().await =
-                    Some(crate::services::config::SUBS_NO_USABLE_KEEP_CACHE.to_string());
                 state.subscription_recovery.complete(refresh_generation);
-                BackgroundRefreshStep::Finished
+                (
+                    BackgroundRefreshStep::Finished,
+                    Some(crate::services::config::SUBS_NO_USABLE_KEEP_CACHE.to_string()),
+                )
             } else {
-                *state.config_warning.lock().await =
-                    Some(crate::services::config::SUBS_WAITING_FOR_NODES.to_string());
-                BackgroundRefreshStep::WaitForNodes
+                (
+                    BackgroundRefreshStep::WaitForNodes,
+                    Some(crate::services::config::SUBS_WAITING_FOR_NODES.to_string()),
+                )
             }
         }
         Err(err) => {
             warn!(error = %err, "Background subscription refresh failed");
-            *state.config_warning.lock().await = Some(REFRESH_FAILED_KEEP_CACHE.to_string());
-            retry_if_subs_configured(current)
+            (
+                retry_if_subs_configured(current),
+                Some(REFRESH_FAILED_KEEP_CACHE.to_string()),
+            )
         }
     };
-    if quiet && step == BackgroundRefreshStep::Retry && state.lifecycle.snapshot().ready {
-        *state.config_warning.lock().await = Some(SUBS_RETRYING_SLOWLY.to_string());
-    }
+    let final_warning =
+        settle_background_refresh_warning(step, warning, quiet, state.lifecycle.snapshot().ready);
+    *state.config_warning.lock().await = final_warning;
     step
 }
 
@@ -802,7 +824,10 @@ enum DataPlaneAttemptPrep {
 
 enum DataPlaneRefreshAttempt {
     Recovered(RecoveryOutcome),
-    NeedsCacheFallback { waiting_for_nodes: bool },
+    NeedsCacheFallback {
+        waiting_for_nodes: bool,
+        fallback_warning: Option<&'static str>,
+    },
 }
 
 async fn prepare_data_plane_recovery_attempt(state: &Arc<AppState>) -> DataPlaneAttemptPrep {
@@ -885,27 +910,54 @@ async fn apply_data_plane_refresh_attempt(
                 warn!("Startup recovery produced unchanged bytes without a ready data plane");
                 DataPlaneRefreshAttempt::NeedsCacheFallback {
                     waiting_for_nodes: false,
+                    fallback_warning: None,
                 }
             }
             RefreshEffect::KeptRunningOnTotalFailure => {
-                *state.config_warning.lock().await = Some(ALL_SUBS_FAILED_RETRY.to_string());
                 DataPlaneRefreshAttempt::NeedsCacheFallback {
                     waiting_for_nodes: false,
+                    fallback_warning: Some(ALL_SUBS_FAILED_RETRY),
                 }
             }
             RefreshEffect::KeptRunningOnValidationFailure => {
-                *state.config_warning.lock().await = Some(STARTUP_VALIDATION_RETRY.to_string());
                 DataPlaneRefreshAttempt::NeedsCacheFallback {
                     waiting_for_nodes: false,
+                    fallback_warning: Some(STARTUP_VALIDATION_RETRY),
                 }
             }
         },
         Err(err) => {
             warn!(error = %err, "Startup data-plane recovery attempt failed");
             let waiting_for_nodes = accepted_response && err.is_no_usable_nodes();
-            *state.config_warning.lock().await = Some(DATA_PLANE_RETRYING.to_string());
-            DataPlaneRefreshAttempt::NeedsCacheFallback { waiting_for_nodes }
+            DataPlaneRefreshAttempt::NeedsCacheFallback {
+                waiting_for_nodes,
+                fallback_warning: Some(DATA_PLANE_RETRYING),
+            }
         }
+    }
+}
+
+fn cache_fallback_warning(
+    cache_started: bool,
+    has_subs: bool,
+    pending_subs: bool,
+    waiting_for_nodes: bool,
+    fallback_warning: Option<&'static str>,
+) -> Option<Option<&'static str>> {
+    if cache_started {
+        if !has_subs {
+            Some(None)
+        } else {
+            Some(Some(if pending_subs {
+                ALL_SUBS_FAILED_KEEP_CACHE
+            } else {
+                REFRESH_FAILED_KEEP_CACHE
+            }))
+        }
+    } else if waiting_for_nodes {
+        Some(Some(crate::services::config::SUBS_WAITING_FOR_NODES))
+    } else {
+        fallback_warning.map(Some)
     }
 }
 
@@ -914,20 +966,24 @@ async fn finish_data_plane_cache_fallback(
     state: &Arc<AppState>,
     pending_subs: bool,
     waiting_for_nodes: bool,
+    fallback_warning: Option<&'static str>,
 ) -> RecoveryOutcome {
-    if try_start_compatible_cache(current, state).await {
-        if current.subs.is_empty() {
-            return RecoveryOutcome::Complete;
-        }
-        *state.config_warning.lock().await = Some(
-            if pending_subs {
-                ALL_SUBS_FAILED_KEEP_CACHE
-            } else {
-                REFRESH_FAILED_KEEP_CACHE
-            }
-            .to_string(),
-        );
-        return RecoveryOutcome::RetrySubscriptions;
+    let cache_started = try_start_compatible_cache(current, state).await;
+    if let Some(next_warning) = cache_fallback_warning(
+        cache_started,
+        !current.subs.is_empty(),
+        pending_subs,
+        waiting_for_nodes,
+        fallback_warning,
+    ) {
+        *state.config_warning.lock().await = next_warning.map(str::to_string);
+    }
+    if cache_started {
+        return if current.subs.is_empty() {
+            RecoveryOutcome::Complete
+        } else {
+            RecoveryOutcome::RetrySubscriptions
+        };
     }
     let runtime = state.lifecycle.snapshot();
     if !runtime.ready {
@@ -936,8 +992,6 @@ async fn finish_data_plane_cache_fallback(
             .finish(runtime.generation, RuntimePhase::Failed);
     }
     if waiting_for_nodes {
-        *state.config_warning.lock().await =
-            Some(crate::services::config::SUBS_WAITING_FOR_NODES.to_string());
         RecoveryOutcome::WaitForNodes
     } else {
         RecoveryOutcome::RetryDataPlane
@@ -989,8 +1043,18 @@ pub(crate) async fn recover_data_plane_once(state: &Arc<AppState>) -> RecoveryOu
     .await
     {
         DataPlaneRefreshAttempt::Recovered(outcome) => outcome,
-        DataPlaneRefreshAttempt::NeedsCacheFallback { waiting_for_nodes } => {
-            finish_data_plane_cache_fallback(&current, state, pending, waiting_for_nodes).await
+        DataPlaneRefreshAttempt::NeedsCacheFallback {
+            waiting_for_nodes,
+            fallback_warning,
+        } => {
+            finish_data_plane_cache_fallback(
+                &current,
+                state,
+                pending,
+                waiting_for_nodes,
+                fallback_warning,
+            )
+            .await
         }
     }
 }

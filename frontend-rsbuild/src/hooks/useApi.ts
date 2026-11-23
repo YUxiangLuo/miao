@@ -30,7 +30,9 @@ export function useToast() {
       window.clearTimeout(timer)
       timers.delete(id)
     }
-    currentToasts = currentToasts.filter((item) => item.id !== id)
+    const next = currentToasts.filter((item) => item.id !== id)
+    if (next.length === currentToasts.length) return
+    currentToasts = next
     setToasts(currentToasts)
   }
 

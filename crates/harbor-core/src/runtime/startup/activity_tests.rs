@@ -113,3 +113,65 @@ fn background_retry_cadence_transitions_between_fast_quiet_and_waiting_for_nodes
     assert_eq!(wait_repaired, slow);
     assert_eq!(warn_repaired, Some(SUBS_RETRYING_SLOWLY));
 }
+
+#[test]
+fn quiet_background_retry_resolves_directly_to_slow_retry_warning() {
+    assert_eq!(
+        settle_background_refresh_warning(
+            BackgroundRefreshStep::Retry,
+            Some(ALL_SUBS_FAILED_KEEP_CACHE.to_string()),
+            true,
+            true,
+        )
+        .as_deref(),
+        Some(SUBS_RETRYING_SLOWLY)
+    );
+    assert_eq!(
+        settle_background_refresh_warning(
+            BackgroundRefreshStep::Retry,
+            Some(ALL_SUBS_FAILED_KEEP_CACHE.to_string()),
+            false,
+            true,
+        )
+        .as_deref(),
+        Some(ALL_SUBS_FAILED_KEEP_CACHE)
+    );
+    assert_eq!(
+        settle_background_refresh_warning(
+            BackgroundRefreshStep::Retry,
+            Some(REFRESH_FAILED_KEEP_CACHE.to_string()),
+            true,
+            false,
+        )
+        .as_deref(),
+        Some(REFRESH_FAILED_KEEP_CACHE)
+    );
+    assert_eq!(
+        settle_background_refresh_warning(BackgroundRefreshStep::Finished, None, true, true),
+        None
+    );
+}
+
+#[test]
+fn cache_fallback_warning_resolves_single_warning_and_clears_when_no_subs() {
+    assert_eq!(
+        cache_fallback_warning(true, false, false, false, Some(DATA_PLANE_RETRYING)),
+        Some(None)
+    );
+    assert_eq!(
+        cache_fallback_warning(true, true, true, false, Some(ALL_SUBS_FAILED_RETRY)),
+        Some(Some(ALL_SUBS_FAILED_KEEP_CACHE))
+    );
+    assert_eq!(
+        cache_fallback_warning(true, true, false, false, Some(DATA_PLANE_RETRYING)),
+        Some(Some(REFRESH_FAILED_KEEP_CACHE))
+    );
+    assert_eq!(
+        cache_fallback_warning(false, true, false, true, Some(DATA_PLANE_RETRYING)),
+        Some(Some(crate::services::config::SUBS_WAITING_FOR_NODES))
+    );
+    assert_eq!(
+        cache_fallback_warning(false, true, true, false, Some(ALL_SUBS_FAILED_RETRY)),
+        Some(Some(ALL_SUBS_FAILED_RETRY))
+    );
+}

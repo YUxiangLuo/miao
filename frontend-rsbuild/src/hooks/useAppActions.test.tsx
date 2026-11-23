@@ -173,3 +173,107 @@ it('forces cache refresh on manual version check and opens release page on Windo
   )
   expect(result.toasts().at(-1)?.message).toContain('已在浏览器打开下载页')
 })
+
+it('keeps a dismissed status warning closed across polls with changing uptime and retry countdown', async () => {
+  const warning = '订阅刷新失败，继续使用当前配置；已结束启动重试，每 30 分钟后台重试，也可手动刷新'
+  let uptime = 100
+  let retryIn = 1800
+  const { result } = setup((url) => {
+    if (url === '/api/status') {
+      return response({
+        success: true,
+        data: statusMock({
+          uptime_secs: uptime,
+          warning,
+          warnings: [{ code: 'runtime_config', message: warning, severity: 'warning' }],
+          subscription_refresh: {
+            phase: 'waiting',
+            outcome: 'failed',
+            retry_in_secs: retryIn,
+            report: { successful_sources: 0, failed_sources: 1, fresh_nodes: 0, cached_nodes: 10 },
+          },
+        }),
+      })
+    }
+  })
+
+  await waitFor(() => expect(result.firstLoadDone()).toBe(true))
+  flush()
+  expect(result.toasts()).toHaveLength(1)
+  expect(result.toasts()[0].message).toBe(warning)
+
+  result.dismissToast(result.toasts()[0].id)
+  flush()
+  expect(result.toasts()).toHaveLength(0)
+
+  uptime = 103
+  retryIn = 1797
+  await result.fetchStatus()
+  flush()
+  expect(result.toasts()).toHaveLength(0)
+
+  uptime = 106
+  retryIn = 1794
+  await result.fetchStatus()
+  flush()
+  expect(result.toasts()).toHaveLength(0)
+})
+
+it('tracks structured status warnings independently and auto-dismisses resolved or replaced warnings', async () => {
+  const warnA = '订阅刷新失败，继续使用当前配置；已结束启动重试，每 30 分钟后台重试，也可手动刷新'
+  const warnB = '1 条自定义规则因出口节点不存在已阻断匹配流量: domain=a.example → gone'
+  const warnC = '该地区没有可用节点，已切回手动选择'
+  let currentWarnings = [{ code: 'runtime_config', message: warnA, severity: 'warning' as const }]
+
+  const { result } = setup((url) => {
+    if (url === '/api/status') {
+      const warning = currentWarnings.length > 0
+        ? currentWarnings.map((item) => item.message).join(';')
+        : undefined
+      return response({
+        success: true,
+        data: statusMock({ warning, warnings: currentWarnings }),
+      })
+    }
+  })
+
+  await waitFor(() => expect(result.firstLoadDone()).toBe(true))
+  flush()
+  expect(result.toasts().map((t) => t.message)).toEqual([warnA])
+
+  // User dismisses A; an unrelated warning B appears and then disappears.
+  // A must not re-open when the legacy concatenated string changes A -> A;B -> A.
+  result.dismissToast(result.toasts()[0].id)
+  flush()
+  expect(result.toasts()).toHaveLength(0)
+
+  currentWarnings = [
+    { code: 'runtime_config', message: warnA, severity: 'warning' },
+    { code: 'custom_rule_outbound_missing', message: warnB, severity: 'warning' },
+  ]
+  await result.fetchStatus()
+  flush()
+  expect(result.toasts().map((t) => t.message)).toEqual([warnB])
+
+  currentWarnings = [{ code: 'runtime_config', message: warnA, severity: 'warning' }]
+  await result.fetchStatus()
+  flush()
+  expect(result.toasts()).toHaveLength(0)
+
+  // Warning A is replaced by C, then all warnings clear: stale C toast is auto-dismissed.
+  currentWarnings = [{ code: 'runtime_config', message: warnC, severity: 'warning' }]
+  await result.fetchStatus()
+  flush()
+  expect(result.toasts().map((t) => t.message)).toEqual([warnC])
+
+  currentWarnings = []
+  await result.fetchStatus()
+  flush()
+  expect(result.toasts()).toHaveLength(0)
+
+  // If A genuinely recurs after clearing, notify the user again.
+  currentWarnings = [{ code: 'runtime_config', message: warnA, severity: 'warning' }]
+  await result.fetchStatus()
+  flush()
+  expect(result.toasts().map((t) => t.message)).toEqual([warnA])
+})

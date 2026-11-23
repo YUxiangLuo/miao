@@ -55,8 +55,10 @@ export function SubDetailModal(props: SubDetailModalProps) {
     }
   }
 
+  const subUrl = createMemo(() => props.sub?.url ?? null)
+
   createEffect(
-    () => props.sub?.url ?? null,
+    () => subUrl(),
     (url) => {
       activeUrl = url
       if (!url) {

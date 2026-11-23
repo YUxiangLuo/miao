@@ -303,4 +303,25 @@ describe('SubDetailModal', () => {
       expect(screen.queryByText('剩余流量：45.17 GB')).not.toBeInTheDocument()
     })
   })
+
+  it('does not reload nodes or steal focus when sub metadata updates for the same url', async () => {
+    const fetchMock = rs.fn(async () => ({
+      ok: true,
+      json: async () => subNodesPayload([
+        subNodesInfoMock({ url: SUB_URL, nodes: [subNodeMock({ name: '香港 01' })] }),
+      ]),
+    }))
+    rs.stubGlobal('fetch', fetchMock)
+
+    const { setSub } = renderModal({ sub: subMock({ url: SUB_URL, node_count: 1, disabled_count: 0 }) })
+    const toggle = await screen.findByRole('switch', { name: '禁用节点 香港 01' })
+    toggle.focus()
+    expect(toggle).toHaveFocus()
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+
+    setSub(subMock({ url: SUB_URL, node_count: 2, disabled_count: 1 }))
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(screen.getByText('香港 01')).toBeInTheDocument()
+    expect(toggle).toHaveFocus()
+  })
 })

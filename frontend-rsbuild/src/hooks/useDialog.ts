@@ -1,4 +1,4 @@
-import { createEffect, createSignal, type Accessor } from 'solid-js'
+import { createEffect, createMemo, createSignal, type Accessor } from 'solid-js'
 
 const FOCUSABLE_SELECTOR = [
   'button:not([disabled])',
@@ -14,11 +14,12 @@ export function useDialog<T extends HTMLElement = HTMLDivElement>(
   onClose: () => void,
 ) {
   const [dialogEl, setDialogEl] = createSignal<T | undefined>()
+  const isOpen = createMemo(() => Boolean(open()))
 
   createEffect(
-    () => ({ isOpen: open(), dialog: dialogEl() }),
-    ({ isOpen, dialog }) => {
-      if (!isOpen || !dialog) return
+    () => ({ isOpen: isOpen(), dialog: dialogEl() }),
+    ({ isOpen: openNow, dialog }) => {
+      if (!openNow || !dialog || !dialog.isConnected) return
 
       const previousFocus = document.activeElement
       const focusable = () => [...dialog.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)]

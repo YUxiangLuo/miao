@@ -46,7 +46,8 @@ export function nodeSelectFeedback(
   }
   const fellBackToManual = result.requested !== 'manual' && result.node_select === 'manual'
   if (fellBackToManual) {
-    const statusAlreadyShowsWarning = statusRead.status === 'success' && Boolean(statusRead.data.warning)
+    const statusAlreadyShowsWarning = statusRead.status === 'success'
+      && (Boolean(statusRead.data.warning) || (statusRead.data.warnings?.length ?? 0) > 0)
     return statusAlreadyShowsWarning
       ? null
       : { message: '请求的地区暂无可用节点，当前使用手动选择', tone: 'info' }

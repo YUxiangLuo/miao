@@ -1,4 +1,4 @@
-import { createEffect, createSignal, type Accessor } from 'solid-js'
+import { createEffect, createMemo, createSignal, type Accessor } from 'solid-js'
 import { FLIP_EASING, FLIP_MS } from '../tokens'
 
 /**
@@ -11,15 +11,17 @@ export function useFlipContainer<T extends HTMLElement>(
   revision?: Accessor<string | undefined>,
 ) {
   const [container, setContainer] = createSignal<T | undefined>()
+  const activeMemo = createMemo(() => Boolean(active()))
+  const revisionMemo = createMemo(() => revision?.())
   const prevPositions = new Map<string, { top: number; left: number }>()
   let lastContainer: T | undefined
   let lastRevision: string | undefined
 
   createEffect(
     () => ({
-      isActive: active(),
+      isActive: activeMemo(),
       el: container(),
-      rev: revision?.(),
+      rev: revisionMemo(),
     }),
     ({ isActive, el, rev }) => {
       if (!isActive || !el) {

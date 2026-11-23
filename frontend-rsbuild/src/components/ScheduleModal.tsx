@@ -56,8 +56,10 @@ export function ScheduleModal(props: ScheduleModalProps) {
     }
   }
 
+  const isOpen = createMemo(() => Boolean(props.open))
+
   createEffect(
-    () => props.open,
+    () => isOpen(),
     (open) => {
       generation++
       loading = false

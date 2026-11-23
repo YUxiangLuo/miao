@@ -124,9 +124,10 @@ export function useProxies(ready: Accessor<boolean>) {
   const selection = createMemo(() => selectPrimaryProxyGroup(proxies()))
   const primaryGroupName = createMemo(() => selection().primaryGroupName || '')
   const primaryGroup = createMemo(() => selection().primaryGroup)
+  const readyMemo = createMemo(() => Boolean(ready()))
 
   createEffect(
-    () => ready(),
+    () => readyMemo(),
     (isReady) => {
       if (!isReady) {
         cancel()
@@ -150,9 +151,10 @@ export function useTraffic(ready: Accessor<boolean>) {
   }
 
   const { close: closeSockets } = useWebSocket<ClashTraffic>(trafficUrl, handleMessage, ready)
+  const readyMemo = createMemo(() => Boolean(ready()))
 
   createEffect(
-    () => ready(),
+    () => readyMemo(),
     (isReady) => {
       if (!isReady) setTraffic({})
     },
@@ -241,8 +243,10 @@ export function useConnections(ready: Accessor<boolean>, clashApiBase: string) {
     }
   }
 
+  const readyMemo = createMemo(() => Boolean(ready()))
+
   createEffect(
-    () => ready(),
+    () => readyMemo(),
     (isReady) => {
       if (!isReady) {
         cancel()
