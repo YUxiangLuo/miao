@@ -1456,7 +1456,7 @@ dependencies = [
 
 [[package]]
 name = "harbor-cli"
-version = "0.51.2"
+version = "0.51.3"
 dependencies = [
  "harbor-core",
  "tokio",
@@ -1464,7 +1464,7 @@ dependencies = [
 
 [[package]]
 name = "harbor-core"
-version = "0.51.2"
+version = "0.51.3"
 dependencies = [
  "arc-swap",
  "axum",
@@ -1497,7 +1497,7 @@ dependencies = [
 
 [[package]]
 name = "harbor-desktop"
-version = "0.51.2"
+version = "0.51.3"
 dependencies = [
  "harbor-core",
  "tauri",
