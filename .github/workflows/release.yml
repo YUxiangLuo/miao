@@ -36,7 +36,7 @@ jobs:
       sing_geoip_ref: ${{ steps.meta.outputs.sing_geoip_ref }}
       direct_rules_ref: ${{ steps.meta.outputs.direct_rules_ref }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 1
       - uses: oven-sh/setup-bun@v2
@@ -57,7 +57,7 @@ jobs:
     needs: preflight
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.preflight.outputs.commit }}
       - uses: oven-sh/setup-bun@v2
@@ -69,11 +69,11 @@ jobs:
     needs: preflight
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.preflight.outputs.commit }}
       - uses: oven-sh/setup-bun@v2
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: ~/.bun/install/cache
           key: bun-${{ runner.os }}-${{ hashFiles('frontend-rsbuild/bun.lock') }}
@@ -81,7 +81,7 @@ jobs:
             bun-${{ runner.os }}-
       - name: Check and build frontend
         run: ./dev.sh check frontend
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: public-panel
           path: public
@@ -93,10 +93,10 @@ jobs:
     needs: [preflight, build-frontend]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.preflight.outputs.commit }}
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: public-panel
           path: public
@@ -113,10 +113,10 @@ jobs:
     needs: [preflight, build-frontend]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.preflight.outputs.commit }}
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: public-panel
           path: public
@@ -127,7 +127,7 @@ jobs:
         with:
           key: linux-musl-release
       - uses: oven-sh/setup-bun@v2
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version: ${{ needs.preflight.outputs.go_version }}
           cache: false
@@ -147,7 +147,7 @@ jobs:
           version_out=$(./dist/linux/harbor-linux-amd64 --version)
           echo "Smoke test: $version_out"
           [[ "$version_out" == *"harbor ${{ needs.preflight.outputs.tag }}"* ]]
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: release-linux
           path: dist/linux
@@ -159,10 +159,10 @@ jobs:
     needs: [preflight, build-frontend]
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.preflight.outputs.commit }}
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: public-panel
           path: public
@@ -173,7 +173,7 @@ jobs:
         with:
           key: windows-desktop-release
       - uses: oven-sh/setup-bun@v2
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version: ${{ needs.preflight.outputs.go_version }}
           cache: false
@@ -193,7 +193,7 @@ jobs:
         run: |
           ./dev.sh build desktop --skip-frontend
           bun scripts/lib/release-artifacts.mjs stage-windows dist/windows "${{ needs.preflight.outputs.commit }}" "${{ needs.preflight.outputs.tag }}" dist/harbor-windows-amd64-setup.exe
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: release-windows
           path: dist/windows
@@ -207,16 +207,16 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.preflight.outputs.commit }}
           fetch-depth: 1
       - uses: oven-sh/setup-bun@v2
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: release-linux
           path: dist/${{ needs.preflight.outputs.tag }}
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: release-windows
           path: dist/${{ needs.preflight.outputs.tag }}
@@ -229,7 +229,7 @@ jobs:
             "${{ needs.preflight.outputs.commit }}" \
             "${{ needs.preflight.outputs.tag }}" \
             "${{ needs.preflight.outputs.draft }}"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: release-manifest-${{ needs.preflight.outputs.tag }}
           path: dist/${{ needs.preflight.outputs.tag }}/release-manifest.json
