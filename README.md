@@ -14,13 +14,6 @@ Harbor 将定制 `sing-box` 内核、大陆/内网直连规则集与 SolidJS 2.0
 - **多协议节点与链式中转（`detour`）**：支持 SOCKS5、Shadowsocks、VMess、VLESS、Trojan、AnyTLS、Hysteria2、TUIC 八种协议与静态住宅前置跳板中转，内置订阅定时刷新、常用服务分流预设与实时连接监控。
 - **单文件部署与 AI 运维**：零外部运行依赖，开箱即用；提供原生 MCP（Streamable HTTP）端点，便于 AI Agent 查询状态、测速与管理配置。
 
-<details>
-<summary>查看控制面板</summary>
-
-<img width="1440" height="1400" alt="Harbor 控制面板" src="https://github.com/user-attachments/assets/320dd0bb-f1da-4bf9-99ab-6c04c3c2c95b" />
-
-</details>
-
 ## 安装与启动
 
 从 [Release](https://github.com/YUxiangLuo/miao/releases/latest) 下载对应平台的产物及同名 `.sha256` 校验文件：
