@@ -54,12 +54,14 @@ export interface ConfirmState {
 }
 
 export type ConsoleNavKey =
-  | 'overview'
   | 'nodes'
-  | 'rules'
-  | 'lan'
+  | 'routing'
   | 'connections'
   | 'settings'
+
+export type NodesTabKey = 'pool' | 'sources'
+
+export type RoutingTabKey = 'devices' | 'ports' | 'rules'
 
 export type NodeModalInitialMode = 'link' | 'manual' | 'vps'
 
@@ -115,7 +117,29 @@ export function shouldAutoTestCurrentNode(state: {
 }
 
 export function useAppData() {
-  const [activeNav, setActiveNav] = createSignal<ConsoleNavKey>('overview')
+  const [activeNav, setActiveNav] = createSignal<ConsoleNavKey>('nodes')
+  const [nodesTab, setNodesTab] = createSignal<NodesTabKey>('pool')
+  const [routingTab, setRoutingTab] = createSignal<RoutingTabKey>('devices')
+  const [routingTabTouched, setRoutingTabTouched] = createSignal(false)
+
+  const selectRoutingTab = (tab: RoutingTabKey) => {
+    setRoutingTabTouched(true)
+    setRoutingTab(tab)
+  }
+
+  const navigateToNodes = (tab?: NodesTabKey) => {
+    if (tab) setNodesTab(tab)
+    setActiveNav('nodes')
+  }
+
+  const navigateToRouting = (tab?: RoutingTabKey) => {
+    if (tab) {
+      setRoutingTabTouched(true)
+      setRoutingTab(tab)
+    }
+    setActiveNav('routing')
+  }
+
   const [upgrading, setUpgrading] = createSignal(false)
   const [nodeForm, setNodeForm] = createSignal<NodeForm>({ ...EMPTY_NODE_FORM })
   const [nodeType, setNodeType] = createSignal<NodeType>('hysteria2')
@@ -328,6 +352,13 @@ export function useAppData() {
   return {
     activeNav,
     setActiveNav,
+    nodesTab,
+    setNodesTab,
+    routingTab,
+    routingTabTouched,
+    selectRoutingTab,
+    navigateToNodes,
+    navigateToRouting,
     firstLoadDone,
     pendingActions,
     upgrading,

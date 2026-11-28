@@ -1,13 +1,11 @@
-import { Show } from 'solid-js'
+import { Show, createMemo } from 'solid-js'
 import type { JSX } from '@solidjs/web'
 import { ICON } from '../tokens'
 import { Button } from '../components/ui'
 import { McpControl } from '../components/McpControl'
-import { ConnectivityCheck } from '../components/ConnectivityCheck'
 import { formatUptime } from '../utils'
-import type { RouteMode } from '../types/api'
 import type { useAppController } from '../hooks/useAppController'
-import { ClockIcon, MoonIcon, PlayIcon, SquareIcon, SunIcon } from '../components/icons'
+import { ClockIcon, MoonIcon, SunIcon } from '../components/icons'
 
 type AppController = ReturnType<typeof useAppController>
 
@@ -21,113 +19,25 @@ export interface SettingsViewProps {
 export function SettingsView(props: SettingsViewProps): JSX.Element {
   const app = () => props.app
 
-  const switchRouteMode = (mode: RouteMode) => {
-    if (mode === app().status().route_mode) return
-    app().handleOpenSetRouteModeConfirm(mode)
-  }
+  const runtimeSummary = createMemo(() => {
+    const status = app().status()
+    if (!status.ready) return ''
+    const parts: string[] = []
+    if (status.pid != null) parts.push(`内核 PID ${status.pid}`)
+    parts.push(`已运行 ${formatUptime(status.uptime_secs)}`)
+    return parts.join(' · ')
+  })
 
   return (
     <>
       <header class="page-header">
         <div>
           <h1 class="page-title">系统设置</h1>
-          <p class="page-subtitle">核心服务状态、自动化策略、MCP 接口与版本更新</p>
+          <p class="page-subtitle">自动化刷新策略、AI 接入协议（MCP）、界面外观与版本更新</p>
         </div>
       </header>
 
-      {/* Group 1: Core Service */}
-      <section class="surface-box" aria-label="核心服务设置">
-        <div class="surface-header">
-          <h2 class="surface-title">核心服务</h2>
-        </div>
-        <div class="hairline-list">
-          <div class="hairline-row">
-            <div class="row-main">
-              <div class="row-title">
-                <span
-                  class={[
-                    'status-dot',
-                    app().status().ready ? 'emerald pulse' : app().status().initializing ? 'amber' : 'muted',
-                  ]}
-                  aria-hidden="true"
-                />
-                <span>sing-box 数据面引擎</span>
-                <span class="mono-tag">{app().status().platform || 'linux'}</span>
-              </div>
-              <div class="row-sub mono">
-                {app().status().ready
-                  ? `PID ${app().status().pid ?? '--'} · 已运行 ${formatUptime(app().status().uptime_secs)}`
-                  : app().status().initializing
-                    ? '正在校验配置并启动服务…'
-                    : '服务当前已停止'}
-              </div>
-            </div>
-            <div class="row-end">
-              <ConnectivityCheck
-                status={app().status()}
-                backendUnreachable={app().backendUnreachable()}
-              />
-              <Show
-                when={app().status().running || app().status().ready}
-                fallback={
-                  <Button
-                    tone="primary"
-                    size="sm"
-                    icon={<PlayIcon size={ICON.xs} />}
-                    loading={app().pendingActions().has('startService')}
-                    onClick={() => { void app().handleStartService() }}
-                  >
-                    启动服务
-                  </Button>
-                }
-              >
-                <Button
-                  tone="danger"
-                  size="sm"
-                  icon={<SquareIcon size={ICON.xs} />}
-                  loading={app().pendingActions().has('stopService')}
-                  onClick={() => app().handleOpenStopServiceConfirm()}
-                >
-                  停止服务
-                </Button>
-              </Show>
-            </div>
-          </div>
-
-          <div class="hairline-row">
-            <div class="row-main">
-              <div class="row-title">分流模式</div>
-              <div class="row-sub">
-                规则分流优先让内网与中国大陆直连；全局代理关闭内置大陆直连分流。
-              </div>
-            </div>
-            <div class="row-end">
-              <div class="seg-rail" role="group" aria-label="分流模式设置">
-                <button
-                  type="button"
-                  class={['seg-btn', { active: app().status().route_mode === 'rule' }]}
-                  aria-pressed={app().status().route_mode === 'rule' ? 'true' : 'false'}
-                  disabled={app().pendingActions().has('routeMode')}
-                  onClick={() => switchRouteMode('rule')}
-                >
-                  规则分流
-                </button>
-                <button
-                  type="button"
-                  class={['seg-btn', { active: app().status().route_mode === 'global' }]}
-                  aria-pressed={app().status().route_mode === 'global' ? 'true' : 'false'}
-                  disabled={app().pendingActions().has('routeMode')}
-                  onClick={() => switchRouteMode('global')}
-                >
-                  全局代理
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* Group 2: Automation & MCP */}
+      {/* Group 1: Automation & MCP */}
       <section class="surface-box" aria-label="自动化与外部集成">
         <div class="surface-header">
           <h2 class="surface-title">自动化与 AI 接入</h2>
@@ -171,7 +81,7 @@ export function SettingsView(props: SettingsViewProps): JSX.Element {
         </div>
       </section>
 
-      {/* Group 3: Appearance & Version */}
+      {/* Group 2: Appearance & Version */}
       <section class="surface-box" aria-label="界面与版本信息">
         <div class="surface-header">
           <h2 class="surface-title">界面与版本</h2>
@@ -211,6 +121,9 @@ export function SettingsView(props: SettingsViewProps): JSX.Element {
               <div class="row-title">
                 <span>Harbor 版本</span>
                 <span class="mono-tag">v{(app().versionInfo().current || '未知').replace(/^v/, '')}</span>
+                <Show when={app().status().platform}>
+                  {(plat) => <span class="mono-tag">{plat()}</span>}
+                </Show>
                 <Show when={app().versionInfo().has_update && app().versionInfo().latest}>
                   {(latest) => <span class="mono-tag emerald">新版本 {latest()}</span>}
                 </Show>
@@ -221,6 +134,9 @@ export function SettingsView(props: SettingsViewProps): JSX.Element {
                   : app().versionInfo().upgrade_supported === false
                     ? '点击前往 GitHub Release 下载最新安装包（覆盖安装前请先从托盘退出）'
                     : '检查 GitHub Release 最新版本并在线更新'}
+                <Show when={!app().upgrading() && runtimeSummary()}>
+                  {(meta) => <span class="mono"> · {meta()}</span>}
+                </Show>
               </div>
             </div>
             <div class="row-end">

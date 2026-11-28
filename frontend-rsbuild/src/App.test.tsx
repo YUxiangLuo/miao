@@ -14,9 +14,9 @@ function jsonResponse(payload: unknown, status = 200) {
   }
 }
 
-function stubMatchMedia() {
+function stubMatchMedia(mobile = false) {
   rs.stubGlobal('matchMedia', rs.fn().mockImplementation(() => ({
-    matches: false,
+    matches: mobile,
     addEventListener: rs.fn(),
     removeEventListener: rs.fn(),
   })))
@@ -29,7 +29,7 @@ describe('Harbor Console integration', () => {
     rs.unstubAllGlobals()
   })
 
-  it('completes first-time SetupWizard onboarding and enters OverviewView', async () => {
+  it('completes first-time SetupWizard onboarding and enters streamlined NodesView', async () => {
     let hasSub = false
     const fetchMock = rs.fn(async (input, init?: RequestInit) => {
       const url = String(input)
@@ -53,7 +53,7 @@ describe('Harbor Console integration', () => {
         return jsonResponse({ success: true, data: [] })
       }
       if (url === '/api/version') {
-        return jsonResponse({ success: true, data: { current: '0.50.0', latest: null, has_update: false } })
+        return jsonResponse({ success: true, data: { current: '0.51.3', latest: null, has_update: false } })
       }
       throw new Error(`Unexpected request: ${url}`)
     })
@@ -70,8 +70,10 @@ describe('Harbor Console integration', () => {
     )
     await user.click(screen.getByRole('button', { name: '添加订阅并启动' }))
 
-    expect(await screen.findByRole('heading', { name: '默认代理出口' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '概览' })).toHaveAttribute('aria-current', 'page')
+    expect(await screen.findByRole('heading', { name: '代理节点' })).toBeInTheDocument()
+    const nav = screen.getByRole('navigation', { name: '主导航' })
+    expect(within(nav).getAllByRole('button')).toHaveLength(4)
+    expect(within(nav).getByRole('button', { name: /代理节点/ })).toHaveAttribute('aria-current', 'page')
   })
 
   it('degrades gracefully when connected to an older backend returning 404 on /api/terminals and /api/access-ports', async () => {
@@ -108,7 +110,7 @@ describe('Harbor Console integration', () => {
     expect(await screen.findByRole('heading', { name: '默认代理出口' })).toBeInTheDocument()
 
     const nav = screen.getByRole('navigation', { name: '主导航' })
-    await user.click(within(nav).getByRole('button', { name: /设备与端口/ }))
+    await user.click(within(nav).getByRole('button', { name: /分流隔离/ }))
     expect(await screen.findByText(/只读兼容模式/)).toBeInTheDocument()
     expect(screen.getByText('192.168.8.180')).toBeInTheDocument()
 
@@ -116,7 +118,7 @@ describe('Harbor Console integration', () => {
     expect(await screen.findByText(/暂不支持独立代理端口/)).toBeInTheDocument()
   })
 
-  it('surfaces blocked node alert banner and creates an independent proxy port via SelectPopover', async () => {
+  it('surfaces global circuit-breaker banner, deep-links into blocked port tab, and creates port + rule', async () => {
     let ports = [
       {
         id: 'ap-20101',
@@ -127,6 +129,7 @@ describe('Harbor Console integration', () => {
         blocked: true,
       },
     ]
+    let rules = [] as ReturnType<typeof ruleMock>[]
 
     const fetchMock = rs.fn(async (input, init?: RequestInit) => {
       const url = String(input)
@@ -141,8 +144,17 @@ describe('Harbor Console integration', () => {
           ],
         })
       }
-      if (url === '/api/rules' || url === '/api/terminals') {
+      if (url === '/api/terminals') {
         return jsonResponse({ success: true, data: [] })
+      }
+      if (url === '/api/rules' && init?.method === 'POST') {
+        const body = JSON.parse(String(init.body))
+        const next = ruleMock({ index: rules.length, field: body.field, value: body.value, target: body.target })
+        rules = [...rules, next]
+        return jsonResponse({ success: true, message: 'Rule added' })
+      }
+      if (url === '/api/rules') {
+        return jsonResponse({ success: true, data: rules })
       }
       if (url === '/api/access-ports' && init?.method === 'POST') {
         const body = JSON.parse(String(init.body))
@@ -163,7 +175,7 @@ describe('Harbor Console integration', () => {
         return jsonResponse({ success: true, data: ports })
       }
       if (url === '/api/version') {
-        return jsonResponse({ success: true, data: { current: '0.50.0', latest: null, has_update: false } })
+        return jsonResponse({ success: true, data: { current: '0.51.3', latest: null, has_update: false } })
       }
       if (url === '/api/clash/proxies') {
         return jsonResponse({
@@ -182,8 +194,8 @@ describe('Harbor Console integration', () => {
     const user = userEvent.setup()
     render(() => <App />)
 
-    expect(await screen.findByText(/有 1 项设备或独立端口所绑定的节点当前不可用/)).toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: '查看设备与端口' }))
+    expect(await screen.findByText(/有 1 项设备、独立端口或规则所绑定的节点当前不可用/)).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '查看分流隔离' }))
 
     expect(await screen.findByText('测试环境 01')).toBeInTheDocument()
 
@@ -205,9 +217,26 @@ describe('Harbor Console integration', () => {
       )
     })
     expect(await screen.findByText('独立浏览器 02')).toBeInTheDocument()
+
+    // Switch to custom rules sub-tab within 分流隔离 and add a rule
+    await user.click(screen.getByRole('button', { name: /自定义规则/ }))
+    await user.click(screen.getByRole('button', { name: '新建规则' }))
+    await user.type(screen.getByLabelText('匹配值'), 'openai.com')
+    await user.click(screen.getByRole('button', { name: '添加规则' }))
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/rules',
+        expect.objectContaining({
+          method: 'POST',
+          body: JSON.stringify({ field: 'domain_suffix', value: 'openai.com', target: 'proxy' }),
+        }),
+      )
+    })
+    expect(await screen.findByText('openai.com')).toBeInTheDocument()
   })
 
-  it('assigns LAN device policy, switches route mode from sidebar dock, and navigates via CommandPalette (⌘K)', async () => {
+  it('assigns LAN device policy, switches route mode from sidebar dock, jumps via CommandPalette (⌘K), and keeps Settings free of duplicate controls', async () => {
     let routeMode = 'rule'
     const fetchMock = rs.fn(async (input, init?: RequestInit) => {
       const url = String(input)
@@ -235,7 +264,7 @@ describe('Harbor Console integration', () => {
         return jsonResponse({ success: true, message: 'Updated' })
       }
       if (url === '/api/version') {
-        return jsonResponse({ success: true, data: { current: '0.50.0', latest: null, has_update: false } })
+        return jsonResponse({ success: true, data: { current: '0.51.3', latest: null, has_update: false } })
       }
       if (url === '/api/clash/proxies') {
         return jsonResponse({ proxies: { proxy: { type: 'Selector', now: 'us-vip', all: ['us-vip'] } } })
@@ -253,7 +282,7 @@ describe('Harbor Console integration', () => {
     render(() => <App />)
 
     const nav = await screen.findByRole('navigation', { name: '主导航' })
-    await user.click(within(nav).getByRole('button', { name: /设备与端口/ }))
+    await user.click(within(nav).getByRole('button', { name: /分流隔离/ }))
     const seatPicker = await screen.findByRole('button', { name: /设置 NAS 主机 \(192\.168\.8\.214\) 出口策略/ })
     await user.click(seatPicker)
     await user.click(await screen.findByRole('option', { name: /禁止走代理/ }))
@@ -268,7 +297,7 @@ describe('Harbor Console integration', () => {
       )
     })
 
-    // Switch route mode from persistent sidebar control dock
+    // Switch route mode from persistent sidebar control dock (single global home)
     const sidebarModeGroup = screen.getByRole('group', { name: '分流模式切换' })
     fireEvent.click(within(sidebarModeGroup).getByRole('button', { name: '全局代理' }))
     flush()
@@ -285,17 +314,19 @@ describe('Harbor Console integration', () => {
       )
     })
 
-    // Open CommandPalette via Ctrl+K shortcut and jump to 节点与订阅
+    // Open CommandPalette via Ctrl+K shortcut and jump directly to 节点源管理
     fireEvent.keyDown(window, { key: 'k', ctrlKey: true })
     expect(await screen.findByRole('dialog', { name: '命令面板' })).toBeInTheDocument()
-    await user.type(screen.getByRole('textbox', { name: '搜索命令或节点' }), '节点与订阅')
-    await user.click(await screen.findByRole('option', { name: /前往 节点与订阅/ }))
+    await user.type(screen.getByRole('textbox', { name: '搜索命令或节点' }), '节点源管理')
+    await user.click(await screen.findByRole('option', { name: /前往 节点源管理/ }))
 
     expect(await screen.findByRole('region', { name: '订阅源' })).toBeInTheDocument()
     expect(screen.getByRole('region', { name: '手动节点' })).toBeInTheDocument()
 
-    // Navigate to 系统设置 and verify MCP switch is accessible
-    await user.click(screen.getByRole('button', { name: /系统设置/ }))
+    // Navigate to 系统设置 and verify MCP switch is accessible & no duplicate route-mode group exists
+    await user.click(within(nav).getByRole('button', { name: /系统设置/ }))
     expect(await screen.findByRole('switch', { name: 'MCP 端点开关' })).toBeInTheDocument()
+    expect(screen.queryByRole('group', { name: '分流模式设置' })).toBeNull()
+    expect(screen.getAllByRole('group', { name: '分流模式切换' })).toHaveLength(1)
   })
 })

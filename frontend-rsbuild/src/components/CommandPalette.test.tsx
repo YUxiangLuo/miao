@@ -12,8 +12,13 @@ type AppController = ReturnType<typeof useAppController>
 
 function createMockApp(overrides: Partial<Record<string, unknown>> = {}): AppController {
   return {
-    activeNav: () => 'overview',
+    activeNav: () => 'nodes',
+    nodesTab: () => 'pool',
     setActiveNav: rs.fn(),
+    setNodesTab: rs.fn(),
+    selectRoutingTab: rs.fn(),
+    navigateToNodes: rs.fn(),
+    navigateToRouting: rs.fn(),
     openNodeModal: rs.fn(),
     handleRefreshSubscriptions: rs.fn().mockResolvedValue(undefined),
     handleSwitchProxy: rs.fn().mockResolvedValue(undefined),
@@ -57,7 +62,7 @@ describe('useCommandShortcut', () => {
 })
 
 describe('CommandPalette', () => {
-  it('navigates across the 6 workspaces and closes on execution', async () => {
+  it('navigates across the 4 workspaces and deep-links into sub-tabs', async () => {
     const user = userEvent.setup()
     const app = createMockApp()
     const onClose = rs.fn()
@@ -73,8 +78,28 @@ describe('CommandPalette', () => {
     ))
 
     expect(screen.getByRole('dialog', { name: '命令面板' })).toBeInTheDocument()
-    await user.click(screen.getByRole('option', { name: /前往 节点与订阅/ }))
-    expect(app.setActiveNav).toHaveBeenCalledWith('nodes')
+    await user.click(screen.getByRole('option', { name: /前往 节点源管理/ }))
+    expect(app.navigateToNodes).toHaveBeenCalledWith('sources')
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
+  it('deep-links independent access port entries into routing ports tab', async () => {
+    const user = userEvent.setup()
+    const app = createMockApp()
+    const onClose = rs.fn()
+
+    render(() => (
+      <CommandPalette
+        open
+        onClose={onClose}
+        app={app}
+        onToggleTheme={rs.fn()}
+        theme="light"
+      />
+    ))
+
+    await user.click(screen.getByRole('option', { name: /独立端口 · 独立浏览器 01/ }))
+    expect(app.navigateToRouting).toHaveBeenCalledWith('ports')
     expect(onClose).toHaveBeenCalledTimes(1)
   })
 

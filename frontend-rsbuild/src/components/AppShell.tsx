@@ -8,24 +8,20 @@ import { SubDetailModal } from './SubDetailModal'
 import { ScheduleModal } from './ScheduleModal'
 import { VpsTasks } from './VpsTasks'
 import { CommandPalette, useCommandShortcut } from './CommandPalette'
-import { buildTerminalRows } from '../domain/terminals'
+import { buildTerminalRows, isSingleSeatRule } from '../domain/terminals'
 import { buildAccessPortRows } from '../domain/accessPorts'
-import { OverviewView } from '../views/OverviewView'
 import { NodesView } from '../views/NodesView'
-import { RulesView } from '../views/RulesView'
-import { LanView } from '../views/LanView'
+import { RoutingView } from '../views/RoutingView'
 import { ConnectionsView } from '../views/ConnectionsView'
 import { SettingsView } from '../views/SettingsView'
-import { formatSpeed } from '../utils'
-import type { ConsoleNavKey } from '../hooks/useAppData'
+import { formatSpeed, formatUptime } from '../utils'
+import type { ConsoleNavKey, RoutingTabKey } from '../hooks/useAppData'
 import type { RouteMode, SubStatus } from '../types/api'
 import type { useAppController } from '../hooks/useAppController'
 import {
   ActivityIcon,
   GlobeIcon,
-  LayoutDashboardIcon,
   MoonIcon,
-  NetworkIcon,
   PlayIcon,
   RouteIcon,
   SearchIcon,
@@ -77,14 +73,27 @@ export function AppShell(props: { app: AppController }) {
     connections: app().connectionsInfo().connections,
   }))
 
-  const lanAlertCount = createMemo(() => (
-    terminalRows().filter((r) => r.failClosed).length
-    + accessPortRows().filter((r) => r.blocked).length
-  ))
+  const generalRules = createMemo(() => app().rules().filter((r) => !isSingleSeatRule(r)))
 
-  const skippedRuleCount = createMemo(() => (
-    app().rules().filter((r) => r.skipped).length
-  ))
+  const failClosedSeatCount = createMemo(() => terminalRows().filter((r) => r.failClosed).length)
+  const failClosedPortCount = createMemo(() => accessPortRows().filter((r) => r.blocked).length)
+  const skippedGeneralRuleCount = createMemo(() => generalRules().filter((r) => r.skipped).length)
+
+  const routingAlertCount = createMemo(
+    () => failClosedSeatCount() + failClosedPortCount() + skippedGeneralRuleCount(),
+  )
+
+  const firstBlockedRoutingTab = createMemo<RoutingTabKey>(() => {
+    if (failClosedSeatCount() > 0) return 'devices'
+    if (failClosedPortCount() > 0) return 'ports'
+    return 'rules'
+  })
+
+  const nodesSourceHasAlert = createMemo(() => {
+    if (app().subs().some((sub) => sub.state === 'failed')) return true
+    const knownTargets = new Set(app().ruleNodeNames())
+    return app().nodes().some((node) => Boolean(node.detour) && !knownTargets.has(node.detour!))
+  })
 
   const statusTone = createMemo(() => {
     if (app().status().ready) return 'emerald pulse'
@@ -107,19 +116,13 @@ export function AppShell(props: { app: AppController }) {
     key: ConsoleNavKey
     label: string
     shortLabel: string
-    icon: (props: IconProps) => ReturnType<typeof LayoutDashboardIcon>
+    icon: (props: IconProps) => ReturnType<typeof GlobeIcon>
     badge?: () => string | undefined
     alertTone?: () => 'crimson' | 'emerald' | undefined
   }> = [
     {
-      key: 'overview',
-      label: '概览',
-      shortLabel: '概览',
-      icon: LayoutDashboardIcon,
-    },
-    {
       key: 'nodes',
-      label: '节点与订阅',
+      label: '代理节点',
       shortLabel: '节点',
       icon: GlobeIcon,
       badge: () => {
@@ -128,25 +131,18 @@ export function AppShell(props: { app: AppController }) {
         const manualCount = app().nodes().length
         return manualCount > 0 ? String(manualCount) : undefined
       },
+      alertTone: () => (nodesSourceHasAlert() ? 'crimson' : undefined),
     },
     {
-      key: 'rules',
-      label: '分流规则',
-      shortLabel: '规则',
+      key: 'routing',
+      label: '分流隔离',
+      shortLabel: '分流',
       icon: RouteIcon,
-      badge: () => (app().rules().length > 0 ? String(app().rules().length) : undefined),
-      alertTone: () => (skippedRuleCount() > 0 ? 'crimson' : undefined),
-    },
-    {
-      key: 'lan',
-      label: '设备与端口',
-      shortLabel: '局域网',
-      icon: NetworkIcon,
       badge: () => {
-        const total = terminalRows().length + accessPortRows().length
+        const total = terminalRows().length + accessPortRows().length + generalRules().length
         return total > 0 ? String(total) : undefined
       },
-      alertTone: () => (lanAlertCount() > 0 ? 'crimson' : undefined),
+      alertTone: () => (routingAlertCount() > 0 ? 'crimson' : undefined),
     },
     {
       key: 'connections',
@@ -239,10 +235,15 @@ export function AppShell(props: { app: AppController }) {
           {/* Persistent Engine & Route Mode Dock */}
           <div class="sidebar-dock" aria-label="运行控制栏">
             <div class="sidebar-dock-row">
-              <span class="sidebar-status">
-                <span class={['status-dot', statusTone()]} aria-hidden="true" />
-                <strong>{statusText()}</strong>
-              </span>
+              <div class="sidebar-status-group">
+                <span class="sidebar-status">
+                  <span class={['status-dot', statusTone()]} aria-hidden="true" />
+                  <strong>{statusText()}</strong>
+                </span>
+                <Show when={app().status().ready && app().status().uptime_secs != null}>
+                  <span class="sidebar-uptime num">{formatUptime(app().status().uptime_secs)}</span>
+                </Show>
+              </div>
 
               <Show
                 when={app().status().running || app().status().ready}
@@ -310,34 +311,87 @@ export function AppShell(props: { app: AppController }) {
         </aside>
       </Show>
 
-      {/* Mobile Compact Header */}
+      {/* Mobile Compact Header + Global Control Strip */}
       <Show when={isMobile()}>
-        <header class="mobile-topbar">
-          <div class="mobile-topbar-left">
-            <LogoIcon size={24} />
-            <span class="sidebar-brand-name">Harbor</span>
-            <span class="status-inline">
-              <span class={['status-dot', statusTone()]} aria-hidden="true" />
-              <span>{statusText()}</span>
-            </span>
+        <header class="mobile-header-stack">
+          <div class="mobile-topbar">
+            <div class="mobile-topbar-left">
+              <LogoIcon size={24} />
+              <span class="sidebar-brand-name">Harbor</span>
+              <span class="status-inline">
+                <span class={['status-dot', statusTone()]} aria-hidden="true" />
+                <span>{statusText()}</span>
+              </span>
+            </div>
+            <div class="mobile-topbar-right">
+              <Show
+                when={app().status().running || app().status().ready}
+                fallback={
+                  <Button
+                    tone="primary"
+                    size="sm"
+                    icon={<PlayIcon size={ICON.xs} />}
+                    loading={app().pendingActions().has('startService')}
+                    onClick={() => { void app().handleStartService() }}
+                  >
+                    启动
+                  </Button>
+                }
+              >
+                <Button
+                  tone="secondary"
+                  size="sm"
+                  icon={<SquareIcon size={ICON.xs} />}
+                  loading={app().pendingActions().has('stopService')}
+                  onClick={() => app().handleOpenStopServiceConfirm()}
+                >
+                  停止
+                </Button>
+              </Show>
+              <button
+                type="button"
+                class="icon-button"
+                aria-label="打开命令面板"
+                onClick={() => setCmdOpen(true)}
+              >
+                <SearchIcon size={ICON.md} />
+              </button>
+              <button
+                type="button"
+                class="icon-button"
+                aria-label={theme() === 'dark' ? '切换为浅色外观' : '切换为深色外观'}
+                onClick={toggleTheme}
+              >
+                {theme() === 'dark' ? <SunIcon size={ICON.md} /> : <MoonIcon size={ICON.md} />}
+              </button>
+            </div>
           </div>
-          <div class="mobile-topbar-right">
-            <button
-              type="button"
-              class="icon-button"
-              aria-label="打开命令面板"
-              onClick={() => setCmdOpen(true)}
-            >
-              <SearchIcon size={ICON.md} />
-            </button>
-            <button
-              type="button"
-              class="icon-button"
-              aria-label={theme() === 'dark' ? '切换为浅色外观' : '切换为深色外观'}
-              onClick={toggleTheme}
-            >
-              {theme() === 'dark' ? <SunIcon size={ICON.md} /> : <MoonIcon size={ICON.md} />}
-            </button>
+
+          <div class="mobile-control-bar">
+            <div class="seg-rail" role="group" aria-label="分流模式切换">
+              <button
+                type="button"
+                class={['seg-btn', { active: app().status().route_mode === 'rule' }]}
+                aria-pressed={app().status().route_mode === 'rule' ? 'true' : 'false'}
+                disabled={app().pendingActions().has('routeMode')}
+                onClick={() => switchRouteMode('rule')}
+              >
+                规则分流
+              </button>
+              <button
+                type="button"
+                class={['seg-btn', { active: app().status().route_mode === 'global' }]}
+                aria-pressed={app().status().route_mode === 'global' ? 'true' : 'false'}
+                disabled={app().pendingActions().has('routeMode')}
+                onClick={() => switchRouteMode('global')}
+              >
+                全局代理
+              </button>
+            </div>
+            <div class="sidebar-speed num" aria-label="实时速率">
+              <span>↓ {formatSpeed(app().traffic().down ?? 0)}</span>
+              <span>↑ {formatSpeed(app().traffic().up ?? 0)}</span>
+            </div>
           </div>
         </header>
       </Show>
@@ -345,10 +399,45 @@ export function AppShell(props: { app: AppController }) {
       {/* Main Single Workspace */}
       <main class="app-main">
         <div class="app-content">
+          <Show when={routingAlertCount() > 0 && app().activeNav() !== 'routing'}>
+            <div class="circuit-banner danger" role="alert">
+              <div class="circuit-banner-main">
+                <span class="status-dot crimson pulse" aria-hidden="true" />
+                <span>
+                  有 {routingAlertCount()} 项设备、独立端口或规则所绑定的节点当前不可用，已自动阻断连接以防意外回退
+                </span>
+              </div>
+              <div class="circuit-banner-actions">
+                <Button
+                  tone="secondary"
+                  size="sm"
+                  onClick={() => app().navigateToRouting(firstBlockedRoutingTab())}
+                >
+                  查看分流隔离
+                </Button>
+                <Show when={!(app().activeNav() === 'nodes' && app().nodesTab() === 'sources')}>
+                  <Button
+                    tone="ghost"
+                    size="sm"
+                    onClick={() => app().navigateToNodes('sources')}
+                  >
+                    检查节点源
+                  </Button>
+                </Show>
+              </div>
+            </div>
+          </Show>
+
+          <Show when={app().status().warnings.length > 0}>
+            <div class="circuit-banner warning" role="status">
+              <div class="circuit-banner-main">
+                <span class="status-dot amber" aria-hidden="true" />
+                <span>{app().status().warnings.map((w) => w.message).join('；')}</span>
+              </div>
+            </div>
+          </Show>
+
           <Switch>
-            <Match when={app().activeNav() === 'overview'}>
-              <OverviewView app={app()} />
-            </Match>
             <Match when={app().activeNav() === 'nodes'}>
               <NodesView
                 app={app()}
@@ -356,11 +445,8 @@ export function AppShell(props: { app: AppController }) {
                 onOpenSchedule={() => setShowScheduleModal(true)}
               />
             </Match>
-            <Match when={app().activeNav() === 'rules'}>
-              <RulesView app={app()} />
-            </Match>
-            <Match when={app().activeNav() === 'lan'}>
-              <LanView app={app()} />
+            <Match when={app().activeNav() === 'routing'}>
+              <RoutingView app={app()} />
             </Match>
             <Match when={app().activeNav() === 'connections'}>
               <ConnectionsView app={app()} />
@@ -377,7 +463,7 @@ export function AppShell(props: { app: AppController }) {
         </div>
       </main>
 
-      {/* Mobile Bottom Navigation */}
+      {/* Mobile Bottom Navigation (4 Items) */}
       <Show when={isMobile()}>
         <nav class="mobile-dock" role="navigation" aria-label="主导航">
           <For each={navItems}>

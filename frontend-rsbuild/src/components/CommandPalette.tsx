@@ -1,6 +1,7 @@
 import { For, Show, createEffect, createMemo, createSignal, onSettled } from 'solid-js'
 import type { JSX } from '@solidjs/web'
 import { formatDelay } from '../utils'
+import type { NodesTabKey, RoutingTabKey } from '../hooks/useAppData'
 import type { useAppController } from '../hooks/useAppController'
 import { cleanNodeDisplay } from './SelectPopover'
 import { SearchIcon } from './icons'
@@ -57,6 +58,26 @@ export function CommandPalette(props: CommandPaletteProps): JSX.Element {
 
   const ctrl = () => props.app as ControllerWithAliases
 
+  const jumpNodes = (tab: NodesTabKey) => {
+    const app = ctrl()
+    if (typeof app.navigateToNodes === 'function') {
+      app.navigateToNodes(tab)
+    } else {
+      app.setNodesTab?.(tab)
+      app.setActiveNav('nodes')
+    }
+  }
+
+  const jumpRouting = (tab?: RoutingTabKey) => {
+    const app = ctrl()
+    if (typeof app.navigateToRouting === 'function') {
+      app.navigateToRouting(tab)
+    } else {
+      if (tab) app.selectRoutingTab?.(tab)
+      app.setActiveNav('routing')
+    }
+  }
+
   const sharedExitNodes = createMemo<string[]>(() => {
     const app = ctrl()
     if (!app.status().ready) return []
@@ -83,38 +104,31 @@ export function CommandPalette(props: CommandPaletteProps): JSX.Element {
 
   const allCommands = createMemo<CommandEntry[]>(() => {
     const app = ctrl()
+    const nodesTab = app.nodesTab?.() ?? 'pool'
     const entries: CommandEntry[] = [
-      {
-        id: 'nav:overview',
-        group: '页面导航',
-        label: '前往 概览',
-        keywords: 'overview 概览 首页 控制台 总览',
-        badge: app.activeNav() === 'overview' ? '当前' : undefined,
-        run: () => app.setActiveNav('overview'),
-      },
       {
         id: 'nav:nodes',
         group: '页面导航',
-        label: '前往 节点与订阅',
-        keywords: 'nodes 节点 订阅 测速 线路 subs proxies',
-        badge: app.activeNav() === 'nodes' ? '当前' : undefined,
-        run: () => app.setActiveNav('nodes'),
+        label: '前往 代理节点',
+        keywords: 'nodes 代理节点 节点 出口 选路 测速 首页 proxies',
+        badge: app.activeNav() === 'nodes' && nodesTab === 'pool' ? '当前' : undefined,
+        run: () => jumpNodes('pool'),
       },
       {
-        id: 'nav:rules',
+        id: 'nav:sources',
         group: '页面导航',
-        label: '前往 分流规则',
-        keywords: 'rules 分流 规则 路由 域名 直连 拦截',
-        badge: app.activeNav() === 'rules' ? '当前' : undefined,
-        run: () => app.setActiveNav('rules'),
+        label: '前往 节点源管理（订阅与手动节点）',
+        keywords: 'sources 节点源 订阅 手动节点 线路 subs',
+        badge: app.activeNav() === 'nodes' && nodesTab === 'sources' ? '当前' : undefined,
+        run: () => jumpNodes('sources'),
       },
       {
-        id: 'nav:lan',
+        id: 'nav:routing',
         group: '页面导航',
-        label: '前往 设备与端口',
-        keywords: 'lan 局域网 设备 独立端口 代理端口 terminals ports',
-        badge: app.activeNav() === 'lan' ? '当前' : undefined,
-        run: () => app.setActiveNav('lan'),
+        label: '前往 分流隔离',
+        keywords: 'routing 分流隔离 分流 隔离 局域网 设备 独立端口 规则 lan terminals ports rules',
+        badge: app.activeNav() === 'routing' ? '当前' : undefined,
+        run: () => jumpRouting(),
       },
       {
         id: 'nav:connections',
@@ -179,11 +193,11 @@ export function CommandPalette(props: CommandPaletteProps): JSX.Element {
     for (const port of app.accessPorts?.() ?? []) {
       entries.push({
         id: `port:${port.id}`,
-        group: '设备与端口',
+        group: '分流隔离',
         label: `独立端口 · ${port.name}`,
         keywords: `${port.name} ${port.port} ${port.outbound} 独立端口 端口`,
         badge: `:${port.port}`,
-        run: () => app.setActiveNav('lan'),
+        run: () => jumpRouting('ports'),
       })
     }
 
@@ -191,11 +205,11 @@ export function CommandPalette(props: CommandPaletteProps): JSX.Element {
       const title = term.name || term.dhcp_hostname || term.ip
       entries.push({
         id: `term:${term.ip}`,
-        group: '设备与端口',
+        group: '分流隔离',
         label: `局域网设备 · ${title}`,
         keywords: `${title} ${term.ip} ${term.department ?? ''} ${term.mac ?? ''} 局域网 设备`,
         badge: term.ip,
-        run: () => app.setActiveNav('lan'),
+        run: () => jumpRouting('devices'),
       })
     }
 
