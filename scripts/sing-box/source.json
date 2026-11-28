@@ -1,8 +1,8 @@
 {
   "repository": "https://github.com/SagerNet/sing-box.git",
-  "revision": "039d829d20c7bfb963dd73113afa9f2d1f080a70",
-  "go_version": "1.27.1",
-  "version": "1.15.0-alpha.13+harbor.17.039d829d",
+  "revision": "64417bc8e802367a2fb25edaddf6dee06bbed29c",
+  "go_version": "1.27.4",
+  "version": "1.15.0-alpha.15+harbor.18.64417bc8",
   "profile": "harbor-client-v4",
   "build_tags": ["with_quic", "with_clash_api", "with_utls"],
   "inbounds": ["mixed", "tun"],
