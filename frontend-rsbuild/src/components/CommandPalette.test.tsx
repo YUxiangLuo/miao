@@ -21,7 +21,7 @@ function createMockApp(overrides: Partial<Record<string, unknown>> = {}): AppCon
     navigateToRouting: rs.fn(),
     openNodeModal: rs.fn(),
     handleRefreshSubscriptions: rs.fn().mockResolvedValue(undefined),
-    handleSwitchProxy: rs.fn().mockResolvedValue(undefined),
+    handleSwitchProxy: rs.fn().mockResolvedValue(true),
     handleSetNodeSelect: rs.fn().mockResolvedValue(undefined),
     primaryGroupName: () => 'proxy',
     primaryGroup: () => ({
@@ -72,8 +72,6 @@ describe('CommandPalette', () => {
         open
         onClose={onClose}
         app={app}
-        onToggleTheme={rs.fn()}
-        theme="light"
       />
     ))
 
@@ -93,8 +91,6 @@ describe('CommandPalette', () => {
         open
         onClose={onClose}
         app={app}
-        onToggleTheme={rs.fn()}
-        theme="light"
       />
     ))
 
@@ -107,15 +103,12 @@ describe('CommandPalette', () => {
     const user = userEvent.setup()
     const app = createMockApp()
     const onClose = rs.fn()
-    const onToggleTheme = rs.fn()
 
     render(() => (
       <CommandPalette
         open
         onClose={onClose}
         app={app}
-        onToggleTheme={onToggleTheme}
-        theme="light"
       />
     ))
 
@@ -132,7 +125,8 @@ describe('CommandPalette', () => {
 
   it('switches default exit nodes with ArrowDown + Enter and supports Escape / backdrop dismissal', async () => {
     const user = userEvent.setup()
-    const app = createMockApp()
+    const handleSelectExitNode = rs.fn().mockResolvedValue(true)
+    const app = createMockApp({ handleSelectExitNode })
     const [open, setOpen] = createSignal(true)
 
     const { container } = render(() => (
@@ -140,8 +134,6 @@ describe('CommandPalette', () => {
         open={open()}
         onClose={() => setOpen(false)}
         app={app}
-        onToggleTheme={rs.fn()}
-        theme="dark"
       />
     ))
 
@@ -155,7 +147,7 @@ describe('CommandPalette', () => {
     expect(exitOptions[1]).toHaveTextContent('洛杉矶原生 02')
 
     await user.keyboard('{ArrowDown}{Enter}')
-    expect(app.handleSwitchProxy).toHaveBeenCalledWith('proxy', `${FLAG_US} 洛杉矶原生 02`)
+    expect(handleSelectExitNode).toHaveBeenCalledWith('proxy', `${FLAG_US} 洛杉矶原生 02`)
     expect(open()).toBe(false)
 
     setOpen(true)
@@ -191,8 +183,6 @@ describe('CommandPalette', () => {
         open
         onClose={onClose}
         app={app}
-        onToggleTheme={rs.fn()}
-        theme="light"
       />
     ))
 

@@ -1,6 +1,7 @@
 import { For, Show, createMemo, createSignal, createUniqueId } from 'solid-js'
 import { Portal, type JSX } from '@solidjs/web'
 import { ICON } from '../tokens'
+import { usePresence } from '../motion'
 import { Button } from '../components/ui'
 import { SelectPopover, cleanNodeDisplay, type SelectOption } from '../components/SelectPopover'
 import { useDialog } from '../hooks/useDialog'
@@ -92,6 +93,12 @@ export function RoutingView(props: { app: AppController }): JSX.Element {
 
   const deviceTitleId = createUniqueId()
   const deviceDialogRef = useDialog(deviceDialogOpen, () => setDeviceDialogOpen(false))
+  const [devicePanelEl, setDevicePanelEl] = createSignal<HTMLElement | null>(null)
+  const devicePresence = usePresence({
+    open: deviceDialogOpen,
+    element: devicePanelEl,
+    exitDurationToken: 'fast',
+  })
 
   // Dialog 2: Independent proxy port
   const [portDialogOpen, setPortDialogOpen] = createSignal(false)
@@ -105,6 +112,12 @@ export function RoutingView(props: { app: AppController }): JSX.Element {
 
   const portTitleId = createUniqueId()
   const portDialogRef = useDialog(portDialogOpen, () => setPortDialogOpen(false))
+  const [portPanelEl, setPortPanelEl] = createSignal<HTMLElement | null>(null)
+  const portPresence = usePresence({
+    open: portDialogOpen,
+    element: portPanelEl,
+    exitDurationToken: 'fast',
+  })
 
   // Dialog 3: Custom routing rule
   const [ruleDrawerOpen, setRuleDrawerOpen] = createSignal(false)
@@ -115,6 +128,12 @@ export function RoutingView(props: { app: AppController }): JSX.Element {
 
   const ruleTitleId = createUniqueId()
   const ruleDialogRef = useDialog<HTMLFormElement>(ruleDrawerOpen, () => setRuleDrawerOpen(false))
+  const [rulePanelEl, setRulePanelEl] = createSignal<HTMLElement | null>(null)
+  const rulePresence = usePresence({
+    open: ruleDrawerOpen,
+    element: rulePanelEl,
+    exitDurationToken: 'fast',
+  })
 
   const terminalRows = createMemo(() => buildTerminalRows({
     terminals: app().terminals(),
@@ -953,15 +972,27 @@ export function RoutingView(props: { app: AppController }): JSX.Element {
       </Show>
 
       {/* Dialog 1: Register / Edit LAN Device */}
-      <Show when={deviceDialogOpen()}>
+      <Show when={devicePresence.mounted()}>
         <Portal>
-          <div class="modal-overlay drawer-overlay" onClick={() => setDeviceDialogOpen(false)}>
+          <div
+            class="modal-overlay drawer-overlay"
+            data-motion="scrim"
+            data-motion-state={devicePresence.motionState()}
+            onClick={() => setDeviceDialogOpen(false)}
+          >
             <div
-              ref={deviceDialogRef}
+              ref={(el) => {
+                deviceDialogRef(el)
+                setDevicePanelEl(el)
+              }}
               class="modal-card drawer-panel"
               role="dialog"
               aria-modal="true"
               aria-labelledby={deviceTitleId}
+              inert={!deviceDialogOpen() ? true : undefined}
+              data-motion="slide-edge"
+              data-side="right"
+              data-motion-state={devicePresence.motionState()}
               tabindex={-1}
               onClick={(e) => e.stopPropagation()}
             >
@@ -1064,15 +1095,27 @@ export function RoutingView(props: { app: AppController }): JSX.Element {
       </Show>
 
       {/* Dialog 2: Create / Edit Independent Proxy Port */}
-      <Show when={portDialogOpen()}>
+      <Show when={portPresence.mounted()}>
         <Portal>
-          <div class="modal-overlay drawer-overlay" onClick={() => setPortDialogOpen(false)}>
+          <div
+            class="modal-overlay drawer-overlay"
+            data-motion="scrim"
+            data-motion-state={portPresence.motionState()}
+            onClick={() => setPortDialogOpen(false)}
+          >
             <div
-              ref={portDialogRef}
+              ref={(el) => {
+                portDialogRef(el)
+                setPortPanelEl(el)
+              }}
               class="modal-card drawer-panel"
               role="dialog"
               aria-modal="true"
               aria-labelledby={portTitleId}
+              inert={!portDialogOpen() ? true : undefined}
+              data-motion="slide-edge"
+              data-side="right"
+              data-motion-state={portPresence.motionState()}
               tabindex={-1}
               onClick={(e) => e.stopPropagation()}
             >
@@ -1182,17 +1225,34 @@ export function RoutingView(props: { app: AppController }): JSX.Element {
       </Show>
 
       {/* Dialog 3: Create Custom Rule */}
-      <Show when={ruleDrawerOpen()}>
+      <Show when={rulePresence.mounted()}>
         <Portal>
-          <div class="modal-overlay drawer-overlay" onClick={() => setRuleDrawerOpen(false)}>
+          <div
+            class="modal-overlay drawer-overlay"
+            data-motion="scrim"
+            data-motion-state={rulePresence.motionState()}
+            onClick={() => setRuleDrawerOpen(false)}
+          >
             <form
-              ref={ruleDialogRef}
+              ref={(el) => {
+                ruleDialogRef(el)
+                setRulePanelEl(el)
+              }}
               class="modal-card drawer-panel"
               role="dialog"
               aria-modal="true"
               aria-labelledby={ruleTitleId}
+              inert={!ruleDrawerOpen() ? true : undefined}
+              data-motion="slide-edge"
+              data-side="right"
+              data-motion-state={rulePresence.motionState()}
               tabindex={-1}
               onClick={(e) => e.stopPropagation()}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && (e.isComposing || e.keyCode === 229)) {
+                  e.preventDefault()
+                }
+              }}
               onSubmit={(e) => { void submitCustomRule(e) }}
             >
               <div class="modal-title-row">

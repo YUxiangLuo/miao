@@ -179,9 +179,9 @@ export function useAppActions(data: AppData) {
     }
   }
 
-  const handleSwitchProxy = async (groupName: string, nodeName: string) => {
-    if (requestedNodeSelect() !== 'manual') return
-    if (data.switchingNode()) return
+  const handleSwitchProxy = async (groupName: string, nodeName: string): Promise<boolean> => {
+    if (requestedNodeSelect() !== 'manual') return false
+    if (data.switchingNode()) return false
     data.setSwitchingNode(nodeName)
     try {
       const response = await data.apiCall<SwitchProxyResult>('proxy/switch', {
@@ -190,8 +190,54 @@ export function useAppActions(data: AppData) {
       }, 'switchProxy')
       await data.fetchProxies()
       presentFeedback(switchProxyFeedback(nodeName, response.data))
+      return true
     } catch (error) {
       data.showToast(errorMessage(error) || '切换节点失败', 'error')
+      return false
+    } finally {
+      data.setSwitchingNode('')
+    }
+  }
+
+  /**
+   * 一步选定默认出口节点：
+   * 若当前处于 fastest_* 自动优选模式，先将选路策略切回 manual 并刷新运行时代理组，
+   * 随后立即执行 proxy/switch 锁定该节点，无需用户先操作下拉框。
+   */
+  const handleSelectExitNode = async (groupName: string, nodeName: string): Promise<boolean> => {
+    if (data.switchingNode() || data.pendingActions().has('nodeSelect')) return false
+    const wasAuto = requestedNodeSelect() !== 'manual'
+      || Boolean(data.status().node_select && data.status().node_select !== 'manual')
+    if (!wasAuto) {
+      return handleSwitchProxy(groupName, nodeName)
+    }
+
+    data.setSwitchingNode(nodeName)
+    try {
+      await data.apiCall<NodeSelectResult>(
+        'node-select',
+        { method: 'POST', body: JSON.stringify({ node_select: 'manual' } satisfies NodeSelectRequest) },
+        'nodeSelect',
+      )
+      await data.fetchStatus()
+      await data.fetchProxies()
+
+      const targetGroup = data.primaryGroupName() || groupName || 'proxy'
+      const response = await data.apiCall<SwitchProxyResult>('proxy/switch', {
+        method: 'POST',
+        body: JSON.stringify({ group: targetGroup, name: nodeName } satisfies LastProxy),
+      }, 'switchProxy')
+      await data.fetchProxies()
+      const feedback = switchProxyFeedback(nodeName, response.data)
+      if (feedback?.tone === 'success') {
+        data.showToast(`已切回手动选择 · ${feedback.message}`, 'success')
+      } else {
+        presentFeedback(feedback)
+      }
+      return true
+    } catch (error) {
+      data.showToast(errorMessage(error) || '切换节点失败', 'error')
+      return false
     } finally {
       data.setSwitchingNode('')
     }
@@ -358,6 +404,10 @@ export function useAppActions(data: AppData) {
 
   const handleTestGroupDelays = (groupName: string, nodeNames: string[]) => {
     void data.testGroupDelays(data.clashApiBase, groupName, nodeNames)
+  }
+
+  const handleCancelGroupDelays = () => {
+    data.cancelGroupDelays()
   }
 
   const handleOpenConnections = () => {
@@ -617,6 +667,7 @@ export function useAppActions(data: AppData) {
     handleSetMaxMultiplier,
     handleSetNodeSelect,
     handleSwitchProxy,
+    handleSelectExitNode,
     handleAddSubscription,
     handleOnboardingAddSub: handleAddSubscription,
     scanClashVerge,
@@ -630,6 +681,7 @@ export function useAppActions(data: AppData) {
     vpsDeploying,
     handleTestDelay,
     handleTestGroupDelays,
+    handleCancelGroupDelays,
     handleOpenConnections,
     handleStartService,
     handleStopService,

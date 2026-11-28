@@ -1,4 +1,5 @@
-import { renderHook } from '@solidjs/testing-library'
+import { renderHook, waitFor } from '@solidjs/testing-library'
+import { flush } from 'solid-js'
 import { afterEach, describe, expect, it, rs } from '@rstest/core'
 import {
   collectNodeProtocols,
@@ -7,6 +8,7 @@ import {
   isClashProxyGroup,
   mergeDisplayMeasurements,
   useConnections,
+  useDelays,
 } from './useClash'
 
 function deferredResponse() {
@@ -153,5 +155,54 @@ describe('enrichConnectionsSnapshot & Clash node collectors', () => {
     }
     expect(collectNodeProtocols(proxies)).toEqual({ direct: 'Direct', 'hk-1': 'Hysteria2' })
     expect(collectRuleTargetNodes([{ tag: 'manual-1' }, { tag: 'hk-1' }], proxies)).toEqual(['manual-1', 'hk-1'])
+  })
+})
+
+describe('useDelays batch progress and cancellation', () => {
+  it('tracks completed batch progress and preserves finished measurements when cancelled mid-flight', async () => {
+    const secondProbe = deferredResponse()
+    rs.stubGlobal('fetch', rs.fn(async (input, init?: RequestInit) => {
+      const url = String(input)
+      if (url.includes(encodeURIComponent('jp-fast'))) {
+        return {
+          ok: true,
+          json: async () => ({ delay: 42 }),
+        } as Response
+      }
+      if (url.includes(encodeURIComponent('jp-pending'))) {
+        init?.signal?.addEventListener('abort', () => {
+          secondProbe.resolve({
+            ok: false,
+            json: async () => ({}),
+          } as Response)
+        })
+        return secondProbe.promise
+      }
+      throw new Error(`Unexpected delay URL: ${url}`)
+    }))
+
+    const { result } = renderHook(() => useDelays())
+    const batchPromise = result.testGroupDelays('/api/clash', 'proxy', ['jp-fast', 'jp-pending'])
+
+    await waitFor(() => {
+      flush()
+      expect(result.delays()['jp-fast']).toBe(42)
+    })
+    expect(result.batchProgress()).toMatchObject({
+      running: true,
+      completed: 1,
+      total: 2,
+    })
+    expect(result.testingNodes()['jp-pending']).toBe(true)
+
+    result.cancelGroupDelays()
+    await batchPromise
+    flush()
+
+    expect(result.testingGroup()).toBe('')
+    expect(result.batchProgress().running).toBe(false)
+    expect(result.testingNodes()).toEqual({})
+    expect(result.delays()['jp-fast']).toBe(42)
+    expect(result.delays()['jp-pending']).toBeUndefined()
   })
 })

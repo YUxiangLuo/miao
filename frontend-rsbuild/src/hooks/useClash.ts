@@ -272,11 +272,26 @@ function clearRecord<T>(draft: Record<string, T>) {
   }
 }
 
+export interface DelayBatchProgress {
+  running: boolean
+  completed: number
+  total: number
+  startedAt: number
+}
+
+const IDLE_BATCH_PROGRESS: DelayBatchProgress = {
+  running: false,
+  completed: 0,
+  total: 0,
+  startedAt: 0,
+}
+
 export function useDelays() {
   const [delaysStore, setDelaysStore] = createStore<Record<string, number>>({})
   const [delayMeasuredAtStore, setDelayMeasuredAtStore] = createStore<Record<string, number>>({})
   const [testingNodesStore, setTestingNodesStore] = createStore<Record<string, boolean>>({})
   const [testingGroup, setTestingGroup] = createSignal('')
+  const [batchProgress, setBatchProgress] = createSignal<DelayBatchProgress>(IDLE_BATCH_PROGRESS)
   const requests = new Map<string, AbortController>()
   let generation = 0
   let groupRunning = false
@@ -328,21 +343,44 @@ export function useDelays() {
 
   const testGroupDelays = async (clashApiBase: string, groupName: string, nodeNames: string[]) => {
     if (groupRunning) return
+    const queue = [...new Set(nodeNames)]
+    if (queue.length === 0) return
     groupRunning = true
     const currentGeneration = generation
     setTestingGroup(groupName)
-    const queue = [...new Set(nodeNames)]
+    setBatchProgress({
+      running: true,
+      completed: 0,
+      total: queue.length,
+      startedAt: Date.now(),
+    })
     let next = 0
     const workers = Array.from({ length: Math.min(DELAY_BATCH_CONCURRENCY, queue.length) }, async () => {
       while (generation === currentGeneration && next < queue.length) {
-        await testDelay(clashApiBase, queue[next++])
+        const target = queue[next++]
+        await testDelay(clashApiBase, target)
+        if (generation === currentGeneration) {
+          setBatchProgress((prev) => ({
+            ...prev,
+            completed: Math.min(prev.total, prev.completed + 1),
+          }))
+        }
       }
     })
     await Promise.all(workers)
     if (generation === currentGeneration) {
       groupRunning = false
       setTestingGroup('')
+      setBatchProgress((prev) => ({ ...prev, running: false }))
     }
+  }
+
+  const cancelGroupDelays = () => {
+    if (!groupRunning && !testingGroup()) return
+    cancel()
+    setTestingNodesStore(clearRecord)
+    setTestingGroup('')
+    setBatchProgress((prev) => ({ ...prev, running: false }))
   }
 
   const clearDelays = () => {
@@ -351,7 +389,18 @@ export function useDelays() {
     setDelayMeasuredAtStore(clearRecord)
     setTestingNodesStore(clearRecord)
     setTestingGroup('')
+    setBatchProgress(IDLE_BATCH_PROGRESS)
   }
 
-  return { delays, delayMeasuredAt, testingNodes, testingGroup, testDelay, testGroupDelays, clearDelays }
+  return {
+    delays,
+    delayMeasuredAt,
+    testingNodes,
+    testingGroup,
+    batchProgress,
+    testDelay,
+    testGroupDelays,
+    cancelGroupDelays,
+    clearDelays,
+  }
 }

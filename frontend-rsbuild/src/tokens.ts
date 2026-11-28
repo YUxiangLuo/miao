@@ -1,14 +1,13 @@
-// 供 JS 逻辑使用的基础常量（虚拟滚动行高、折叠计算宽度、断点、动效时长等）。
+// 供 JS 逻辑使用的基础常量（虚拟滚动行高、折叠计算宽度、断点、动效常量等）。
 
 export const ICON = { xs: 13, sm: 15, md: 16, lg: 18 }
-export const LOGO_SIZE = { topbar: 30, onboarding: 44 }
+export const LOGO_SIZE = { topbar: 28, onboarding: 44 }
 
 // 桌面/移动端分界宽度
 export const CONNECTIONS_MODAL_MIN_WIDTH = 841
 
-// 主题存储键及 PWA theme-color 兜底值（运行时优先读取 CSS --bg）
-export const THEME_KEY = 'harbor-theme'
-export const THEME_META = { light: '#F7F6F3', dark: '#111113' }
+// 工业浅色画布色值（与 theme.css --color-canvas 一致）
+export const CANVAS_COLOR = '#F2F4F7'
 
 export const ARRIVE_MS = 480
 export const SCAN_STAGGER_CAP = 8

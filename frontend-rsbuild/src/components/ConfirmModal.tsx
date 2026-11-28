@@ -1,6 +1,7 @@
-import { Show, createUniqueId } from 'solid-js'
+import { Show, createSignal, createUniqueId } from 'solid-js'
 import { ICON } from '../tokens'
 import { useDialog } from '../hooks/useDialog'
+import { usePresence } from '../motion'
 import { Button } from './ui'
 import { CircleAlertIcon, XIcon } from './icons'
 
@@ -14,18 +15,35 @@ export interface ConfirmModalProps {
 
 export function ConfirmModal(props: ConfirmModalProps) {
   const titleId = createUniqueId()
+  const [panelEl, setPanelEl] = createSignal<HTMLElement | null>(null)
+  const presence = usePresence({
+    open: () => props.open,
+    element: panelEl,
+    exitDurationToken: 'fast',
+  })
   const dialogRef = useDialog(() => props.open, () => props.onCancel())
 
   return (
-    <Show when={props.open}>
-      <div class="modal-overlay" onClick={props.onCancel}>
+    <Show when={presence.mounted()}>
+      <div
+        class="modal-overlay"
+        data-motion="scrim"
+        data-motion-state={presence.motionState()}
+        onClick={props.onCancel}
+      >
         <div
-          ref={dialogRef}
+          ref={(el) => {
+            setPanelEl(el)
+            dialogRef(el)
+          }}
           class="modal-card modal-confirm"
           role="dialog"
           aria-modal="true"
           aria-labelledby={titleId}
           tabindex={-1}
+          inert={!props.open ? true : undefined}
+          data-motion="elevate"
+          data-motion-state={presence.motionState()}
           onClick={(event) => event.stopPropagation()}
         >
           <div class="modal-title-row">

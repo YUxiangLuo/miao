@@ -4,6 +4,7 @@ import { ICON } from '../tokens'
 import { API_HEADERS, DELAY_TEST_URL } from '../utils'
 import { fetchJson } from '../hooks/request'
 import { useDialog } from '../hooks/useDialog'
+import { usePresence } from '../motion'
 import { Button } from './ui'
 import type { ApiResponse, ConnectivityResult, StatusData } from '../types/api'
 import { ActivityIcon, XIcon } from './icons'
@@ -22,6 +23,12 @@ function describeResult(result: ConnectivityResult): string {
 
 export function ConnectivityCheck(props: { status: StatusData; backendUnreachable: boolean }) {
   const [open, setOpen] = createSignal(false)
+  const [panelEl, setPanelEl] = createSignal<HTMLElement | null>(null)
+  const presence = usePresence({
+    open,
+    element: panelEl,
+    exitDurationToken: 'fast',
+  })
   const [url, setUrl] = createSignal(DELAY_TEST_URL)
   const [pending, setPending] = createSignal(false)
   const [validation, setValidation] = createSignal('')
@@ -103,16 +110,28 @@ export function ConnectivityCheck(props: { status: StatusData; backendUnreachabl
       <Button tone="secondary" size="sm" icon={<ActivityIcon size={ICON.xs} />} onClick={() => setOpen(true)}>
         连接检查
       </Button>
-      <Show when={open()}>
+      <Show when={presence.mounted()}>
         <Portal>
-          <div class="modal-overlay drawer-overlay" onClick={() => setOpen(false)}>
+          <div
+            class="modal-overlay drawer-overlay"
+            data-motion="scrim"
+            data-motion-state={presence.motionState()}
+            onClick={() => setOpen(false)}
+          >
             <div
-              ref={dialogRef}
+              ref={(el) => {
+                setPanelEl(el)
+                dialogRef(el)
+              }}
               class="modal-card drawer-panel connectivity-dialog"
               role="dialog"
               aria-modal="true"
               aria-label="连接检查"
               tabindex={-1}
+              inert={!open() ? true : undefined}
+              data-motion="slide-edge"
+              data-side="right"
+              data-motion-state={presence.motionState()}
               onClick={(event) => event.stopPropagation()}
             >
               <div class="modal-title-row">
@@ -134,7 +153,10 @@ export function ConnectivityCheck(props: { status: StatusData; backendUnreachabl
                   value={url()}
                   disabled={pending()}
                   onInput={(event) => setUrl(event.currentTarget.value)}
-                  onKeyDown={(event) => { if (event.key === 'Enter') void runCheck() }}
+                  onKeyDown={(event) => {
+                    if (event.isComposing || event.keyCode === 229) return
+                    if (event.key === 'Enter') void runCheck()
+                  }}
                 />
               </label>
               <Show when={validation()}>

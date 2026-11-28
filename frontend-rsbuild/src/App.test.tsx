@@ -3,6 +3,7 @@ import { flush } from 'solid-js'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, rs } from '@rstest/core'
 import App from './App'
+import { resetMotionPolicyForTest } from './motion'
 import { nodeMock, ruleMock, statusMock, subMock } from './testFixtures'
 
 function jsonResponse(payload: unknown, status = 200) {
@@ -27,6 +28,7 @@ describe('Harbor Console integration', () => {
   afterEach(() => {
     rs.useRealTimers()
     rs.unstubAllGlobals()
+    resetMotionPolicyForTest()
   })
 
   it('completes first-time SetupWizard onboarding and enters streamlined NodesView', async () => {
@@ -328,5 +330,134 @@ describe('Harbor Console integration', () => {
     expect(await screen.findByRole('switch', { name: 'MCP 端点开关' })).toBeInTheDocument()
     expect(screen.queryByRole('group', { name: '分流模式设置' })).toBeNull()
     expect(screen.getAllByRole('group', { name: '分流模式切换' })).toHaveLength(1)
+
+    // Verify 4-state motion policy selector in Settings persists and syncs root dataset
+    const motionGroup = screen.getByRole('group', { name: '界面动效' })
+    await user.click(within(motionGroup).getByRole('button', { name: '精简' }))
+    expect(document.documentElement.dataset.motionProfile).toBe('reduced')
+    expect(window.localStorage.getItem('harbor-motion')).toBe('reduced')
+  })
+
+  it('supports independent single-node probe, cancellable batch speed test, latency sort, and 1-click auto-to-manual exit lock', async () => {
+    const jpSlow = '🇯🇵 东京标准 01 [1.5x]'
+    const jpFast = '🇯🇵 大阪极速 02'
+    const jpStuck = '🇯🇵 名古屋专线 03'
+    let nodeSelect: 'fastest_jp' | 'manual' = 'fastest_jp'
+    let currentExit = jpSlow
+    let resolveStuckProbe!: (value: ReturnType<typeof jsonResponse>) => void
+    const stuckProbe = new Promise<ReturnType<typeof jsonResponse>>((resolve) => {
+      resolveStuckProbe = resolve
+    })
+
+    const fetchMock = rs.fn(async (input, init?: RequestInit) => {
+      const url = String(input)
+      if (url === '/api/status') {
+        return jsonResponse({
+          success: true,
+          data: statusMock({
+            running: true,
+            ready: true,
+            node_select: nodeSelect,
+            requested_node_select: nodeSelect,
+          }),
+        })
+      }
+      if (url === '/api/subs') return jsonResponse({ success: true, data: [subMock()] })
+      if (url === '/api/nodes' || url === '/api/rules' || url === '/api/terminals' || url === '/api/access-ports') {
+        return jsonResponse({ success: true, data: [] })
+      }
+      if (url === '/api/version') {
+        return jsonResponse({ success: true, data: { current: '0.51.3', latest: null, has_update: false } })
+      }
+      if (url === '/api/clash/proxies') {
+        return jsonResponse({
+          proxies: {
+            proxy: {
+              type: nodeSelect === 'manual' ? 'Selector' : 'URLTest',
+              now: currentExit,
+              all: [jpSlow, jpFast, jpStuck],
+            },
+            [jpSlow]: { type: 'Hysteria2' },
+            [jpFast]: { type: 'VLESS' },
+            [jpStuck]: { type: 'Trojan' },
+          },
+        })
+      }
+      if (url === '/api/clash/connections') {
+        return jsonResponse({ connections: [], uploadTotal: 0, downloadTotal: 0 })
+      }
+      if (url.includes(encodeURIComponent(jpSlow)) && url.includes('/delay')) {
+        return jsonResponse({ delay: 165 })
+      }
+      if (url.includes(encodeURIComponent(jpFast)) && url.includes('/delay')) {
+        return jsonResponse({ delay: 34 })
+      }
+      if (url.includes(encodeURIComponent(jpStuck)) && url.includes('/delay')) {
+        init?.signal?.addEventListener('abort', () => resolveStuckProbe(jsonResponse({}, 499)))
+        return stuckProbe
+      }
+      if (url === '/api/node-select' && init?.method === 'POST') {
+        nodeSelect = 'manual'
+        return jsonResponse({
+          success: true,
+          data: {
+            requested: 'manual',
+            node_select: 'manual',
+            changed: true,
+            runtime_updated: true,
+            started: false,
+            reloaded: true,
+            restarted: false,
+          },
+        })
+      }
+      if (url === '/api/proxy/switch' && init?.method === 'POST') {
+        const body = JSON.parse(String(init.body))
+        currentExit = body.name
+        return jsonResponse({
+          success: true,
+          data: { persisted: true },
+        })
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    })
+
+    rs.stubGlobal('fetch', fetchMock)
+    stubMatchMedia()
+    const user = userEvent.setup()
+    const { container } = render(() => <App />)
+
+    const matrix = await screen.findByRole('group', { name: '候选节点列表' })
+    expect(within(matrix).getByText('Hy2')).toBeInTheDocument()
+    expect(within(matrix).getByText('1.5x')).toBeInTheDocument()
+    expect(within(matrix).getByText('VLESS')).toBeInTheDocument()
+
+    // 1. Independent single-node probe does NOT switch strategy or exit node
+    await user.click(within(matrix).getByRole('button', { name: '测速节点 大阪极速 02' }))
+    expect(await within(matrix).findByText('34 ms')).toBeInTheDocument()
+    expect(fetchMock.mock.calls.some(([u]) => u === '/api/node-select' || u === '/api/proxy/switch')).toBe(false)
+
+    // 2. Batch speed test shows progress & cancel button; stopping preserves finished probes
+    await user.click(screen.getByRole('button', { name: '批量测速' }))
+    const stopBtn = await screen.findByRole('button', { name: '停止测速' })
+    await waitFor(() => {
+      expect(within(matrix).getByText('165 ms')).toBeInTheDocument()
+    })
+    await user.click(stopBtn)
+    expect(await screen.findByRole('button', { name: '批量测速' })).toBeInTheDocument()
+
+    // 3. Sort by latency places 34 ms node ahead of 165 ms node and untested node
+    const sortGroup = screen.getByRole('group', { name: '节点排序方式' })
+    await user.click(within(sortGroup).getByRole('button', { name: /按延迟/ }))
+    const cardNames = Array.from(container.querySelectorAll('.node-card-name')).map((el) => el.textContent)
+    expect(cardNames).toEqual(['大阪极速 02', '东京标准 01 [1.5x]', '名古屋专线 03'])
+
+    // 4. Clicking a node card body while in fastest_jp mode switches to manual + locks that node in 1 step
+    const selectFastBtn = within(matrix).getByRole('button', { name: /大阪极速 02.*VLESS/ })
+    await user.click(selectFastBtn)
+    await waitFor(() => {
+      const posts = fetchMock.mock.calls.filter(([, options]) => options?.method === 'POST')
+      expect(posts.map(([u]) => u)).toEqual(['/api/node-select', '/api/proxy/switch'])
+    })
   })
 })

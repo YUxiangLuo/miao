@@ -1,20 +1,26 @@
-import { Show, createMemo } from 'solid-js'
+import { For, Show, createMemo } from 'solid-js'
 import type { JSX } from '@solidjs/web'
 import { ICON } from '../tokens'
+import { getMotionPreference, setMotionPreference, type MotionPreference } from '../motion'
 import { Button } from '../components/ui'
 import { McpControl } from '../components/McpControl'
 import { formatUptime } from '../utils'
 import type { useAppController } from '../hooks/useAppController'
-import { ClockIcon, MoonIcon, SunIcon } from '../components/icons'
+import { ClockIcon } from '../components/icons'
 
 type AppController = ReturnType<typeof useAppController>
 
 export interface SettingsViewProps {
   app: AppController
-  theme: 'light' | 'dark'
-  onToggleTheme: () => void
   onOpenSchedule: () => void
 }
+
+const MOTION_OPTIONS: ReadonlyArray<{ value: MotionPreference; label: string }> = [
+  { value: 'system', label: '跟随系统' },
+  { value: 'full', label: '标准' },
+  { value: 'reduced', label: '精简' },
+  { value: 'off', label: '关闭' },
+]
 
 export function SettingsView(props: SettingsViewProps): JSX.Element {
   const app = () => props.app
@@ -33,7 +39,7 @@ export function SettingsView(props: SettingsViewProps): JSX.Element {
       <header class="page-header">
         <div>
           <h1 class="page-title">系统设置</h1>
-          <p class="page-subtitle">自动化刷新策略、AI 接入协议（MCP）、界面外观与版本更新</p>
+          <p class="page-subtitle">自动化刷新策略、AI 接入协议（MCP）、界面动效与版本更新</p>
         </div>
       </header>
 
@@ -81,7 +87,7 @@ export function SettingsView(props: SettingsViewProps): JSX.Element {
         </div>
       </section>
 
-      {/* Group 2: Appearance & Version */}
+      {/* Group 2: Motion Policy & Version */}
       <section class="surface-box" aria-label="界面与版本信息">
         <div class="surface-header">
           <h2 class="surface-title">界面与版本</h2>
@@ -89,29 +95,28 @@ export function SettingsView(props: SettingsViewProps): JSX.Element {
         <div class="hairline-list">
           <div class="hairline-row">
             <div class="row-main">
-              <div class="row-title">界面外观</div>
-              <div class="row-sub">在浅色暖纸与深色碳黑主题之间切换</div>
+              <div class="row-title">界面动效</div>
+              <div class="row-sub">
+                控制浮层、抽屉与节点重排过渡；精简模式消除位移缩放仅保留微淡入，关闭模式全部瞬时切换。
+              </div>
             </div>
             <div class="row-end">
-              <div class="seg-rail" role="group" aria-label="界面外观">
-                <button
-                  type="button"
-                  class={['seg-btn', { active: props.theme === 'light' }]}
-                  aria-pressed={props.theme === 'light' ? 'true' : 'false'}
-                  onClick={() => { if (props.theme !== 'light') props.onToggleTheme() }}
-                >
-                  <SunIcon size={13} />
-                  <span>浅色</span>
-                </button>
-                <button
-                  type="button"
-                  class={['seg-btn', { active: props.theme === 'dark' }]}
-                  aria-pressed={props.theme === 'dark' ? 'true' : 'false'}
-                  onClick={() => { if (props.theme !== 'dark') props.onToggleTheme() }}
-                >
-                  <MoonIcon size={13} />
-                  <span>深色</span>
-                </button>
+              <div class="seg-rail" role="group" aria-label="界面动效">
+                <For each={MOTION_OPTIONS}>
+                  {(opt) => {
+                    const active = () => getMotionPreference() === opt.value
+                    return (
+                      <button
+                        type="button"
+                        class={['seg-btn', { active: active() }]}
+                        aria-pressed={active() ? 'true' : 'false'}
+                        onClick={() => setMotionPreference(opt.value)}
+                      >
+                        <span>{opt.label}</span>
+                      </button>
+                    )
+                  }}
+                </For>
               </div>
             </div>
           </div>

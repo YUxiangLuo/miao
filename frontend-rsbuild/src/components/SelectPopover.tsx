@@ -1,5 +1,6 @@
 import { For, Show, createEffect, createMemo, createSignal, createUniqueId } from 'solid-js'
 import type { JSX } from '@solidjs/web'
+import { scrollIntoViewSafe, usePresence } from '../motion'
 import { CheckIcon, ChevronDownIcon, SearchIcon } from './icons'
 
 export interface SelectOption {
@@ -98,15 +99,21 @@ export function SelectPopover(props: SelectPopoverProps): JSX.Element {
   const [query, setQuery] = createSignal('')
   const [focusedIndex, setFocusedIndex] = createSignal(-1)
   const [flipUp, setFlipUp] = createSignal(false)
+  const [popoverNode, setPopoverNode] = createSignal<HTMLElement | null>(null)
 
   let rootEl: HTMLDivElement | undefined
   let triggerEl: HTMLButtonElement | undefined
   let searchInputEl: HTMLInputElement | undefined
   let popoverEl: HTMLDivElement | undefined
 
+  const presence = usePresence({
+    open,
+    element: popoverNode,
+    exitDurationToken: 'micro',
+  })
+
   const isDisabled = createMemo(() => Boolean(props.disabled))
   const searchable = createMemo(() => props.options.length > (props.searchableThreshold ?? 6))
-
   const selectedOption = createMemo(() => props.options.find((opt) => opt.value === props.value))
 
   const selectedDisplay = createMemo(() => {
@@ -133,7 +140,6 @@ export function SelectPopover(props: SelectPopoverProps): JSX.Element {
     }
     setQuery('')
     setOpen(true)
-    // Solid 2.0 写入在 microtask flush 后才对读取可见，用本次空查询直接计算初始焦点。
     setFocusedIndex(findInitialFocusIndex(filterSelectOptions(props.options, '')))
   }
 
@@ -164,10 +170,7 @@ export function SelectPopover(props: SelectPopoverProps): JSX.Element {
       if (!items[idx].option.disabled) {
         setFocusedIndex(idx)
         const optionNodes = popoverEl?.querySelectorAll<HTMLElement>('.picker-option')
-        const activeEl = optionNodes?.[idx]
-        if (activeEl && typeof activeEl.scrollIntoView === 'function') {
-          activeEl.scrollIntoView({ block: 'nearest' })
-        }
+        scrollIntoViewSafe(optionNodes?.[idx], { block: 'nearest' })
         return
       }
     }
@@ -211,6 +214,8 @@ export function SelectPopover(props: SelectPopoverProps): JSX.Element {
   )
 
   const handleRootKeyDown = (event: KeyboardEvent) => {
+    if (event.isComposing || event.keyCode === 229) return
+
     if (!open()) {
       if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
         event.preventDefault()
@@ -280,13 +285,20 @@ export function SelectPopover(props: SelectPopoverProps): JSX.Element {
         <ChevronDownIcon size={14} />
       </button>
 
-      <Show when={open()}>
+      <Show when={presence.mounted()}>
         <div
-          ref={(el) => { popoverEl = el }}
+          ref={(el) => {
+            popoverEl = el
+            setPopoverNode(el)
+          }}
           id={listboxId}
           role="listbox"
           aria-label={props.ariaLabel}
           tabindex={-1}
+          inert={!open() ? true : undefined}
+          data-motion="float"
+          data-side={flipUp() ? 'top' : 'bottom'}
+          data-motion-state={presence.motionState()}
           class={[
             'picker-popover',
             props.align === 'right' ? 'align-right' : 'align-left',

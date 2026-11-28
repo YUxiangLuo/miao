@@ -1,6 +1,7 @@
 import { Match, Show, Switch, createEffect, createMemo, createSignal, createUniqueId, type Setter } from 'solid-js'
 import { ICON } from '../../tokens'
 import { useDialog } from '../../hooks/useDialog'
+import { usePresence } from '../../motion'
 import type { NodeForm } from '../../utils'
 import { LinkImportPane } from './LinkImportPane'
 import { ManualPane } from './ManualPane'
@@ -28,6 +29,12 @@ export interface NodeModalProps {
 
 export function NodeModal(props: NodeModalProps) {
   const titleId = createUniqueId()
+  const [panelEl, setPanelEl] = createSignal<HTMLElement | null>(null)
+  const presence = usePresence({
+    open: () => props.open,
+    element: panelEl,
+    exitDurationToken: 'fast',
+  })
   const dialogRef = useDialog(() => props.open, () => props.onClose())
   const [mode, setMode] = createSignal<NodeModalMode>('link')
   const [submitting, setSubmitting] = createSignal(false)
@@ -82,15 +89,27 @@ export function NodeModal(props: NodeModalProps) {
   }
 
   return (
-    <Show when={props.open}>
-      <div class="modal-overlay drawer-overlay" onClick={props.onClose}>
+    <Show when={presence.mounted()}>
+      <div
+        class="modal-overlay drawer-overlay"
+        data-motion="scrim"
+        data-motion-state={presence.motionState()}
+        onClick={props.onClose}
+      >
         <div
-          ref={dialogRef}
+          ref={(el) => {
+            setPanelEl(el)
+            dialogRef(el)
+          }}
           class="modal-card drawer-panel node-modal"
           role="dialog"
           aria-modal="true"
           aria-labelledby={titleId}
           tabindex={-1}
+          inert={!props.open ? true : undefined}
+          data-motion="slide-edge"
+          data-side="right"
+          data-motion-state={presence.motionState()}
           onClick={(event) => event.stopPropagation()}
         >
           <div class="modal-title-row">

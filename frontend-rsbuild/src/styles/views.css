@@ -1,18 +1,18 @@
-/* Harbor Workspace Views — Nodes, Routing, Connections, Settings & Onboarding */
+/* Harbor Workspace Views — Precision Speed-Test Workbench, Routing, Connections & Settings */
 
-/* 1. NodesView — Current Exit Pill, Strategy Picker, Inline Subscription Bar & Node Matrix */
+/* 1. NodesView — Current Exit Pill, Probe Progress Strip & Precision Node Cards */
 .current-node-pill {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  max-width: min(360px, 100%);
-  padding: 3px 9px;
+  max-width: min(380px, 100%);
+  padding: 3px 10px;
   border-radius: 999px;
-  background: var(--bg-subtle);
-  border: 1px solid var(--hairline);
-  font-size: 12.5px;
+  background-color: var(--color-surface-active);
+  border: 1px solid var(--color-primary-border);
+  font-size: var(--text-table);
   font-weight: 500;
-  color: var(--ink);
+  color: var(--color-foreground);
   min-width: 0;
 }
 
@@ -20,11 +20,10 @@
   flex-wrap: nowrap;
 }
 
-/* 2. NodesView — Inline Subscription Bar & Node Pool Matrix */
 .inline-form-bar {
   padding: 12px 18px;
-  background: var(--bg-subtle);
-  border-bottom: 1px solid var(--hairline);
+  background-color: var(--color-surface-subtle);
+  border-bottom: 1px solid var(--color-border-subtle);
 }
 
 .inline-form {
@@ -38,108 +37,295 @@
   flex: 1 1 260px;
   min-width: 0;
   height: 32px;
-  padding: 0 10px;
-  border-radius: 8px;
-  border: 1px solid var(--border-strong);
-  background: var(--bg-surface);
-  color: var(--ink);
-  font-size: 12.5px;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  padding: 0 11px;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--color-border-control);
+  background-color: var(--color-surface);
+  color: var(--color-foreground);
+  font-size: var(--text-table);
+  transition:
+    border-color var(--duration-fast) var(--motion-ease-productive),
+    box-shadow var(--duration-fast) var(--motion-ease-productive);
 }
 
 .inline-form input::placeholder {
-  color: var(--ink-muted);
+  color: var(--color-subtle-foreground);
+}
+
+.inline-form input:hover:not(:disabled):not(:focus) {
+  border-color: var(--color-border-strong);
 }
 
 .inline-form input:focus {
   outline: none;
-  border-color: var(--border-focus);
-  box-shadow: 0 0 0 2px var(--focus-ring);
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 2px var(--focus-ring-halo);
 }
 
-.node-matrix {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 208px), 1fr));
-  gap: 8px;
+/* Batch Speed-Test Telemetry Strip (smoothly revealed via data-motion="reveal") */
+.probe-telemetry-shell {
+  border-bottom: 1px solid var(--color-border-subtle);
+  background-color: var(--color-surface-subtle);
 }
 
-.node-cell {
+.probe-telemetry-inner {
+  padding: 10px 18px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.probe-telemetry-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  font-size: var(--text-xs);
+}
+
+.probe-telemetry-stats {
+  display: inline-flex;
+  align-items: center;
   gap: 8px;
-  height: 38px;
-  padding: 0 11px;
-  border-radius: 8px;
-  border: 1px solid var(--hairline);
-  background: var(--bg-subtle);
-  color: var(--ink);
-  font-size: 12.5px;
-  font-weight: 500;
-  cursor: pointer;
-  min-width: 0;
-  text-align: left;
-  transition: border-color 0.14s ease, background-color 0.14s ease, box-shadow 0.14s ease;
+  flex-wrap: wrap;
+  color: var(--color-muted-foreground);
 }
 
-.node-cell:hover:not(:disabled) {
-  border-color: var(--border-strong);
-  background: var(--bg-surface);
-}
-
-.node-cell.selected {
-  background: var(--bg-surface);
-  border-color: var(--ink);
-  box-shadow: 0 0 0 1px var(--ink);
+.probe-telemetry-stats strong {
+  color: var(--color-foreground);
   font-weight: 600;
 }
 
-.node-cell:disabled {
-  cursor: default;
+/* Precision Node Instrument Grid & Split-Action Card */
+.node-matrix {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 256px), 1fr));
+  gap: 10px;
 }
 
-.node-cell-main {
+.node-card {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+  min-height: 56px;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--color-border);
+  background-color: var(--color-surface);
+  overflow: hidden;
+  transition:
+    border-color var(--duration-micro) var(--motion-ease-productive),
+    background-color var(--duration-micro) var(--motion-ease-productive),
+    box-shadow var(--duration-micro) var(--motion-ease-productive);
+}
+
+.node-card:hover {
+  border-color: var(--color-border-control);
+  box-shadow: var(--shadow-xs);
+}
+
+.node-card.selected {
+  background-color: var(--color-surface-active);
+  border-color: var(--color-primary);
+  box-shadow: inset 0 0 0 1px var(--color-primary);
+}
+
+.node-card.timeout:not(.selected) {
+  border-color: var(--color-destructive-border);
+  background-color: var(--color-surface-subtle);
+}
+
+.node-card-select {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  padding: 9px 10px 11px 12px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+  text-align: left;
+  cursor: pointer;
+  color: var(--color-foreground);
+  transition: transform var(--duration-micro) var(--motion-ease-productive);
+}
+
+.node-card-select:active:not(:disabled) {
+  transform: scale(var(--motion-scale-press));
+}
+
+.node-card-select:disabled {
+  cursor: wait;
+  opacity: 0.7;
+}
+
+.node-card-select:focus-visible {
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: -2px;
+  border-radius: var(--radius-md);
+}
+
+.node-card-top {
   display: flex;
   align-items: center;
   gap: 6px;
   min-width: 0;
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
-.node-cell-name {
+.node-card-name {
+  font-size: var(--text-table);
+  font-weight: 500;
+  color: var(--color-foreground);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   min-width: 0;
+}
+
+.node-card.selected .node-card-name {
+  font-weight: 600;
+  color: var(--color-primary);
+}
+
+.node-card-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-left: 13px;
+  font-size: var(--text-xs);
+  color: var(--color-subtle-foreground);
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.node-meta-item {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-xs);
+  color: var(--color-muted-foreground);
+}
+
+.node-meta-sep {
+  color: var(--color-border);
+}
+
+/* Dedicated Independent Single-Node Probe Trigger on Right Side of Card */
+.node-card-probe {
+  flex-shrink: 0;
+  min-width: 68px;
+  padding: 0 10px;
+  border: none;
+  border-left: 1px solid var(--color-border-subtle);
+  background-color: transparent;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-xs);
+  font-weight: 500;
+  color: var(--color-subtle-foreground);
+  transition:
+    background-color var(--duration-micro) var(--motion-ease-productive),
+    color var(--duration-micro) var(--motion-ease-productive),
+    transform var(--duration-micro) var(--motion-ease-productive);
+}
+
+.node-card.selected .node-card-probe {
+  border-left-color: var(--color-primary-border);
+}
+
+.node-card-probe:hover:not(:disabled) {
+  background-color: rgba(0, 92, 230, 0.08);
+  color: var(--color-primary);
+}
+
+.node-card-probe:active:not(:disabled) {
+  transform: scale(var(--motion-scale-press));
+}
+
+.node-card-probe:disabled {
+  cursor: wait;
+}
+
+.node-card-probe:focus-visible {
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: -2px;
+}
+
+.node-card-probe.fast {
+  color: var(--color-success);
+}
+
+.node-card-probe.medium {
+  color: var(--color-warning);
+}
+
+.node-card-probe.slow,
+.node-card-probe.timeout {
+  color: var(--color-destructive);
+}
+
+/* Subtle bottom latency quality bar inside measured node card */
+.node-latency-meter {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  background-color: transparent;
+  pointer-events: none;
+}
+
+.node-latency-meter-fill {
+  height: 100%;
+  transition: width var(--duration-normal) var(--motion-ease-productive);
+}
+
+.node-latency-meter-fill.fast {
+  background-color: var(--color-success);
+}
+
+.node-latency-meter-fill.medium {
+  background-color: var(--color-warning);
+}
+
+.node-latency-meter-fill.slow,
+.node-latency-meter-fill.timeout {
+  background-color: var(--color-destructive);
 }
 
 .latency-text {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
-  font-size: 11.5px;
-  color: var(--ink-muted);
+  font-size: var(--text-xs);
+  color: var(--color-subtle-foreground);
   white-space: nowrap;
   flex-shrink: 0;
 }
 
 .latency-text.fast {
-  color: var(--signal-emerald-text);
+  color: var(--color-success);
+  font-weight: 500;
 }
 
 .latency-text.medium {
-  color: var(--signal-amber-text);
+  color: var(--color-warning);
+  font-weight: 500;
 }
 
 .latency-text.slow,
 .latency-text.timeout {
-  color: var(--signal-crimson-text);
+  color: var(--color-destructive);
+  font-weight: 500;
 }
 
-/* 2. RoutingView — Drawer Preset Chips, Device Pickers & Proxy Endpoint Copy Pills */
-
+/* 2. RoutingView — Preset Chips, Device Pickers & Proxy Endpoint Copy Pills */
 .preset-chips {
   display: flex;
   align-items: center;
@@ -148,51 +334,55 @@
 }
 
 .preset-chip {
-  height: 27px;
-  padding: 0 10px;
+  height: 28px;
+  padding: 0 11px;
   border-radius: 999px;
-  border: 1px solid var(--border-strong);
-  background: var(--bg-subtle);
-  color: var(--ink-secondary);
-  font-size: 12px;
+  border: 1px solid var(--color-border-control);
+  background-color: var(--color-surface-subtle);
+  color: var(--color-muted-foreground);
+  font-size: var(--text-xs);
   font-weight: 500;
   cursor: pointer;
-  transition: border-color 0.14s ease, background-color 0.14s ease, color 0.14s ease;
+  transition:
+    border-color var(--duration-micro) var(--motion-ease-productive),
+    background-color var(--duration-micro) var(--motion-ease-productive),
+    color var(--duration-micro) var(--motion-ease-productive);
 }
 
 .preset-chip:hover {
-  border-color: var(--ink-muted);
-  color: var(--ink);
-  background: var(--bg-surface);
+  border-color: var(--color-border-strong);
+  color: var(--color-foreground);
+  background-color: var(--color-surface);
 }
 
 .preset-chip.active {
-  background: var(--cta-bg);
-  border-color: var(--cta-bg);
-  color: var(--cta-fg);
+  background-color: var(--color-primary);
+  border-color: var(--color-primary);
+  color: var(--color-primary-foreground);
 }
 
-/* 4. LanView — Device Pickers & Proxy Endpoint Copy Pills */
 .endpoint-code-pill {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   padding: 2px 8px;
-  border-radius: 6px;
-  border: 1px solid var(--hairline);
-  background: var(--bg-subtle);
-  color: var(--ink);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+  background-color: var(--color-surface-subtle);
+  color: var(--color-foreground);
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
-  font-size: 12px;
+  font-size: var(--text-xs);
   cursor: pointer;
   white-space: nowrap;
-  transition: border-color 0.15s ease, background-color 0.15s ease;
+  transition:
+    border-color var(--duration-micro) var(--motion-ease-productive),
+    background-color var(--duration-micro) var(--motion-ease-productive);
 }
 
 .endpoint-code-pill:hover {
-  border-color: var(--border-strong);
-  background: var(--bg-well);
+  border-color: var(--color-border-control);
+  background-color: var(--color-surface-hover);
 }
 
 .endpoint-picker-wrap {
@@ -208,9 +398,9 @@
   }
 }
 
-/* 5. ConnectionsView — Virtualized Stream (Must keep 60px item height matching tokens.ts) */
+/* 3. ConnectionsView — Virtualized Stream (Must keep 60px item height matching tokens.ts) */
 .conn-rows {
-  height: calc(100vh - 250px);
+  height: calc(100vh - 248px);
   min-height: 380px;
   overflow-y: auto;
   overflow-x: hidden;
@@ -233,17 +423,19 @@
 .conn-row {
   height: 60px;
   padding: 8px 14px;
-  border-radius: 8px;
-  border: 1px solid var(--hairline);
-  background: var(--bg-subtle);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--color-border-subtle);
+  background-color: var(--color-surface-subtle);
   display: flex;
   align-items: center;
-  transition: border-color 0.14s ease, background-color 0.14s ease;
+  transition:
+    border-color var(--duration-micro) var(--motion-ease-productive),
+    background-color var(--duration-micro) var(--motion-ease-productive);
 }
 
 .conn-row.active {
-  background: var(--bg-surface);
-  border-color: var(--border-strong);
+  background-color: var(--color-surface);
+  border-color: var(--color-border);
 }
 
 .conn-row-main {
@@ -257,13 +449,13 @@
 .site-icon {
   width: 28px;
   height: 28px;
-  border-radius: 7px;
-  background: var(--bg-well);
-  color: var(--ink-secondary);
+  border-radius: var(--radius-md);
+  background-color: var(--color-surface-hover);
+  color: var(--color-muted-foreground);
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 11.5px;
+  font-size: var(--text-xs);
   font-weight: 700;
   flex-shrink: 0;
 }
@@ -277,25 +469,25 @@
 }
 
 .conn-row-title {
-  font-size: 13px;
+  font-size: var(--text-table);
   font-weight: 500;
-  color: var(--ink);
+  color: var(--color-foreground);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .conn-row-sub {
-  font-size: 11.5px;
-  color: var(--ink-muted);
+  font-size: var(--text-xs);
+  color: var(--color-muted-foreground);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .connection-outbound-chip {
-  background: var(--bg-well);
-  color: var(--ink-secondary);
+  background-color: var(--color-surface-hover);
+  color: var(--color-muted-foreground);
   flex-shrink: 0;
   max-width: 210px;
   min-width: 0;
@@ -304,14 +496,14 @@
 
 .connection-outbound-code {
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: var(--text-xs);
   font-weight: 600;
-  line-height: 1.25;
+  line-height: 1.2;
   padding: 1px 4px;
-  border-radius: 4px;
-  background: var(--bg-surface);
-  color: var(--ink-secondary);
-  border: 1px solid var(--hairline);
+  border-radius: var(--radius-sm);
+  background-color: var(--color-surface);
+  color: var(--color-muted-foreground);
+  border: 1px solid var(--color-border-subtle);
   flex-shrink: 0;
 }
 
@@ -323,8 +515,9 @@
 }
 
 .connection-outbound-chip.direct {
-  background: var(--signal-emerald-soft);
-  color: var(--signal-emerald-text);
+  background-color: var(--color-success-soft);
+  border-color: var(--color-success-border);
+  color: var(--color-success);
 }
 
 .conn-row-speed,
@@ -335,9 +528,9 @@
   gap: 2px;
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
-  font-size: 11px;
-  color: var(--ink-secondary);
-  min-width: 84px;
+  font-size: var(--text-xs);
+  color: var(--color-muted-foreground);
+  min-width: 86px;
   flex-shrink: 0;
 }
 
@@ -353,19 +546,17 @@
 }
 
 .tone-download svg {
-  color: var(--signal-emerald);
+  color: var(--color-success);
 }
 
 .tone-upload svg {
-  color: var(--signal-cobalt);
+  color: var(--color-primary);
 }
 
-/* 6. SetupWizard — Centered Onboarding */
+/* 4. SetupWizard — Centered Industrial Onboarding */
 .wizard-screen {
   min-height: 100vh;
-  background-color: var(--bg-canvas);
-  background-image: radial-gradient(var(--grid-dot) 1px, transparent 1px);
-  background-size: 18px 18px;
+  background-color: var(--color-canvas);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -374,10 +565,10 @@
 
 .wizard-sheet {
   width: 100%;
-  max-width: 660px;
-  background: var(--bg-surface);
-  border: 1px solid var(--hairline);
-  border-radius: 16px;
+  max-width: 640px;
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-2xl);
   box-shadow: var(--shadow-md);
   padding: 32px;
   display: flex;
@@ -394,16 +585,16 @@
 .wizard-header h1,
 .wizard-sheet h1 {
   margin: 0;
-  font-size: 20px;
+  font-size: var(--text-xl);
   font-weight: 650;
   letter-spacing: -0.02em;
-  color: var(--ink);
+  color: var(--color-foreground);
 }
 
 .wizard-sub {
-  margin: 3px 0 0;
-  font-size: 13px;
-  color: var(--ink-secondary);
+  margin: 4px 0 0;
+  font-size: var(--text-table);
+  color: var(--color-muted-foreground);
 }
 
 .wizard-section {
@@ -416,8 +607,8 @@
   display: flex;
   align-items: center;
   gap: 12px;
-  color: var(--ink-muted);
-  font-size: 11.5px;
+  color: var(--color-subtle-foreground);
+  font-size: var(--text-xs);
 }
 
 .wizard-divider::before,
@@ -425,7 +616,7 @@
   content: "";
   flex: 1;
   height: 1px;
-  background: var(--hairline);
+  background-color: var(--color-border-subtle);
 }
 
 .wizard-actions {
@@ -435,7 +626,7 @@
   flex-wrap: wrap;
 }
 
-/* 7. Shared Panes: NodeModal, LinkImport, VpsPane, SubDetail, Schedule, MCP, VpsTasks */
+/* 5. Shared Panes: NodeModal, LinkImport, VpsPane, SubDetail, Schedule, MCP, VpsTasks */
 .node-pane,
 .schedule-body,
 .sub-detail-list {
@@ -453,22 +644,22 @@
 
 .node-submit-status {
   margin: 0;
-  font-size: 12px;
-  color: var(--ink-secondary);
+  font-size: var(--text-xs);
+  color: var(--color-muted-foreground);
 }
 
 .advanced-details {
-  border: 1px solid var(--hairline);
-  border-radius: 8px;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-lg);
   padding: 10px 12px;
-  background: var(--bg-subtle);
+  background-color: var(--color-surface-subtle);
 }
 
 .advanced-details summary {
   cursor: pointer;
-  font-size: 12.5px;
+  font-size: var(--text-table);
   font-weight: 500;
-  color: var(--ink-secondary);
+  color: var(--color-muted-foreground);
 }
 
 .advanced-details-body {
@@ -477,7 +668,7 @@
 
 .share-link-input {
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: var(--text-xs);
   line-height: 1.5;
 }
 
@@ -493,28 +684,28 @@
 .share-link-result {
   margin: 0;
   padding: 12px;
-  border-radius: 8px;
-  background: var(--bg-subtle);
-  color: var(--ink-muted);
-  font-size: 12px;
+  border-radius: var(--radius-lg);
+  background-color: var(--color-surface-subtle);
+  color: var(--color-muted-foreground);
+  font-size: var(--text-xs);
   white-space: pre-line;
 }
 
 .share-link-item {
   padding: 9px 11px;
-  border-radius: 8px;
-  border: 1px solid var(--hairline);
-  background: var(--bg-subtle);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--color-border-subtle);
+  background-color: var(--color-surface-subtle);
   display: flex;
   flex-direction: column;
   gap: 5px;
-  font-size: 12px;
+  font-size: var(--text-xs);
 }
 
 .share-link-item.error {
-  background: var(--signal-crimson-soft);
-  border-color: rgba(225, 29, 72, 0.25);
-  color: var(--signal-crimson-text);
+  background-color: var(--color-destructive-soft);
+  border-color: var(--color-destructive-border);
+  color: var(--color-destructive);
 }
 
 .share-link-item-top {
@@ -527,11 +718,11 @@
 .share-link-type,
 .share-link-chip {
   padding: 1px 6px;
-  border-radius: 4px;
-  background: var(--bg-well);
-  color: var(--ink-secondary);
+  border-radius: var(--radius-sm);
+  background-color: var(--color-surface-hover);
+  color: var(--color-muted-foreground);
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--text-xs);
   flex-shrink: 0;
 }
 
@@ -544,9 +735,9 @@
 }
 
 .share-link-server {
-  color: var(--ink-muted);
+  color: var(--color-muted-foreground);
   font-family: var(--font-mono);
-  font-size: 11.5px;
+  font-size: var(--text-xs);
   flex-shrink: 0;
 }
 
@@ -566,21 +757,21 @@
 
 .vps-deploy-hint {
   margin: 0;
-  font-size: 12px;
-  color: var(--ink-muted);
+  font-size: var(--text-xs);
+  color: var(--color-muted-foreground);
   line-height: 1.55;
 }
 
 .vps-deploy-error {
   padding: 11px 13px;
-  border-radius: 8px;
-  background: var(--signal-crimson-soft);
-  border: 1px solid rgba(225, 29, 72, 0.25);
-  color: var(--signal-crimson-text);
+  border-radius: var(--radius-lg);
+  background-color: var(--color-destructive-soft);
+  border: 1px solid var(--color-destructive-border);
+  color: var(--color-destructive);
   display: flex;
   flex-direction: column;
   gap: 6px;
-  font-size: 12.5px;
+  font-size: var(--text-table);
 }
 
 .vps-deploy-error-heading {
@@ -599,28 +790,28 @@
   position: relative;
   margin-top: 6px;
   padding: 8px 10px;
-  border-radius: 6px;
-  background: var(--bg-canvas);
-  border: 1px solid var(--hairline);
+  border-radius: var(--radius-md);
+  background-color: var(--color-canvas);
+  border: 1px solid var(--color-border-subtle);
 }
 
 .vps-command pre {
   margin: 0;
   overflow-x: auto;
   font-family: var(--font-mono);
-  font-size: 11.5px;
-  color: var(--ink);
+  font-size: var(--text-xs);
+  color: var(--color-foreground);
 }
 
 .vps-command-copy {
   float: right;
   margin-left: 8px;
-  padding: 2px 7px;
-  border-radius: 5px;
-  border: 1px solid var(--border-strong);
-  background: var(--bg-surface);
-  color: var(--ink-secondary);
-  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border-control);
+  background-color: var(--color-surface);
+  color: var(--color-foreground);
+  font-size: var(--text-xs);
   cursor: pointer;
 }
 
@@ -644,9 +835,9 @@
   justify-content: space-between;
   gap: 10px;
   padding: 9px 12px;
-  border: 1px solid var(--hairline);
-  border-radius: 8px;
-  background: var(--bg-subtle);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-lg);
+  background-color: var(--color-surface-subtle);
 }
 
 .list-row.disabled {
@@ -660,7 +851,7 @@
 
 .list-row-title {
   font-weight: 500;
-  font-size: 13px;
+  font-size: var(--text-table);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -670,8 +861,8 @@
 .sub-detail-meta,
 .sub-detail-foot,
 .schedule-note {
-  font-size: 12px;
-  color: var(--ink-muted);
+  font-size: var(--text-xs);
+  color: var(--color-muted-foreground);
 }
 
 .sub-stale-block {
@@ -681,14 +872,14 @@
 }
 
 .schedule-section-label {
-  font-size: 12px;
+  font-size: var(--text-xs);
   font-weight: 600;
-  color: var(--ink-secondary);
+  color: var(--color-muted-foreground);
 }
 
 .schedule-empty {
-  font-size: 12px;
-  color: var(--ink-muted);
+  font-size: var(--text-xs);
+  color: var(--color-subtle-foreground);
 }
 
 .schedule-list {
@@ -704,13 +895,13 @@
 }
 
 .schedule-row input[type="time"] {
-  height: 32px;
+  height: 34px;
   padding: 0 10px;
-  border-radius: 7px;
-  border: 1px solid var(--border-strong);
-  background: var(--bg-surface);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--color-border-control);
+  background-color: var(--color-surface);
   font-family: var(--font-mono);
-  font-size: 13px;
+  font-size: var(--text-table);
 }
 
 /* MCP Control */
@@ -723,15 +914,15 @@
 
 .mcp-control-label {
   font-family: var(--font-mono);
-  font-size: 11.5px;
+  font-size: var(--text-xs);
   font-weight: 600;
-  color: var(--ink-secondary);
+  color: var(--color-muted-foreground);
 }
 
 .mcp-control-divider {
   width: 1px;
   height: 16px;
-  background: var(--hairline);
+  background-color: var(--color-border-subtle);
 }
 
 .mcp-agent-buttons {
@@ -741,23 +932,26 @@
 }
 
 .mcp-agent-button {
-  width: 28px;
-  height: 28px;
-  border-radius: 6px;
-  border: 1px solid var(--border-strong);
-  background: var(--bg-subtle);
-  color: var(--ink-secondary);
+  width: 30px;
+  height: 30px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border-control);
+  background-color: var(--color-surface-subtle);
+  color: var(--color-muted-foreground);
   display: inline-flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: border-color 0.14s ease, color 0.14s ease, background-color 0.14s ease;
+  transition:
+    border-color var(--duration-micro) var(--motion-ease-productive),
+    color var(--duration-micro) var(--motion-ease-productive),
+    background-color var(--duration-micro) var(--motion-ease-productive);
 }
 
 .mcp-agent-button:hover {
-  border-color: var(--ink-muted);
-  color: var(--ink);
-  background: var(--bg-surface);
+  border-color: var(--color-border-strong);
+  color: var(--color-foreground);
+  background-color: var(--color-surface);
 }
 
 .mcp-agent-button svg {
@@ -772,24 +966,24 @@
   left: auto;
   right: 20px;
   bottom: 20px;
-  z-index: 80;
+  z-index: var(--z-header-popover);
   width: 340px;
   max-width: calc(100vw - 32px);
   padding: 12px 14px;
-  font-size: 12.5px;
+  font-size: var(--text-table);
   box-shadow: var(--shadow-md);
 }
 
 .vps-tasks summary {
   cursor: pointer;
   font-weight: 600;
-  color: var(--ink);
+  color: var(--color-foreground);
 }
 
 .vps-tasks p {
   margin: 6px 0;
-  font-size: 11.5px;
-  color: var(--ink-muted);
+  font-size: var(--text-xs);
+  color: var(--color-muted-foreground);
 }
 
 .vps-tasks-list {
@@ -803,8 +997,8 @@
 
 .vps-tasks-list article {
   padding-top: 8px;
-  border-top: 1px solid var(--hairline);
-  font-size: 12px;
+  border-top: 1px solid var(--color-border-subtle);
+  font-size: var(--text-xs);
 }
 
 /* Responsive Views */

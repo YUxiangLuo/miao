@@ -1,6 +1,5 @@
 import { For, Match, Show, Switch, createMemo, createSignal, onSettled } from 'solid-js'
 import { ICON } from '../tokens'
-import { useTheme } from '../hooks/useTheme'
 import { Button, LogoIcon, ToastStack } from './ui'
 import { ConfirmModal } from './ConfirmModal'
 import { NodeModal } from './node-modal/NodeModal'
@@ -21,13 +20,11 @@ import type { useAppController } from '../hooks/useAppController'
 import {
   ActivityIcon,
   GlobeIcon,
-  MoonIcon,
   PlayIcon,
   RouteIcon,
   SearchIcon,
   SettingsIcon,
   SquareIcon,
-  SunIcon,
   type IconProps,
 } from './icons'
 
@@ -41,7 +38,6 @@ function detectMobileViewport(): boolean {
 
 export function AppShell(props: { app: AppController }) {
   const app = () => props.app
-  const { theme, toggle: toggleTheme } = useTheme()
   const [cmdOpen, setCmdOpen] = createSignal(false)
   const [inspectingSub, setInspectingSub] = createSignal<SubStatus | null>(null)
   const [showScheduleModal, setShowScheduleModal] = createSignal(false)
@@ -297,15 +293,6 @@ export function AppShell(props: { app: AppController }) {
                 <span>↓ {formatSpeed(app().traffic().down ?? 0)}</span>
                 <span>↑ {formatSpeed(app().traffic().up ?? 0)}</span>
               </div>
-              <button
-                type="button"
-                class="icon-button subtle"
-                aria-label={theme() === 'dark' ? '切换为浅色外观' : '切换为深色外观'}
-                title={theme() === 'dark' ? '切换为浅色外观' : '切换为深色外观'}
-                onClick={toggleTheme}
-              >
-                {theme() === 'dark' ? <SunIcon size={14} /> : <MoonIcon size={14} />}
-              </button>
             </div>
           </div>
         </aside>
@@ -355,14 +342,6 @@ export function AppShell(props: { app: AppController }) {
                 onClick={() => setCmdOpen(true)}
               >
                 <SearchIcon size={ICON.md} />
-              </button>
-              <button
-                type="button"
-                class="icon-button"
-                aria-label={theme() === 'dark' ? '切换为浅色外观' : '切换为深色外观'}
-                onClick={toggleTheme}
-              >
-                {theme() === 'dark' ? <SunIcon size={ICON.md} /> : <MoonIcon size={ICON.md} />}
               </button>
             </div>
           </div>
@@ -454,8 +433,6 @@ export function AppShell(props: { app: AppController }) {
             <Match when={app().activeNav() === 'settings'}>
               <SettingsView
                 app={app()}
-                theme={theme()}
-                onToggleTheme={toggleTheme}
                 onOpenSchedule={() => setShowScheduleModal(true)}
               />
             </Match>
@@ -489,8 +466,6 @@ export function AppShell(props: { app: AppController }) {
         open={cmdOpen()}
         onClose={() => setCmdOpen(false)}
         app={app()}
-        onToggleTheme={toggleTheme}
-        theme={theme()}
       />
 
       <VpsTasks tasks={app().vpsTasks()} />

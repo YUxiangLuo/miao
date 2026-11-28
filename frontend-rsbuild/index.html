@@ -6,15 +6,16 @@
     <title>Harbor</title>
     <link rel="icon" href="/icon.svg" type="image/svg+xml" />
     <link rel="manifest" href="/manifest.webmanifest" />
-    <meta name="theme-color" content="#F7F6F3" />
+    <meta name="theme-color" content="#F2F4F7" />
     <link rel="apple-touch-icon" href="/icon-192.png" />
     <script>
       try {
-        var t = localStorage.getItem('harbor-theme')
-        if (t !== 'dark') t = 'light'
-        document.documentElement.dataset.theme = t
-        var meta = document.querySelector('meta[name="theme-color"]')
-        if (meta) meta.content = t === 'dark' ? '#111113' : '#F7F6F3'
+        var m = localStorage.getItem('harbor-motion')
+        if (m === 'off' || m === 'reduced' || m === 'full') {
+          document.documentElement.dataset.motionProfile = m
+        } else if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+          document.documentElement.dataset.motionProfile = 'reduced'
+        }
       } catch (e) {}
     </script>
     <script>

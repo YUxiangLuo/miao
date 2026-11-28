@@ -2,6 +2,7 @@ import { For, Show, createEffect, createMemo, createSignal, createUniqueId } fro
 import { ICON } from '../tokens'
 import { useDialog } from '../hooks/useDialog'
 import { fetchJson } from '../hooks/request'
+import { usePresence } from '../motion'
 import { Button } from './ui'
 import { formatNextRun, formatTimezoneLabel } from '../scheduleFormat'
 import type { ApiResponse, ScheduledRefreshRequest, ScheduledRefreshStatus } from '../types/api'
@@ -22,6 +23,12 @@ function normalizedTimes(times: string[]): string[] {
 
 export function ScheduleModal(props: ScheduleModalProps) {
   const titleId = createUniqueId()
+  const [panelEl, setPanelEl] = createSignal<HTMLElement | null>(null)
+  const presence = usePresence({
+    open: () => props.open,
+    element: panelEl,
+    exitDurationToken: 'fast',
+  })
   const dialogRef = useDialog(() => props.open, () => props.onClose())
   const [status, setStatus] = createSignal<ScheduledRefreshStatus | null>(null)
   const [loadError, setLoadError] = createSignal('')
@@ -104,15 +111,27 @@ export function ScheduleModal(props: ScheduleModalProps) {
   }
 
   return (
-    <Show when={props.open}>
-      <div class="modal-overlay drawer-overlay" onClick={props.onClose}>
+    <Show when={presence.mounted()}>
+      <div
+        class="modal-overlay drawer-overlay"
+        data-motion="scrim"
+        data-motion-state={presence.motionState()}
+        onClick={props.onClose}
+      >
         <div
-          ref={dialogRef}
+          ref={(el) => {
+            setPanelEl(el)
+            dialogRef(el)
+          }}
           class="modal-card drawer-panel schedule-modal"
           role="dialog"
           aria-modal="true"
           aria-labelledby={titleId}
           tabindex={-1}
+          inert={!props.open ? true : undefined}
+          data-motion="slide-edge"
+          data-side="right"
+          data-motion-state={presence.motionState()}
           onClick={(event) => event.stopPropagation()}
         >
           <div class="modal-title-row">

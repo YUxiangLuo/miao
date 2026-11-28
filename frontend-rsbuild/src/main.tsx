@@ -2,7 +2,10 @@ import { Errored } from 'solid-js'
 import { render } from '@solidjs/web'
 import App from './App'
 import { Button, LogoIcon } from './components/ui'
+import { initMotionPolicy } from './motion'
 import './styles.css'
+
+initMotionPolicy()
 
 const rootElement = document.getElementById('root')
 if (!rootElement) throw new Error('找不到 #root 挂载点')

@@ -277,3 +277,69 @@ it('tracks structured status warnings independently and auto-dismisses resolved 
   flush()
   expect(result.toasts().map((t) => t.message)).toEqual([warnA])
 })
+
+it('switches from fastest_* auto strategy back to manual and selects exit node in one step', async () => {
+  let activeSelect: 'fastest_jp' | 'manual' = 'fastest_jp'
+  let activeNow = 'jp-01'
+
+  const { result, fetch } = setup((url, options) => {
+    if (url === '/api/status') {
+      return response({
+        success: true,
+        data: statusMock({
+          running: true,
+          ready: true,
+          node_select: activeSelect,
+          requested_node_select: activeSelect,
+        }),
+      })
+    }
+    if (url === '/api/clash/proxies') {
+      return response({
+        proxies: {
+          proxy: {
+            type: activeSelect === 'manual' ? 'Selector' : 'URLTest',
+            now: activeNow,
+            all: ['jp-01', 'jp-02'],
+          },
+        },
+      })
+    }
+    if (url === '/api/node-select' && options.method === 'POST') {
+      activeSelect = 'manual'
+      return response({
+        success: true,
+        data: {
+          requested: 'manual',
+          node_select: 'manual',
+          changed: true,
+          runtime_updated: true,
+          started: false,
+          reloaded: true,
+          restarted: false,
+        },
+      })
+    }
+    if (url === '/api/proxy/switch' && options.method === 'POST') {
+      const body = JSON.parse(String(options.body))
+      activeNow = body.name
+      return response({
+        success: true,
+        data: { persisted: true },
+      })
+    }
+  })
+
+  await waitFor(() => expect(result.firstLoadDone()).toBe(true))
+  flush()
+  const ok = await result.handleSelectExitNode('proxy', 'jp-02')
+  flush()
+  expect(ok).toBe(true)
+
+  const postCalls = fetch.mock.calls.filter(([, options]) => options?.method === 'POST')
+  expect(postCalls.map(([url]) => url)).toEqual(['/api/node-select', '/api/proxy/switch'])
+  expect(postCalls[0][1]?.body).toBe(JSON.stringify({ node_select: 'manual' }))
+  expect(postCalls[1][1]?.body).toBe(JSON.stringify({ group: 'proxy', name: 'jp-02' }))
+  expect(result.primaryGroup()?.now).toBe('jp-02')
+  expect(result.toasts().at(-1)?.message).toContain('已切回手动选择')
+})

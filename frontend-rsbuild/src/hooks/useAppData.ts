@@ -206,7 +206,17 @@ export function useAppData() {
     fetchConnections,
   } = useConnections(isReady, clashApiBase)
   const { versionInfo, fetchVersion } = useVersion()
-  const { delays, delayMeasuredAt, testingNodes, testingGroup, testDelay, testGroupDelays, clearDelays } = useDelays()
+  const {
+    delays,
+    delayMeasuredAt,
+    testingNodes,
+    testingGroup,
+    batchProgress,
+    testDelay,
+    testGroupDelays,
+    cancelGroupDelays,
+    clearDelays,
+  } = useDelays()
 
   let lastAutoTestedNode = ''
   const currentNodeName = createMemo(() => primaryGroup()?.now || '')
@@ -421,8 +431,10 @@ export function useAppData() {
     delayMeasuredAt: mergedMeasuredAt,
     testingNodes,
     testingGroup,
+    batchProgress,
     testDelay,
     testGroupDelays,
+    cancelGroupDelays,
     clearDelays,
     resetNodeForm,
     needsOnboarding,

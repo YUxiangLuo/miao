@@ -1,5 +1,6 @@
 import { For, Show, createEffect, createMemo, createSignal, onSettled } from 'solid-js'
 import type { JSX } from '@solidjs/web'
+import { scrollIntoViewSafe, usePresence } from '../motion'
 import { formatDelay } from '../utils'
 import type { NodesTabKey, RoutingTabKey } from '../hooks/useAppData'
 import type { useAppController } from '../hooks/useAppController'
@@ -10,13 +11,12 @@ export interface CommandPaletteProps {
   open: boolean
   onClose: () => void
   app: ReturnType<typeof useAppController>
-  onToggleTheme: () => void
-  theme: 'light' | 'dark'
 }
 
 type ControllerWithAliases = ReturnType<typeof useAppController> & {
   proxyNodes?: () => string[]
   handleSelectProxy?: (groupName: string, nodeName: string) => unknown
+  handleSelectExitNode?: (groupName: string, nodeName: string) => unknown
 }
 
 interface CommandEntry {
@@ -53,8 +53,15 @@ export function useCommandShortcut(onToggle: () => void): void {
 export function CommandPalette(props: CommandPaletteProps): JSX.Element {
   const [query, setQuery] = createSignal('')
   const [activeIndex, setActiveIndex] = createSignal(0)
+  const [dialogEl, setDialogEl] = createSignal<HTMLElement | null>(null)
   let inputEl: HTMLInputElement | undefined
   let listEl: HTMLDivElement | undefined
+
+  const presence = usePresence({
+    open: () => props.open,
+    element: dialogEl,
+    exitDurationToken: 'fast',
+  })
 
   const ctrl = () => props.app as ControllerWithAliases
 
@@ -90,6 +97,10 @@ export function CommandPalette(props: CommandPaletteProps): JSX.Element {
   const switchSharedExit = (nodeName: string) => {
     const app = ctrl()
     const group = app.primaryGroupName?.() || 'proxy'
+    if (typeof app.handleSelectExitNode === 'function') {
+      void app.handleSelectExitNode(group, nodeName)
+      return
+    }
     if (typeof app.handleSelectProxy === 'function') {
       void app.handleSelectProxy(group, nodeName)
       return
@@ -142,7 +153,7 @@ export function CommandPalette(props: CommandPaletteProps): JSX.Element {
         id: 'nav:settings',
         group: '页面导航',
         label: '前往 系统设置',
-        keywords: 'settings 系统设置 设置 mcp 更新 版本 外观 定时刷新',
+        keywords: 'settings 系统设置 设置 mcp 更新 版本 动效 定时刷新',
         badge: app.activeNav() === 'settings' ? '当前' : undefined,
         run: () => app.setActiveNav('settings'),
       },
@@ -179,14 +190,6 @@ export function CommandPalette(props: CommandPaletteProps): JSX.Element {
         keywords: 'refresh subs 刷新 更新 订阅 节点池',
         badge: app.subs?.() ? `${app.subs().length} 个` : undefined,
         run: () => { void app.handleRefreshSubscriptions() },
-      },
-      {
-        id: 'act:theme',
-        group: '快捷操作',
-        label: '切换深色 / 浅色外观',
-        keywords: 'theme dark light 深色 浅色 外观 主题',
-        badge: props.theme === 'dark' ? '深色' : '浅色',
-        run: () => props.onToggleTheme(),
       },
     ]
 
@@ -291,6 +294,8 @@ export function CommandPalette(props: CommandPaletteProps): JSX.Element {
   )
 
   const handleDialogKeyDown = (event: KeyboardEvent) => {
+    if (event.isComposing || event.keyCode === 229) return
+
     const rows = filteredRows()
     if (event.key === 'ArrowDown') {
       event.preventDefault()
@@ -298,10 +303,7 @@ export function CommandPalette(props: CommandPaletteProps): JSX.Element {
       const next = (activeIndex() + 1) % rows.length
       setActiveIndex(next)
       const items = listEl?.querySelectorAll<HTMLElement>('.cmd-item')
-      const target = items?.[next]
-      if (target && typeof target.scrollIntoView === 'function') {
-        target.scrollIntoView({ block: 'nearest' })
-      }
+      scrollIntoViewSafe(items?.[next], { block: 'nearest' })
       return
     }
 
@@ -311,10 +313,7 @@ export function CommandPalette(props: CommandPaletteProps): JSX.Element {
       const prev = (activeIndex() - 1 + rows.length) % rows.length
       setActiveIndex(prev)
       const items = listEl?.querySelectorAll<HTMLElement>('.cmd-item')
-      const target = items?.[prev]
-      if (target && typeof target.scrollIntoView === 'function') {
-        target.scrollIntoView({ block: 'nearest' })
-      }
+      scrollIntoViewSafe(items?.[prev], { block: 'nearest' })
       return
     }
 
@@ -326,13 +325,22 @@ export function CommandPalette(props: CommandPaletteProps): JSX.Element {
   }
 
   return (
-    <Show when={props.open}>
-      <div class="cmd-backdrop" onClick={() => props.onClose()}>
+    <Show when={presence.mounted()}>
+      <div
+        class="cmd-backdrop"
+        data-motion="scrim"
+        data-motion-state={presence.motionState()}
+        onClick={() => props.onClose()}
+      >
         <div
+          ref={setDialogEl}
           class="cmd-dialog"
           role="dialog"
           aria-modal="true"
           aria-label="命令面板"
+          inert={!props.open ? true : undefined}
+          data-motion="elevate"
+          data-motion-state={presence.motionState()}
           onClick={(event) => event.stopPropagation()}
           onKeyDown={handleDialogKeyDown}
         >

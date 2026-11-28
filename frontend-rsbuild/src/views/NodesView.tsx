@@ -1,6 +1,7 @@
-import { For, Show, createMemo, createProjection, createSignal } from 'solid-js'
+import { For, Show, createMemo, createProjection, createSignal, flush } from 'solid-js'
 import { ICON } from '../tokens'
-import { Button } from '../components/ui'
+import { flashSurface, flipElements, usePresence } from '../motion'
+import { Button, ProgressBar } from '../components/ui'
 import { SelectPopover, cleanNodeDisplay, type SelectOption } from '../components/SelectPopover'
 import { buildProxyRegionBuckets, classifyProxyRegion, type ProxyRegionId } from '../proxyRegions'
 import {
@@ -14,17 +15,21 @@ import type { useAppController } from '../hooks/useAppController'
 import {
   ClockIcon,
   DownloadIcon,
+  ListFilterIcon,
   ListPlusIcon,
+  LoaderCircleIcon,
   PlayIcon,
   PlusIcon,
   RefreshCwIcon,
   RocketIcon,
   SearchIcon,
+  SquareIcon,
   Trash2Icon,
   ZapIcon,
 } from '../components/icons'
 
 type AppController = ReturnType<typeof useAppController>
+type NodeSortMode = 'default' | 'latency'
 
 export interface NodesViewProps {
   app: AppController
@@ -52,6 +57,45 @@ const REGION_LABELS: Record<ProxyRegionId, string> = {
   other: '其他',
 }
 
+const COMPACT_PROTOCOLS: Record<string, string> = {
+  hysteria2: 'Hy2',
+  hy2: 'Hy2',
+  shadowsocks: 'SS',
+  ss: 'SS',
+  vless: 'VLESS',
+  vmess: 'VMess',
+  trojan: 'Trojan',
+  anytls: 'AnyTLS',
+  socks: 'SOCKS5',
+  socks5: 'SOCKS5',
+  tuic: 'TUIC',
+  wireguard: 'WG',
+}
+
+const MULTIPLIER_RE = /(?:\b(\d+(?:\.\d+)?)\s*(?:[xX×]|倍(?:率)?)(?![a-zA-Z0-9]))|(?:(?:×|倍率[:：\s]*)(\d+(?:\.\d+)?)(?![a-zA-Z0-9.]))/u
+
+export function compactProtocolLabel(rawType: string | undefined): string | null {
+  if (!rawType) return null
+  const key = rawType.trim().toLowerCase()
+  if (!key) return null
+  return COMPACT_PROTOCOLS[key] || rawType.trim()
+}
+
+export function extractNodeMultiplier(rawName: string): string | null {
+  const match = MULTIPLIER_RE.exec(rawName)
+  const rawNum = match?.[1] || match?.[2]
+  if (!rawNum) return null
+  const parsed = Number.parseFloat(rawNum)
+  if (!Number.isFinite(parsed) || parsed <= 0 || parsed > 99) return null
+  return `${rawNum}x`
+}
+
+export function computeLatencyMeterPercent(delay: number | undefined): number {
+  if (delay === undefined) return 0
+  if (delay < 0) return 100
+  return Math.round(Math.max(18, Math.min(100, 108 - delay * 0.22)))
+}
+
 function formatSubStateText(sub: SubStatus): string {
   const enabledCount = Math.max(0, sub.node_count - sub.disabled_count)
   if (sub.state === 'refreshing') return '正在拉取更新…'
@@ -74,6 +118,9 @@ export function NodesView(props: NodesViewProps) {
   const [scanningVerge, setScanningVerge] = createSignal(false)
   const [region, setRegion] = createSignal<ProxyRegionId>('all')
   const [query, setQuery] = createSignal('')
+  const [sortBy, setSortBy] = createSignal<NodeSortMode>('default')
+  const [telemetryEl, setTelemetryEl] = createSignal<HTMLElement | null>(null)
+  let matrixEl: HTMLDivElement | undefined
 
   const tab = () => app().nodesTab()
 
@@ -121,12 +168,11 @@ export function NodesView(props: NodesViewProps) {
     })),
   ])
 
-  const visibleNodes = createMemo(() => {
+  const filteredNodes = createMemo(() => {
     const needle = query().trim().toLowerCase()
     const reg = region()
-    const active = currentNode()
 
-    const filtered = candidateNodes().filter((rawName) => {
+    return candidateNodes().filter((rawName) => {
       if (reg !== 'all' && classifyProxyRegion(rawName) !== reg) return false
       if (!needle) return true
       const cleaned = cleanNodeDisplay(rawName)
@@ -136,11 +182,120 @@ export function NodesView(props: NodesViewProps) {
         || (cleaned.code !== null && cleaned.code.toLowerCase().includes(needle))
       )
     })
+  })
 
-    if (!active) return filtered
-    const activeIndex = filtered.indexOf(active)
-    if (activeIndex <= 0) return filtered
-    return [active, ...filtered.slice(0, activeIndex), ...filtered.slice(activeIndex + 1)]
+  const visibleNodes = createMemo(() => {
+    const base = filteredNodes()
+    const mode = sortBy()
+
+    if (mode === 'latency') {
+      const delays = app().delays()
+      const testing = app().testingNodes()
+      const indexMap = new Map<string, number>()
+      base.forEach((name, idx) => indexMap.set(name, idx))
+
+      const rankNode = (name: string): number => {
+        const d = delays[name]
+        if (d !== undefined && d > 0) return 0
+        if (testing[name]) return 1
+        if (d === undefined) return 2
+        return 3
+      }
+
+      return [...base].sort((a, b) => {
+        const ra = rankNode(a)
+        const rb = rankNode(b)
+        if (ra !== rb) return ra - rb
+        if (ra === 0) {
+          const diff = delays[a] - delays[b]
+          if (diff !== 0) return diff
+        }
+        return (indexMap.get(a) ?? 0) - (indexMap.get(b) ?? 0)
+      })
+    }
+
+    const active = currentNode()
+    if (!active) return base
+    const activeIndex = base.indexOf(active)
+    if (activeIndex <= 0) return base
+    return [active, ...base.slice(0, activeIndex), ...base.slice(activeIndex + 1)]
+  })
+
+  const runMatrixFlip = (mutate: () => void) => {
+    const cards = matrixEl
+      ? Array.from(matrixEl.querySelectorAll<HTMLElement>('.node-card'))
+      : []
+    if (cards.length === 0 || cards.length > 32) {
+      mutate()
+      return
+    }
+    flipElements(
+      cards,
+      () => {
+        mutate()
+        flush()
+      },
+      { maxElements: 32 },
+    )
+  }
+
+  const changeSortMode = (next: NodeSortMode) => {
+    if (sortBy() === next) return
+    runMatrixFlip(() => setSortBy(next))
+  }
+
+  const changeRegion = (next: ProxyRegionId) => {
+    if (region() === next) return
+    runMatrixFlip(() => setRegion(next))
+  }
+
+  const isFilteredScope = createMemo(() => region() !== 'all' || query().trim().length > 0)
+  const probeTargetNodes = createMemo(() => (isFilteredScope() ? filteredNodes() : candidateNodes()))
+  const isBatchTesting = createMemo(() => Boolean(app().testingGroup()))
+
+  const telemetryStats = createMemo(() => {
+    const nodes = filteredNodes()
+    const delays = app().delays()
+    let measured = 0
+    let fast = 0
+    let timeout = 0
+    let best: number | null = null
+
+    for (const name of nodes) {
+      const d = delays[name]
+      if (d === undefined) continue
+      measured++
+      if (d < 0) {
+        timeout++
+      } else {
+        if (d < 80) fast++
+        if (best === null || d < best) best = d
+      }
+    }
+
+    return { total: nodes.length, measured, fast, timeout, best }
+  })
+
+  const showTelemetry = createMemo(() => (
+    app().status().ready
+    && candidateNodes().length > 0
+    && (isBatchTesting() || telemetryStats().measured > 0)
+  ))
+
+  const telemetryPresence = usePresence({
+    open: showTelemetry,
+    element: telemetryEl,
+    exitDurationToken: 'fast',
+  })
+
+  const telemetryProgressPercent = createMemo(() => {
+    const bp = app().batchProgress?.()
+    if (isBatchTesting() && bp && bp.total > 0) {
+      return (bp.completed / bp.total) * 100
+    }
+    const stats = telemetryStats()
+    if (stats.total <= 0) return 0
+    return (stats.measured / stats.total) * 100
   })
 
   const openAddSubscription = () => {
@@ -274,16 +429,55 @@ export function NodesView(props: NodesViewProps) {
               />
             </Show>
 
+            <Show when={app().status().ready && candidateNodes().length > 1}>
+              <div class="seg-rail" role="group" aria-label="节点排序方式">
+                <button
+                  type="button"
+                  class={['seg-btn', { active: sortBy() === 'default' }]}
+                  aria-pressed={sortBy() === 'default' ? 'true' : 'false'}
+                  onClick={() => changeSortMode('default')}
+                >
+                  <span>默认</span>
+                </button>
+                <button
+                  type="button"
+                  class={['seg-btn', { active: sortBy() === 'latency' }]}
+                  aria-pressed={sortBy() === 'latency' ? 'true' : 'false'}
+                  onClick={() => changeSortMode('latency')}
+                >
+                  <ListFilterIcon size={12} />
+                  <span>按延迟</span>
+                </button>
+              </div>
+            </Show>
+
             <Show when={app().status().ready && candidateNodes().length > 0}>
-              <Button
-                tone="secondary"
-                size="sm"
-                icon={<ZapIcon size={ICON.xs} />}
-                loading={Boolean(app().testingGroup())}
-                onClick={() => app().handleTestGroupDelays(app().primaryGroupName() || 'proxy', candidateNodes())}
+              <Show
+                when={isBatchTesting()}
+                fallback={
+                  <Button
+                    tone="secondary"
+                    size="sm"
+                    icon={<ZapIcon size={ICON.xs} />}
+                    disabled={probeTargetNodes().length === 0}
+                    onClick={() => app().handleTestGroupDelays(
+                      app().primaryGroupName() || 'proxy',
+                      probeTargetNodes(),
+                    )}
+                  >
+                    {isFilteredScope() ? `测速筛选 (${probeTargetNodes().length})` : '批量测速'}
+                  </Button>
+                }
               >
-                批量测速
-              </Button>
+                <Button
+                  tone="secondary"
+                  size="sm"
+                  icon={<SquareIcon size={ICON.xs} />}
+                  onClick={() => app().handleCancelGroupDelays()}
+                >
+                  停止测速
+                </Button>
+              </Show>
             </Show>
           </Show>
 
@@ -310,7 +504,7 @@ export function NodesView(props: NodesViewProps) {
         </div>
       </div>
 
-      {/* Tab 1: Default Proxy Exit & Node Matrix */}
+      {/* Tab 1: Default Proxy Exit & Precision Node Matrix */}
       <Show when={tab() === 'pool'}>
         <section class="surface-box" aria-label="默认代理出口">
           <Show when={app().status().ready && candidateNodes().length > 0}>
@@ -352,7 +546,7 @@ export function NodesView(props: NodesViewProps) {
                           type="button"
                           class={['seg-btn', { active: region() === bucket().id }]}
                           aria-pressed={region() === bucket().id ? 'true' : 'false'}
-                          onClick={() => setRegion(bucket().id)}
+                          onClick={() => changeRegion(bucket().id)}
                         >
                           {REGION_LABELS[bucket().id]} <span class="num">{bucket().count}</span>
                         </button>
@@ -375,6 +569,74 @@ export function NodesView(props: NodesViewProps) {
                 </div>
               </Show>
             </div>
+
+            <Show when={telemetryPresence.mounted()}>
+              <div
+                ref={setTelemetryEl}
+                class="probe-telemetry-shell"
+                data-motion="reveal"
+                data-motion-state={telemetryPresence.motionState()}
+                role="status"
+                aria-live="polite"
+              >
+                <div class="probe-telemetry-inner">
+                  <div class="probe-telemetry-row">
+                    <div class="probe-telemetry-stats num">
+                      <Show
+                        when={isBatchTesting()}
+                        fallback={
+                          <span>
+                            已测 <strong>{telemetryStats().measured}</strong> / {telemetryStats().total}
+                          </span>
+                        }
+                      >
+                        <span class="status-inline">
+                          <LoaderCircleIcon size={12} class="spin" />
+                          <span>
+                            正在测速 <strong>{app().batchProgress?.()?.completed ?? 0}</strong> / {app().batchProgress?.()?.total ?? probeTargetNodes().length}
+                          </span>
+                        </span>
+                      </Show>
+
+                      <Show when={telemetryStats().best !== null}>
+                        <span>·</span>
+                        <span>
+                          最快 <strong class="latency-text fast">{telemetryStats().best} ms</strong>
+                        </span>
+                      </Show>
+
+                      <Show when={telemetryStats().fast > 0}>
+                        <span>·</span>
+                        <span>极速 (&lt;80ms) <strong>{telemetryStats().fast}</strong></span>
+                      </Show>
+
+                      <Show when={telemetryStats().timeout > 0}>
+                        <span>·</span>
+                        <span>
+                          超时 <strong class="latency-text timeout">{telemetryStats().timeout}</strong>
+                        </span>
+                      </Show>
+                    </div>
+
+                    <Show when={!isBatchTesting() && telemetryStats().measured > 1 && sortBy() !== 'latency'}>
+                      <button
+                        type="button"
+                        class="btn-link"
+                        onClick={() => changeSortMode('latency')}
+                      >
+                        按延迟升序排列
+                      </button>
+                    </Show>
+                  </div>
+
+                  <ProgressBar
+                    label="节点测速进度"
+                    value={telemetryProgressPercent()}
+                    tone={isBatchTesting() ? 'primary' : 'success'}
+                  />
+                </div>
+              </div>
+            </Show>
           </Show>
 
           <div class="surface-body">
@@ -426,62 +688,158 @@ export function NodesView(props: NodesViewProps) {
                   when={visibleNodes().length > 0}
                   fallback={<div class="empty-state">没有匹配当前筛选条件的节点。</div>}
                 >
-                  <div class="node-matrix" role="group" aria-label="候选节点列表">
+                  <div
+                    ref={(el) => { matrixEl = el }}
+                    class="node-matrix"
+                    role="group"
+                    aria-label="候选节点列表"
+                  >
                     <For each={visibleNodes()}>
                       {(nodeName) => {
+                        let cardEl: HTMLDivElement | undefined
                         const selected = () => Boolean(selectedNodeMap[nodeName])
                         const cleaned = createMemo(() => cleanNodeDisplay(nodeName))
+                        const protocol = createMemo(() => compactProtocolLabel(app().nodeProtocols()[nodeName]))
+                        const multiplier = createMemo(() => extractNodeMultiplier(nodeName))
                         const delay = () => app().delays()[nodeName]
+                        const testing = () => Boolean(app().testingNodes()[nodeName])
                         const tone = () => getDelayTone(delay())
+                        const meterPercent = () => computeLatencyMeterPercent(delay())
+                        const selectDisabled = () => (
+                          Boolean(app().switchingNode()) || app().pendingActions().has('nodeSelect')
+                        )
+
+                        const onSelectCard = async () => {
+                          const ok = await app().handleSelectExitNode(
+                            app().primaryGroupName() || 'proxy',
+                            nodeName,
+                          )
+                          if (ok) {
+                            flashSurface(cardEl, 'active')
+                          }
+                        }
+
                         return (
-                          <button
-                            type="button"
-                            class={['node-cell', { selected: selected() }]}
-                            aria-pressed={selected() ? 'true' : 'false'}
-                            disabled={!isManual() || Boolean(app().switchingNode())}
-                            title={
-                              !isManual()
-                                ? `${cleaned().name}（切回「手动选择」后可手动指定）`
-                                : `切换默认出口为 ${cleaned().name}`
-                            }
-                            onClick={() => {
-                              void app().handleSwitchProxy(app().primaryGroupName() || 'proxy', nodeName)
-                            }}
+                          <div
+                            ref={(el) => { cardEl = el }}
+                            class={[
+                              'node-card',
+                              {
+                                selected: selected(),
+                                timeout: tone() === 'timeout',
+                              },
+                            ]}
                           >
-                            <span class="node-cell-main">
-                              <span
-                                class={[
-                                  'status-dot',
-                                  selected()
-                                    ? 'emerald'
-                                    : tone() === 'timeout'
-                                      ? 'crimson'
-                                      : 'muted',
-                                ]}
-                              />
-                              <Show when={cleaned().code}>
-                                {(code) => <span class="mono-tag">{code()}</span>}
+                            <button
+                              type="button"
+                              class="node-card-select"
+                              aria-pressed={selected() ? 'true' : 'false'}
+                              disabled={selectDisabled()}
+                              title={
+                                !isManual()
+                                  ? `点击切回手动选择并指定出口为 ${cleaned().name}`
+                                  : `切换默认出口为 ${cleaned().name}`
+                              }
+                              onClick={() => { void onSelectCard() }}
+                            >
+                              <span class="node-card-top">
+                                <span
+                                  class={[
+                                    'status-dot',
+                                    selected()
+                                      ? 'emerald'
+                                      : tone() === 'timeout'
+                                        ? 'crimson'
+                                        : 'muted',
+                                  ]}
+                                  aria-hidden="true"
+                                />
+                                <Show when={cleaned().code}>
+                                  {(code) => <span class="mono-tag">{code()}</span>}
+                                </Show>
+                                <span class="node-card-name">{cleaned().name}</span>
+                              </span>
+
+                              <Show when={protocol() || multiplier() || selected()}>
+                                <span class="node-card-meta">
+                                  <Show when={protocol()}>
+                                    {(proto) => <span class="node-meta-item">{proto()}</span>}
+                                  </Show>
+                                  <Show when={protocol() && multiplier()}>
+                                    <span class="node-meta-sep" aria-hidden="true">·</span>
+                                  </Show>
+                                  <Show when={multiplier()}>
+                                    {(mult) => <span class="node-meta-item">{mult()}</span>}
+                                  </Show>
+                                  <Show when={selected()}>
+                                    <Show when={protocol() || multiplier()}>
+                                      <span class="node-meta-sep" aria-hidden="true">·</span>
+                                    </Show>
+                                    <span class="node-meta-item">
+                                      {isManual() ? '当前出口' : '自动命中'}
+                                    </span>
+                                  </Show>
+                                </span>
                               </Show>
-                              <span class="node-cell-name">{cleaned().name}</span>
-                            </span>
-                            <span
+                            </button>
+
+                            <button
+                              type="button"
                               class={[
-                                'latency-text',
-                                'num',
+                                'node-card-probe',
                                 {
                                   fast: tone() === 'fast',
                                   medium: tone() === 'medium',
-                                  slow: tone() === 'slow' || tone() === 'timeout',
+                                  slow: tone() === 'slow',
+                                  timeout: tone() === 'timeout',
                                 },
                               ]}
+                              disabled={testing()}
+                              aria-label={`测速节点 ${cleaned().name}`}
+                              title={
+                                testing()
+                                  ? `${cleaned().name} 正在测速…`
+                                  : delay() != null
+                                    ? `重新测速 ${cleaned().name}（当前 ${formatDelay(delay())}）`
+                                    : `单独测速 ${cleaned().name}`
+                              }
+                              onClick={() => app().handleTestDelay(nodeName)}
                             >
-                              {app().testingNodes()[nodeName]
-                                ? '…'
-                                : delay() == null
-                                  ? '—'
-                                  : formatDelay(delay())}
-                            </span>
-                          </button>
+                              <Show
+                                when={!testing()}
+                                fallback={<LoaderCircleIcon size={13} class="spin" />}
+                              >
+                                <Show
+                                  when={delay() != null}
+                                  fallback={
+                                    <>
+                                      <ZapIcon size={12} />
+                                      <span>测速</span>
+                                    </>
+                                  }
+                                >
+                                  <span>{formatDelay(delay())}</span>
+                                </Show>
+                              </Show>
+                            </button>
+
+                            <Show when={meterPercent() > 0}>
+                              <div class="node-latency-meter" aria-hidden="true">
+                                <div
+                                  class={[
+                                    'node-latency-meter-fill',
+                                    {
+                                      fast: tone() === 'fast',
+                                      medium: tone() === 'medium',
+                                      slow: tone() === 'slow',
+                                      timeout: tone() === 'timeout',
+                                    },
+                                  ]}
+                                  style={{ width: `${meterPercent()}%` }}
+                                />
+                              </div>
+                            </Show>
+                          </div>
                         )
                       }}
                     </For>

@@ -1,4 +1,5 @@
 import { createEffect, createMemo, createSignal, type Accessor } from 'solid-js'
+import { peekReducedMotion } from '../motion'
 import { FLIP_EASING, FLIP_MS } from '../tokens'
 
 /**
@@ -37,7 +38,7 @@ export function useFlipContainer<T extends HTMLElement>(
       }
       if (rev !== undefined && lastRevision === rev) return
       lastRevision = rev
-      const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+      const reduceMotion = peekReducedMotion()
       const next = new Map<string, { top: number; left: number }>()
       for (const child of el.querySelectorAll<HTMLElement>(':scope > [data-flip-key]')) {
         const key = child.dataset.flipKey as string

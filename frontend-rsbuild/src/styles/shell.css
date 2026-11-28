@@ -1,16 +1,16 @@
-/* Harbor Console Shell — Left Fixed Sidebar + Single Focused Workspace */
+/* Harbor Industrial Console Shell — Pure White Sidebar on Cool Slate Canvas */
 
 .app-layout {
   min-height: 100vh;
   display: flex;
-  background: var(--bg-canvas);
-  color: var(--ink);
+  background-color: var(--color-canvas);
+  color: var(--color-foreground);
   overflow-x: clip;
 }
 
-/* Desktop Left Sidebar */
+/* Desktop Left Sidebar (228px pure white workbench rail) */
 .app-sidebar {
-  width: 236px;
+  width: 228px;
   flex-shrink: 0;
   position: sticky;
   top: 0;
@@ -20,8 +20,8 @@
   justify-content: space-between;
   gap: 16px;
   padding: 16px 12px 14px;
-  background: var(--bg-sidebar);
-  border-right: 1px solid var(--hairline);
+  background-color: var(--color-surface);
+  border-right: 1px solid var(--color-border-subtle);
   overflow-y: auto;
 }
 
@@ -37,7 +37,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 2px 8px;
+  padding: 2px 6px;
 }
 
 .sidebar-brand-main {
@@ -48,35 +48,38 @@
 }
 
 .sidebar-brand-name {
-  font-size: 15.5px;
+  font-size: var(--text-base);
   font-weight: 650;
   letter-spacing: -0.02em;
-  color: var(--ink);
+  color: var(--color-foreground);
   line-height: 1;
   white-space: nowrap;
 }
 
 .sidebar-cmd-btn {
   width: 100%;
-  height: 32px;
+  height: 34px;
   padding: 0 8px 0 10px;
-  border-radius: 8px;
-  border: 1px solid var(--hairline);
-  background: var(--bg-surface);
-  color: var(--ink-muted);
-  font-size: 12.5px;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--color-border-control);
+  background-color: var(--color-surface-subtle);
+  color: var(--color-subtle-foreground);
+  font-size: var(--text-table);
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
   cursor: pointer;
-  box-shadow: var(--shadow-xs);
-  transition: border-color 0.14s ease, color 0.14s ease, background-color 0.14s ease;
+  transition:
+    border-color var(--duration-micro) var(--motion-ease-productive),
+    color var(--duration-micro) var(--motion-ease-productive),
+    background-color var(--duration-micro) var(--motion-ease-productive);
 }
 
 .sidebar-cmd-btn:hover {
-  border-color: var(--border-strong);
-  color: var(--ink);
+  border-color: var(--color-border-strong);
+  background-color: var(--color-surface);
+  color: var(--color-foreground);
 }
 
 .sidebar-cmd-label {
@@ -92,18 +95,18 @@
 .sidebar-nav {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 3px;
 }
 
 .sidebar-nav-item {
   width: 100%;
-  height: 35px;
+  height: 36px;
   padding: 0 10px;
   border: none;
-  border-radius: 8px;
-  background: transparent;
-  color: var(--ink-secondary);
-  font-size: 13px;
+  border-radius: var(--radius-lg);
+  background-color: transparent;
+  color: var(--color-muted-foreground);
+  font-size: var(--text-table);
   font-weight: 500;
   display: flex;
   align-items: center;
@@ -112,19 +115,20 @@
   cursor: pointer;
   text-align: left;
   user-select: none;
-  transition: background-color 0.12s ease, color 0.12s ease, box-shadow 0.12s ease;
+  transition:
+    background-color var(--duration-micro) var(--motion-ease-productive),
+    color var(--duration-micro) var(--motion-ease-productive);
 }
 
 .sidebar-nav-item:hover:not(.active) {
-  background: var(--bg-hover);
-  color: var(--ink);
+  background-color: var(--color-surface-hover);
+  color: var(--color-foreground);
 }
 
 .sidebar-nav-item.active {
-  background: var(--bg-surface);
-  color: var(--ink);
+  background-color: var(--color-surface-active);
+  color: var(--color-primary);
   font-weight: 600;
-  box-shadow: var(--shadow-xs), inset 0 0 0 1px var(--hairline);
 }
 
 .sidebar-nav-main {
@@ -137,13 +141,16 @@
 
 .sidebar-nav-main svg {
   flex-shrink: 0;
-  color: var(--ink-muted);
-  transition: color 0.12s ease;
+  color: var(--color-subtle-foreground);
+  transition: color var(--duration-micro) var(--motion-ease-productive);
 }
 
-.sidebar-nav-item.active .sidebar-nav-main svg,
 .sidebar-nav-item:hover .sidebar-nav-main svg {
-  color: var(--ink);
+  color: var(--color-foreground);
+}
+
+.sidebar-nav-item.active .sidebar-nav-main svg {
+  color: var(--color-primary);
 }
 
 .sidebar-nav-end {
@@ -155,30 +162,29 @@
 
 .sidebar-nav-count {
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--text-xs);
   font-weight: 500;
-  line-height: 1.35;
+  line-height: 1.3;
   padding: 1px 6px;
   border-radius: 999px;
-  background: var(--bg-well);
-  color: var(--ink-muted);
+  background-color: var(--color-surface-hover);
+  color: var(--color-muted-foreground);
 }
 
 .sidebar-nav-item.active .sidebar-nav-count {
-  background: var(--bg-subtle);
-  color: var(--ink-secondary);
+  background-color: var(--color-surface);
+  color: var(--color-primary);
 }
 
 /* Persistent Sidebar Control Dock */
 .sidebar-dock {
-  background: var(--bg-surface);
-  border: 1px solid var(--hairline);
-  border-radius: 11px;
-  padding: 11px;
+  background-color: var(--color-surface-subtle);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-xl);
+  padding: 12px;
   display: flex;
   flex-direction: column;
-  gap: 9px;
-  box-shadow: var(--shadow-xs);
+  gap: 10px;
 }
 
 .sidebar-dock-row {
@@ -199,8 +205,8 @@
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  font-size: 13px;
-  color: var(--ink);
+  font-size: var(--text-table);
+  color: var(--color-foreground);
   min-width: 0;
 }
 
@@ -210,10 +216,10 @@
 
 .sidebar-uptime {
   font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--ink-muted);
+  font-size: var(--text-xs);
+  color: var(--color-subtle-foreground);
   padding-left: 14px;
-  line-height: 1.25;
+  line-height: 1.3;
 }
 
 .sidebar-dock-foot {
@@ -222,21 +228,22 @@
   justify-content: space-between;
   gap: 6px;
   padding-top: 2px;
+  border-top: 1px solid var(--color-border-subtle);
 }
 
 .sidebar-speed {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--ink-muted);
+  font-size: var(--text-xs);
+  color: var(--color-muted-foreground);
   min-width: 0;
   overflow: hidden;
   white-space: nowrap;
 }
 
-/* Right Single Workspace */
+/* Right Single Workspace (Follows Layout Law #1: app-main is flex-col without overflow-y-auto) */
 .app-main {
   flex: 1;
   min-width: 0;
@@ -246,37 +253,37 @@
 
 .app-content {
   width: 100%;
-  max-width: 1040px;
+  max-width: 1080px;
   margin: 0 auto;
-  padding: 28px 32px 64px;
+  padding: 24px 32px 64px;
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 16px;
   min-width: 0;
 }
 
 .page-header {
+  flex-shrink: 0;
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
   flex-wrap: wrap;
-  padding-bottom: 2px;
 }
 
 .page-title {
   margin: 0;
-  font-size: 20px;
+  font-size: var(--text-xl);
   font-weight: 650;
   letter-spacing: -0.02em;
-  color: var(--ink);
-  line-height: 1.25;
+  color: var(--color-foreground);
+  line-height: 1.3;
 }
 
 .page-subtitle {
   margin: 4px 0 0;
-  font-size: 13px;
-  color: var(--ink-muted);
+  font-size: var(--text-table);
+  color: var(--color-muted-foreground);
   line-height: 1.45;
 }
 
@@ -291,11 +298,11 @@
 .mobile-header-stack {
   position: sticky;
   top: 0;
-  z-index: 50;
-  background: var(--topbar-bg);
+  z-index: var(--z-header-popover);
+  background-color: var(--topbar-bg);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
-  border-bottom: 1px solid var(--hairline);
+  border-bottom: 1px solid var(--color-border-subtle);
 }
 
 .mobile-topbar {
@@ -317,7 +324,7 @@
 
 .mobile-control-bar {
   padding: 6px 14px 8px;
-  border-top: 1px solid var(--hairline);
+  border-top: 1px solid var(--color-border-subtle);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -330,27 +337,27 @@
   left: 10px;
   right: 10px;
   bottom: calc(10px + env(safe-area-inset-bottom, 0px));
-  z-index: 60;
+  z-index: var(--z-header-popover);
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 4px;
   padding: 4px;
-  border-radius: 14px;
-  background: var(--topbar-bg);
+  border-radius: var(--radius-2xl);
+  background-color: var(--topbar-bg);
   backdrop-filter: blur(18px);
   -webkit-backdrop-filter: blur(18px);
-  border: 1px solid var(--border-strong);
+  border: 1px solid var(--color-border);
   box-shadow: var(--shadow-lg);
 }
 
 .mobile-dock-item {
-  height: 44px;
+  height: 46px;
   padding: 2px 4px;
   border: none;
-  border-radius: 10px;
-  background: transparent;
-  color: var(--ink-secondary);
-  font-size: 11px;
+  border-radius: var(--radius-lg);
+  background-color: transparent;
+  color: var(--color-muted-foreground);
+  font-size: var(--text-xs);
   font-weight: 500;
   display: flex;
   flex-direction: column;
@@ -359,13 +366,15 @@
   gap: 2px;
   cursor: pointer;
   white-space: nowrap;
+  transition:
+    background-color var(--duration-micro) var(--motion-ease-productive),
+    color var(--duration-micro) var(--motion-ease-productive);
 }
 
 .mobile-dock-item.active {
-  background: var(--bg-surface);
-  color: var(--ink);
+  background-color: var(--color-surface-active);
+  color: var(--color-primary);
   font-weight: 600;
-  box-shadow: var(--shadow-xs);
 }
 
 /* Calm Loading & Reconnect State Screen */
@@ -375,13 +384,13 @@
   align-items: center;
   justify-content: center;
   padding: 24px;
-  background: var(--bg-canvas);
+  background-color: var(--color-canvas);
 }
 
 .shell-state-card {
-  background: var(--bg-surface);
-  border: 1px solid var(--hairline);
-  border-radius: 14px;
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-2xl);
   box-shadow: var(--shadow-sm);
   padding: 32px 36px;
   display: flex;
@@ -389,21 +398,20 @@
   align-items: center;
   gap: 10px;
   text-align: center;
-  max-width: 400px;
+  max-width: 420px;
   width: 100%;
 }
 
 .shell-state-card strong {
-  font-size: 14.5px;
+  font-size: var(--text-base);
   font-weight: 600;
-  color: var(--ink);
-  letter-spacing: -0.01em;
+  color: var(--color-foreground);
 }
 
 .shell-state-card span,
 .shell-state-sub {
-  font-size: 12.5px;
-  color: var(--ink-muted);
+  font-size: var(--text-table);
+  color: var(--color-muted-foreground);
 }
 
 @media (max-width: 820px) {
@@ -412,7 +420,7 @@
   }
 
   .app-content {
-    padding: 18px 14px 96px;
-    gap: 16px;
+    padding: 16px 14px 96px;
+    gap: 14px;
   }
 }
