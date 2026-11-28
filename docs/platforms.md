@@ -39,7 +39,7 @@ sha256sum -c "$asset.sha256"
 直接从 Release 下载 `harbor-windows-amd64-setup.exe` 安装（本地从源码打包见[开发指南](development.md#windows-交叉检查与桌面打包)）：
 
 - **安装与提权**：安装到 `%LOCALAPPDATA%\Harbor`（无需管理员，缺 WebView2 时自动引导下载）；启动时校验参数后通过 UAC 提权，已有实例运行时直接唤出原窗口而不重复弹窗。
-- **托盘与自启**：关闭窗口最小化到托盘，左键单击唤出、双击切换显隐，右键「退出」才停止内核。勾选「开机自启」注册 `Harbor` 登录计划任务（带 `--minimized`），启动时自动修正迁移后的旧路径；「打开日志」定位 `%LOCALAPPDATA%\io.github.yuxiangluo.harbor\harbor.log`（2 MiB 封顶，单份 `.old` 轮转）。
+- **托盘与自启**：关闭窗口自动收起驻留托盘，左键点击立即唤出并聚焦窗口，右键「退出」才停止内核。勾选「开机自启」注册 `Harbor` 登录计划任务（带 `--minimized`），启动时自动修正迁移后的旧路径；「打开日志」定位 `%LOCALAPPDATA%\io.github.yuxiangluo.harbor\harbor.log`（2 MiB 封顶，单份 `.old` 轮转）。
 - **更新与卸载**：在「系统设置」检查新版本后点击「前往下载」会通过默认浏览器打开 GitHub Release 页面。覆盖升级或卸载前请先从托盘右键「退出」；卸载勾选删除数据时一并清理 `%LOCALAPPDATA%\io.github.yuxiangluo.harbor` 与 `%TEMP%\harbor-sing-box`。
 
 ## PWA

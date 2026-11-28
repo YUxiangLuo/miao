@@ -28,8 +28,8 @@ pub use autostart::{
 pub use cli::config_path_from_args;
 pub use error::{AppError, AppResult};
 pub use instance::{
-    acquire_single_instance, double_click_interval, focus_existing_window, peek_single_instance,
-    InstanceAcquire, InstanceGuard, InstancePeek, WINDOW_TITLE,
+    acquire_single_instance, focus_existing_window, peek_single_instance, InstanceAcquire,
+    InstanceGuard, InstancePeek, WINDOW_TITLE,
 };
 pub use paths::default_log_path;
 pub use privilege::{is_elevated, require_privileges, show_user_error};

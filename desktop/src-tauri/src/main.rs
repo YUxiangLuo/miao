@@ -1,15 +1,13 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
 
 use harbor_core::{
     acquire_single_instance, autostart_is_enabled, autostart_repair_if_stale,
-    autostart_set_enabled, config_path_from_args, default_log_path, double_click_interval,
-    focus_existing_window, is_elevated, peek_single_instance, require_privileges, show_user_error,
-    spawn_server, InstanceAcquire, InstancePeek, RuntimeOptions, ServerHandle, MINIMIZED_ARG,
-    WINDOW_TITLE,
+    autostart_set_enabled, config_path_from_args, default_log_path, focus_existing_window,
+    is_elevated, peek_single_instance, require_privileges, show_user_error, spawn_server,
+    InstanceAcquire, InstancePeek, RuntimeOptions, ServerHandle, MINIMIZED_ARG, WINDOW_TITLE,
 };
 use tauri::menu::{CheckMenuItem, CheckMenuItemBuilder, Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
@@ -148,17 +146,15 @@ fn run_app(config_path: Option<std::path::PathBuf>) -> Result<(), Box<dyn std::e
                 let _ = window.hide();
                 api.prevent_close();
             }
-            WindowEvent::Focused(true) => {
-                // 后到实例通过 Win32 ShowWindow 唤出托盘隐藏窗口时，tao 内部缓存的
-                // WindowFlags::VISIBLE 仍可能停留在 false；同步调用 show() 在已可见时
-                // 是纯空操作，同时可为 `--minimized` 首次唤出补做可见态最大化。
-                if window.is_visible().unwrap_or(false) {
-                    let _ = window.show();
-                    if consume_pending_initial_maximize(window.app_handle())
-                        && !window.is_maximized().unwrap_or(false)
-                    {
-                        let _ = window.maximize();
-                    }
+            // 后到实例通过 Win32 ShowWindow 唤出托盘隐藏窗口时，tao 内部缓存的
+            // WindowFlags::VISIBLE 仍可能停留在 false；同步调用 show() 在已可见时
+            // 是纯空操作，同时可为 `--minimized` 首次唤出补做可见态最大化。
+            WindowEvent::Focused(true) if window.is_visible().unwrap_or(false) => {
+                let _ = window.show();
+                if consume_pending_initial_maximize(window.app_handle())
+                    && !window.is_maximized().unwrap_or(false)
+                {
+                    let _ = window.maximize();
                 }
             }
             _ => {}
@@ -173,14 +169,21 @@ fn run_app(config_path: Option<std::path::PathBuf>) -> Result<(), Box<dyn std::e
     Ok(())
 }
 
-/// 托盘单击/双击判定状态。Windows 双击消息序列是 Down,Up,DoubleClick,Up——
-/// 若单击立即响应，双击会表现成「先显示、再隐藏、又被尾声 Up 重新显示」。
-/// 因此单击延迟一个系统双击时长执行（期间出现双击则作废），
-/// 双击后的那次尾声 Up 直接忽略。
-#[derive(Default)]
-struct TrayClickState {
-    generation: AtomicU64,
-    last_double_click: Mutex<Option<Instant>>,
+/// 判断托盘事件是否应立即唤出并聚焦主窗口：
+/// 左键抬起（`Up`）零延迟同步响应；左键双击（`DoubleClick`）保持幂等唤出，
+/// 避免用户习惯性双击时把刚唤出的窗口重新关回托盘。
+fn should_show_window_on_tray_event(event: &TrayIconEvent) -> bool {
+    matches!(
+        event,
+        TrayIconEvent::Click {
+            button: MouseButton::Left,
+            button_state: MouseButtonState::Up,
+            ..
+        } | TrayIconEvent::DoubleClick {
+            button: MouseButton::Left,
+            ..
+        }
+    )
 }
 
 fn install_tray(app: &AppHandle) -> tauri::Result<()> {
@@ -193,7 +196,6 @@ fn install_tray(app: &AppHandle) -> tauri::Result<()> {
     let menu = Menu::with_items(app, &[&show, &log, &autostart, &quit])?;
 
     let autostart_for_event = autostart.clone();
-    let click_state = Arc::new(TrayClickState::default());
     let mut tray = TrayIconBuilder::new()
         .menu(&menu)
         .show_menu_on_left_click(false)
@@ -205,44 +207,10 @@ fn install_tray(app: &AppHandle) -> tauri::Result<()> {
             "quit" => app.exit(0),
             _ => {}
         })
-        .on_tray_icon_event(move |tray, event| match event {
-            TrayIconEvent::Click {
-                button: MouseButton::Left,
-                button_state: MouseButtonState::Up,
-                ..
-            } => {
-                // 双击尾声的 Up：忽略
-                let trailing = click_state
-                    .last_double_click
-                    .lock()
-                    .ok()
-                    .and_then(|guard| *guard)
-                    .is_some_and(|at| at.elapsed() <= double_click_interval());
-                if trailing {
-                    return;
-                }
-                let generation = click_state.generation.fetch_add(1, Ordering::Relaxed) + 1;
-                let app = tray.app_handle().clone();
-                let state = click_state.clone();
-                std::thread::spawn(move || {
-                    std::thread::sleep(double_click_interval());
-                    if state.generation.load(Ordering::Relaxed) == generation {
-                        show_main_window(&app);
-                    }
-                });
+        .on_tray_icon_event(|tray, event| {
+            if should_show_window_on_tray_event(&event) {
+                show_main_window(tray.app_handle());
             }
-            TrayIconEvent::DoubleClick {
-                button: MouseButton::Left,
-                ..
-            } => {
-                // 作废挂起的单击，记录时间以吞掉随后的尾声 Up
-                click_state.generation.fetch_add(1, Ordering::Relaxed);
-                if let Ok(mut guard) = click_state.last_double_click.lock() {
-                    *guard = Some(Instant::now());
-                }
-                toggle_main_window(tray.app_handle());
-            }
-            _ => {}
         });
 
     if let Some(icon) = app.default_window_icon() {
@@ -309,27 +277,15 @@ fn toggle_autostart(item: &CheckMenuItem<tauri::Wry>) {
 
 fn show_main_window(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
-        // 先确保窗口可见、取消最小化，再按需执行首次最大化，绝不在隐藏态调用 maximize()。
+        // 先确保窗口可见、按需取消最小化，再执行首次最大化，绝不在隐藏态调用 maximize()。
         let _ = window.show();
-        let _ = window.unminimize();
+        if window.is_minimized().unwrap_or(false) {
+            let _ = window.unminimize();
+        }
         if consume_pending_initial_maximize(app) && !window.is_maximized().unwrap_or(false) {
             let _ = window.maximize();
         }
         let _ = window.set_focus();
-    }
-}
-
-/// 双击托盘图标：窗口显示中（且未最小化）则收回托盘，否则唤出。
-/// 与单击「只显示」配合后，双击在两种起始状态下的结果都符合直觉。
-fn toggle_main_window(app: &AppHandle) {
-    if let Some(window) = app.get_webview_window("main") {
-        let visible = window.is_visible().unwrap_or(false);
-        let minimized = window.is_minimized().unwrap_or(false);
-        if visible && !minimized {
-            let _ = window.hide();
-        } else {
-            show_main_window(app);
-        }
     }
 }
 
@@ -373,9 +329,69 @@ fn shutdown_panel(app: &AppHandle) {
 mod tests {
     use super::{
         explorer_select_arg, initial_window_maximized, is_allowed_external_release_url,
-        WindowLaunchState,
+        should_show_window_on_tray_event, WindowLaunchState,
     };
     use std::path::Path;
+    use tauri::tray::{MouseButton, MouseButtonState, TrayIconEvent, TrayIconId};
+    use tauri::{PhysicalPosition, PhysicalSize, Rect};
+
+    fn sample_rect() -> Rect {
+        Rect {
+            position: PhysicalPosition::new(0.0, 0.0).into(),
+            size: PhysicalSize::new(24u32, 24u32).into(),
+        }
+    }
+
+    #[test]
+    fn tray_event_shows_window_immediately_on_left_up_and_idempotent_left_double_click() {
+        let id = TrayIconId::new("main-tray");
+        let position = PhysicalPosition::new(10.0, 10.0);
+        let rect = sample_rect();
+
+        assert!(should_show_window_on_tray_event(&TrayIconEvent::Click {
+            id: id.clone(),
+            position,
+            rect,
+            button: MouseButton::Left,
+            button_state: MouseButtonState::Up,
+        }));
+        assert!(should_show_window_on_tray_event(
+            &TrayIconEvent::DoubleClick {
+                id: id.clone(),
+                position,
+                rect,
+                button: MouseButton::Left,
+            }
+        ));
+
+        assert!(!should_show_window_on_tray_event(&TrayIconEvent::Click {
+            id: id.clone(),
+            position,
+            rect,
+            button: MouseButton::Left,
+            button_state: MouseButtonState::Down,
+        }));
+        assert!(!should_show_window_on_tray_event(&TrayIconEvent::Click {
+            id: id.clone(),
+            position,
+            rect,
+            button: MouseButton::Right,
+            button_state: MouseButtonState::Up,
+        }));
+        assert!(!should_show_window_on_tray_event(
+            &TrayIconEvent::DoubleClick {
+                id: id.clone(),
+                position,
+                rect,
+                button: MouseButton::Right,
+            }
+        ));
+        assert!(!should_show_window_on_tray_event(&TrayIconEvent::Enter {
+            id,
+            position,
+            rect,
+        }));
+    }
 
     #[test]
     fn initial_maximize_is_deferred_when_starting_minimized() {
