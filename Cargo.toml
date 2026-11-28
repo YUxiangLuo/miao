@@ -5,7 +5,7 @@ members = ["crates/harbor-core", "crates/harbor-cli", "desktop/src-tauri"]
 default-members = ["crates/harbor-core", "crates/harbor-cli"]
 
 [workspace.package]
-version = "0.52.0"
+version = "0.52.1"
 edition = "2021"
 license = "MIT"
 
